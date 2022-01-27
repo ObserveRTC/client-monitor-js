@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+      "target": "es6",
+      "module": "commonjs",
+      "declaration": true,
+      "outDir": "./dist",
+      "downlevelIteration": true,
+      "strict": true,
+      "types": ["jest", "node"],
+      "typeRoots": [", ", "./tests/", "./node_modules/@types"]
+    },
+    "include": ["src/**/*", "tests"],
+    "exclude": ["node_modules", "**/tests/*"],
+}

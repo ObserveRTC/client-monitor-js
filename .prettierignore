@@ -1,0 +1,5 @@
+docs-generator/
+node_modules/
+package.json
+tsconfig.json
+tslint.json
