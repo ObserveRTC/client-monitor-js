@@ -26,22 +26,25 @@ observer.addStatsCollector({
 observer.events.onStatsCollected(() => {
     for (const transport of observer.stats.transports()) {
         /// use the transport
+        console.log(transport.stats.packetsSent);
     }
 })
 ```
-The above example collect stats in every 5s using the stats collector.
+The above example collect stats in every 5s.
 When stats are collected and stored it emits an event to notify the 
 application.
 
-Related stats can be revealed by navigating to the interface.
-For example
+You can navigate through related stats:
+
 ```javascript
+    // list outbound RTP stats
     for (const outboundRtp of observer.stats.outboundRtps()) {
+        // get the remote inbound RTP stats belongs to the actual outbound RTP
         const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
         console.log(outboundRtp.stats, remoteInboundRtp.stats);
     }
 ```
-The example above shows how to retrieve the remote inbound rtp stats related to the outbound rtp stats.
+The example above shows how to get the remote inbound rtp stats related to the outbound rtp stats.
 
 ### Sample & Send
 

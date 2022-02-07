@@ -8,6 +8,7 @@ export enum TransportState {
 }
 
 type MessageListener = (data: string) => void;
+/*eslint-disable @typescript-eslint/no-explicit-any*/
 type ErrorListener = (err: any) => void;
 type StateChangedListener = (newState: TransportState) => void;
 

@@ -4,14 +4,12 @@ export type JsonCodecConfig = {
     space?: number;
 }
 
-type JsonCodecConstructorConfig = JsonCodecConfig & {
-
-}
+type JsonCodecConstructorConfig = JsonCodecConfig;
 
 const defaultConfig: JsonCodecConstructorConfig = {
     space: undefined,
 }
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export class JsonCodec implements Codec<any, string> {
     public static create(config?: JsonCodecConfig): JsonCodec {
         const appliedConfig = Object.assign(defaultConfig, config);
@@ -23,6 +21,7 @@ export class JsonCodec implements Codec<any, string> {
         this._config = config;
     }
 
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     encode(data: any): string {
         if (this._config.space) {
             return JSON.stringify(data, undefined, this._config.space);
@@ -30,7 +29,8 @@ export class JsonCodec implements Codec<any, string> {
         return JSON.stringify(data);
     }
 
-    decode(data: string) {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    decode(data: string): any {
         return JSON.parse(data);
     }
 }

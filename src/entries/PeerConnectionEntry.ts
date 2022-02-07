@@ -1,7 +1,7 @@
 import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
 import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs } from "./StatsEntryInterfaces";
 import * as hash from "object-hash";
-import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidatePairStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcLocalCandidateStats, RtcMediaSourceCompoundStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteCandidateStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats, RtcVideoSourceStats } from "../schemas/W3CStatsIdentifier";
+import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidatePairStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcLocalCandidateStats, RtcMediaSourceCompoundStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteCandidateStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats } from "../schemas/W3CStatsIdentifier";
 
 interface IPeerConnectionEntry {
     readonly id: string | undefined;
@@ -224,7 +224,7 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
     }
 
     private Visitor = class extends StatsVisitor {
-        public touched: boolean = false;
+        public touched = false;
         public readonly created: number = Date.now();
         private _pc: PeerConnectionEntry;
         constructor(outer: PeerConnectionEntry) {
@@ -300,7 +300,7 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
         visitInboundRtp(stats: RtcInboundRtpStreamStats): void {
             const pc = this._pc;
             const entries = pc._inboundRtps;
-            let entry = entries.get(stats.id);
+            const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (!entry) {
                 const ssrcsToInboundRtpPairs = this._pc._ssrcsToInboundRtpPair;
@@ -432,7 +432,7 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
         visitRemoteInboundRtp(stats: RtcRemoteInboundRtpStreamStats): void {
             const pc = this._pc;
             const entries = pc._remoteInboundRtps;
-            let entry = entries.get(stats.id);
+            const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (!entry) {
                 const ssrcsToOutboundRtpPair = this._pc._ssrcsToOutboundRtpPair;
@@ -490,7 +490,7 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
         visitRemoteOutboundRtp(stats: RtcRemoteOutboundRTPStreamStats): void {
             const pc = this._pc;
             const entries = pc._remoteOutboundRtps;
-            let entry = entries.get(stats.id);
+            const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (!entry) {
                 const ssrcsToInboundRtpPair = this._pc._ssrcsToInboundRtpPair;

@@ -25,14 +25,14 @@ export type AdapterConfig = {
     browserVersion?: string,
 }
 
-type AdapterConstructorType = AdapterConfig & {
-}
+type AdapterConstructorType = AdapterConfig;
 
 const defaultConfig: AdapterConstructorType = {
 
 }
 
 export interface Adapter {
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     adapt(data: any): Generator<StatsEntry | undefined, void, undefined>;
 }
 
@@ -45,6 +45,7 @@ function createChromeAdapter(version?: string): Adapter {
     switch (majorVersion) {
         case "97":
             return new Chrome97Adapter();
+        /*eslint-disable no-fallthrough */
         case "96":
         case "95":
         case "94":
@@ -59,6 +60,7 @@ function createChromeAdapter(version?: string): Adapter {
             return new Chrome86_96Adapter();
         default:
             logger.warn(`Cannot recognize chrome version ${version}`);
+        /* eslint-disable no-fallthrough */
         case AdapterTypes.DefaultAdapter:
             return new DefaultAdapter();
     }
@@ -105,6 +107,7 @@ export function createAdapter(providedConfig?: AdapterConfig): Adapter {
     }
 }
 
+/*eslint-disable @typescript-eslint/no-explicit-any */
 export function castStats(rtcStatType: string, rtcStatValue: any): StatsEntry | undefined {
     switch (rtcStatType.toLowerCase()) {
         case StatsType.codec:

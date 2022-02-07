@@ -64,6 +64,7 @@ export class WebsocketTransport implements Transport {
             try {
                 this._ws.send(queuedMessage);
                 logger.debug(`Message is sent`);
+            /*eslint-disable @typescript-eslint/no-explicit-any */
             } catch (error: any) {
                 logger.warn("Websocket encountered an error while sending message", error);
                 this._ws = undefined;
@@ -106,6 +107,7 @@ export class WebsocketTransport implements Transport {
         return this;
     }
 
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     onError(listener: (err: any) => void): Transport {
         if (this._state === TransportState.Closed) {
             throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
@@ -114,6 +116,7 @@ export class WebsocketTransport implements Transport {
         return this;
     }
 
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     offError(listener: (err: any) => void): Transport {
         if (this._state === TransportState.Closed) {
             throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
@@ -138,7 +141,7 @@ export class WebsocketTransport implements Transport {
     }
 
 
-    private async _connect(tried: number = 0): Promise<void> {
+    private async _connect(tried = 0): Promise<void> {
         if (this._state === TransportState.Closed) {
             return Promise.reject(`The transport is already closed`);
         }
@@ -167,7 +170,8 @@ export class WebsocketTransport implements Transport {
                     reject(error);
                 };
             }
-        }).catch(async (err) => {
+        /*eslint-disable @typescript-eslint/no-explicit-any */
+        }).catch(async (err: any) => {
             logger.warn(err);
             if (tried < this._config.maxRetry!) {
                 await this._waitBeforeReconnect(tried + 1);

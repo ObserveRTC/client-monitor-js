@@ -104,11 +104,11 @@ export class Sampler {
     // private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
     private _trackRelations: Map<string, TrackRelation> = new Map();
     private _sampled?: number;
-    private _sampleSeq: number = 0;
+    private _sampleSeq = 0;
     private _marker?: string;
     private _timezoneOffset: number = new Date().getTimezoneOffset();
     private _config: SamplerConstructorConfig;
-    private _closed: boolean = false;
+    private _closed = false;
     private constructor(config: SamplerConstructorConfig) {
         if (config.callId && !isValidUuid(config.callId)) {
             throw new Error(`Sampler.config.callId must be a valid UUID`);
@@ -329,6 +329,7 @@ export class Sampler {
             const { ended, trackIdentifier: senderTrackId } = outboundRtp.getSender()?.stats || {};
             const codecStats = outboundRtp.getCodec()?.stats || {};
             if (outboundRtp.stats.kind === "audio") {
+                /* eslint-disable @typescript-eslint/no-explicit-any */
                 const { trackIdentifier: sourceTrackId, ...audioSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as RtcAudioSourceStats : {};
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 const { rtpStreamId } = this._trackRelations.get(trackId || "notId") || {};
@@ -442,8 +443,11 @@ export class Sampler {
             }
             const transportStats = transport.stats;
             const selectedCandidatePair = transport.getSelectedIceCandidatePair();
+            /*eslint-disable @typescript-eslint/ban-types*/
             let candidatePairStats: Object = {};
+            /*eslint-disable @typescript-eslint/ban-types*/
             let localCandidateStats: Object = {};
+            /*eslint-disable @typescript-eslint/ban-types*/
             let remoteCandidateStats: Object = {};
             if (selectedCandidatePair) {
                 candidatePairStats = makePrefixedObj(selectedCandidatePair.stats, `candidatePair`);

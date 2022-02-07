@@ -1,17 +1,16 @@
 import { Adapter, castStats } from "./Adapter";
 import { StatsEntry } from "../utils/StatsVisitor";
-import { DefaultAdapter } from "./DefaultAdapter";
-import { StatsType } from "../schemas/W3CStatsIdentifier";
 
 
 export class Chrome86_96Adapter implements Adapter {
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     public *adapt(rtcStats: any): Generator<StatsEntry | undefined, void, undefined> {
         if (!rtcStats || !rtcStats.values || typeof rtcStats.values !== 'function') {
             throw new Error(`not rtcStats object: ` + rtcStats);
         }
+        /*eslint-disable @typescript-eslint/no-explicit-any */
         const tracks = new Map<string, any>();
-        for (let rtcStatValue of rtcStats.values()) {
-            const rawType = rtcStatValue.type;
+        for (const rtcStatValue of rtcStats.values()) {
             if (rtcStatValue && rtcStatValue.type === "track") {
                 tracks.set(rtcStatValue.ssrc, rtcStatValue);
             }

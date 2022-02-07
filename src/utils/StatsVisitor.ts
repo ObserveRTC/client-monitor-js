@@ -1,4 +1,5 @@
-import { RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcAudioSourceStats, RtcVideoSourceStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcAudioSenderStats, RtcVideoSenderStats, RtcAudioReceiverStats, RtcVideoReceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats, RtcCertificateStats, RtcIceServerStats, StatsType, RtcMediaSourceStats, RtcMediaSourceCompoundStats, RtcSenderCompoundStats, RtcReceiverCompoundStats, RtcIceCandidateStats } from "../schemas/W3CStatsIdentifier";
+import { RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcAudioSourceStats, RtcVideoSourceStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcAudioSenderStats, RtcVideoSenderStats, RtcAudioReceiverStats, RtcVideoReceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats, RtcCertificateStats, RtcIceServerStats, StatsType, RtcMediaSourceCompoundStats, RtcSenderCompoundStats, RtcReceiverCompoundStats, RtcIceCandidateStats } from "../schemas/W3CStatsIdentifier";
+import { logger } from "./logger";
 
 type StatsValue = 
     RtcCodecStats |
@@ -92,8 +93,9 @@ export abstract class StatsVisitor {
                 default:
                     break;
             }
+        /*eslint-disable @typescript-eslint/no-explicit-any */    
         } catch (err: any) {
-
+            logger.warn(err);
         }
     }
     abstract visitCodec(stats: RtcCodecStats): void;

@@ -49,15 +49,19 @@ export class Timer {
             nextInvokeInMs: now + action.fixedDelayInMs,
             invoked: 0,
         }
+        /*eslint-disable @typescript-eslint/no-this-alias */
         const timer = this;
         const visitor = new class extends ActionVisitor {
-            visitCollectTypeAction(action: Action): void {
+            /*eslint-disable @typescript-eslint/no-unused-vars*/
+            visitCollectTypeAction(_action: Action): void {
                 timer._collecting.set(id, storedAction);
             }
-            visitSampleTypeAction(action: Action): void {
+            /*eslint-disable @typescript-eslint/no-unused-vars*/
+            visitSampleTypeAction(_action: Action): void {
                 timer._sampling.set(id, storedAction);
             }
-            visitSendTypeAction(action: Action): void {
+            /*eslint-disable @typescript-eslint/no-unused-vars*/
+            visitSendTypeAction(_action: Action): void {
                 timer._sending.set(id, storedAction);
             }
         };
@@ -69,7 +73,7 @@ export class Timer {
     }
 
     public remove(id: string): void {
-        let deleted: boolean = false;
+        let deleted = false;
         this._iterateInOrder(map => {
             deleted = deleted || map.delete(id);
         })
@@ -91,11 +95,11 @@ export class Timer {
     public _invoke(): void {
         const now: number = Date.now();
         let next: number = now + 60000;
-        let remainingActionsNum: number = 0;
+        let remainingActionsNum = 0;
         this._iterateInOrder(map => {
             const actions = Array.from(map.values());
             for (const action of actions) {
-                let stretchInMs: number = 0;
+                let stretchInMs = 0;
                 const remainingTimeInMs = action.nextInvokeInMs - now;
                 if (10 < remainingTimeInMs) {
                     next = Math.min(next, action.nextInvokeInMs);
@@ -106,6 +110,7 @@ export class Timer {
                 }
                 try {
                     action.process();
+                /*eslint-disable @typescript-eslint/no-explicit-any*/
                 } catch (err: any) {
                     logger.warn(`Error occurred while executing timer action (${action.context})`)
                 }

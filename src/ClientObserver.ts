@@ -1,4 +1,4 @@
-import { Browser, ClientSample, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from "./schemas/ClientSample";
+import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from "./schemas/ClientSample";
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, SamplerConfig, defaultConfig as samplerDefaultConfig, TrackRelation } from "./Sampler";
@@ -64,9 +64,7 @@ export type ClientObserverConfig = {
     accumulator?: AccumulatorConfig,
 };
 
-type ConstructorConfig = ClientObserverConfig & {
-
-}
+type ConstructorConfig = ClientObserverConfig;
 
 const defaultConfig: ConstructorConfig = {
     // samplingPeriodInMs: 5000,
@@ -138,7 +136,7 @@ export class ClientObserver implements IClientObserver {
         return new ClientObserver(appliedConfig);
     }
 
-    private _closed: boolean = false;
+    private _closed = false;
     private _config: ConstructorConfig;
     private _mediaDevices: MediaDevices;
     private _clientDevices: ClientDevices;
@@ -168,6 +166,7 @@ export class ClientObserver implements IClientObserver {
     }
     
     public get clientId() : string {
+        /* eslint-disable @typescript-eslint/no-non-null-assertion */
         return this._sampler.clientId!;
     }
 
@@ -283,6 +282,7 @@ export class ClientObserver implements IClientObserver {
         const promises: Promise<void>[] = [];
         this._accumulator.drainTo(samples => {
             if (!samples) return;
+            /* eslint-disable @typescript-eslint/no-non-null-assertion */
             const promise = this._sender!.send(samples);
             promises.push(promise);
         });

@@ -19,9 +19,9 @@ const defaultConfig: SenderConstructConfig = {
 export class Sender {
     public static create(config?: SenderConfig) {
         const appliedConfig = Object.assign(defaultConfig, config);
-        return new Sender(appliedConfig);;
+        return new Sender(appliedConfig);
     }
-    private _closed: boolean = false;
+    private _closed = false;
     private _config: SenderConstructConfig;
     private _codec: Codec<Samples, Uint8Array>;
     private _transport: Transport

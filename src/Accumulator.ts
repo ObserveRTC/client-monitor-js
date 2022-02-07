@@ -20,7 +20,7 @@ export class Accumulator  {
 
     private _samples: Samples = {};
     private _buffer: Samples[] = [];
-    private _empty: boolean = true;
+    private _empty = true;
     private _config: AccumulatorConfig;
     public constructor(config: AccumulatorConfig) {
         this._config = config;

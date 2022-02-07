@@ -1,13 +1,11 @@
 import { Codec } from "./Codec";
 
-
+/*eslint-disable  @typescript-eslint/ban-types*/
 export type TextCodecConfig = {
 
 }
 
-type TextCodecConstructorConfig = TextCodecConfig & {
-
-}
+type TextCodecConstructorConfig = TextCodecConfig;
 
 const defaultConfig: TextCodecConstructorConfig = {
 
@@ -18,7 +16,7 @@ export class TextCodec implements Codec<string, Uint8Array> {
         const appliedConfig = Object.assign(defaultConfig, config);
         return new TextCodec(appliedConfig);
     }
-
+    /*eslint-disable @typescript-eslint/no-unused-vars*/
     private _config: TextCodecConstructorConfig;
     private _encoder: TextEncoder;
     private _decoder: TextDecoder;

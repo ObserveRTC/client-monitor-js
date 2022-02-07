@@ -2,7 +2,7 @@
 // Source: https://www.examplefiles.net/cs/230820
 // Big love and thanks for the creator avoiding me to spend hours
 // figuring out the right way of types to use.
-
+/*eslint-disable @typescript-eslint/no-explicit-any*/
 type Entries<T extends object> = { [K in keyof T]: [K, T[K]] }[keyof T]
 
 function reverseEnum<E extends Record<keyof E, string | number>>(

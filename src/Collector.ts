@@ -2,6 +2,7 @@ import { Adapter, AdapterConfig, createAdapter } from "./adapters/Adapter";
 import { logger } from "./utils/logger";
 import { StatsWriter } from "./entries/StatsStorage";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 type ScrappedStats = any;
 export type CollectorConfig = {
     /**
@@ -14,9 +15,7 @@ export type CollectorConfig = {
     adapter?: AdapterConfig;    
 }
 
-type CollectorConstructorConfig = CollectorConfig & {
-
-}
+type CollectorConstructorConfig = CollectorConfig;
 
 const defaultConfig: CollectorConstructorConfig = {
 
@@ -67,7 +66,7 @@ export class Collector {
     private _config: CollectorConstructorConfig;
     private _statsCollectors: Map<string, PcStatsCollector> = new Map();
     private _adapter: Adapter;
-    private _closed: boolean = false;
+    private _closed = false;
     private constructor(config: CollectorConstructorConfig) {
         this._config = config;
         this._adapter = createAdapter(this._config.adapter);
@@ -85,7 +84,9 @@ export class Collector {
             logger.warn(`Output of the collector has not been set`);
             return;
         }
-        let complete: () => void = () => {};
+        let complete: () => void = () => {
+            // empty function
+        };
         this._pendingCollect = new Promise(resolve => {
             complete = () => {
                 resolve();
@@ -93,6 +94,7 @@ export class Collector {
             }
         });
         type ScrappedEntry = [string, ScrappedStats] | undefined;
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         const illConfigs: [string, any][] = [];
         const promises: Promise<ScrappedEntry>[] = [];
         for (const statsConfig of this._statsCollectors.values()) {
@@ -109,6 +111,7 @@ export class Collector {
         }
         for await (const scrappedEntry of promises) {
             if (scrappedEntry === undefined) continue;
+            /* eslint-disable @typescript-eslint/no-explicit-any */
             const [collectorId, scrappedStats] = scrappedEntry;
             for (const statsEntry of this._adapter.adapt(scrappedStats)) {
                 if (!statsEntry) continue;

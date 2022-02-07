@@ -1,3 +1,5 @@
+global.TextEncoder = require("util").TextEncoder;
+global.TextDecoder = require("util").TextDecoder;
 import { TextCodec } from "../../src/codecs/TextCodec";
 
 describe("TextCodec", () => {

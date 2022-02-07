@@ -58,9 +58,8 @@ const defaultConfig: CodecConstructorConfig = {
     },
 }
 
-export function createCodec<T = any>(providedConfig?: CodecConfig): Codec<T, Uint8Array> {
+export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, Uint8Array> {
     const config = Object.assign(defaultConfig, providedConfig);
-    let result: Codec<T, Uint8Array> | undefined;
     let formatter: Codec<T, string> | undefined;
     const formatCodec = config.format;
     if (formatCodec.type === "json") {
@@ -74,6 +73,6 @@ export function createCodec<T = any>(providedConfig?: CodecConfig): Codec<T, Uin
         formatter = FacadedCodec.wrap(formatter).then(base64Codec);
     }
     const textCodec = TextCodec.create();
-    result = FacadedCodec.wrap(formatter).then<Uint8Array>(textCodec);
+    const result = FacadedCodec.wrap(formatter).then<Uint8Array>(textCodec);
     return result;
 }

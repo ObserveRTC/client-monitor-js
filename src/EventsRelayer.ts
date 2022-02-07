@@ -32,9 +32,9 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
     public static create(): EventsRelayer {
         return new EventsRelayer()
     }
-    private _emitter: EventEmitter = new EventEmitter();
+    private _emitter: EventEmitter;
     private constructor() {
-
+        this._emitter = new EventEmitter();
     }
 
     onStatsCollected(listener: StatsCollectedListener): EventsRegister {

@@ -31,11 +31,12 @@ export class ClientDevices {
     private _platform: Platform = UNKNOWN_PLATFORM;
     private _engine: Engine = UNKNOWN_ENGINE;
     public constructor() {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
         let outerNavigator: any = undefined;
         if (navigator) outerNavigator = navigator;
         else if (window && window.navigator) outerNavigator = window.navigator;
         else return this;
-        const parsedResult =  Bowser.parse(window.navigator.userAgent);
+        const parsedResult =  Bowser.parse(outerNavigator.userAgent);
         this._browser = Object.assign(this._browser, parsedResult.browser);
         this._engine = Object.assign(this._engine, parsedResult.engine);
         this._os = Object.assign(this._os, parsedResult.os);

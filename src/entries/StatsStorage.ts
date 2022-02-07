@@ -32,10 +32,6 @@ export interface StatsWriter {
     accept(collectorId: string, statsEntry: StatsEntry): void;
 }
 
-type StatsStorageConfig = {
-    expirationInMs?: number;
-}
-
 export class StatsStorage implements StatsReader, StatsWriter {
     private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
     public accept(collectorId: string, statsEntry: StatsEntry): void {

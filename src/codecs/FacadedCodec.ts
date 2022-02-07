@@ -1,6 +1,8 @@
 import { Codec } from "./Codec";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export class FacadedCodec<TIn = any, TOut = any> implements Codec<TIn, TOut> {
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     public static wrap<U = any, R = any>(codec: Codec<U, R>): FacadedCodec<U, R> {
         const facadedCodec = new FacadedCodec(codec);
         return facadedCodec;

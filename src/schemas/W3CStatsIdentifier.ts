@@ -28,7 +28,7 @@ export enum StatsType {
     remoteCandidate = "remote-candidate",
     certificate = "certificate",
     iceServer = "ice-server",
-};
+}
 
 // https://www.w3.org/TR/webrtc-stats/#summary
 // export type CodecStats = RtcCodecStats;
@@ -293,9 +293,7 @@ export interface RtcMediaHandlerStats extends RtcStats {
 }
 
 // RTCVideoHandlerStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
-export interface RtcVideoHandlerStats extends RtcMediaHandlerStats {
-
-}
+export type RtcVideoHandlerStats = RtcMediaHandlerStats
 
 // RTCVideoHandlerStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
 export interface RtcVideoSenderStats extends RtcVideoHandlerStats {
@@ -303,14 +301,10 @@ export interface RtcVideoSenderStats extends RtcVideoHandlerStats {
 }
 
 // RTCVideoReceiverStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
-export interface RtcVideoReceiverStats extends RtcVideoHandlerStats {
-
-}
+export type RtcVideoReceiverStats = RtcVideoHandlerStats
 
 // RTCAudioHandlerStats (https://www.w3.org/TR/webrtc-stats/#aststats-dict*)
-export interface RtcAudioHandlerStats extends RtcMediaHandlerStats {
-
-}
+export type RtcAudioHandlerStats = RtcMediaHandlerStats
 
 // RTCAudioSenderStats (https://www.w3.org/TR/webrtc-stats/#asstats-dict*)
 export interface RtcAudioSenderStats extends RtcAudioHandlerStats {
@@ -318,9 +312,7 @@ export interface RtcAudioSenderStats extends RtcAudioHandlerStats {
 }
 
 // RTCAudioReceiverStats (https://www.w3.org/TR/webrtc-stats/#raststats-dict*)
-export interface RtcAudioReceiverStats extends RtcAudioHandlerStats {
-
-}
+export type RtcAudioReceiverStats = RtcAudioHandlerStats
 
 export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";
 
