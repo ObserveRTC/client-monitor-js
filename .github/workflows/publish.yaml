@@ -12,8 +12,15 @@ jobs:
       - uses: actions/setup-node@v1
         with:
           node-version: 10
-      - run: npm install
-      - run: npm test
+      - name: Install
+        run: yarn
+
+      - name: Build
+        run: yarn build
+
+      - name: Create Release
+        run: npm publish
+
       - uses: JS-DevTools/npm-publish@v1
         with:
           token: ${{ secrets.NPM_TOKEN }}
