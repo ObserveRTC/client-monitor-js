@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { Chrome97Adapter } from "./Chrome97Adapter";
 import { twoWayEnum } from "../utils/reverseEnums";
 import { DefaultAdapter } from "./DefaultAdapter";
-import { StatsType, RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcMediaSourceCompoundStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcCertificateStats, RtcIceServerStats, RtcReceiverCompoundStats, RtcSenderCompoundStats, RtcIceCandidateStatsPairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats } from "../schemas/W3CStatsIdentifier";
+import { StatsType, RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcMediaSourceCompoundStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcCertificateStats, RtcIceServerStats, RtcReceiverCompoundStats, RtcSenderCompoundStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats } from "../schemas/W3CStatsIdentifier";
 import { Chrome86_96Adapter } from "./Chrome86_96Adapter";
 import { Firefox94Adapter } from "./Firefox90_94";
 
@@ -140,7 +140,7 @@ export function castStats(rtcStatType: string, rtcStatValue: any): StatsEntry | 
         case StatsType.sctpTransport:
             return [StatsType.sctpTransport, rtcStatValue as RtcSctpTransportStats];
         case StatsType.candidatePair:
-            return [StatsType.candidatePair, rtcStatValue as RtcIceCandidateStatsPairStats];
+            return [StatsType.candidatePair, rtcStatValue as RtcIceCandidatePairStats];
         case StatsType.localCandidate:
             return [StatsType.localCandidate, rtcStatValue as RtcLocalCandidateStats];
         case StatsType.remoteCandidate:

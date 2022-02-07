@@ -1,8 +1,9 @@
 import { MediaDevice } from "../schemas/ClientSample";
-type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
+export type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
+const EMPTY_ARRAY: MediaDevice[] = [];
 export class MediaDevices {
     private _mediaDevices: Map<string, MediaDevice> = new Map();
-    private _indexes: Map<MediaDeviceKind, string[]> = new Map();
+    private _indexes: Map<string, string[]> = new Map();
 
     public add(mediaDevice: MediaDevice): void {
         const mediaDeviceId = mediaDevice.id;
@@ -11,7 +12,8 @@ export class MediaDevices {
             return;
         }
         const index = mediaDevice.kind;
-        let keys = this._indexes.get(index) || [];
+        const keys = this._indexes.get(index) || [];
+        keys.push(mediaDeviceId);
         this._indexes.set(index, keys);
     }
 
@@ -27,11 +29,12 @@ export class MediaDevices {
     }
 
     public values(index?: MediaDeviceKind): IterableIterator<MediaDevice> {
-        if (!index) return this._mediaDevices.values();
+        if (!index) {
+            return this._mediaDevices.values();
+        }
         const keys = this._indexes.get(index);
         if (!keys) {
-            const empty: MediaDevice[] = [];
-            return empty.values();
+            return EMPTY_ARRAY.values();
         }
         const mediaDevices: MediaDevice[] = [];
         for (const key of keys) {

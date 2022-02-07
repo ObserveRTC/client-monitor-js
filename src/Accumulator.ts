@@ -1,6 +1,5 @@
 import { ClientSample } from "./schemas/ClientSample";
 import { Samples } from "./schemas/Samples";
-import { logger } from "./utils/logger";
 
 export type AccumulatorConfig = {
     maxClientSamples?: number;
@@ -19,17 +18,12 @@ export class Accumulator  {
         return new Accumulator(appliedConfig);
     }
 
-    private _output: SamplesListener[] = [];
     private _samples: Samples = {};
     private _buffer: Samples[] = [];
     private _empty: boolean = true;
     private _config: AccumulatorConfig;
     public constructor(config: AccumulatorConfig) {
         this._config = config;
-    }
-
-    public set output(value: SamplesListener) {
-        this._output.push(value);
     }
 
     public get isEmpty(): boolean {

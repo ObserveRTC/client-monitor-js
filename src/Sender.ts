@@ -9,16 +9,10 @@ export type SenderConfig = {
 }
 
 type SenderConstructConfig = SenderConfig & {
-    codec: CodecConfig,
     transport: TransportConfig,
 }
 
 const defaultConfig: SenderConstructConfig = {
-    codec: {
-        format: {
-            type: "json",
-        },
-    },
     transport: {}
 }
 

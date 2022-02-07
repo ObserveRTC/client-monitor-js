@@ -1,7 +1,7 @@
 import { FacadedCodec } from "../../src/codecs/FacadedCodec";
 
-describe("FacadedCodec spec test", () => {
-    it('FacadedCodec encodes / decodes consequently', () => {
+describe("FacadedCodec", () => {
+    it('encodes / decodes correctly', () => {
         const codec = FacadedCodec.wrap<string, number>({
             encode: (data: string) => Number.parseInt(data),
             decode: (data: number) => `${data}`,

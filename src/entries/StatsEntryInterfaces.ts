@@ -1,18 +1,13 @@
-import { ICELocalCandidate } from "../schemas/ClientSample";
-import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidateStatsPairStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcLocalCandidateStats, RtcMediaSourceCompoundStats, RtcOutboundRTPStreamStats, RtcReceiverCompoundStats, RtcRemoteCandidateStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats } from "../schemas/W3CStatsIdentifier";
+import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidatePairStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcLocalCandidateStats, RtcMediaSourceCompoundStats, RtcOutboundRTPStreamStats, RtcReceiverCompoundStats, RtcRemoteCandidateStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats } from "../schemas/W3CStatsIdentifier";
 import { PeerConnectionEntry } from "./PeerConnectionEntry";
 
-interface StatsEntryAbs {
+export interface StatsEntryAbs {
     id: string;
     created: number;
     updated: number;
     touched: number;
     getPeerConnection(): PeerConnectionEntry;
     hashCode: string;
-}
-
-export interface RemovableEntry extends StatsEntryAbs {
-    remove(): void;
 }
 
 export interface CodecEntry extends StatsEntryAbs {
@@ -103,7 +98,7 @@ export interface SctpTransportEntry extends StatsEntryAbs {
 }
 
 export interface IceCandidatePairEntry extends StatsEntryAbs {
-    stats: RtcIceCandidateStatsPairStats;
+    stats: RtcIceCandidatePairStats;
     getTransport(): TransportEntry | undefined;
     getLocalCandidate(): LocalCandidateEntry | undefined;
     getRemoteCandidate(): RemoteCandidateEntry | undefined;

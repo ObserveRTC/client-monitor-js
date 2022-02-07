@@ -1,4 +1,4 @@
-import { RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcAudioSourceStats, RtcVideoSourceStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcAudioSenderStats, RtcVideoSenderStats, RtcAudioReceiverStats, RtcVideoReceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcIceCandidateStatsPairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats, RtcCertificateStats, RtcIceServerStats, StatsType, RtcMediaSourceStats, RtcMediaSourceCompoundStats, RtcSenderCompoundStats, RtcReceiverCompoundStats, RtcIceCandidateStats } from "../schemas/W3CStatsIdentifier";
+import { RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcAudioSourceStats, RtcVideoSourceStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcAudioSenderStats, RtcVideoSenderStats, RtcAudioReceiverStats, RtcVideoReceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats, RtcCertificateStats, RtcIceServerStats, StatsType, RtcMediaSourceStats, RtcMediaSourceCompoundStats, RtcSenderCompoundStats, RtcReceiverCompoundStats, RtcIceCandidateStats } from "../schemas/W3CStatsIdentifier";
 
 type StatsValue = 
     RtcCodecStats |
@@ -18,7 +18,7 @@ type StatsValue =
     RtcVideoReceiverStats |
     RtcTransportStats |
     RtcSctpTransportStats |
-    RtcIceCandidateStatsPairStats |
+    RtcIceCandidatePairStats |
     RtcLocalCandidateStats |
     RtcRemoteCandidateStats |
     RtcCertificateStats |
@@ -75,7 +75,7 @@ export abstract class StatsVisitor {
                     this.visitSctpTransport(statsValue as RtcSctpTransportStats);
                     break;  
                 case StatsType.candidatePair:
-                    this.visitIceCandidatePair(statsValue as RtcIceCandidateStatsPairStats);
+                    this.visitIceCandidatePair(statsValue as RtcIceCandidatePairStats);
                     break;
                 case StatsType.localCandidate:
                     this.visitLocalCandidate(statsValue as RtcLocalCandidateStats);
@@ -110,7 +110,7 @@ export abstract class StatsVisitor {
     abstract visitReceiver(stats: RtcReceiverCompoundStats): void;
     abstract visitTransport(stats: RtcTransportStats): void;
     abstract visitSctpTransport(stats: RtcSctpTransportStats): void;
-    abstract visitIceCandidatePair(stats: RtcIceCandidateStatsPairStats): void;
+    abstract visitIceCandidatePair(stats: RtcIceCandidatePairStats): void;
     abstract visitLocalCandidate(stats: RtcIceCandidateStats): void;
     abstract visitRemoteCandidate( stats: RtcIceCandidateStats): void;
     abstract visitCertificate(stats: RtcCertificateStats): void;

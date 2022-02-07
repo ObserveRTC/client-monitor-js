@@ -33,6 +33,13 @@ export type ClientObserverConfig = {
     sendingPeriodInMs?: number;
 
     /**
+     * By setting it stats items and entries are deleted if they are not updated.
+     * 
+     * DEFAULT: undefined
+     */
+    statsExpirationTimeInMs?: number;
+
+    /**
      * Collector Component related configurations
      */
     collectors?: CollectorConfig;
@@ -252,6 +259,12 @@ export class ClientObserver implements IClientObserver {
             logger.warn(`Error occurred while collecting`, err);
         });
         this._eventer.emitStatsCollected();
+
+        if (this._config.statsExpirationTimeInMs) {
+            const expirationThresholdInMs = Date.now() - this._config.statsExpirationTimeInMs;
+            this._statsStorage.trim(expirationThresholdInMs);
+        }
+        
     }
 
     public async sample(): Promise<void> {

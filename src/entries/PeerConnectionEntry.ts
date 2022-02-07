@@ -1,13 +1,15 @@
 import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
-import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, RemovableEntry } from "./StatsEntryInterfaces";
+import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs } from "./StatsEntryInterfaces";
 import * as hash from "object-hash";
-import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidateStatsPairStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcLocalCandidateStats, RtcMediaSourceCompoundStats, RtcMediaSourceStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteCandidateStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats, RtcVideoSourceStats } from "../schemas/W3CStatsIdentifier";
-import MappedDeque from "../utils/MappedQueue";
+import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidatePairStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcLocalCandidateStats, RtcMediaSourceCompoundStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteCandidateStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats, RtcVideoSourceStats } from "../schemas/W3CStatsIdentifier";
 
 interface IPeerConnectionEntry {
     readonly id: string | undefined;
     readonly collectorId: string;
-    readonly stats: RtcPeerConnectionStats;
+    readonly stats: RtcPeerConnectionStats | undefined;
+    readonly created: number;
+    readonly touched: number;
+    readonly updated: number;
     codecs(): IterableIterator<CodecEntry>;
     inboundRtps(): IterableIterator<InboundRtpEntry>;
     outboundRtps(): IterableIterator<OutboundRtpEntry>;
@@ -41,7 +43,6 @@ type OutboundRtpPair = {
 type PeerConnectionEntryConfig = {
     collectorId: string,
     collectorLabel?: string,
-    expirationInMs?: number,
 }
 
 export class PeerConnectionEntry implements IPeerConnectionEntry {
@@ -50,14 +51,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
         return result;
     }
 
-    private readonly created: number = Date.now();
+    public readonly created: number;
     private _config: PeerConnectionEntryConfig;
-    private _updated: number = Date.now();
+    private _updated: number;
+    private _touched: number;
     private _stats?: RtcPeerConnectionStats;
-    public get id(): string | undefined {
-        return this._stats?.id;
-    }
-    private _touches: MappedDeque<string, RemovableEntry> = new MappedDeque();
     private _ssrcsToInboundRtpPair: Map<number, InboundRtpPair> = new Map();
     private _ssrcsToOutboundRtpPair: Map<number, OutboundRtpPair> = new Map();
 
@@ -81,6 +79,10 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
     private _iceServers: Map<string, IceServerEntry> = new Map();
     private constructor(config: PeerConnectionEntryConfig) {
         this._config = config;
+        const now = Date.now();
+        this.created = now;
+        this._updated = now;
+        this._touched = now;
     }
 
     public get collectorId(): string {
@@ -155,12 +157,20 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
         return this._iceServers.values();
     }
 
-    public get stats(): RtcPeerConnectionStats {
-        return this._stats!;
+    public get stats(): RtcPeerConnectionStats | undefined {
+        return this._stats;
+    }
+
+    public get id(): string | undefined {
+        return this._stats?.id;
     }
 
     public get updated(): number {
         return this._updated;
+    }
+
+    public get touched(): number {
+        return this._touched;
     }
 
     public codecs(): IterableIterator<CodecEntry> {
@@ -174,27 +184,56 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
     public update(statsEntry: StatsEntry) {
         const visitor = new this.Visitor(this);
         visitor.visit(statsEntry);
+        if (visitor.touched) {
+            this._touched = visitor.created;
+        }
     }
 
-    public clean(): void {
-        if (!this._config.expirationInMs) {
-            return;
-        }
-        const expirationThreshold = Date.now() - this._config.expirationInMs;
-        while(!this._touches.isEmpty) {
-            const removableEntry = this._touches.peekFirst();
-            if (!removableEntry) return;
-            if (expirationThreshold < removableEntry.touched) return;
-            removableEntry.remove();
+    public trim(expirationThresholdInMs: number): void {
+        const maps: Map<string, StatsEntryAbs>[] = [
+            this._codecs,
+            this._inboundRtps,
+            this._outboundRtps,
+            this._remoteInboundRtps,
+            this._remoteOutboundRtps,
+            this._mediaSources,
+            this._contributingSources,
+            this._dataChannels,
+            this._transceivers,
+            this._senders,
+            this._receivers,
+            this._transports,
+            this._sctpTransports,
+            this._iceCandidatePairs,
+            this._localCandidates,
+            this._remoteCandidates,
+            this._certificates,
+            this._iceServers
+        ];
+        for (const map of maps) {
+            const toRemove: string[] = [];
+            for (const statsEntry of map.values()) {
+                if (statsEntry.touched < expirationThresholdInMs) {
+                    toRemove.push(statsEntry.id);
+                }
+            }
+            for (const statsEntryId of toRemove) {
+                map.delete(statsEntryId);
+            }
         }
     }
 
     private Visitor = class extends StatsVisitor {
-        private _created: number = Date.now();
+        public touched: boolean = false;
+        public readonly created: number = Date.now();
         private _pc: PeerConnectionEntry;
         constructor(outer: PeerConnectionEntry) {
             super();
             this._pc = outer;
+        }
+        visit(statsEntry: StatsEntry) {
+            super.visit(statsEntry);
+            this.touched = true;
         }
 
         visitCodec(stats: RtcCodecStats): void {
@@ -203,12 +242,12 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
                 entry.hashCode = hashCode;
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -218,9 +257,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     return pc;
                 },
                 stats,
-                created: this._created,
-                updated: this._created,
-                touched: this._created,
+                created: this.created,
+                updated: this.created,
+                touched: this.created,
                 hashCode,
                 getTransport: () => {
                     const transportId = newEntry.stats.transportId;
@@ -236,11 +275,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -251,9 +290,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
             };
             entries.set(stats.id, newEntry);
         }
@@ -273,9 +312,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     },
                     stats,
                     hashCode,
-                    touched: this._created,
-                    created: this._created,
-                    updated: this._created,
+                    touched: this.created,
+                    created: this.created,
+                    updated: this.created,
                     getSsrc: () => {
                         return newEntry.stats.ssrc;
                     },
@@ -313,9 +352,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     inboundRtpPair.inboundRtpId = newEntry.stats.id;
                 }
             } else {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode !== hashCode) {
-                    entry.updated = this._created;
+                    entry.updated = this.created;
                     entry.stats = stats;
                 }
             }
@@ -336,9 +375,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     },
                     stats,
                     hashCode,
-                    touched: this._created,
-                    created: this._created,
-                    updated: this._created,
+                    touched: this.created,
+                    created: this.created,
+                    updated: this.created,
                     getSsrc: () => {
                         return newEntry.stats.ssrc;
                     },
@@ -373,9 +412,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 entries.set(stats.id, newEntry);
                 entry = newEntry;
             } else {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode !== hashCode) {
-                    entry.updated = this._created;
+                    entry.updated = this.created;
                     entry.stats = stats;
                 }
             }
@@ -405,9 +444,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     },
                     stats,
                     hashCode,
-                    touched: this._created,
-                    created: this._created,
-                    updated: this._created,
+                    touched: this.created,
+                    created: this.created,
+                    updated: this.created,
                     getSsrc: () => {
                         return newEntry.stats.ssrc;
                     },
@@ -441,9 +480,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     outboundRtpPair.remoteInboundRtpId = newEntry.stats.id;
                 }
             } else {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode !== hashCode) {
-                    entry.updated = this._created;
+                    entry.updated = this.created;
                     entry.stats = stats;
                 }
             }
@@ -463,9 +502,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     },
                     stats,
                     hashCode,
-                    touched: this._created,
-                    created: this._created,
-                    updated: this._created,
+                    touched: this.created,
+                    created: this.created,
+                    updated: this.created,
                     getSsrc: () => {
                         return newEntry.stats.ssrc;
                     },
@@ -498,9 +537,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                     inboundRtpPair.remoteOutboundRtpId = newEntry.stats.id;
                 }
             } else {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (hashCode !== entry.hashCode) {
-                    entry.updated = this._created;
+                    entry.updated = this.created;
                     entry.stats = stats;
                 }
             }
@@ -511,11 +550,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -526,9 +565,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getInboundRtp: () => {
                     const inboundRtpId = newEntry.stats.inboundRtpStreamId;
                     return pc._inboundRtps.get(inboundRtpId);
@@ -539,7 +578,7 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
         visitPeerConnection(stats: RtcPeerConnectionStats): void {
             const pc = this._pc;
             pc._stats = stats;
-            pc._updated = this._created;
+            pc._updated = this.created;
         }
         visitDataChannel(stats: RtcDataChannelStats): void {
             const pc = this._pc;
@@ -547,11 +586,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -562,9 +601,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
             };
             entries.set(stats.id, newEntry);
         }
@@ -574,11 +613,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -589,9 +628,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getSender: () => {
                     const senderId = newEntry.stats.senderId;
                     return pc._senders.get(senderId);
@@ -609,11 +648,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -624,9 +663,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getMediaSource: () => {
                     const mediaSourceId = newEntry.stats.mediaSourceId;
                     if (!mediaSourceId) return undefined;
@@ -641,11 +680,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -656,9 +695,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
             };
             entries.set(stats.id, newEntry);
         }
@@ -668,11 +707,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -683,9 +722,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getSelectedIceCandidatePair: () => {
                     const candidatePairId = newEntry.stats.selectedCandidatePairId;
                     if (!candidatePairId) return undefined;
@@ -715,11 +754,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -730,9 +769,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getTransport: () => {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
@@ -741,17 +780,17 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             };
             entries.set(stats.id, newEntry);
         }
-        visitIceCandidatePair(stats: RtcIceCandidateStatsPairStats): void {
+        visitIceCandidatePair(stats: RtcIceCandidatePairStats): void {
             const pc = this._pc;
             const entries = pc._iceCandidatePairs;
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -762,9 +801,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getTransport: () => {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
@@ -789,11 +828,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -804,9 +843,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getTransport: () => {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
@@ -821,11 +860,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -836,9 +875,9 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
                 getTransport: () => {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
@@ -853,11 +892,11 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
             const entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
                 return;
             }
@@ -868,38 +907,38 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
                 },
                 stats,
                 hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
+                touched: this.created,
+                created: this.created,
+                updated: this.created,
             };
             entries.set(stats.id, newEntry);
         }
         visitIceServer(stats: RtcIceServerStats): void {
             const pc = this._pc;
             const entries = pc._iceServers;
-            const entry = entries.get(stats.id);
+            let entry = entries.get(stats.id);
             const hashCode = hash(stats);
             if (entry) {
-                entry.touched = this._created;
+                entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
                     return;
                 }
-                entry.updated = this._created;
+                entry.updated = this.created;
                 entry.stats = stats;
-                return;
+            } else {
+                entry = {
+                    id: stats.id,
+                    getPeerConnection: () => {
+                        return pc;
+                    },
+                    stats,
+                    hashCode,
+                    touched: this.created,
+                    created: this.created,
+                    updated: this.created,
+                };
+                entries.set(stats.id, entry);
             }
-            const newEntry: IceServerEntry = {
-                id: stats.id,
-                getPeerConnection: () => {
-                    return pc;
-                },
-                stats,
-                hashCode,
-                touched: this._created,
-                created: this._created,
-                updated: this._created,
-            };
-            entries.set(stats.id, newEntry);
         }
     }
 }

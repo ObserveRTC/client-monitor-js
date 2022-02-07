@@ -16,7 +16,6 @@ type WebsocketTransportConstructorConfig = WebsocketTransportConfig & {
 const defaultConfig: WebsocketTransportConstructorConfig = {
     url: "cannot be this",
     maxRetry: 3
-    
 }
 
 const ON_STATE_CHANGED_EVENT_NAME = "onStateChanged";
@@ -39,7 +38,13 @@ export class WebsocketTransport implements Transport {
     }
 
     public connect(): Promise<void> {
-        throw new Error("Method not implemented.");
+        if (this._state === TransportState.Closed) {
+            return Promise.reject(`The transport is already closed`);
+        }
+        if (this._state === TransportState.Connected) {
+            return Promise.resolve();
+        }
+        return this._connect();
     }
 
     public get state(): TransportState {
@@ -163,6 +168,7 @@ export class WebsocketTransport implements Transport {
                 };
             }
         }).catch(async (err) => {
+            logger.warn(err);
             if (tried < this._config.maxRetry!) {
                 await this._waitBeforeReconnect(tried + 1);
                 await this._connect(tried + 1);

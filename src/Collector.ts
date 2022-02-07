@@ -1,6 +1,4 @@
 import { Adapter, AdapterConfig, createAdapter } from "./adapters/Adapter";
-import { StatsEntry } from "./utils/StatsVisitor";
-import { EventEmitter } from "events";
 import { logger } from "./utils/logger";
 import { StatsWriter } from "./entries/StatsStorage";
 
@@ -59,10 +57,15 @@ export class Collector {
         return result;
     }
 
+    public static create(config?: CollectorConfig) {
+        const appliedConfig = Object.assign(defaultConfig, config);
+        return new Collector(appliedConfig);
+    }
+
     private _statsWriter?: StatsWriter;
     private _pendingCollect?: Promise<void>
     private _config: CollectorConstructorConfig;
-    private _collectors: Map<string, PcStatsCollector> = new Map();
+    private _statsCollectors: Map<string, PcStatsCollector> = new Map();
     private _adapter: Adapter;
     private _closed: boolean = false;
     private constructor(config: CollectorConstructorConfig) {
@@ -75,6 +78,13 @@ export class Collector {
     }
 
     public async collect(): Promise<void> {
+        if (this._closed) {
+            throw new Error(`Collector is already closed`);
+        }
+        if (!this._statsWriter) {
+            logger.warn(`Output of the collector has not been set`);
+            return;
+        }
         let complete: () => void = () => {};
         this._pendingCollect = new Promise(resolve => {
             complete = () => {
@@ -85,7 +95,7 @@ export class Collector {
         type ScrappedEntry = [string, ScrappedStats] | undefined;
         const illConfigs: [string, any][] = [];
         const promises: Promise<ScrappedEntry>[] = [];
-        for (const statsConfig of this._collectors.values()) {
+        for (const statsConfig of this._statsCollectors.values()) {
             const { id: collectorId, getStats } = statsConfig;
             const promise: Promise<ScrappedEntry> = new Promise(resolve => {
                 getStats().then(scrappedStats => {
@@ -102,10 +112,6 @@ export class Collector {
             const [collectorId, scrappedStats] = scrappedEntry;
             for (const statsEntry of this._adapter.adapt(scrappedStats)) {
                 if (!statsEntry) continue;
-                if (!this._statsWriter) {
-                    logger.warn(`Output of the collector has not been set, statsEntry is dropped`, statsEntry);
-                    continue;
-                }
                 try {
                     this._statsWriter.accept(collectorId, statsEntry);
                 } catch (err: any) {
@@ -115,6 +121,9 @@ export class Collector {
         }
         for (const illConfig of illConfigs) {
             // remove and log problems
+            const [collectorId, err] = illConfig;
+            this.remove(collectorId);
+            logger.warn(`collector ${collectorId} is removed due to reported error`, err);
         }
         complete();
     }
@@ -124,15 +133,25 @@ export class Collector {
      * @param pcStatsCollector Collector wanted to add.
      */
     public add(pcStatsCollector: PcStatsCollector): void {
-        const { id: collectorId } = pcStatsCollector;
-        if (this._collectors.has(collectorId)) {
-            logger.warn(`Collector with peer connection id ${collectorId} has already been added, it will be overridden now`);
+        if (this._closed) {
+            throw new Error(`Cannot add StatsCollector because the Collector is closed`)
         }
-        this._collectors.set(collectorId, pcStatsCollector);
+        const { id: collectorId } = pcStatsCollector;
+        if (this._statsCollectors.has(collectorId)) {
+            throw new Error(`StatsCollector with id ${collectorId} has already been added`)
+        }
+        this._statsCollectors.set(collectorId, pcStatsCollector);
+    }
+
+    public has(statsCollectorId: string): boolean {
+        return this._statsCollectors.has(statsCollectorId);
     }
 
     public remove(collectorId: string): void {
-        if (!this._collectors.delete(collectorId)) {
+        if (this._closed) {
+            throw new Error(`Cannot remove StatsCollector because the Collector is closed`)
+        }
+        if (!this._statsCollectors.delete(collectorId)) {
             logger.warn(`Collector with peer connection id ${collectorId} was not found`);
         }
     }
@@ -146,6 +165,6 @@ export class Collector {
         if (this._pendingCollect) {
             await this._pendingCollect;
         }
-        this._collectors.clear();
+        this._statsCollectors.clear();
     }
 }

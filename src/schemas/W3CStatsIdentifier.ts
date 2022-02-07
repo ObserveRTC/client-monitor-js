@@ -392,7 +392,7 @@ export interface RtcIceCandidateStats extends RtcStats {
 export type RtcStatsIceCandidatePairState = "failed" | "cancelled" | "frozen" | "inprogress" | "succeeded" | "waiting";
 
 // RTCIceCandidatePairStats (https://www.w3.org/TR/webrtc-stats/#dom-rtcicecandidatepairstats)
-export interface RtcIceCandidateStatsPairStats extends RtcStats {
+export interface RtcIceCandidatePairStats extends RtcStats {
     transportId: string;
     localCandidateId: string;
     remoteCandidateId: string;

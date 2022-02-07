@@ -14,7 +14,7 @@ export interface EventsRegister {
     offSampleCreated(listener: SampleCreatedListener): EventsRegister;
 
     onSampleSent(listener: SampleSentListener): EventsRegister;
-    offSamplsSent(listener: SampleSentListener): EventsRegister;
+    offSampleSent(listener: SampleSentListener): EventsRegister;
 }
 
 export interface EventsEmitter {
@@ -74,8 +74,8 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
         this._emitter.emit(ON_SAMPLES_SENT_EVENT_NAME);
     }
 
-    offSamplsSent(listener: SampleSentListener): EventsRegister {
-        this._emitter.off(ON_STATS_COLLECTED_EVENT_NAME, listener);
+    offSampleSent(listener: SampleSentListener): EventsRegister {
+        this._emitter.off(ON_SAMPLES_SENT_EVENT_NAME, listener);
         return this;
     }
 

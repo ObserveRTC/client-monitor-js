@@ -1,10 +1,10 @@
 import { Timer } from "../../src/utils/Timer";
 
-describe("Connect to a server", () => {
-    it('Timer is constructed without error', () => {
+describe("Timer", () => {
+    it('When it is constructed Then no error', () => {
         new Timer();
     });
-    it('Timer invokes the added action', async () => {
+    it('When process is added Then process is invoked', async () => {
         const timer = new Timer();
         await new Promise<void>(resolve => {
             timer.add({
@@ -15,7 +15,7 @@ describe("Connect to a server", () => {
         });
         timer.clear();
     });
-    it('Timer invokes the added actions having different timeout', async () => {
+    it('When two process are added Then both are invoked', async () => {
         const timer = new Timer();
         let process1: number = 0;
         let process2: number = 0;
@@ -39,7 +39,7 @@ describe("Connect to a server", () => {
         expect(process2).toBe(1);
     });
 
-    it('Timer is not invoked after it is cleared', async () => {
+    it('When Timer is cleared Then it does not invoke processes', async () => {
         const timer = new Timer();
         let invoked: number = 0;
         timer.add({
@@ -57,7 +57,7 @@ describe("Connect to a server", () => {
         expect(invoked).toBe(1);
     });
 
-    it('Timers invoked in typed order (collect, sample, send) and not in added order', async () => {
+    it('When different type of processes (collect, sample, send) are added Then they are called strictly in typed order (collect, sample, send)', async () => {
         const timer = new Timer();
         let invoked: number = 0;
         await new Promise<void>(resolve => {

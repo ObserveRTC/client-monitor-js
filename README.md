@@ -50,7 +50,7 @@ UNDER DEVELOPMENT
 ## Configurations
 
 ```javascript
-const config: ClientObserverConfig = {
+const config = {
     /**
      * By setting it, the observer calls the added statsCollectors periodically
      * and pulls the stats.
@@ -64,6 +64,13 @@ const config: ClientObserverConfig = {
      * DEFAULT: undefined
      */
     samplingPeriodInMs: 10000,
+
+    /**
+     * By setting it stats items and entries are deleted if they are not updated.
+     * 
+     * DEFAULT: undefined
+     */
+    statsExpirationTimeInMs: 60000,
 
     /**
      * Collector Component related configurations
@@ -104,6 +111,8 @@ const config: ClientObserverConfig = {
          * If server side componet is used to collect the samples, this parameter is the critical to provide to match clients being in the same room.
          * 
          * DEFAULT: a generated unique value
+         * 
+         * NOTE: if this value has not been set clients which are in the same room will not be matched at the observer
          */
         roomId: "testRoom",
 
@@ -112,14 +121,14 @@ const config: ClientObserverConfig = {
          * 
          * DEFAULT: a generated unique value
          */
-        clientId: generateUuid(),
+        clientId: "clientId",
 
         /**
          * the identifier of the call between clients in the same room. If not given then the server side assigns one. If it is given it must be a valid UUID.
          * 
          * DEFAULT: undefined
          */
-        callId: generateUuid(),
+        callId: "callId",
         /**
          * The userId of the client appeared to other users.
          * 

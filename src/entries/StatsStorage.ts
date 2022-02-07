@@ -32,6 +32,10 @@ export interface StatsWriter {
     accept(collectorId: string, statsEntry: StatsEntry): void;
 }
 
+type StatsStorageConfig = {
+    expirationInMs?: number;
+}
+
 export class StatsStorage implements StatsReader, StatsWriter {
     private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
     public accept(collectorId: string, statsEntry: StatsEntry): void {
@@ -41,6 +45,12 @@ export class StatsStorage implements StatsReader, StatsWriter {
             return;
         }
         pcEntry.update(statsEntry);
+    }
+
+    public trim(expirationThresholdInMs: number) {
+        for (const pcEntry of this._peerConnections.values()) {
+            pcEntry.trim(expirationThresholdInMs);
+        }
     }
 
     public register(collectorId: string, collectorLabel?: string): void {
