@@ -1,10 +1,9 @@
 import { StatsEntry } from "../utils/StatsVisitor";
 import { logger } from "../utils/logger";
-import { Chrome97Adapter } from "./Chrome97Adapter";
+import { Chrome86Adapter } from "./Chrome86Adapter";
 import { twoWayEnum } from "../utils/reverseEnums";
 import { DefaultAdapter } from "./DefaultAdapter";
 import { StatsType, RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcMediaSourceCompoundStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcCertificateStats, RtcIceServerStats, RtcReceiverCompoundStats, RtcSenderCompoundStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats } from "../schemas/W3CStatsIdentifier";
-import { Chrome86_96Adapter } from "./Chrome86_96Adapter";
 import { Firefox94Adapter } from "./Firefox90_94";
 
 export const TwoWayRtcStatsType = twoWayEnum(StatsType);
@@ -46,8 +45,6 @@ function createChromeAdapter(version?: string): Adapter {
         case "99":
         case "98":
         case "97":
-            return new Chrome97Adapter();
-        /*eslint-disable no-fallthrough */
         case "96":
         case "95":
         case "94":
@@ -59,7 +56,7 @@ function createChromeAdapter(version?: string): Adapter {
         case "88":
         case "87":
         case "86":
-            return new Chrome86_96Adapter();
+            return new Chrome86Adapter();
         default:
             logger.warn(`Cannot recognize chrome version ${version}`);
         /* eslint-disable no-fallthrough */
