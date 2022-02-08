@@ -41,8 +41,10 @@ function createChromeAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    console.warn(majorVersion);
     switch (majorVersion) {
+        /*eslint-disable no-fallthrough */
+        case "99":
+        case "98":
         case "97":
             return new Chrome97Adapter();
         /*eslint-disable no-fallthrough */
