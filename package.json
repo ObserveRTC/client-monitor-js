@@ -1,6 +1,6 @@
 {
   "name": "@observertc/client-observer-js",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "ObserveRTC Client Integration Library",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -29,13 +29,11 @@
   "license": "MIT",
   "dependencies": {
     "@types/events": "^3.0.0",
-    "@types/object-hash": "^2.2.1",
     "@types/uuid": "^8.3.4",
     "@types/ws": "^8.2.2",
     "bowser": "^2.11.0",
     "js-base64": "^3.7.2",
     "loglevel": "^1.8.0",
-    "object-hash": "^2.2.0",
     "uuid": "^8.3.2",
     "ws": "^8.4.2"
   },
