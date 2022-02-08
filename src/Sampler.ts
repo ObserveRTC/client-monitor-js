@@ -42,11 +42,20 @@ export type SamplerConfig = {
      * DEFAULT: true
      */
     incrementalSampling?: boolean;
+
+    /**
+     * If true it makes a warning log every time a trackId is not a uuid, thus cannot be sampled.
+     * Otherwise invalid track identifiers are skipped silently
+     * 
+     * DEFAULT: true
+     */
+    logInvalidTrackIds?: boolean;
 }
 
 type SamplerConstructorConfig = SamplerConfig & {
     roomId: string,
-    clientId: string;
+    clientId: string,
+    logInvalidTrackIds: boolean,
 }
 
 export type TrackRelation = {
@@ -60,7 +69,7 @@ export const defaultConfig: SamplerConstructorConfig = {
     clientId: uuidv4(),
 
     incrementalSampling: true,
-    // validateUuids: true,
+    logInvalidTrackIds: true,
 }
 
 interface Builder {
@@ -332,6 +341,12 @@ export class Sampler {
                 /* eslint-disable @typescript-eslint/no-explicit-any */
                 const { trackIdentifier: sourceTrackId, ...audioSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as RtcAudioSourceStats : {};
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
+                if (trackId && !isValidUuid(trackId)) {
+                    if (this._config.logInvalidTrackIds) {
+                        logger.warn(`Invalid outbound audio track id ${trackId}, not be sampled`);
+                    }
+                    continue;
+                }
                 const { rtpStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const {
                     perDscpPacketsSent: perDscpPackets,
@@ -355,6 +370,12 @@ export class Sampler {
             if (outboundRtp.stats.kind === "video") {
                 const { trackIdentifier: sourceTrackId, ...videoSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as RtcVideoSourceStats : {};
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
+                if (trackId && !isValidUuid(trackId)) {
+                    if (this._config.logInvalidTrackIds) {
+                        logger.warn(`Invalid outbound video track id ${trackId}, not be sampled`);
+                    }
+                    continue;
+                }
                 const { rtpStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const {
                     qualityLimitationDurations,
@@ -393,9 +414,14 @@ export class Sampler {
             }
             const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
             const { ended, trackIdentifier: trackId } = inboundRtp.getReceiver()?.stats || {};
+            if (trackId && !isValidUuid(trackId)) {
+                if (this._config.logInvalidTrackIds) {
+                    logger.warn(`Invalid inbound track id ${trackId}, not be sampled`);
+                }
+                continue;
+            }
             const { rtpStreamId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
             const codecStats = inboundRtp.getCodec()?.stats || {};
-            
             const { perDscpPacketsReceived: perDscpPackets, ...inboundRtpStats } = inboundRtp.stats;
             const perDscpId = perDscpPackets ? Object.keys(perDscpPackets)[0] : undefined;
             const perDscpPacketsReceived = perDscpPackets && perDscpId ? perDscpPackets[perDscpId] : undefined;
