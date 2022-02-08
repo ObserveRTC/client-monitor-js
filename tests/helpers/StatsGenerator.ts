@@ -1,4 +1,4 @@
-import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidateStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcMediaSourceStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats as RtcRemoteOutboundRtpStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats, StatsType } from "../../dist/schemas/W3CStatsIdentifier";
+import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidateStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcMediaSourceStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats as RtcRemoteOutboundRtpStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats, StatsType } from "../../src/schemas/W3CStatsIdentifier";
 import { RtcIceCandidatePairStats } from "../../src/schemas/W3CStatsIdentifier";
 
 export function createCodecStats(data?: RtcCodecStats) {

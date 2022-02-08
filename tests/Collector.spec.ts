@@ -1,5 +1,5 @@
-import { StatsType } from "../dist/schemas/W3CStatsIdentifier";
-import { StatsEntry } from "../dist/utils/StatsVisitor";
+import { StatsType } from "../src/schemas/W3CStatsIdentifier";
+import { StatsEntry } from "../src/utils/StatsVisitor";
 import { Collector } from "../src/Collector";
 import { StatsWriter } from "../src/entries/StatsStorage";
 import { createCertificateStats, createCodecStats, createCsrcStats, createDataChannelStats, createIceCandidatePairStats, createIceLocalCandidateStats, createIceRemoteCandidateStats, createIceServerStats, createInboundRtpStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSctpTransportStats, createSenderStats, createTransceiverStats } from "./helpers/StatsGenerator";
