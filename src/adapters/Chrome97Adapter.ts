@@ -16,6 +16,12 @@ export class Chrome97Adapter implements Adapter {
                 if (rtcStatValue.mediaType && !rtcStatValue.kind) {
                     rtcStatValue.kind = rtcStatValue.mediaType;
                 }
+                if (rawType === "inbound-rtp" && rtcStatValue.trackId && !rtcStatValue.receiverId) {
+                    rtcStatValue.receiverId = rtcStatValue.trackId;
+                }
+                if (rawType === "outbound-rtp" && rtcStatValue.trackId && !rtcStatValue.senderId) {
+                    rtcStatValue.senderId = rtcStatValue.trackId;
+                }
             }
 
             yield castStats(rawType, rtcStatValue);
