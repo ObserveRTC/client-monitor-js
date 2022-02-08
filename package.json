@@ -1,12 +1,12 @@
 {
   "name": "@observertc/client-observer-js",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ObserveRTC Client Integration Library",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist/**/*"
-  ],
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "engines": {
+    "node": ">=10"
+  },
   "scripts": {
     "prepare": "npm run build",
     "prepublishOnly": "npm test && npm run lint",
@@ -48,5 +48,8 @@
     "typescript": "^4.5.5",
     "utf-8-validate": "^5.0.8"
   },
-  "repository": "https://github.com/observertc/client-observer-js"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/observertc/client-observer-js"
+  }
 }

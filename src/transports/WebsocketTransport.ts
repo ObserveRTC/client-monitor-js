@@ -1,12 +1,12 @@
 import { Transport, TransportState } from "./Transport";
-import * as WebSocket from 'ws';
+import { ClientOptions, WebSocket }  from 'ws';
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 
 export type WebsocketTransportConfig = {
     url: string;
     maxRetry?: number;
-    socketOptions?: WebSocket.ClientOptions;
+    socketOptions?: ClientOptions;
 }
 
 type WebsocketTransportConstructorConfig = WebsocketTransportConfig & {
@@ -166,7 +166,7 @@ export class WebsocketTransport implements Transport {
                 ws.onopen = () => {
                     opened();
                 };
-                ws.onerror = error => {
+                ws.onerror = (error: any) => {
                     reject(error);
                 };
             }
