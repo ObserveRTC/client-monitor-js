@@ -15,10 +15,11 @@ npm i @observertc/client-observer-js
 
 ```javascript
 import { ClientObserver } from "@observertc/client-observer-js";
-
-const observer = ClientObserver.create({
+// see full config in Configuration section
+const config = {
     collectingPeriodInMs: 5000,
-});
+};
+const observer = ClientObserver.create(config);
 observer.addStatsCollector({
     id: "collectorId",
     getStats: () => peerConnection.getStats(),
@@ -45,6 +46,10 @@ You can navigate through related stats:
     }
 ```
 The example above shows how to get the remote inbound rtp stats related to the outbound rtp stats.
+
+With `stats` you accessing so called Entries. The interface for the entries visualized in the picture below:
+
+![Entry Navigations](docs/navigation.png)
 
 ### Sample & Send
 

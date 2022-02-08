@@ -18,6 +18,9 @@ jobs:
       - name: Build
         run: yarn build
 
+      - name: Test
+        run: yarn test
+
       - uses: JS-DevTools/npm-publish@v1
         with:
           access: public
