@@ -1,7 +1,7 @@
 ObserveRTC Client Integration Core Library
 ---
 
-UNDER DEVELOPMENT, NO STABLE VERSION IS AVAILABLE AT THE MOMENT!
+# !!! UNDER DEVELOPMENT, NO STABLE VERSION IS AVAILABLE AT THE MOMENT! !!!
 
 @observertc/client-observer-js is a client side library for observertc integration.
 

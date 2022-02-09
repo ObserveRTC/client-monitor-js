@@ -1,27 +1,27 @@
-import * as crypto from "crypto";
+import { sha256 } from 'js-sha256';
 
 /*eslint-disable @typescript-eslint/no-explicit-any */
 export function hash(obj: any): string {
-    const digester = crypto.createHash("sha256");
+    const digester = sha256.create();
     if (obj === undefined) {
         digester.update("undefined");
-        return digester.digest("hex");
+        return digester.hex();
     }
     if (obj === null) {
         digester.update("undefined");
-        return digester.digest("hex");
+        return digester.hex();
     }
     const type = typeof obj;
     if (type === "function") {
         digester.update("function");
-        return digester.digest("hex");
+        return digester.hex();
     }
     if (type === "object") {
         for (const [key, value] of Object.entries(obj)) {
             const valueHash = hash(value);
             digester.update(key + valueHash);
         }
-        return digester.digest("hex");
+        return digester.hex();
     }
     switch (type) {
         case "bigint":
@@ -43,5 +43,5 @@ export function hash(obj: any): string {
             digester.update((obj as symbol).toString())
             break;
     }
-    return digester.digest("hex");
+    return digester.hex();
 }

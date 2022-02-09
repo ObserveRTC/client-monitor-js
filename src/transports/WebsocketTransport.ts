@@ -1,12 +1,11 @@
 import { Transport, TransportState } from "./Transport";
-import { ClientOptions, WebSocket }  from 'ws';
+import ReconnectingWebSocket from 'reconnecting-websocket';
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 
 export type WebsocketTransportConfig = {
     url: string;
     maxRetry?: number;
-    socketOptions?: ClientOptions;
 }
 
 type WebsocketTransportConstructorConfig = WebsocketTransportConfig & {
@@ -32,7 +31,7 @@ export class WebsocketTransport implements Transport {
     private _state: TransportState = TransportState.Created;
     private _buffer: Uint8Array[] = [];
     private _emitter: EventEmitter = new EventEmitter();
-    private _ws?: WebSocket;
+    private _ws?: ReconnectingWebSocket;
     private constructor(config: WebsocketTransportConstructorConfig) {
         this._config = config;
     }
@@ -151,9 +150,8 @@ export class WebsocketTransport implements Transport {
         }
         this._setState(TransportState.Connecting);
         const url = this._config.url;
-        const socketOptions = this._config.socketOptions;
         await new Promise<void>((resolve, reject) => {
-            const ws = new WebSocket(url, socketOptions);
+            const ws = new ReconnectingWebSocket(url);
             const opened = () => {
                 this._ws = ws;
                 resolve();

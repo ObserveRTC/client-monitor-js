@@ -1,22 +1,20 @@
 import { TransportState } from '../../src/transports/Transport';
 import { WebsocketTransport, WebsocketTransportConfig } from "../../src/transports/WebsocketTransport";
-import { WebSocketServer } from 'ws';
 
 describe("WebsocketTransport", () => {
-    const server = new WebSocketServer({ port: 7070 });
     describe("Given a server listening for connection", () => {
         const url = 'ws://localhost:7070';
         const config: WebsocketTransportConfig = {
             url,
         };
-        let buffer: string[] = [];
-        server.on("connection", ws => {
-            console.log("connection");
-            ws.on("message", data => {
-                const message = new TextDecoder().decode(data as ArrayBuffer);
-                buffer.push(message);
-           });
-        });
+        // let buffer: string[] = [];
+        // server.on("connection", ws => {
+        //     console.log("connection");
+        //     ws.on("message", data => {
+        //         const message = new TextDecoder().decode(data as ArrayBuffer);
+        //         buffer.push(message);
+        //    });
+        // });
         const transport = WebsocketTransport.create(config);
         describe("When transport is created", () => {
             it("Then state is created", () => {
@@ -39,5 +37,5 @@ describe("WebsocketTransport", () => {
         //     });
         // });
     });
-    server.close();
+    // server.close();
 });
