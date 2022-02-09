@@ -71,7 +71,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
     public *receivers(): Generator<ReceiverEntry, void, undefined> {
         for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.outboundRtps()) {
+            for (const entry of pcEntry.receivers()) {
                 yield entry;
             }
         }
@@ -79,7 +79,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
     public *mediaSources(): Generator<MediaSourceEntry, void, undefined> {
         for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.outboundRtps()) {
+            for (const entry of pcEntry.mediaSources()) {
                 yield entry;
             }
         }

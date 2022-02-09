@@ -2,7 +2,7 @@ import { Adapter, castStats } from "./Adapter";
 import { StatsEntry } from "../utils/StatsVisitor";
 
 
-export class Chrome86Adapter implements Adapter {
+export class Safari14Adapter implements Adapter {
     /*eslint-disable @typescript-eslint/no-explicit-any */
     public *adapt(rtcStats: any): Generator<StatsEntry | undefined, void, undefined> {
         if (!rtcStats || !rtcStats.values || typeof rtcStats.values !== 'function') {
@@ -36,18 +36,11 @@ export class Chrome86Adapter implements Adapter {
                         }
                     }
                 }
-                if (rtcStatValue.mediaType && !rtcStatValue.kind) {
-                    rtcStatValue.kind = rtcStatValue.mediaType;
-                }
                 if (rawType === "inbound-rtp" && rtcStatValue.trackId && !rtcStatValue.receiverId) {
                     rtcStatValue.receiverId = rtcStatValue.trackId;
                 }
                 if (rawType === "outbound-rtp" && rtcStatValue.trackId && !rtcStatValue.senderId) {
                     rtcStatValue.senderId = rtcStatValue.trackId;
-                }
-            } else if (rawType === "local-candidate" || rawType === "remote-candidate") {
-                if (rtcStatValue.ip && !rtcStatValue.address) {
-                    rtcStatValue.address = rtcStatValue.ip;
                 }
             }
             yield castStats(rawType, rtcStatValue);

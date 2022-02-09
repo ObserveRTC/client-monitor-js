@@ -5,6 +5,7 @@ import { twoWayEnum } from "../utils/reverseEnums";
 import { DefaultAdapter } from "./DefaultAdapter";
 import { StatsType, RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcMediaSourceCompoundStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcCertificateStats, RtcIceServerStats, RtcReceiverCompoundStats, RtcSenderCompoundStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats } from "../schemas/W3CStatsIdentifier";
 import { Firefox94Adapter } from "./Firefox90_94";
+import { Safari14Adapter } from "./Safari14Adapter";
 
 export const TwoWayRtcStatsType = twoWayEnum(StatsType);
 
@@ -63,7 +64,6 @@ function createChromeAdapter(version?: string): Adapter {
         case AdapterTypes.DefaultAdapter:
             return new DefaultAdapter();
     }
-    return new DefaultAdapter();
 }
 
 
@@ -72,7 +72,6 @@ function createFirefoxAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    console.warn(majorVersion);
     switch (majorVersion) {
         case "94":
         case "93":
@@ -85,7 +84,23 @@ function createFirefoxAdapter(version?: string): Adapter {
         case AdapterTypes.DefaultAdapter:
             return new DefaultAdapter();
     }
-    return new DefaultAdapter();
+}
+
+function createSafariAdapter(version?: string): Adapter {
+    if (!version) {
+        return new DefaultAdapter();
+    }
+    const majorVersion = version.split(".")[0];
+    switch (majorVersion) {
+        case "16":
+        case "15":
+        case "14":
+            return new Safari14Adapter();
+        default:
+            logger.warn(`Cannot recognize chrome version ${version}`);
+        case AdapterTypes.DefaultAdapter:
+            return new DefaultAdapter();
+    }
 }
 
 export function createAdapter(providedConfig?: AdapterConfig): Adapter {
@@ -93,13 +108,13 @@ export function createAdapter(providedConfig?: AdapterConfig): Adapter {
     if (!config || !config.browserType) {
         return new DefaultAdapter();
     }
-    switch (config.browserType) {
+    switch (config.browserType.toLowerCase()) {
         case "chrome":
-        case "Chrome":
             return createChromeAdapter(config.browserVersion);
-        case "Firefox":
         case "firefox":
             return createFirefoxAdapter(config.browserVersion);
+        case "safari":
+            return createSafariAdapter(config.browserVersion);
         default:
             // logger.info(`Browser type ${config.browserType} is not recognized`);
             return new DefaultAdapter();
