@@ -1,11 +1,10 @@
-import { RtcCertificateStats, RtcCodecStats, RtcDataChannelStats, RtcIceCandidateStats, RtcIceServerStats, RtcInboundRtpStreamStats, RtcMediaSourceStats, RtcOutboundRTPStreamStats, RtcPeerConnectionStats, RtcReceiverCompoundStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats as RtcRemoteOutboundRtpStreamStats, RtcRtpContributingSourceStats, RtcRtpTransceiverStats, RtcSctpTransportStats, RtcSenderCompoundStats, RtcTransportStats, StatsType } from "../../src/schemas/W3CStatsIdentifier";
-import { RtcIceCandidatePairStats } from "../../src/schemas/W3CStatsIdentifier";
+import { W3CStats as W3C } from "@observertc/schemas"
 
-export function createCodecStats(data?: RtcCodecStats) {
-    const result: RtcCodecStats = {
+export function createCodecStats(data?: W3C.RtcCodecStats) {
+    const result: W3C.RtcCodecStats = {
         id: "codec_0_1",
         codecType: "encode",
-        type: StatsType.codec,
+        type: W3C.StatsType.codec,
         timestamp: Date.now(),
         payloadType: "128",
         transportId: "transportId",
@@ -15,10 +14,10 @@ export function createCodecStats(data?: RtcCodecStats) {
     return result;
 }
 
-export function createInboundRtpStats(data?: RtcInboundRtpStreamStats) {
-    const result: RtcInboundRtpStreamStats = {
+export function createInboundRtpStats(data?: W3C.RtcInboundRtpStreamStats) {
+    const result: W3C.RtcInboundRtpStreamStats = {
         id: "inboundrtp_0_1",
-        type: StatsType.inboundRtp,
+        type: W3C.StatsType.inboundRtp,
         timestamp: Date.now(),
         transportId: "transportId",
         receiverId: "receiver_0_1",
@@ -29,10 +28,10 @@ export function createInboundRtpStats(data?: RtcInboundRtpStreamStats) {
     return result;
 }
 
-export function createOutboundRtpStats(data?: RtcOutboundRTPStreamStats) {
-    const result: RtcOutboundRTPStreamStats = {
+export function createOutboundRtpStats(data?: W3C.RtcOutboundRTPStreamStats) {
+    const result: W3C.RtcOutboundRTPStreamStats = {
         id: "outboundrtp_0_1",
-        type: StatsType.outboundRtp,
+        type: W3C.StatsType.outboundRtp,
         timestamp: Date.now(),
         transportId: "transportId",
         senderId: "sender_0_1",
@@ -43,10 +42,10 @@ export function createOutboundRtpStats(data?: RtcOutboundRTPStreamStats) {
     return result;
 }
 
-export function createRemoteInboundRtpStats(data?: RtcRemoteInboundRtpStreamStats) {
-    const result: RtcRemoteInboundRtpStreamStats = {
+export function createRemoteInboundRtpStats(data?: W3C.RtcRemoteInboundRtpStreamStats) {
+    const result: W3C.RtcRemoteInboundRtpStreamStats = {
         id: "remote-inboundrtp_0_1",
-        type: StatsType.remoteInboundRtp,
+        type: W3C.StatsType.remoteInboundRtp,
         timestamp: Date.now(),
         transportId: "transportId",
         ssrc: 12345,
@@ -56,10 +55,10 @@ export function createRemoteInboundRtpStats(data?: RtcRemoteInboundRtpStreamStat
     return result;
 }
 
-export function createRemoteOutboundRtpStats(data?: RtcRemoteOutboundRtpStreamStats) {
-    const result: RtcRemoteOutboundRtpStreamStats = {
+export function createRemoteOutboundRtpStats(data?: W3C.RtcRemoteOutboundRTPStreamStats) {
+    const result: W3C.RtcRemoteOutboundRTPStreamStats = {
         id: "remote-outboundrtp_0_1",
-        type: StatsType.remoteOutboundRtp,
+        type: W3C.StatsType.remoteOutboundRtp,
         timestamp: Date.now(),
         transportId: "transportId",
         ssrc: 12345,
@@ -69,10 +68,10 @@ export function createRemoteOutboundRtpStats(data?: RtcRemoteOutboundRtpStreamSt
     return result;
 }
 
-export function createMediaSourceStats(data?: RtcMediaSourceStats) {
-    const result: RtcMediaSourceStats = {
+export function createMediaSourceStats(data?: W3C.RtcMediaSourceStats) {
+    const result: W3C.RtcMediaSourceStats = {
         id: "mediasource_0_1",
-        type: StatsType.mediaSource,
+        type: W3C.StatsType.mediaSource,
         timestamp: Date.now(),
         trackIdentifier: "track_0_1",
         kind: "audio",
@@ -81,32 +80,32 @@ export function createMediaSourceStats(data?: RtcMediaSourceStats) {
     return result;
 }
 
-export function createCsrcStats(data?: RtcRtpContributingSourceStats) {
-    const result: RtcRtpContributingSourceStats = {
+export function createCsrcStats(data?: W3C.RtcRtpContributingSourceStats) {
+    const result: W3C.RtcRtpContributingSourceStats = {
         id: "csrc_0_1",
         contributorSsrc: 12345,
         inboundRtpStreamId: "inbound_0_1",
-        type: StatsType.csrc,
+        type: W3C.StatsType.csrc,
         timestamp: Date.now(),
         ...(data || {}),
     };
     return result;
 }
 
-export function createPeerConnectionStats(data?: RtcPeerConnectionStats) {
-    const result: RtcPeerConnectionStats = {
+export function createPeerConnectionStats(data?: W3C.RtcPeerConnectionStats) {
+    const result: W3C.RtcPeerConnectionStats = {
         id: "peerConnection_0_1",
-        type: StatsType.peerConnection,
+        type: W3C.StatsType.peerConnection,
         timestamp: Date.now(),
         ...(data || {}),
     };
     return result;
 }
 
-export function createDataChannelStats(data?: RtcDataChannelStats) {
-    const result: RtcDataChannelStats = {
+export function createDataChannelStats(data?: W3C.RtcDataChannelStats) {
+    const result: W3C.RtcDataChannelStats = {
         id: "peerConnection_0_1",
-        type: StatsType.dataChannel,
+        type: W3C.StatsType.dataChannel,
         timestamp: Date.now(),
         state: "open",
         ...(data || {}),
@@ -114,10 +113,10 @@ export function createDataChannelStats(data?: RtcDataChannelStats) {
     return result;
 }
 
-export function createTransceiverStats(data?: RtcRtpTransceiverStats) {
-    const result: RtcRtpTransceiverStats = {
+export function createTransceiverStats(data?: W3C.RtcRtpTransceiverStats) {
+    const result: W3C.RtcRtpTransceiverStats = {
         id: "datachannel_0_1",
-        type: StatsType.transceiver,
+        type: W3C.StatsType.transceiver,
         timestamp: Date.now(),
         senderId: "sender_0_1",
         receiverId: "receiver_0_1",
@@ -125,30 +124,30 @@ export function createTransceiverStats(data?: RtcRtpTransceiverStats) {
     };
     return result;
 }
-export function createSenderStats(data?: RtcSenderCompoundStats) {
-    const result: RtcSenderCompoundStats = {
+export function createSenderStats(data?: W3C.RtcSenderCompoundStats) {
+    const result: W3C.RtcSenderCompoundStats = {
         id: "sender_0_1",
-        type: StatsType.sender,
+        type: W3C.StatsType.sender,
         timestamp: Date.now(),
         kind: "audio",
         ...(data || {}),
     };
     return result;
 }
-export function createReceiverStats(data?: RtcReceiverCompoundStats) {
-    const result: RtcReceiverCompoundStats = {
+export function createReceiverStats(data?: W3C.RtcReceiverCompoundStats) {
+    const result: W3C.RtcReceiverCompoundStats = {
         id: "receiver_0_1",
-        type: StatsType.receiver,
+        type: W3C.StatsType.receiver,
         timestamp: Date.now(),
         kind: "audio",
         ...(data || {}),
     };
     return result;
 }
-export function createTransportStats(data?: RtcTransportStats) {
-    const result: RtcTransportStats = {
+export function createTransportStats(data?: W3C.RtcTransportStats) {
+    const result: W3C.RtcTransportStats = {
         id: "receiver_0_1",
-        type: StatsType.transport,
+        type: W3C.StatsType.transport,
         timestamp: Date.now(),
         dtlsState: "connected",
         ...(data || {}),
@@ -156,20 +155,20 @@ export function createTransportStats(data?: RtcTransportStats) {
     return result;
 }
 
-export function createSctpTransportStats(data?: RtcSctpTransportStats) {
-    const result: RtcSctpTransportStats = {
+export function createSctpTransportStats(data?: W3C.RtcSctpTransportStats) {
+    const result: W3C.RtcSctpTransportStats = {
         id: "receiver_0_1",
-        type: StatsType.sctpTransport,
+        type: W3C.StatsType.sctpTransport,
         timestamp: Date.now(),
         ...(data || {}),
     };
     return result;
 }
 
-export function createIceCandidatePairStats(data?: RtcIceCandidatePairStats) {
-    let result: RtcIceCandidatePairStats = {
+export function createIceCandidatePairStats(data?: W3C.RtcIceCandidatePairStats) {
+    let result: W3C.RtcIceCandidatePairStats = {
         id: "candidatepair_0_1",
-        type: StatsType.candidatePair,
+        type: W3C.StatsType.candidatePair,
         timestamp: Date.now(),
         localCandidateId: "candidate_0_1",
         remoteCandidateId: "candidate_1_1",
@@ -180,11 +179,11 @@ export function createIceCandidatePairStats(data?: RtcIceCandidatePairStats) {
     return result;
 }
 
-export function createIceLocalCandidateStats(data?: RtcIceCandidateStats) {
-    const result: RtcIceCandidateStats = {
+export function createIceLocalCandidateStats(data?: W3C.RtcIceCandidateStats) {
+    const result: W3C.RtcIceCandidateStats = {
         id: "icecandidate_0_1",
         transportId: "transport_0_1",
-        type: StatsType.localCandidate,
+        type: W3C.StatsType.localCandidate,
         timestamp: Date.now(),
         candidateType: "host",
         ...(data || {}),
@@ -192,11 +191,11 @@ export function createIceLocalCandidateStats(data?: RtcIceCandidateStats) {
     return result;
 }
 
-export function createIceRemoteCandidateStats(data?: RtcIceCandidateStats) {
-    const result: RtcIceCandidateStats = {
+export function createIceRemoteCandidateStats(data?: W3C.RtcIceCandidateStats) {
+    const result: W3C.RtcIceCandidateStats = {
         id: "icecandidate_1_1",
         transportId: "transport_1_1",
-        type: StatsType.remoteCandidate,
+        type: W3C.StatsType.remoteCandidate,
         timestamp: Date.now(),
         candidateType: "host",
         ...(data || {}),
@@ -204,10 +203,10 @@ export function createIceRemoteCandidateStats(data?: RtcIceCandidateStats) {
     return result;
 }
 
-export function createCertificateStats(data?: RtcCertificateStats) {
-    const result: RtcCertificateStats = {
+export function createCertificateStats(data?: W3C.RtcCertificateStats) {
+    const result: W3C.RtcCertificateStats = {
         id: "certificate_0_1",
-        type: StatsType.certificate,
+        type: W3C.StatsType.certificate,
         timestamp: Date.now(),
         fingerprint: "fingerprint",
         fingerprintAlgorithm: "noAlg",
@@ -218,10 +217,10 @@ export function createCertificateStats(data?: RtcCertificateStats) {
 }
 
 
-export function createIceServerStats(data?: RtcIceServerStats) {
-    const result: RtcIceServerStats = {
+export function createIceServerStats(data?: W3C.RtcIceServerStats) {
+    const result: W3C.RtcIceServerStats = {
         id: "iceserver_0_1",
-        type: StatsType.iceServer,
+        type: W3C.StatsType.iceServer,
         timestamp: Date.now(),
         url: "localhost",
         ...(data || {}),

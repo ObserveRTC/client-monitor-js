@@ -1,94 +1,94 @@
-import { RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcAudioSourceStats, RtcVideoSourceStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcAudioSenderStats, RtcVideoSenderStats, RtcAudioReceiverStats, RtcVideoReceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats, RtcCertificateStats, RtcIceServerStats, StatsType, RtcMediaSourceCompoundStats, RtcSenderCompoundStats, RtcReceiverCompoundStats, RtcIceCandidateStats } from "../schemas/W3CStatsIdentifier";
+import { W3CStats as W3C } from "@observertc/schemas";
 import { logger } from "./logger";
 
 type StatsValue = 
-    RtcCodecStats |
-    RtcInboundRtpStreamStats |
-    RtcOutboundRTPStreamStats |
-    RtcRemoteInboundRtpStreamStats |
-    RtcRemoteOutboundRTPStreamStats |
-    RtcAudioSourceStats |
-    RtcVideoSourceStats |
-    RtcRtpContributingSourceStats |
-    RtcPeerConnectionStats |
-    RtcDataChannelStats |
-    RtcRtpTransceiverStats |
-    RtcAudioSenderStats | 
-    RtcVideoSenderStats |
-    RtcAudioReceiverStats |
-    RtcVideoReceiverStats |
-    RtcTransportStats |
-    RtcSctpTransportStats |
-    RtcIceCandidatePairStats |
-    RtcLocalCandidateStats |
-    RtcRemoteCandidateStats |
-    RtcCertificateStats |
-    RtcIceServerStats
+    W3C.RtcCodecStats |
+    W3C.RtcInboundRtpStreamStats |
+    W3C.RtcOutboundRTPStreamStats |
+    W3C.RtcRemoteInboundRtpStreamStats |
+    W3C.RtcRemoteOutboundRTPStreamStats |
+    W3C.RtcAudioSourceStats |
+    W3C.RtcVideoSourceStats |
+    W3C.RtcRtpContributingSourceStats |
+    W3C.RtcPeerConnectionStats |
+    W3C.RtcDataChannelStats |
+    W3C.RtcRtpTransceiverStats |
+    W3C.RtcAudioSenderStats | 
+    W3C.RtcVideoSenderStats |
+    W3C.RtcAudioReceiverStats |
+    W3C.RtcVideoReceiverStats |
+    W3C.RtcTransportStats |
+    W3C.RtcSctpTransportStats |
+    W3C.RtcIceCandidatePairStats |
+    W3C.RtcLocalCandidateStats |
+    W3C.RtcRemoteCandidateStats |
+    W3C.RtcCertificateStats |
+    W3C.RtcIceServerStats
     ;
 
-export type StatsEntry = [StatsType, StatsValue];
+export type StatsEntry = [W3C.StatsType, StatsValue];
 
 export abstract class StatsVisitor {
     public visit(statsEntry: StatsEntry): void {
         const [statsType, statsValue] = statsEntry;
         try {
             switch(statsType) {
-                case StatsType.codec:
-                    this.visitCodec(statsValue as RtcCodecStats)
+                case W3C.StatsType.codec:
+                    this.visitCodec(statsValue as W3C.RtcCodecStats)
                     break;
-                case StatsType.inboundRtp:
-                    this.visitInboundRtp(statsValue as RtcInboundRtpStreamStats);
+                case W3C.StatsType.inboundRtp:
+                    this.visitInboundRtp(statsValue as W3C.RtcInboundRtpStreamStats);
                     break;
-                case StatsType.outboundRtp:
-                    this.visitOutboundRtp(statsValue as RtcOutboundRTPStreamStats);
+                case W3C.StatsType.outboundRtp:
+                    this.visitOutboundRtp(statsValue as W3C.RtcOutboundRTPStreamStats);
                     break;
-                case StatsType.remoteInboundRtp:
-                    this.visitRemoteInboundRtp(statsValue as RtcRemoteInboundRtpStreamStats);
+                case W3C.StatsType.remoteInboundRtp:
+                    this.visitRemoteInboundRtp(statsValue as W3C.RtcRemoteInboundRtpStreamStats);
                     break;
-                case StatsType.remoteOutboundRtp:
-                    this.visitRemoteOutboundRtp(statsValue as RtcRemoteOutboundRTPStreamStats);
+                case W3C.StatsType.remoteOutboundRtp:
+                    this.visitRemoteOutboundRtp(statsValue as W3C.RtcRemoteOutboundRTPStreamStats);
                     break;
-                case StatsType.mediaSource:
-                    this.visitMediaSource(statsValue as RtcMediaSourceCompoundStats);
+                case W3C.StatsType.mediaSource:
+                    this.visitMediaSource(statsValue as W3C.RtcMediaSourceCompoundStats);
                     break;
-                case StatsType.csrc:
-                    this.visitContributingSource(statsValue as RtcRtpContributingSourceStats);
+                case W3C.StatsType.csrc:
+                    this.visitContributingSource(statsValue as W3C.RtcRtpContributingSourceStats);
                     break;
-                case StatsType.peerConnection:
-                    this.visitPeerConnection(statsValue as RtcPeerConnectionStats);
+                case W3C.StatsType.peerConnection:
+                    this.visitPeerConnection(statsValue as W3C.RtcPeerConnectionStats);
                     break;
-                case StatsType.dataChannel:
-                    this.visitDataChannel(statsValue as RtcDataChannelStats);
+                case W3C.StatsType.dataChannel:
+                    this.visitDataChannel(statsValue as W3C.RtcDataChannelStats);
                     break;
-                case StatsType.transceiver:
-                    this.visitTransceiver(statsValue as RtcRtpTransceiverStats);
+                case W3C.StatsType.transceiver:
+                    this.visitTransceiver(statsValue as W3C.RtcRtpTransceiverStats);
                     break;
-                case StatsType.sender:
-                    this.visitSender(statsValue as RtcSenderCompoundStats);
+                case W3C.StatsType.sender:
+                    this.visitSender(statsValue as W3C.RtcSenderCompoundStats);
                     break;
-                case StatsType.receiver:
-                    this.visitReceiver(statsValue as RtcReceiverCompoundStats);
+                case W3C.StatsType.receiver:
+                    this.visitReceiver(statsValue as W3C.RtcReceiverCompoundStats);
                     break;
-                case StatsType.transport:
-                    this.visitTransport(statsValue as RtcTransportStats);
+                case W3C.StatsType.transport:
+                    this.visitTransport(statsValue as W3C.RtcTransportStats);
                     break;
-                case StatsType.sctpTransport:
-                    this.visitSctpTransport(statsValue as RtcSctpTransportStats);
+                case W3C.StatsType.sctpTransport:
+                    this.visitSctpTransport(statsValue as W3C.RtcSctpTransportStats);
                     break;  
-                case StatsType.candidatePair:
-                    this.visitIceCandidatePair(statsValue as RtcIceCandidatePairStats);
+                case W3C.StatsType.candidatePair:
+                    this.visitIceCandidatePair(statsValue as W3C.RtcIceCandidatePairStats);
                     break;
-                case StatsType.localCandidate:
-                    this.visitLocalCandidate(statsValue as RtcLocalCandidateStats);
+                case W3C.StatsType.localCandidate:
+                    this.visitLocalCandidate(statsValue as W3C.RtcLocalCandidateStats);
                     break;       
-                case StatsType.remoteCandidate:
-                    this.visitRemoteCandidate(statsValue as RtcRemoteCandidateStats);
+                case W3C.StatsType.remoteCandidate:
+                    this.visitRemoteCandidate(statsValue as W3C.RtcRemoteCandidateStats);
                     break;
-                case StatsType.certificate:
-                    this.visitCertificate(statsValue as RtcCertificateStats);
+                case W3C.StatsType.certificate:
+                    this.visitCertificate(statsValue as W3C.RtcCertificateStats);
                     break;
-                case StatsType.iceServer:
-                    this.visitIceServer(statsValue as RtcIceServerStats);
+                case W3C.StatsType.iceServer:
+                    this.visitIceServer(statsValue as W3C.RtcIceServerStats);
                     break;
                 default:
                     break;
@@ -98,23 +98,23 @@ export abstract class StatsVisitor {
             logger.warn(err);
         }
     }
-    abstract visitCodec(stats: RtcCodecStats): void;
-    abstract visitInboundRtp(stats: RtcInboundRtpStreamStats): void;
-    abstract visitOutboundRtp(stats: RtcOutboundRTPStreamStats): void;
-    abstract visitRemoteInboundRtp(stats: RtcRemoteInboundRtpStreamStats): void;
-    abstract visitRemoteOutboundRtp(stats: RtcRemoteOutboundRTPStreamStats): void;
-    abstract visitMediaSource(stats: RtcMediaSourceCompoundStats): void;
-    abstract visitContributingSource(stats: RtcRtpContributingSourceStats): void;
-    abstract visitPeerConnection(stats: RtcPeerConnectionStats): void;
-    abstract visitDataChannel(stats: RtcDataChannelStats): void;
-    abstract visitTransceiver(stats: RtcRtpTransceiverStats): void;
-    abstract visitSender(stats: RtcSenderCompoundStats): void;
-    abstract visitReceiver(stats: RtcReceiverCompoundStats): void;
-    abstract visitTransport(stats: RtcTransportStats): void;
-    abstract visitSctpTransport(stats: RtcSctpTransportStats): void;
-    abstract visitIceCandidatePair(stats: RtcIceCandidatePairStats): void;
-    abstract visitLocalCandidate(stats: RtcIceCandidateStats): void;
-    abstract visitRemoteCandidate( stats: RtcIceCandidateStats): void;
-    abstract visitCertificate(stats: RtcCertificateStats): void;
-    abstract visitIceServer(stats: RtcIceServerStats): void;
+    abstract visitCodec(stats: W3C.RtcCodecStats): void;
+    abstract visitInboundRtp(stats: W3C.RtcInboundRtpStreamStats): void;
+    abstract visitOutboundRtp(stats: W3C.RtcOutboundRTPStreamStats): void;
+    abstract visitRemoteInboundRtp(stats: W3C.RtcRemoteInboundRtpStreamStats): void;
+    abstract visitRemoteOutboundRtp(stats: W3C.RtcRemoteOutboundRTPStreamStats): void;
+    abstract visitMediaSource(stats: W3C.RtcMediaSourceCompoundStats): void;
+    abstract visitContributingSource(stats: W3C.RtcRtpContributingSourceStats): void;
+    abstract visitPeerConnection(stats: W3C.RtcPeerConnectionStats): void;
+    abstract visitDataChannel(stats: W3C.RtcDataChannelStats): void;
+    abstract visitTransceiver(stats: W3C.RtcRtpTransceiverStats): void;
+    abstract visitSender(stats: W3C.RtcSenderCompoundStats): void;
+    abstract visitReceiver(stats: W3C.RtcReceiverCompoundStats): void;
+    abstract visitTransport(stats: W3C.RtcTransportStats): void;
+    abstract visitSctpTransport(stats: W3C.RtcSctpTransportStats): void;
+    abstract visitIceCandidatePair(stats: W3C.RtcIceCandidatePairStats): void;
+    abstract visitLocalCandidate(stats: W3C.RtcIceCandidateStats): void;
+    abstract visitRemoteCandidate( stats: W3C.RtcIceCandidateStats): void;
+    abstract visitCertificate(stats: W3C.RtcCertificateStats): void;
+    abstract visitIceServer(stats: W3C.RtcIceServerStats): void;
 }

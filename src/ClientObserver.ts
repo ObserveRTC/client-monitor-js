@@ -1,4 +1,4 @@
-import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from "./schemas/ClientSample";
+import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from "@observertc/schemas"
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, SamplerConfig, defaultConfig as samplerDefaultConfig, TrackRelation } from "./Sampler";
@@ -234,6 +234,7 @@ export class ClientObserver implements IClientObserver {
     }
 
     public removeMediaDevice(device: MediaDevice): void {
+        if (device.id === undefined) return;
         this._mediaDevices.remove(device.id);
     }
 

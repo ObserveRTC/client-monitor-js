@@ -1,4 +1,4 @@
-import { MediaDevice } from "../../src/schemas/ClientSample";
+import { MediaDevice } from "@observertc/schemas";
 import { MediaDevices } from "../../src/utils/MediaDevices";
 
 describe(`MediaDevices`, () => {
@@ -26,7 +26,7 @@ describe(`MediaDevices`, () => {
     });
     describe(`When mediadevice is removed`, () => {
         it(`Then it cannot be retrieved`, () => {
-            devices.remove(device.id);
+            devices.remove(device.id!);
             let invoked = 0;
 
             for (const d of devices.values()) {

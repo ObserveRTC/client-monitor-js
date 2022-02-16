@@ -1,4 +1,4 @@
-import { Samples } from "./schemas/Samples";
+import { Samples } from "@observertc/schemas"
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
 import { createTransport, Transport, TransportConfig } from "./transports/Transport"
 import { logger } from "./utils/logger";

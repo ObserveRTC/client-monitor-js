@@ -1,12 +1,11 @@
 
 import * as Bowser from "bowser";
-import { Browser, Engine, OperationSystem, Platform } from "./schemas/ClientSample";
+import { Browser, Engine, OperationSystem, Platform } from "@observertc/schemas"
 
 const UNKNOWN_OS: OperationSystem = {
     name: "Unkown",
     version: undefined,
     versionName: undefined,
-
 };
 
 const UNKNOWN_BROWSER: Browser = {

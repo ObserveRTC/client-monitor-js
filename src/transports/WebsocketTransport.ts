@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 
 export type WebsocketTransportConfig = {
     url: string;
-    maxRetry?: number;
+    maxRetries?: number;
 }
 
 type WebsocketTransportConstructorConfig = WebsocketTransportConfig & {
@@ -171,7 +171,7 @@ export class WebsocketTransport implements Transport {
         /*eslint-disable @typescript-eslint/no-explicit-any */
         }).catch(async (err: any) => {
             logger.warn(err);
-            if (tried < this._config.maxRetry!) {
+            if (tried < this._config.maxRetries!) {
                 await this._waitBeforeReconnect(tried + 1);
                 await this._connect(tried + 1);
                 return;

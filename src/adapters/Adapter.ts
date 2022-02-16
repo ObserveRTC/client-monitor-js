@@ -1,13 +1,10 @@
 import { StatsEntry } from "../utils/StatsVisitor";
 import { logger } from "../utils/logger";
 import { Chrome86Adapter } from "./Chrome86Adapter";
-import { twoWayEnum } from "../utils/reverseEnums";
 import { DefaultAdapter } from "./DefaultAdapter";
-import { StatsType, RtcCodecStats, RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats, RtcMediaSourceCompoundStats, RtcRtpContributingSourceStats, RtcPeerConnectionStats, RtcDataChannelStats, RtcRtpTransceiverStats, RtcTransportStats, RtcSctpTransportStats, RtcCertificateStats, RtcIceServerStats, RtcReceiverCompoundStats, RtcSenderCompoundStats, RtcIceCandidatePairStats, RtcLocalCandidateStats, RtcRemoteCandidateStats } from "../schemas/W3CStatsIdentifier";
+import { W3CStats } from "@observertc/schemas";
 import { Firefox94Adapter } from "./Firefox90_94";
 import { Safari14Adapter } from "./Safari14Adapter";
-
-export const TwoWayRtcStatsType = twoWayEnum(StatsType);
 
 export enum AdapterTypes {
     Chrome91Adapter = "Chrome91",
@@ -124,48 +121,48 @@ export function createAdapter(providedConfig?: AdapterConfig): Adapter {
 /*eslint-disable @typescript-eslint/no-explicit-any */
 export function castStats(rtcStatType: string, rtcStatValue: any): StatsEntry | undefined {
     switch (rtcStatType.toLowerCase()) {
-        case StatsType.codec:
-            return [StatsType.codec, rtcStatValue as RtcCodecStats];
-        case StatsType.inboundRtp:
-            return [StatsType.inboundRtp, rtcStatValue as RtcInboundRtpStreamStats];
-        case StatsType.outboundRtp:
-            return [StatsType.outboundRtp, rtcStatValue as RtcOutboundRTPStreamStats];
-        case StatsType.remoteInboundRtp:
-            return [StatsType.remoteInboundRtp, rtcStatValue as RtcRemoteInboundRtpStreamStats];
-        case StatsType.remoteOutboundRtp:
-            return [StatsType.remoteOutboundRtp, rtcStatValue as RtcRemoteOutboundRTPStreamStats];
-        case StatsType.mediaSource:
-            return [StatsType.mediaSource, rtcStatValue as RtcMediaSourceCompoundStats];
-        case StatsType.csrc:
-            return [StatsType.csrc, rtcStatValue as RtcRtpContributingSourceStats];
-        case StatsType.peerConnection:
-            return [StatsType.peerConnection, rtcStatValue as RtcPeerConnectionStats];
-        case StatsType.dataChannel:
-            return [StatsType.dataChannel, rtcStatValue as RtcDataChannelStats];
-        case StatsType.stream:
+        case W3CStats.StatsType.codec:
+            return [W3CStats.StatsType.codec, rtcStatValue as W3CStats.RtcCodecStats];
+        case W3CStats.StatsType.inboundRtp:
+            return [W3CStats.StatsType.inboundRtp, rtcStatValue as W3CStats.RtcInboundRtpStreamStats];
+        case W3CStats.StatsType.outboundRtp:
+            return [W3CStats.StatsType.outboundRtp, rtcStatValue as W3CStats.RtcOutboundRTPStreamStats];
+        case W3CStats.StatsType.remoteInboundRtp:
+            return [W3CStats.StatsType.remoteInboundRtp, rtcStatValue as W3CStats.RtcRemoteInboundRtpStreamStats];
+        case W3CStats.StatsType.remoteOutboundRtp:
+            return [W3CStats.StatsType.remoteOutboundRtp, rtcStatValue as W3CStats.RtcRemoteOutboundRTPStreamStats];
+        case W3CStats.StatsType.mediaSource:
+            return [W3CStats.StatsType.mediaSource, rtcStatValue as W3CStats.RtcMediaSourceCompoundStats];
+        case W3CStats.StatsType.csrc:
+            return [W3CStats.StatsType.csrc, rtcStatValue as W3CStats.RtcRtpContributingSourceStats];
+        case W3CStats.StatsType.peerConnection:
+            return [W3CStats.StatsType.peerConnection, rtcStatValue as W3CStats.RtcPeerConnectionStats];
+        case W3CStats.StatsType.dataChannel:
+            return [W3CStats.StatsType.dataChannel, rtcStatValue as W3CStats.RtcDataChannelStats];
+        case W3CStats.StatsType.stream:
             return undefined; // unsupported
-        case StatsType.track:
+        case W3CStats.StatsType.track:
             return undefined; // unsupported
-        case StatsType.transceiver:
-            return [StatsType.transceiver, rtcStatValue as RtcRtpTransceiverStats];
-        case StatsType.sender:
-            return [StatsType.sender, rtcStatValue as RtcSenderCompoundStats];
-        case StatsType.receiver:
-            return [StatsType.receiver, rtcStatValue as RtcReceiverCompoundStats];
-        case StatsType.transport:
-            return [StatsType.transport, rtcStatValue as RtcTransportStats];
-        case StatsType.sctpTransport:
-            return [StatsType.sctpTransport, rtcStatValue as RtcSctpTransportStats];
-        case StatsType.candidatePair:
-            return [StatsType.candidatePair, rtcStatValue as RtcIceCandidatePairStats];
-        case StatsType.localCandidate:
-            return [StatsType.localCandidate, rtcStatValue as RtcLocalCandidateStats];
-        case StatsType.remoteCandidate:
-            return [StatsType.remoteCandidate, rtcStatValue as RtcRemoteCandidateStats];
-        case StatsType.certificate:
-            return [StatsType.certificate, rtcStatValue as RtcCertificateStats];
-        case StatsType.iceServer:
-            return [StatsType.iceServer, rtcStatValue as RtcIceServerStats];
+        case W3CStats.StatsType.transceiver:
+            return [W3CStats.StatsType.transceiver, rtcStatValue as W3CStats.RtcRtpTransceiverStats];
+        case W3CStats.StatsType.sender:
+            return [W3CStats.StatsType.sender, rtcStatValue as W3CStats.RtcSenderCompoundStats];
+        case W3CStats.StatsType.receiver:
+            return [W3CStats.StatsType.receiver, rtcStatValue as W3CStats.RtcReceiverCompoundStats];
+        case W3CStats.StatsType.transport:
+            return [W3CStats.StatsType.transport, rtcStatValue as W3CStats.RtcTransportStats];
+        case W3CStats.StatsType.sctpTransport:
+            return [W3CStats.StatsType.sctpTransport, rtcStatValue as W3CStats.RtcSctpTransportStats];
+        case W3CStats.StatsType.candidatePair:
+            return [W3CStats.StatsType.candidatePair, rtcStatValue as W3CStats.RtcIceCandidatePairStats];
+        case W3CStats.StatsType.localCandidate:
+            return [W3CStats.StatsType.localCandidate, rtcStatValue as W3CStats.RtcLocalCandidateStats];
+        case W3CStats.StatsType.remoteCandidate:
+            return [W3CStats.StatsType.remoteCandidate, rtcStatValue as W3CStats.RtcRemoteCandidateStats];
+        case W3CStats.StatsType.certificate:
+            return [W3CStats.StatsType.certificate, rtcStatValue as W3CStats.RtcCertificateStats];
+        case W3CStats.StatsType.iceServer:
+            return [W3CStats.StatsType.iceServer, rtcStatValue as W3CStats.RtcIceServerStats];
         default:
             return undefined;
     }

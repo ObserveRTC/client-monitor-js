@@ -1,4 +1,4 @@
-import { MediaDevice } from "../schemas/ClientSample";
+import { MediaDevice } from "@observertc/schemas"
 export type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
 const EMPTY_ARRAY: MediaDevice[] = [];
 export class MediaDevices {
@@ -6,6 +6,7 @@ export class MediaDevices {
     private _indexes: Map<string, string[]> = new Map();
 
     public add(mediaDevice: MediaDevice): void {
+        if (!mediaDevice.id) return;
         const mediaDeviceId = mediaDevice.id;
         this._mediaDevices.set(mediaDeviceId, mediaDevice);
         if (!mediaDevice.kind) {

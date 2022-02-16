@@ -1,9 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { PeerConnectionEntry } from "./entries/PeerConnectionEntry";
-import { Browser, Certificate, ClientSample, Codec, DataChannel, Engine, ExtensionStat, ICELocalCandidate, ICERemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "./schemas/ClientSample";
+import { W3CStats as W3C, Browser, Certificate, ClientSample, MediaCodecStats, DataChannel, Engine, ExtensionStat, IceLocalCandidate, IceRemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "@observertc/schemas";
 import { logger } from "./utils/logger";
-import { makePrefixedObj } from "./utils/common";
-import { RtcAudioSourceStats, RtcOutboundRTPStreamStats, RtcVideoSourceStats } from "./schemas/W3CStatsIdentifier";
+import { makePrefixedObj, NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
 import { isValidUuid } from "./utils/validators";
 
@@ -241,10 +240,10 @@ export class Sampler {
         let outboundVideoTracks: OutboundVideoTrack[] | undefined;
         let pcTransports: PeerConnectionTransport[] | undefined;
         let mediaSources: MediaSourceStat[] | undefined;
-        let codecs: Codec[] | undefined;
+        let codecs: MediaCodecStats[] | undefined;
         let certificates: Certificate[] | undefined;
-        let iceLocalCandidates: ICELocalCandidate[] | undefined;
-        let iceRemoteCandidates: ICERemoteCandidate[] | undefined;
+        let iceLocalCandidates: IceLocalCandidate[] | undefined;
+        let iceRemoteCandidates: IceRemoteCandidate[] | undefined;
         let dataChannels: DataChannel[] | undefined;
         let iceServers: string[] | undefined;
         for (const peerConnection of this._statsReader.peerConnections()) {
@@ -339,7 +338,7 @@ export class Sampler {
             const codecStats = outboundRtp.getCodec()?.stats || {};
             if (outboundRtp.stats.kind === "audio") {
                 /* eslint-disable @typescript-eslint/no-explicit-any */
-                const { trackIdentifier: sourceTrackId, ...audioSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as RtcAudioSourceStats : {};
+                const { trackIdentifier: sourceTrackId, ...audioSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as W3C.RtcAudioSourceStats : {};
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 if (trackId && !isValidUuid(trackId)) {
                     if (this._config.logInvalidTrackIds) {
@@ -351,7 +350,7 @@ export class Sampler {
                 const {
                     perDscpPacketsSent: perDscpPackets,
                     ...outboundStats
-                }: RtcOutboundRTPStreamStats = outboundRtp.stats;
+                }: W3C.RtcOutboundRTPStreamStats = outboundRtp.stats;
                 const perDscpId = perDscpPackets ? Object.keys(perDscpPackets)[0] : undefined;
                 const perDscpPacketsSent = perDscpPackets && perDscpId ? perDscpPackets[perDscpId] : undefined;
                 const outboundAudioTrack: OutboundAudioTrack = {
@@ -368,7 +367,7 @@ export class Sampler {
                 yield [outboundAudioTrack, undefined];
             }
             if (outboundRtp.stats.kind === "video") {
-                const { trackIdentifier: sourceTrackId, ...videoSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as RtcVideoSourceStats : {};
+                const { trackIdentifier: sourceTrackId, ...videoSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as W3C.RtcVideoSourceStats : {};
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 if (trackId && !isValidUuid(trackId)) {
                     if (this._config.logInvalidTrackIds) {
@@ -381,7 +380,7 @@ export class Sampler {
                     qualityLimitationDurations,
                     perDscpPacketsSent: perDscpPackets,
                     ...outboundStats
-                }: RtcOutboundRTPStreamStats = outboundRtp.stats;
+                }: W3C.RtcOutboundRTPStreamStats = outboundRtp.stats;
                 const perDscpId = perDscpPackets ? Object.keys(perDscpPackets)[0] : undefined;
                 const perDscpPacketsSent = perDscpPackets && perDscpId ? perDscpPackets[perDscpId] : undefined;
                 const outboundVideoTrack: OutboundVideoTrack = {
@@ -432,7 +431,6 @@ export class Sampler {
 
                     // to overwrite id and other stuffs:
                     ...inboundRtpStats,
-                    perDscpId,
                     perDscpPacketsReceived,
                     trackId,
                     rtpStreamId,
@@ -488,7 +486,7 @@ export class Sampler {
                 ...candidatePairStats,
                 ...localCandidateStats,
                 ...remoteCandidateStats,
-                peerConnectionId: peerConnection.id,
+                peerConnectionId: peerConnection.id ?? NULL_UUID,
                 label: peerConnection.collectorLabel,
             };
             yield sample;
@@ -504,13 +502,13 @@ export class Sampler {
             }
             const stats = mediaSourceEntry.stats;
             const sample: MediaSourceStat = {
-                ...((stats.kind === "audio") ? stats as RtcAudioSourceStats : stats as RtcVideoSourceStats),
+                ...((stats.kind === "audio") ? stats as W3C.RtcAudioSourceStats : stats as W3C.RtcVideoSourceStats),
             };
             yield sample;
         }
     }
 
-    private *_makeCodec(peerConnection: PeerConnectionEntry): Generator<Codec, void, undefined> {
+    private *_makeCodec(peerConnection: PeerConnectionEntry): Generator<MediaCodecStats, void, undefined> {
         for (const codec of peerConnection.codecs()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
@@ -518,9 +516,8 @@ export class Sampler {
                 continue;
             }
             const stats = codec.stats;
-            const sampledCodec: Codec = {
+            const sampledCodec: MediaCodecStats = {
                 ...stats,
-                peerConnectionId: peerConnection.id,
             };
             yield sampledCodec;
         }
@@ -541,7 +538,7 @@ export class Sampler {
         }
     }
 
-    private *_makeIceLocalCandidate(peerConnection: PeerConnectionEntry): Generator<ICELocalCandidate, void, undefined> {
+    private *_makeIceLocalCandidate(peerConnection: PeerConnectionEntry): Generator<IceLocalCandidate, void, undefined> {
         for (const iceLocalCandidate of peerConnection.localCandidates()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
@@ -549,7 +546,7 @@ export class Sampler {
                 continue;
             }
             const stats = iceLocalCandidate.stats;
-            const sampledLocalCandidate: ICELocalCandidate = {
+            const sampledLocalCandidate: IceLocalCandidate = {
                 ...stats,
                 peerConnectionId: peerConnection.id,
             };
@@ -557,7 +554,7 @@ export class Sampler {
         }
     }
 
-    private *_makeIceRemoteCandidate(peerConnection: PeerConnectionEntry): Generator<ICERemoteCandidate, void, undefined> {
+    private *_makeIceRemoteCandidate(peerConnection: PeerConnectionEntry): Generator<IceRemoteCandidate, void, undefined> {
         for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
@@ -582,7 +579,7 @@ export class Sampler {
             const stats = dataChannel.stats;
             yield {
                 ...stats,
-                peerConnectionId: peerConnection.id,
+                peerConnectionId: peerConnection.id ?? NULL_UUID,
             };
         }
     }

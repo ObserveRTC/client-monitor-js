@@ -1,5 +1,4 @@
-import { ClientSample } from "./schemas/ClientSample";
-import { Samples } from "./schemas/Samples";
+import { ClientSample, Samples } from "@observertc/schemas"
 
 export type AccumulatorConfig = {
     maxClientSamples?: number;

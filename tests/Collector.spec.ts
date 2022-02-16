@@ -1,4 +1,4 @@
-import { StatsType } from "../src/schemas/W3CStatsIdentifier";
+import { W3CStats as W3C } from "@observertc/schemas";
 import { StatsEntry } from "../src/utils/StatsVisitor";
 import { Collector } from "../src/Collector";
 import { StatsWriter } from "../src/entries/StatsStorage";
@@ -41,7 +41,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.codec)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.codec)
                 },
             );
             expect(executed).toBe(true);
@@ -54,7 +54,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.inboundRtp)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.inboundRtp)
                 },
             );
             expect(executed).toBe(true);
@@ -68,7 +68,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.outboundRtp)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.outboundRtp)
                 },
             );
             expect(executed).toBe(true);
@@ -82,7 +82,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.remoteInboundRtp)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.remoteInboundRtp)
                 },
             );
             expect(executed).toBe(true);
@@ -96,7 +96,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.remoteOutboundRtp)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.remoteOutboundRtp)
                 },
             );
             expect(executed).toBe(true);
@@ -110,7 +110,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.csrc)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.csrc)
                 },
             );
             expect(executed).toBe(true);
@@ -124,7 +124,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.localCandidate)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.localCandidate)
                 },
             );
             expect(executed).toBe(true);
@@ -138,7 +138,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.remoteCandidate)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.remoteCandidate)
                 },
             );
             expect(executed).toBe(true);
@@ -152,7 +152,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.candidatePair)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.candidatePair)
                 },
             );
             expect(executed).toBe(true);
@@ -165,7 +165,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.certificate)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.certificate)
                 },
             );
             expect(executed).toBe(true);
@@ -179,7 +179,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.peerConnection)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.peerConnection)
                 },
             );
             expect(executed).toBe(true);
@@ -193,7 +193,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.dataChannel)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.dataChannel)
                 },
             );
             expect(executed).toBe(true);
@@ -207,7 +207,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.transceiver)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.transceiver)
                 },
             );
             expect(executed).toBe(true);
@@ -221,7 +221,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.sender)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.sender)
                 },
             );
             expect(executed).toBe(true);
@@ -234,7 +234,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.receiver)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.receiver)
                 },
             );
             expect(executed).toBe(true);
@@ -247,7 +247,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.sctpTransport)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.sctpTransport)
                 },
             );
             expect(executed).toBe(true);
@@ -261,7 +261,7 @@ describe("Collector", () => {
                 (collectorId: string, statsEntry: StatsEntry) => {
                     executed = true;
                     expect(collectorId).toBe(COLLECTOR_ID);
-                    expect(statsEntry[0]).toEqual(StatsType.iceServer)
+                    expect(statsEntry[0]).toEqual(W3C.StatsType.iceServer)
                 },
             );
             expect(executed).toBe(true);

@@ -7,3 +7,5 @@ export function makePrefixedObj(obj: any, prefix?: string): Object {
     }
     return result;
 }
+
+export const NULL_UUID = "00000000-0000-0000-0000-000000000000";

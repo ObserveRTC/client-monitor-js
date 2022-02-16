@@ -1,5 +1,4 @@
 import { Accumulator } from "../src/Accumulator";
-import { ClientSample } from "../src/schemas/ClientSample";
 
 describe("Accumulator", () => {
     it("When two ClientSamples are added Then they were accumulated", () => {
