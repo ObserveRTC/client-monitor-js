@@ -1,3 +1,4 @@
+import { AvroCodec, AvroCodecConfig } from "./AvroCodec";
 import { Base64Codec } from "./Base64Codec";
 import { FacadedCodec } from "./FacadedCodec";
 import { JsonCodec, JsonCodecConfig } from "./JsonCodec";
@@ -16,9 +17,9 @@ export interface Codec<U, R> extends Encoder<U, R>, Decoder<U, R> {
 }
 
 type FormatConfig = {
-    type: "json",
+    type: "json" | "avro",
     base64: boolean,
-    config: JsonCodecConfig;
+    config: JsonCodecConfig | AvroCodecConfig;
 }
 
 export type CodecConfig = {
@@ -58,21 +59,28 @@ const defaultConfig: CodecConstructorConfig = {
     },
 }
 
-export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, Uint8Array> {
+export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, ArrayBuffer> {
     const config = Object.assign(defaultConfig, providedConfig);
-    let formatter: Codec<T, string> | undefined;
+    let formatter: Codec<T, ArrayBuffer> | undefined;
     const formatCodec = config.format;
     if (formatCodec.type === "json") {
-        formatter = JsonCodec.create(formatCodec.config);
-    } 
+        let strCodec: Codec<T, string> = JsonCodec.create(formatCodec.config as JsonCodecConfig);
+        if (formatCodec.base64) {
+            const base64Codec = Base64Codec.create();
+            strCodec = FacadedCodec.wrap(strCodec).then(base64Codec);
+        }
+        const textCodec = TextCodec.create();
+        formatter = FacadedCodec.wrap(strCodec).then<ArrayBuffer>(textCodec);
+    } else if (formatCodec.type === "avro") {
+        if (formatCodec.base64) {
+            throw new Error(`Avro Codec cannot be combined with base64 codec`);
+        }
+        formatter = AvroCodec.create<T>(formatCodec.config as AvroCodecConfig);
+    }
     if (!formatter) {
         throw new Error(`Unrecognized format config: ${formatCodec.type}`);
     }
-    if (formatCodec.base64) {
-        const base64Codec = Base64Codec.create();
-        formatter = FacadedCodec.wrap(formatter).then(base64Codec);
-    }
-    const textCodec = TextCodec.create();
-    const result = FacadedCodec.wrap(formatter).then<Uint8Array>(textCodec);
+    
+    const result = formatter
     return result;
 }

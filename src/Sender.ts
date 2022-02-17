@@ -1,4 +1,5 @@
-import { Samples } from "@observertc/schemas"
+import { Samples, AvroSamples } from "@observertc/schemas"
+import { AvroCodecConfig } from "./codecs/AvroCodec";
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
 import { createTransport, Transport, TransportConfig } from "./transports/Transport"
 import { logger } from "./utils/logger";
@@ -23,11 +24,18 @@ export class Sender {
     }
     private _closed = false;
     private _config: SenderConstructConfig;
-    private _codec: Codec<Samples, Uint8Array>;
+    private _codec: Codec<Samples, ArrayBuffer>;
     private _transport: Transport
     private constructor(config: SenderConstructConfig) {
         this._config = config;
-        this._codec = createCodec<Samples>(this._config.codec);
+        const codecConfig = this._config.codec;
+        if (codecConfig?.format?.type === "avro") {
+            const avroConfig: AvroCodecConfig = {
+                schema: AvroSamples,
+            }
+            codecConfig.format.config = avroConfig;
+        }
+        this._codec = createCodec<Samples>(codecConfig);
         this._transport = createTransport(this._config.transport);
     }
     

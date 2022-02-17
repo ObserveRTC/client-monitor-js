@@ -13,12 +13,13 @@ type ErrorListener = (err: any) => void;
 type StateChangedListener = (newState: TransportState) => void;
 
 export type TransportConfig = {
+    
     websocket?: WebsocketTransportConfig;
 }
 
 export interface Transport {
     readonly state: TransportState;
-    send(data: Uint8Array): Promise<void>;
+    send(data: ArrayBuffer): Promise<void>;
 
     onReceived(listener: MessageListener): Transport;
     offReceived(listener: MessageListener): Transport;

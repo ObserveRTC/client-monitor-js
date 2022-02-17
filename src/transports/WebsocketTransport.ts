@@ -4,17 +4,17 @@ import { EventEmitter } from "events";
 import { logger } from "../utils/logger";
 
 export type WebsocketTransportConfig = {
-    url: string;
+    urls: string[];
     maxRetries?: number;
 }
 
 type WebsocketTransportConstructorConfig = WebsocketTransportConfig & {
-    maxRetry: number,
+    maxRetries: number,
 }
 
 const defaultConfig: WebsocketTransportConstructorConfig = {
-    url: "cannot be this",
-    maxRetry: 3
+    urls: ["cannot be this"],
+    maxRetries: 3
 }
 
 const ON_STATE_CHANGED_EVENT_NAME = "onStateChanged";
@@ -29,7 +29,6 @@ export class WebsocketTransport implements Transport {
     private _cancelTimer?: () => void;
     private _config: WebsocketTransportConfig;
     private _state: TransportState = TransportState.Created;
-    private _buffer: Uint8Array[] = [];
     private _emitter: EventEmitter = new EventEmitter();
     private _ws?: ReconnectingWebSocket;
     private constructor(config: WebsocketTransportConstructorConfig) {
@@ -50,28 +49,11 @@ export class WebsocketTransport implements Transport {
         return this._state;
     }
 
-    public async send(message: Uint8Array): Promise<void> {
+    public async send(message: ArrayBuffer): Promise<void> {
         if (this._state !== TransportState.Connected) {
             throw new Error(`Transport must be Connected state to send any data`);
         }
-        this._buffer.push(message);
-        for (let sendingIndex = 0; sendingIndex < this._buffer.length; ++sendingIndex) {
-            const queuedMessage = this._buffer[sendingIndex];
-            if (!this._ws) {
-                throw new Error(`Websocket has not been initialized`);
-            }
-            try {
-                this._ws.send(queuedMessage);
-                logger.debug(`Message is sent`);
-            /*eslint-disable @typescript-eslint/no-explicit-any */
-            } catch (error: any) {
-                logger.warn("Websocket encountered an error while sending message", error);
-                this._ws = undefined;
-                this._buffer.push(message);
-                this._setState(TransportState.Connecting);
-                await this._connect();
-            }
-        }
+        this._ws?.send(message);
     }
 
     onReceived(listener: (data: string) => void): Transport {
@@ -149,55 +131,36 @@ export class WebsocketTransport implements Transport {
             return Promise.resolve();
         }
         this._setState(TransportState.Connecting);
-        const url = this._config.url;
-        await new Promise<void>((resolve, reject) => {
-            const ws = new ReconnectingWebSocket(url);
-            const opened = () => {
-                this._ws = ws;
-                resolve();
+        let urlIndex = 0;
+        const urlProvider = async () => {
+            urlIndex = ++urlIndex % this._config.urls.length;
+            const result = this._config.urls[urlIndex];
+            return result;
+        };
+        const protocols: string | undefined = undefined;
+        const options = {
+            maxRetries: this._config.maxRetries,
+        };
+        const rws = new ReconnectingWebSocket(urlProvider, protocols, options);
+        return new Promise((resolve, reject) => {
+            rws.addEventListener('open', () => {
+                this._ws = rws;
+                rws.addEventListener('message', (message) => {
+                    this._emitter.emit(ON_RECEIVED_EVENT_NAME, message);
+                });
+                rws.addEventListener('close', () => {
+                    this.close();
+                })
                 this._setState(TransportState.Connected);
-                logger.info(`Connection is established to ${url}`);
-            };
-            if (ws.readyState === WebSocket.OPEN) {
-                opened();
-            } else {
-                ws.onopen = () => {
-                    opened();
-                };
-                ws.onerror = (error: any) => {
-                    reject(error);
-                };
-            }
-        /*eslint-disable @typescript-eslint/no-explicit-any */
-        }).catch(async (err: any) => {
-            logger.warn(err);
-            if (tried < this._config.maxRetries!) {
-                await this._waitBeforeReconnect(tried + 1);
-                await this._connect(tried + 1);
-                return;
-            }
-            this._emitter.emit(ON_ERROR_EVENT_NAME, err);
-            this.close();
-        });
-    }
-
-    private async _waitBeforeReconnect(executed: number) {
-        const base = executed + 1;
-        const max = 1 / base;
-        const random = Math.random();
-        const exp = 1 + Math.max(0.1, Math.min(random, max));
-        const timeout = Math.floor(Math.min(Math.pow(base, exp), 60) * 1000);
-        return new Promise<void>((resolve) => {
-            const timer = setTimeout(() => {
-                this._cancelTimer = undefined;
                 resolve();
-            }, timeout);
-            this._cancelTimer = () => {
-                clearTimeout(timer);
-            };
-            logger.info(`Enforced waiting before reconnect is ${timeout}ms`);
-        })
-        
+            });
+            rws.addEventListener('error', (err) => {
+                logger.warn(err);
+                this._emitter.emit(ON_ERROR_EVENT_NAME, err);
+                this.close();
+                reject(err);
+            });
+        });
     }
 
     private _setState(state: TransportState): void {

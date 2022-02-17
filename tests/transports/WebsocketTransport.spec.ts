@@ -3,9 +3,9 @@ import { WebsocketTransport, WebsocketTransportConfig } from "../../src/transpor
 
 describe("WebsocketTransport", () => {
     describe("Given a server listening for connection", () => {
-        const url = 'ws://localhost:7070';
+        const urls = ['ws://localhost:7070'];
         const config: WebsocketTransportConfig = {
-            url,
+            urls,
         };
         // let buffer: string[] = [];
         // server.on("connection", ws => {
