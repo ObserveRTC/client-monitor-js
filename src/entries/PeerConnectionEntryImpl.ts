@@ -1,34 +1,7 @@
 import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
-import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs } from "./StatsEntryInterfaces";
+import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs, PeerConnectionEntry } from "./StatsEntryInterfaces";
 import { hash } from "../utils/hash";
 import { W3CStats as W3C } from "@observertc/schemas";
-
-interface IPeerConnectionEntry {
-    readonly id: string | undefined;
-    readonly collectorId: string;
-    readonly stats: W3C.RtcPeerConnectionStats | undefined;
-    readonly created: number;
-    readonly touched: number;
-    readonly updated: number;
-    codecs(): IterableIterator<CodecEntry>;
-    inboundRtps(): IterableIterator<InboundRtpEntry>;
-    outboundRtps(): IterableIterator<OutboundRtpEntry>;
-    remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry>;
-    remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry>;
-    mediaSources(): IterableIterator<MediaSourceEntry>;
-    contributingSources(): IterableIterator<ContributingSourceEntry>;
-    dataChannels(): IterableIterator<DataChannelEntry>;
-    transceivers(): IterableIterator<TransceiverEntry>;
-    senders(): IterableIterator<SenderEntry>;
-    receivers(): IterableIterator<ReceiverEntry>;
-    transports(): IterableIterator<TransportEntry>;
-    sctpTransports(): IterableIterator<SctpTransportEntry>;
-    iceCandidatePairs(): IterableIterator<IceCandidatePairEntry>;
-    localCandidates(): IterableIterator<LocalCandidateEntry>;
-    remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
-    certificates(): IterableIterator<CertificateEntry>;
-    iceServers(): IterableIterator<IceServerEntry>;
-}
 
 type InboundRtpPair = {
     inboundRtpId?: string;
@@ -45,9 +18,9 @@ type PeerConnectionEntryConfig = {
     collectorLabel?: string,
 }
 
-export class PeerConnectionEntry implements IPeerConnectionEntry {
-    public static create(config: PeerConnectionEntryConfig): PeerConnectionEntry {
-        const result = new PeerConnectionEntry(config);
+export class PeerConnectionEntryImpl implements PeerConnectionEntry {
+    public static create(config: PeerConnectionEntryConfig): PeerConnectionEntryImpl {
+        const result = new PeerConnectionEntryImpl(config);
         return result;
     }
 
@@ -226,8 +199,8 @@ export class PeerConnectionEntry implements IPeerConnectionEntry {
     private Visitor = class extends StatsVisitor {
         public touched = false;
         public readonly created: number = Date.now();
-        private _pc: PeerConnectionEntry;
-        constructor(outer: PeerConnectionEntry) {
+        private _pc: PeerConnectionEntryImpl;
+        constructor(outer: PeerConnectionEntryImpl) {
             super();
             this._pc = outer;
         }

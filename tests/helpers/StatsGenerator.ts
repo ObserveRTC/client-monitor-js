@@ -1,5 +1,31 @@
 import { W3CStats as W3C } from "@observertc/schemas"
+import { RtcCodecType, RtcDataChannelState, RtcDtlsTransportState, RtcIceCandidateType, RtcMediaKind, RtcStatsIceCandidatePairState } from "@observertc/schemas/lib/w3c/W3cStatsIdentifiers";
 
+const DEFAULT_START_TIMESTAMP = Date.now() - 50000;
+const DEFAULT_END_TIMESTAMP = Date.now();
+
+const DEFAULT_CODEC_ID = "codec_0_1";
+const DEFAULT_INBOUND_ID = "inboundrtp_0_1";
+const DEFAULT_OUTBOUND_ID = "outboundrtp_0_1";
+const DEFAULT_REMOTE_INBOUND_RTP_ID = "remote-inboundrtp_0_1";
+const DEFAULT_REMOTE_OUTBOUND_RTP_ID = "remote-outboundrtp_0_1";
+const DEFAULT_MEDIA_SOURCE_ID = "mediasource_0_1";
+const DEFAULT_CSRC_ID = "csrc_0_1";
+const DEFAULT_PEER_CONNECTION_ID = "peerConnection_0_1";
+const DEFAULT_DATA_CHANNEL_ID = "dataChannel_0_1";
+const DEFAULT_TRANSCEIVER_ID = "transceiver_0_1";
+const DEFAULT_RECEIVER_ID = "receiver_0_1";
+const DEFAULT_SENDER_ID = "sender_0_1";
+const DEFAULT_SCTP_TRANSPORT_ID = "sctp_transport_0_1";
+const DEFAULT_TRANSPORT_ID = "transport_0_1";
+const DEFAULT_TRACK_ID = "track_0_1";
+const DEFAULT_ICE_CANDIDATE_PAIR_ID = "candidatePair_0_1";
+const DEFAULT_LOCAL_CANDIDATE_ID = "local_candidate_0_1";
+const DEFAULT_REMOTE_CANDIDATE_ID = "remote_candidate_0_1";
+const DEFAULT_CERTIFICATE_ID = "certificate_0_1";
+const DEFAULT_ICE_SERVER_ID = "iceserver_0_1";
+const DEFAULT_OUTBOUND_RTP_SSRC = generateIntegerBetween(199999, 9999999);
+const DEFAULT_INBOUND_RTP_SSRC = generateIntegerBetween(199999, 9999999);
 
 function generateRandomString(length = 20): string {
     let result = "";
@@ -11,9 +37,12 @@ function generateRandomString(length = 20): string {
     return result.toLowerCase();
 }
 
-function generateRandomTimestampInMs(start = new Date(98, 1), end = new Date(21, 1)): number {
-    const date = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
-    return date.getMilliseconds();
+function generateRandomTimestampInMs(start?: Date, end?: Date): number {
+    const startTs = start ? start.getTime() : DEFAULT_START_TIMESTAMP;
+    const endTs = end ? end.getTime() : DEFAULT_END_TIMESTAMP;
+    if (endTs < startTs) throw new Error(`start timestamp cannot be higher than end timestamp`);
+    const randomTs = Math.floor(startTs + Math.random() * (endTs - startTs));
+    return randomTs;
 }
 
 function generateFrom<T>(...params: T[]): T{
@@ -40,239 +69,233 @@ function generateBoolean(): boolean {
     return result < 0.5;
 }
 
+
 export function createCodecStats(data?: any) {
     const result: W3C.RtcCodecStats = {
-        id: "codec_0_1",
-        codecType: "encode",
+        id: DEFAULT_CODEC_ID,
+        codecType: generateFrom<RtcCodecType>("encode", "decode"),
         type: W3C.StatsType.codec,
         timestamp: Date.now(),
         payloadType: "128",
-        transportId: "transportId",
-        mimeType: "opus/audio",
+        transportId: DEFAULT_TRANSPORT_ID,
+        mimeType: generateFrom<string>("opus/audio", "vp8/video"),
         ...(data || {}),
     };
     return result;
 }
 
-export function generateCodecStats(data?: any ) {
-    return createCodecStats({
-        id: generateRandomString(30),
-        transportId: generateRandomString(),
-        channels: generateIntegerBetween(1, 3),
-        clockRate: generateFrom<number>(48000, 90000),
-        mimeType: generateBoolean() ? "audio/opus" : "video/vp8",
-        ...(data || {}),
-    })
-}
-
-export function createInboundRtpStats(data?: W3C.RtcInboundRtpStreamStats) {
+export function createInboundRtpStats(data?: any) {
     const result: W3C.RtcInboundRtpStreamStats = {
-        id: "inboundrtp_0_1",
+        id: DEFAULT_INBOUND_ID,
         type: W3C.StatsType.inboundRtp,
         timestamp: Date.now(),
-        transportId: "transportId",
-        receiverId: "receiver_0_1",
-        ssrc: 12345,
-        kind: "audio",
+        transportId: DEFAULT_TRANSPORT_ID,
+        receiverId: DEFAULT_RECEIVER_ID,
+        ssrc: DEFAULT_INBOUND_RTP_SSRC,
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createOutboundRtpStats(data?: W3C.RtcOutboundRTPStreamStats) {
+export function createOutboundRtpStats(data?: any) {
     const result: W3C.RtcOutboundRTPStreamStats = {
-        id: "outboundrtp_0_1",
+        id: DEFAULT_OUTBOUND_ID,
         type: W3C.StatsType.outboundRtp,
-        timestamp: Date.now(),
-        transportId: "transportId",
-        senderId: "sender_0_1",
-        ssrc: 12345,
-        kind: "audio",
+        timestamp: generateRandomTimestampInMs(),
+        transportId: DEFAULT_TRANSPORT_ID,
+        senderId: DEFAULT_SENDER_ID,
+        ssrc: DEFAULT_OUTBOUND_RTP_SSRC,
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createRemoteInboundRtpStats(data?: W3C.RtcRemoteInboundRtpStreamStats) {
+export function createRemoteInboundRtpStats(data?: any) {
     const result: W3C.RtcRemoteInboundRtpStreamStats = {
-        id: "remote-inboundrtp_0_1",
+        id: DEFAULT_REMOTE_INBOUND_RTP_ID,
         type: W3C.StatsType.remoteInboundRtp,
-        timestamp: Date.now(),
-        transportId: "transportId",
-        ssrc: 12345,
-        kind: "audio",
+        timestamp: generateRandomTimestampInMs(),
+        transportId: DEFAULT_TRANSPORT_ID,
+        ssrc: DEFAULT_OUTBOUND_RTP_SSRC,
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createRemoteOutboundRtpStats(data?: W3C.RtcRemoteOutboundRTPStreamStats) {
+export function createRemoteOutboundRtpStats(data?: any) {
     const result: W3C.RtcRemoteOutboundRTPStreamStats = {
-        id: "remote-outboundrtp_0_1",
+        id: DEFAULT_REMOTE_OUTBOUND_RTP_ID,
         type: W3C.StatsType.remoteOutboundRtp,
-        timestamp: Date.now(),
-        transportId: "transportId",
-        ssrc: 12345,
-        kind: "audio",
+        timestamp: generateRandomTimestampInMs(),
+        transportId: DEFAULT_TRANSPORT_ID,
+        ssrc: DEFAULT_INBOUND_RTP_SSRC,
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createMediaSourceStats(data?: W3C.RtcMediaSourceStats) {
+export function createMediaSourceStats(data?: any) {
     const result: W3C.RtcMediaSourceStats = {
-        id: "mediasource_0_1",
+        id: DEFAULT_MEDIA_SOURCE_ID,
         type: W3C.StatsType.mediaSource,
-        timestamp: Date.now(),
-        trackIdentifier: "track_0_1",
-        kind: "audio",
+        timestamp: generateRandomTimestampInMs(),
+        trackIdentifier: DEFAULT_TRACK_ID,
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createCsrcStats(data?: W3C.RtcRtpContributingSourceStats) {
+export function createCsrcStats(data?: any) {
     const result: W3C.RtcRtpContributingSourceStats = {
-        id: "csrc_0_1",
-        contributorSsrc: 12345,
-        inboundRtpStreamId: "inbound_0_1",
+        id: DEFAULT_CSRC_ID,
+        contributorSsrc: generateIntegerBetween(34623746, 99999999),
+        inboundRtpStreamId: DEFAULT_INBOUND_ID,
         type: W3C.StatsType.csrc,
-        timestamp: Date.now(),
+        timestamp: generateRandomTimestampInMs(),
         ...(data || {}),
     };
     return result;
 }
 
-export function createPeerConnectionStats(data?: W3C.RtcPeerConnectionStats) {
+export function createPeerConnectionStats(data?: any) {
     const result: W3C.RtcPeerConnectionStats = {
-        id: "peerConnection_0_1",
+        id: DEFAULT_PEER_CONNECTION_ID,
         type: W3C.StatsType.peerConnection,
-        timestamp: Date.now(),
+        timestamp: generateRandomTimestampInMs(),
         ...(data || {}),
     };
     return result;
 }
 
-export function createDataChannelStats(data?: W3C.RtcDataChannelStats) {
+
+export function createDataChannelStats(data?: any) {
     const result: W3C.RtcDataChannelStats = {
-        id: "peerConnection_0_1",
+        id: DEFAULT_DATA_CHANNEL_ID,
         type: W3C.StatsType.dataChannel,
-        timestamp: Date.now(),
-        state: "open",
+        timestamp: generateRandomTimestampInMs(),
+        state: generateFrom<RtcDataChannelState>("open", "closed", "closing"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createTransceiverStats(data?: W3C.RtcRtpTransceiverStats) {
+export function createTransceiverStats(data?: any) {
     const result: W3C.RtcRtpTransceiverStats = {
-        id: "datachannel_0_1",
+        id: DEFAULT_TRANSCEIVER_ID,
         type: W3C.StatsType.transceiver,
-        timestamp: Date.now(),
-        senderId: "sender_0_1",
-        receiverId: "receiver_0_1",
+        timestamp: generateRandomTimestampInMs(),
+        senderId: DEFAULT_SENDER_ID,
+        receiverId: DEFAULT_RECEIVER_ID,
         ...(data || {}),
     };
     return result;
 }
-export function createSenderStats(data?: W3C.RtcSenderCompoundStats) {
+export function createSenderStats(data?: any) {
     const result: W3C.RtcSenderCompoundStats = {
-        id: "sender_0_1",
+        id: DEFAULT_SENDER_ID,
         type: W3C.StatsType.sender,
-        timestamp: Date.now(),
-        kind: "audio",
+        timestamp: generateRandomTimestampInMs(),
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
+        ended: generateBoolean(),
         ...(data || {}),
     };
     return result;
 }
-export function createReceiverStats(data?: W3C.RtcReceiverCompoundStats) {
+export function createReceiverStats(data?: any) {
     const result: W3C.RtcReceiverCompoundStats = {
-        id: "receiver_0_1",
+        id: DEFAULT_RECEIVER_ID,
         type: W3C.StatsType.receiver,
-        timestamp: Date.now(),
-        kind: "audio",
+        timestamp: generateRandomTimestampInMs(),
+        kind: generateFrom<RtcMediaKind>("audio", "video"),
+        ended: generateBoolean(),
         ...(data || {}),
     };
     return result;
 }
-export function createTransportStats(data?: W3C.RtcTransportStats) {
+
+export function createTransportStats(data?: any) {
     const result: W3C.RtcTransportStats = {
-        id: "receiver_0_1",
+        id: DEFAULT_TRANSPORT_ID,
         type: W3C.StatsType.transport,
-        timestamp: Date.now(),
-        dtlsState: "connected",
+        timestamp: generateRandomTimestampInMs(),
+        dtlsState: generateFrom<RtcDtlsTransportState>("closed", "connected", "new"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createSctpTransportStats(data?: W3C.RtcSctpTransportStats) {
+export function createSctpTransportStats(data?: any) {
     const result: W3C.RtcSctpTransportStats = {
-        id: "receiver_0_1",
+        id: DEFAULT_SCTP_TRANSPORT_ID,
         type: W3C.StatsType.sctpTransport,
-        timestamp: Date.now(),
+        timestamp: generateRandomTimestampInMs(),
         ...(data || {}),
     };
     return result;
 }
 
-export function createIceCandidatePairStats(data?: W3C.RtcIceCandidatePairStats) {
+export function createIceCandidatePairStats(data?: any) {
     let result: W3C.RtcIceCandidatePairStats = {
-        id: "candidatepair_0_1",
+        id: DEFAULT_ICE_CANDIDATE_PAIR_ID,
         type: W3C.StatsType.candidatePair,
-        timestamp: Date.now(),
-        localCandidateId: "candidate_0_1",
-        remoteCandidateId: "candidate_1_1",
-        transportId: "transport_0_1",
-        state: "succeeded",
+        timestamp: generateRandomTimestampInMs(),
+        localCandidateId: DEFAULT_LOCAL_CANDIDATE_ID,
+        remoteCandidateId: DEFAULT_REMOTE_CANDIDATE_ID,
+        transportId: DEFAULT_TRANSPORT_ID,
+        state: generateFrom<RtcStatsIceCandidatePairState>("succeeded", "waiting", "frozen"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createIceLocalCandidateStats(data?: W3C.RtcIceCandidateStats) {
+export function createIceLocalCandidateStats(data?: any) {
     const result: W3C.RtcIceCandidateStats = {
-        id: "icecandidate_0_1",
-        transportId: "transport_0_1",
+        id: DEFAULT_LOCAL_CANDIDATE_ID,
+        transportId: DEFAULT_TRANSPORT_ID,
         type: W3C.StatsType.localCandidate,
-        timestamp: Date.now(),
-        candidateType: "host",
+        timestamp: generateRandomTimestampInMs(),
+        candidateType: generateFrom<RtcIceCandidateType>("host", "prflx"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createIceRemoteCandidateStats(data?: W3C.RtcIceCandidateStats) {
+export function createIceRemoteCandidateStats(data?: any) {
     const result: W3C.RtcIceCandidateStats = {
-        id: "icecandidate_1_1",
-        transportId: "transport_1_1",
+        id: DEFAULT_REMOTE_CANDIDATE_ID,
+        transportId: DEFAULT_TRANSPORT_ID,
         type: W3C.StatsType.remoteCandidate,
-        timestamp: Date.now(),
-        candidateType: "host",
+        timestamp: generateRandomTimestampInMs(),
+        candidateType: generateFrom<RtcIceCandidateType>("host", "prflx"),
         ...(data || {}),
     };
     return result;
 }
 
-export function createCertificateStats(data?: W3C.RtcCertificateStats) {
+export function createCertificateStats(data?: any) {
     const result: W3C.RtcCertificateStats = {
-        id: "certificate_0_1",
+        id: DEFAULT_CERTIFICATE_ID,
         type: W3C.StatsType.certificate,
-        timestamp: Date.now(),
-        fingerprint: "fingerprint",
+        timestamp: generateRandomTimestampInMs(),
+        fingerprint: generateRandomString(),
         fingerprintAlgorithm: "noAlg",
-        base64Certificate: "abc",
+        base64Certificate: generateRandomString(),
         ...(data || {}),
     };
     return result;
 }
 
 
-export function createIceServerStats(data?: W3C.RtcIceServerStats) {
+export function createIceServerStats(data?: any) {
     const result: W3C.RtcIceServerStats = {
-        id: "iceserver_0_1",
+        id: DEFAULT_ICE_SERVER_ID,
         type: W3C.StatsType.iceServer,
-        timestamp: Date.now(),
+        timestamp: generateRandomTimestampInMs(),
         url: "localhost",
         ...(data || {}),
     };

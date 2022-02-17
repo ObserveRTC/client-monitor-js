@@ -1,5 +1,4 @@
 import { W3CStats as W3C } from "@observertc/schemas";
-import { PeerConnectionEntry } from "./PeerConnectionEntry";
 
 export interface StatsEntryAbs {
     id: string;
@@ -122,3 +121,30 @@ export interface IceServerEntry extends StatsEntryAbs {
     stats: W3C.RtcIceServerStats;
 }
 
+export interface PeerConnectionEntry {
+    readonly id: string | undefined;
+    readonly collectorId: string;
+    readonly stats: W3C.RtcPeerConnectionStats | undefined;
+    readonly created: number;
+    readonly touched: number;
+    readonly updated: number;
+    readonly collectorLabel: string | undefined;
+    codecs(): IterableIterator<CodecEntry>;
+    inboundRtps(): IterableIterator<InboundRtpEntry>;
+    outboundRtps(): IterableIterator<OutboundRtpEntry>;
+    remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry>;
+    remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry>;
+    mediaSources(): IterableIterator<MediaSourceEntry>;
+    contributingSources(): IterableIterator<ContributingSourceEntry>;
+    dataChannels(): IterableIterator<DataChannelEntry>;
+    transceivers(): IterableIterator<TransceiverEntry>;
+    senders(): IterableIterator<SenderEntry>;
+    receivers(): IterableIterator<ReceiverEntry>;
+    transports(): IterableIterator<TransportEntry>;
+    sctpTransports(): IterableIterator<SctpTransportEntry>;
+    iceCandidatePairs(): IterableIterator<IceCandidatePairEntry>;
+    localCandidates(): IterableIterator<LocalCandidateEntry>;
+    remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
+    certificates(): IterableIterator<CertificateEntry>;
+    iceServers(): IterableIterator<IceServerEntry>;
+}

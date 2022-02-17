@@ -1,6 +1,6 @@
 import { StatsEntry } from "../utils/StatsVisitor";
-import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry } from "./StatsEntryInterfaces";
-import { PeerConnectionEntry } from "./PeerConnectionEntry";
+import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, PeerConnectionEntry } from "./StatsEntryInterfaces";
+import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
 import { logger } from "../utils/logger";
 
 
@@ -33,7 +33,7 @@ export interface StatsWriter {
 }
 
 export class StatsStorage implements StatsReader, StatsWriter {
-    private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
+    private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
     public accept(collectorId: string, statsEntry: StatsEntry): void {
         const pcEntry = this._peerConnections.get(collectorId);
         if (!pcEntry) {
@@ -50,7 +50,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
     }
 
     public register(collectorId: string, collectorLabel?: string): void {
-        const pcEntry = PeerConnectionEntry.create({
+        const pcEntry = PeerConnectionEntryImpl.create({
             collectorId,
             collectorLabel,
         });
@@ -63,7 +63,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
         }
     }
 
-    public *peerConnections(): Generator<PeerConnectionEntry, void, undefined> {
+    public *peerConnections(): Generator<PeerConnectionEntryImpl, void, undefined> {
         for (const pcEntry of this._peerConnections.values()) {
             yield pcEntry;
         }
