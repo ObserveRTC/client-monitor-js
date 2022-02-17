@@ -1,4 +1,3 @@
-import { AvroCodec, AvroCodecConfig } from "./AvroCodec";
 import { Base64Codec } from "./Base64Codec";
 import { FacadedCodec } from "./FacadedCodec";
 import { JsonCodec, JsonCodecConfig } from "./JsonCodec";
@@ -17,9 +16,9 @@ export interface Codec<U, R> extends Encoder<U, R>, Decoder<U, R> {
 }
 
 type FormatConfig = {
-    type: "json" | "avro",
+    type: "json",
     base64: boolean,
-    config: JsonCodecConfig | AvroCodecConfig;
+    config: JsonCodecConfig;
 }
 
 export type CodecConfig = {
@@ -71,11 +70,6 @@ export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, ArrayBuff
         }
         const textCodec = TextCodec.create();
         formatter = FacadedCodec.wrap(strCodec).then<ArrayBuffer>(textCodec);
-    } else if (formatCodec.type === "avro") {
-        if (formatCodec.base64) {
-            throw new Error(`Avro Codec cannot be combined with base64 codec`);
-        }
-        formatter = AvroCodec.create<T>(formatCodec.config as AvroCodecConfig);
     }
     if (!formatter) {
         throw new Error(`Unrecognized format config: ${formatCodec.type}`);

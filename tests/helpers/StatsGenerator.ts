@@ -1,6 +1,46 @@
 import { W3CStats as W3C } from "@observertc/schemas"
 
-export function createCodecStats(data?: W3C.RtcCodecStats) {
+
+function generateRandomString(length = 20): string {
+    let result = "";
+    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const charactersLength = characters.length;
+    for (let i = 0; i < length; i++) {
+        result += characters.charAt(Math.floor(Math.random() * charactersLength));
+    }
+    return result.toLowerCase();
+}
+
+function generateRandomTimestampInMs(start = new Date(98, 1), end = new Date(21, 1)): number {
+    const date = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+    return date.getMilliseconds();
+}
+
+function generateFrom<T>(...params: T[]): T{
+    if (!params) {
+        throw new Error(`Cannot generate random items from an empty array`);
+    }
+    const result = params[Math.floor(Math.random() * params.length)];
+    return result;
+}
+
+function generateFloat(min = 0.0, max = 100.0): number {
+    const result = Math.random() * (max - min + 1) + min;
+    return result;
+}
+
+function generateIntegerBetween(min = 0, max = 1000): number {
+    const float = generateFloat(min, max);
+    const result = Math.floor(float);
+    return result;
+}
+
+function generateBoolean(): boolean {
+    const result = Math.random();
+    return result < 0.5;
+}
+
+export function createCodecStats(data?: any) {
     const result: W3C.RtcCodecStats = {
         id: "codec_0_1",
         codecType: "encode",
@@ -12,6 +52,17 @@ export function createCodecStats(data?: W3C.RtcCodecStats) {
         ...(data || {}),
     };
     return result;
+}
+
+export function generateCodecStats(data?: any ) {
+    return createCodecStats({
+        id: generateRandomString(30),
+        transportId: generateRandomString(),
+        channels: generateIntegerBetween(1, 3),
+        clockRate: generateFrom<number>(48000, 90000),
+        mimeType: generateBoolean() ? "audio/opus" : "video/vp8",
+        ...(data || {}),
+    })
 }
 
 export function createInboundRtpStats(data?: W3C.RtcInboundRtpStreamStats) {

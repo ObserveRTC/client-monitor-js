@@ -298,7 +298,14 @@ export class ClientObserver implements IClientObserver {
             const promise = this._sender!.send(samples);
             promises.push(promise);
         });
-        await Promise.all(promises);
+        await Promise.all(promises).catch(async err => {
+            logger.warn(err);
+            if (!this._sender) return;
+            if (!this._sender.closed) {
+                await this._sender.close();
+            }
+            this._sender = undefined;
+        });
         this._eventer.emitSampleSent();
     }
 

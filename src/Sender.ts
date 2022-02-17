@@ -1,5 +1,4 @@
 import { Samples, AvroSamples } from "@observertc/schemas"
-import { AvroCodecConfig } from "./codecs/AvroCodec";
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
 import { createTransport, Transport, TransportConfig, TransportState } from "./transports/Transport"
 import { logger } from "./utils/logger";
@@ -29,12 +28,6 @@ export class Sender {
     private constructor(config: SenderConstructConfig) {
         this._config = config;
         const codecConfig = this._config.codec;
-        if (codecConfig?.format?.type === "avro") {
-            const avroConfig: AvroCodecConfig = {
-                schema: AvroSamples,
-            }
-            codecConfig.format.config = avroConfig;
-        }
         this._codec = createCodec<Samples>(codecConfig);
         this._transport = createTransport(this._config.transport);
     }
@@ -45,6 +38,10 @@ export class Sender {
             return Promise.resolve();
         }
         this._closed = true;
+    }
+
+    public get closed() {
+        return this._closed;
     }
 
     public async send(samples: Samples): Promise<void> {
@@ -58,6 +55,7 @@ export class Sender {
                 break;
             case TransportState.Closed:
                 logger.error(`Transport is closed, sending is not possible`);
+                this.close();
                 return;
             case TransportState.Connecting:
                 break;
