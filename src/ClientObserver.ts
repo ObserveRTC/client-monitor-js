@@ -10,6 +10,7 @@ import { Timer } from "./utils/Timer";
 import { logger } from "./utils/logger";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator, AccumulatorConfig } from "./Accumulator";
+import { LogLevelDesc } from "loglevel";
 
 export type ClientObserverConfig = {
     /**
@@ -131,6 +132,16 @@ export interface IClientObserver {
 }
 
 export class ClientObserver implements IClientObserver {
+     /**
+     * Sets the level of logging of the module
+     */
+    public static setLogLevel(level: LogLevelDesc) {
+        logger.setLevel(level);
+    }
+    /**
+     * Create ClientObserver
+     * @param config the passed config
+     */
     public static create(config?: ClientObserverConfig): ClientObserver {
         const appliedConfig = config ? Object.assign(defaultConfig, config) : defaultConfig;
         return new ClientObserver(appliedConfig);

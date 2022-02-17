@@ -1,7 +1,7 @@
 import { Samples, AvroSamples } from "@observertc/schemas"
 import { AvroCodecConfig } from "./codecs/AvroCodec";
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
-import { createTransport, Transport, TransportConfig } from "./transports/Transport"
+import { createTransport, Transport, TransportConfig, TransportState } from "./transports/Transport"
 import { logger } from "./utils/logger";
 
 export type SenderConfig = {
@@ -52,6 +52,18 @@ export class Sender {
             throw new Error(`Cannot use an already closed Sender`);
         }
         const message = this._codec.encode(samples);
+        switch (this._transport.state) {
+            case TransportState.Created:
+                await this._transport.connect();
+                break;
+            case TransportState.Closed:
+                logger.error(`Transport is closed, sending is not possible`);
+                return;
+            case TransportState.Connecting:
+                break;
+            case TransportState.Connected:
+                break;
+        }
         await this._transport.send(message);
     }
 }
