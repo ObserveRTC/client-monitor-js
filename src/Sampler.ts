@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { W3CStats as W3C, Browser, Certificate, ClientSample, MediaCodecStats, DataChannel, Engine, ExtensionStat, IceLocalCandidate, IceRemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "@observertc/schemas";
 import { logger } from "./utils/logger";
-import { makePrefixedObj, NULL_UUID } from "./utils/common";
+import { makeForwardDeltaObj, makePrefixedObj, NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
 import { isValidUuid } from "./utils/validators";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
@@ -41,12 +41,19 @@ export type SamplerConfig = {
      * DEFAULT: true
      */
     incrementalSampling?: boolean;
+
+    /**
+     * Indicate if the the sampler only forward the fields changed for `{in, out}`bound`{audio, video}`tracks
+     * 
+     * DEFAULT: false
+     */
+    forwardOnlyDelta?: boolean;
 }
 
 type SamplerConstructorConfig = SamplerConfig & {
     roomId: string,
     clientId: string,
-    logInvalidTrackIds: boolean,
+    forwardOnlyDelta: boolean;
 }
 
 export type TrackRelation = {
@@ -58,10 +65,16 @@ export type TrackRelation = {
 export const defaultConfig: SamplerConstructorConfig = {
     roomId: uuidv4(),
     clientId: uuidv4(),
-
     incrementalSampling: true,
-    logInvalidTrackIds: true,
+    forwardOnlyDelta: false,
 }
+
+type TracedSubject = InboundAudioTrack | InboundVideoTrack | OutboundAudioTrack | OutboundVideoTrack;
+
+type Trace = {
+    subject: TracedSubject;
+    updated: number;
+};
 
 interface Builder {
     withConfig(value: SamplerConfig): Builder;
@@ -109,6 +122,7 @@ export class Sampler {
     private _timezoneOffset: number = new Date().getTimezoneOffset();
     private _config: SamplerConstructorConfig;
     private _closed = false;
+    private _traces = new Map<string, Trace>();
     private constructor(config: SamplerConstructorConfig) {
         if (config.callId && !isValidUuid(config.callId)) {
             throw new Error(`Sampler.config.callId must be a valid UUID`);
@@ -178,7 +192,6 @@ export class Sampler {
 
     public setMarker(marker: string): void {
         this._marker = marker;
-
     }
 
     public async close(): Promise<void> {
@@ -193,6 +206,7 @@ export class Sampler {
         if (this._closed) {
             throw new Error(`Cannot sample a closed Sampler`);
         }
+        const now = Date.now();
         const clientSample: ClientSample = {
             callId: this._config.callId,
             clientId: this._config.clientId,
@@ -210,7 +224,7 @@ export class Sampler {
             userMediaErrors: this._userMediaErrors,
             extensionStats: this._extensionStats,
             mediaDevices: this._mediaDevices,
-            timestamp: Date.now(),
+            timestamp: now,
         };
         ++this._sampleSeq;
         this._engine = undefined;
@@ -238,26 +252,54 @@ export class Sampler {
         let iceRemoteCandidates: IceRemoteCandidate[] | undefined;
         let dataChannels: DataChannel[] | undefined;
         let iceServers: string[] | undefined;
+        const { forwardOnlyDelta } = this._config;
+        const makeForwardingObj = (key: string, tracedSubject: TracedSubject) => {
+            if (!forwardOnlyDelta) return tracedSubject;
+            const prevSubject = this._traces.get(key);
+            const subject = makeForwardDeltaObj(prevSubject, tracedSubject);
+            const trace: Trace = {
+                updated: now,
+                subject,
+            }
+            this._traces.set(key, trace);
+            return subject;
+        }
         for (const peerConnection of this._statsReader.peerConnections()) {
             for (const [inboundAudioTrack, inboundVideoTrack] of this._makeInboundTrack(peerConnection)) {
                 if (inboundAudioTrack) {
+                    const forwardingObj = makeForwardingObj(`inb-a-${inboundAudioTrack.ssrc}`, inboundAudioTrack);
+                    if (!forwardingObj) continue;
                     if (!inboundAudioTracks) inboundAudioTracks = [];
-                    inboundAudioTracks.push(inboundAudioTrack);
+                    inboundAudioTracks.push(forwardingObj);
+                    // if (!inboundAudioTracks) inboundAudioTracks = [];
+                    // inboundAudioTracks.push(inboundAudioTrack);
                 }
                 if (inboundVideoTrack) {
-                    if (!inboundAudioTracks) inboundAudioTracks = [];
-                    inboundAudioTracks.push(inboundVideoTrack);
+                    const forwardingObj = makeForwardingObj(`inb-v-${inboundVideoTrack.ssrc}`, inboundVideoTrack);
+                    if (!forwardingObj) continue;
+                    if (!inboundVideoTracks) inboundVideoTracks = [];
+                    inboundVideoTracks.push(forwardingObj);
+                    // if (!inboundVideoTracks) inboundVideoTracks = [];
+                    // inboundVideoTracks.push(inboundVideoTrack);
                 }
             }
 
             for (const [outboundAudioTrack, outboundVideoTrack] of this._makeOutboundTrack(peerConnection)) {
                 if (outboundAudioTrack) {
+                    const forwardingObj = makeForwardingObj(`outb-a-${outboundAudioTrack.ssrc}`, outboundAudioTrack);
+                    if (!forwardingObj) continue;
                     if (!outboundAudioTracks) outboundAudioTracks = [];
-                    outboundAudioTracks.push(outboundAudioTrack);
+                    outboundAudioTracks.push(forwardingObj);
+                    // if (!outboundAudioTracks) outboundAudioTracks = [];
+                    // outboundAudioTracks.push(outboundAudioTrack);
                 }
                 if (outboundVideoTrack) {
+                    const forwardingObj = makeForwardingObj(`outb-a-${outboundVideoTrack.ssrc}`, outboundVideoTrack);
+                    if (!forwardingObj) continue;
                     if (!outboundVideoTracks) outboundVideoTracks = [];
-                    outboundVideoTracks.push(outboundVideoTrack);
+                    outboundVideoTracks.push(forwardingObj);
+                    // if (!outboundVideoTracks) outboundVideoTracks = [];
+                    // outboundVideoTracks.push(outboundVideoTrack);
                 }
             }
 
@@ -405,9 +447,7 @@ export class Sampler {
             const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
             const { ended, trackIdentifier: trackId } = inboundRtp.getReceiver()?.stats || {};
             if (trackId && !isValidUuid(trackId)) {
-                if (this._config.logInvalidTrackIds) {
-                    logger.warn(`Invalid inbound track id ${trackId}, not be sampled`);
-                }
+                logger.debug(`Invalid inbound track id ${trackId}, not be sampled`);
                 continue;
             }
             const { rtpStreamId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
@@ -465,11 +505,11 @@ export class Sampler {
             /*eslint-disable @typescript-eslint/ban-types*/
             let remoteCandidateStats: Object = {};
             if (selectedCandidatePair) {
-                candidatePairStats = makePrefixedObj(selectedCandidatePair.stats, `candidatePair`);
+                candidatePairStats = makePrefixedObj(selectedCandidatePair.stats, `candidatePair`, true);
                 const localCandidate = selectedCandidatePair.getLocalCandidate();
-                localCandidateStats = localCandidate ? makePrefixedObj(localCandidate.stats, `local`) : {};
+                localCandidateStats = localCandidate ? makePrefixedObj(localCandidate.stats, `local`, true) : {};
                 const remoteCandidate = selectedCandidatePair.getRemoteCandidate();
-                remoteCandidateStats = remoteCandidate ? makePrefixedObj(remoteCandidate.stats, `remote`) : {};
+                remoteCandidateStats = remoteCandidate ? makePrefixedObj(remoteCandidate.stats, `remote`, true) : {};
             }
             const sample: PeerConnectionTransport = {
                 ...peerConnection.stats,
