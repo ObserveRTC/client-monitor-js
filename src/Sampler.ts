@@ -41,19 +41,11 @@ export type SamplerConfig = {
      * DEFAULT: true
      */
     incrementalSampling?: boolean;
-
-    /**
-     * Indicate if the the sampler only forward the fields changed for `{in, out}`bound`{audio, video}`tracks
-     * 
-     * DEFAULT: false
-     */
-    forwardOnlyDelta?: boolean;
 }
 
 type SamplerConstructorConfig = SamplerConfig & {
     roomId: string,
     clientId: string,
-    forwardOnlyDelta: boolean;
 }
 
 export type TrackRelation = {
@@ -66,15 +58,7 @@ export const defaultConfig: SamplerConstructorConfig = {
     roomId: uuidv4(),
     clientId: uuidv4(),
     incrementalSampling: true,
-    forwardOnlyDelta: false,
 }
-
-type TracedSubject = InboundAudioTrack | InboundVideoTrack | OutboundAudioTrack | OutboundVideoTrack;
-
-type Trace = {
-    subject: TracedSubject;
-    updated: number;
-};
 
 interface Builder {
     withConfig(value: SamplerConfig): Builder;
@@ -122,7 +106,6 @@ export class Sampler {
     private _timezoneOffset: number = new Date().getTimezoneOffset();
     private _config: SamplerConstructorConfig;
     private _closed = false;
-    private _traces = new Map<string, Trace>();
     private constructor(config: SamplerConstructorConfig) {
         if (config.callId && !isValidUuid(config.callId)) {
             throw new Error(`Sampler.config.callId must be a valid UUID`);
@@ -252,54 +235,26 @@ export class Sampler {
         let iceRemoteCandidates: IceRemoteCandidate[] | undefined;
         let dataChannels: DataChannel[] | undefined;
         let iceServers: string[] | undefined;
-        const { forwardOnlyDelta } = this._config;
-        const makeForwardingObj = (key: string, tracedSubject: TracedSubject) => {
-            if (!forwardOnlyDelta) return tracedSubject;
-            const prevSubject = this._traces.get(key);
-            const subject = makeForwardDeltaObj(prevSubject, tracedSubject);
-            const trace: Trace = {
-                updated: now,
-                subject,
-            }
-            this._traces.set(key, trace);
-            return subject;
-        }
         for (const peerConnection of this._statsReader.peerConnections()) {
             for (const [inboundAudioTrack, inboundVideoTrack] of this._makeInboundTrack(peerConnection)) {
                 if (inboundAudioTrack) {
-                    const forwardingObj = makeForwardingObj(`inb-a-${inboundAudioTrack.ssrc}`, inboundAudioTrack);
-                    if (!forwardingObj) continue;
                     if (!inboundAudioTracks) inboundAudioTracks = [];
-                    inboundAudioTracks.push(forwardingObj);
-                    // if (!inboundAudioTracks) inboundAudioTracks = [];
-                    // inboundAudioTracks.push(inboundAudioTrack);
+                    inboundAudioTracks.push(inboundAudioTrack);
                 }
                 if (inboundVideoTrack) {
-                    const forwardingObj = makeForwardingObj(`inb-v-${inboundVideoTrack.ssrc}`, inboundVideoTrack);
-                    if (!forwardingObj) continue;
                     if (!inboundVideoTracks) inboundVideoTracks = [];
-                    inboundVideoTracks.push(forwardingObj);
-                    // if (!inboundVideoTracks) inboundVideoTracks = [];
-                    // inboundVideoTracks.push(inboundVideoTrack);
+                    inboundVideoTracks.push(inboundVideoTrack);
                 }
             }
 
             for (const [outboundAudioTrack, outboundVideoTrack] of this._makeOutboundTrack(peerConnection)) {
                 if (outboundAudioTrack) {
-                    const forwardingObj = makeForwardingObj(`outb-a-${outboundAudioTrack.ssrc}`, outboundAudioTrack);
-                    if (!forwardingObj) continue;
                     if (!outboundAudioTracks) outboundAudioTracks = [];
-                    outboundAudioTracks.push(forwardingObj);
-                    // if (!outboundAudioTracks) outboundAudioTracks = [];
-                    // outboundAudioTracks.push(outboundAudioTrack);
+                    outboundAudioTracks.push(outboundAudioTrack);
                 }
                 if (outboundVideoTrack) {
-                    const forwardingObj = makeForwardingObj(`outb-a-${outboundVideoTrack.ssrc}`, outboundVideoTrack);
-                    if (!forwardingObj) continue;
                     if (!outboundVideoTracks) outboundVideoTracks = [];
-                    outboundVideoTracks.push(forwardingObj);
-                    // if (!outboundVideoTracks) outboundVideoTracks = [];
-                    // outboundVideoTracks.push(outboundVideoTrack);
+                    outboundVideoTracks.push(outboundVideoTrack);
                 }
             }
 
@@ -368,12 +323,23 @@ export class Sampler {
                 continue;
             }
             const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats || {};
-            const mediaSourceEntry = outboundRtp.getMediaSource();
+            const mediaSource = outboundRtp.getMediaSource();
+            const codec = outboundRtp.getCodec();
+            let codecStats = {};
+            if (!this._config.incrementalSampling && codec?.stats) {
+                codecStats = codec?.stats;
+            } else if (codec?.stats && this._sampled && this._sampled < codec.updated) {
+                codecStats = codec?.stats;
+            }
             const { ended, trackIdentifier: senderTrackId } = outboundRtp.getSender()?.stats || {};
-            const codecStats = outboundRtp.getCodec()?.stats || {};
             if (outboundRtp.stats.kind === "audio") {
                 /* eslint-disable @typescript-eslint/no-explicit-any */
-                const { trackIdentifier: sourceTrackId, ...audioSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as W3C.RtcAudioSourceStats : {};
+                const { trackIdentifier: sourceTrackId, ...audioSourceStats }: any = mediaSource ? mediaSource.stats as W3C.RtcAudioSourceStats : {};
+                let mediaSourceStats = {};
+                if (audioSourceStats) {
+                    if (!this._config.incrementalSampling) mediaSourceStats = audioSourceStats;
+                    else if (mediaSource && this._sampled && this._sampled < mediaSource.updated) mediaSourceStats = audioSourceStats;
+                }
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 if (trackId && !isValidUuid(trackId)) {
                     logger.debug(`Invalid outbound audio track id ${trackId}, not be sampled`)
@@ -388,11 +354,11 @@ export class Sampler {
                 const perDscpPacketsSent = perDscpPackets && perDscpId ? perDscpPackets[perDscpId] : undefined;
                 const outboundAudioTrack: OutboundAudioTrack = {
                     ...codecStats,
-                    ...audioSourceStats,
+                    ...mediaSourceStats,
                     ...remoteInboundRtpStats,
                     ...outboundStats,
                     peerConnectionId: peerConnection.collectorId,
-                    perDscpId,
+                    // perDscpId,
                     perDscpPacketsSent,
                     trackId,
                     rtpStreamId,
@@ -401,7 +367,12 @@ export class Sampler {
                 yield [outboundAudioTrack, undefined];
             }
             if (outboundRtp.stats.kind === "video") {
-                const { trackIdentifier: sourceTrackId, ...videoSourceStats}: any = mediaSourceEntry? mediaSourceEntry.stats as W3C.RtcVideoSourceStats : {};
+                const { trackIdentifier: sourceTrackId, ...videoSourceStats}: any = mediaSource? mediaSource.stats as W3C.RtcVideoSourceStats : {};
+                let mediaSourceStats = {};
+                if (videoSourceStats) {
+                    if (!this._config.incrementalSampling) mediaSourceStats = videoSourceStats;
+                    else if (mediaSource && this._sampled && this._sampled < mediaSource.updated) mediaSourceStats = videoSourceStats;
+                }
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 if (trackId && !isValidUuid(trackId)) {
                     logger.debug(`Invalid outbound video track id ${trackId}, not be sampled`)
@@ -417,7 +388,7 @@ export class Sampler {
                 const perDscpPacketsSent = perDscpPackets && perDscpId ? perDscpPackets[perDscpId] : undefined;
                 const outboundVideoTrack: OutboundVideoTrack = {
                     ...codecStats,
-                    ...videoSourceStats,
+                    ...mediaSourceStats,
                     ...remoteInboundRtpStats,
                     ...outboundStats,
                     peerConnectionId: peerConnection.collectorId,
@@ -425,7 +396,7 @@ export class Sampler {
                     qualityLimitationDurationCPU: qualityLimitationDurations?.cpu,
                     qualityLimitationDurationBandwidth: qualityLimitationDurations?.bandwidth,
                     qualityLimitationDurationOther: qualityLimitationDurations?.none,
-                    perDscpId,
+                    // perDscpId,
                     perDscpPacketsSent,
                     trackId,
                     rtpStreamId,
@@ -451,7 +422,13 @@ export class Sampler {
                 continue;
             }
             const { rtpStreamId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
-            const codecStats = inboundRtp.getCodec()?.stats || {};
+            const codec = inboundRtp.getCodec();
+            let codecStats = {};
+            if (!this._config.incrementalSampling && codec?.stats) {
+                codecStats = codec?.stats;
+            } else if (codec?.stats && this._sampled && this._sampled < codec.updated) {
+                codecStats = codec?.stats;
+            }
             const { perDscpPacketsReceived: perDscpPackets, ...inboundRtpStats } = inboundRtp.stats;
             const perDscpId = perDscpPackets ? Object.keys(perDscpPackets)[0] : undefined;
             const perDscpPacketsReceived = perDscpPackets && perDscpId ? perDscpPackets[perDscpId] : undefined;
@@ -505,11 +482,13 @@ export class Sampler {
             /*eslint-disable @typescript-eslint/ban-types*/
             let remoteCandidateStats: Object = {};
             if (selectedCandidatePair) {
-                candidatePairStats = makePrefixedObj(selectedCandidatePair.stats, `candidatePair`, true);
-                const localCandidate = selectedCandidatePair.getLocalCandidate();
-                localCandidateStats = localCandidate ? makePrefixedObj(localCandidate.stats, `local`, true) : {};
-                const remoteCandidate = selectedCandidatePair.getRemoteCandidate();
-                remoteCandidateStats = remoteCandidate ? makePrefixedObj(remoteCandidate.stats, `remote`, true) : {};
+                if (!this._config.incrementalSampling || !this._sampled || this._sampled < selectedCandidatePair.updated) {
+                    candidatePairStats = makePrefixedObj(selectedCandidatePair.stats, `candidatePair`, true);
+                    const localCandidate = selectedCandidatePair.getLocalCandidate();
+                    localCandidateStats = localCandidate ? makePrefixedObj(localCandidate.stats, `local`, true) : {};
+                    const remoteCandidate = selectedCandidatePair.getRemoteCandidate();
+                    remoteCandidateStats = remoteCandidate ? makePrefixedObj(remoteCandidate.stats, `remote`, true) : {};
+                }
             }
             const sample: PeerConnectionTransport = {
                 ...peerConnection.stats,
