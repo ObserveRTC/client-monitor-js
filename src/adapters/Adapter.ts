@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { Chrome86Adapter } from "./Chrome86Adapter";
 import { DefaultAdapter } from "./DefaultAdapter";
 import { W3CStats } from "@observertc/schemas";
-import { Firefox94Adapter } from "./Firefox90_94";
+import { Firefox94Adapter } from "./Firefox94Adapter";
 import { Safari14Adapter } from "./Safari14Adapter";
 
 export enum AdapterTypes {

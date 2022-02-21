@@ -31,7 +31,8 @@ export interface Transport {
     offError(listener: ErrorListener): Transport;
 
     connect(): Promise<void>;
-    close(): Promise<void>;
+    readonly closed: boolean;
+    close(): void;
 }
 
 export function createTransport(config: TransportConfig): Transport {

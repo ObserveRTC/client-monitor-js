@@ -105,6 +105,7 @@ export function createOutboundRtpStats(data?: any) {
         timestamp: generateRandomTimestampInMs(),
         transportId: DEFAULT_TRANSPORT_ID,
         senderId: DEFAULT_SENDER_ID,
+        mediaSourceId: DEFAULT_MEDIA_SOURCE_ID,
         ssrc: DEFAULT_OUTBOUND_RTP_SSRC,
         kind: generateFrom<RtcMediaKind>("audio", "video"),
         ...(data || {}),
@@ -224,6 +225,9 @@ export function createTransportStats(data?: any) {
         type: W3C.StatsType.transport,
         timestamp: generateRandomTimestampInMs(),
         dtlsState: generateFrom<RtcDtlsTransportState>("closed", "connected", "new"),
+        selectedCandidatePairId: DEFAULT_ICE_CANDIDATE_PAIR_ID,
+        localCertificateId: DEFAULT_CERTIFICATE_ID,
+        remoteCertificateId: DEFAULT_CERTIFICATE_ID,
         ...(data || {}),
     };
     return result;
@@ -232,6 +236,7 @@ export function createTransportStats(data?: any) {
 export function createSctpTransportStats(data?: any) {
     const result: W3C.RtcSctpTransportStats = {
         id: DEFAULT_SCTP_TRANSPORT_ID,
+        transportId: DEFAULT_TRANSPORT_ID,
         type: W3C.StatsType.sctpTransport,
         timestamp: generateRandomTimestampInMs(),
         ...(data || {}),

@@ -1,7 +1,9 @@
 import { Transport, TransportState } from "./Transport";
 import ReconnectingWebSocket from 'reconnecting-websocket';
 import { EventEmitter } from "events";
-import { logger } from "../utils/logger";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("WebsocketTransport");
 
 export type WebsocketTransportConfig = {
     urls: string[];
@@ -106,9 +108,13 @@ export class WebsocketTransport implements Transport {
         return this;
     }
 
-    public async close(): Promise<void> {
+    public get closed(): boolean {
+        return this._state === TransportState.Closed;
+    }
+
+    public close(): void {
         if (this._state === TransportState.Closed) {
-            return Promise.resolve();
+            return;
         }
         if (this._ws) {
             this._ws.close();

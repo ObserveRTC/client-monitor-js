@@ -1,10 +1,13 @@
 import { v4 as uuidv4 } from "uuid";
 import { W3CStats as W3C, Browser, Certificate, ClientSample, MediaCodecStats, DataChannel, Engine, ExtensionStat, IceLocalCandidate, IceRemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "@observertc/schemas";
-import { logger } from "./utils/logger";
-import { makeForwardDeltaObj, makePrefixedObj, NULL_UUID } from "./utils/common";
+import { makePrefixedObj, NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
 import { isValidUuid } from "./utils/validators";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
+import { createLogger } from "./utils/logger";
+
+const logger = createLogger("Sampler");
+
 
 export type SamplerConfig = {
     /**
@@ -50,7 +53,8 @@ type SamplerConstructorConfig = SamplerConfig & {
 
 export type TrackRelation = {
     trackId: string,
-    rtpStreamId?: string;
+    sfuStreamId?: string;
+    sfuSinkId?: string;
     remoteClientId?: string;
 }
 
@@ -177,10 +181,10 @@ export class Sampler {
         this._marker = marker;
     }
 
-    public async close(): Promise<void> {
+    public close(): void {
         if (this._closed) {
             logger.warn(`Attempted to close the Sampler twice`);
-            return Promise.resolve();
+            return;
         }
         this._closed = true;
     }
@@ -319,7 +323,7 @@ export class Sampler {
         for (const outboundRtp of peerConnection.outboundRtps()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                outboundRtp.updated < this._sampled) {
+                outboundRtp.updated <= this._sampled) {
                 continue;
             }
             const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats || {};
@@ -328,7 +332,7 @@ export class Sampler {
             let codecStats = {};
             if (!this._config.incrementalSampling && codec?.stats) {
                 codecStats = codec?.stats;
-            } else if (codec?.stats && this._sampled && this._sampled < codec.updated) {
+            } else if (codec?.stats && this._sampled && this._sampled <= codec.updated) {
                 codecStats = codec?.stats;
             }
             const { ended, trackIdentifier: senderTrackId } = outboundRtp.getSender()?.stats || {};
@@ -338,14 +342,14 @@ export class Sampler {
                 let mediaSourceStats = {};
                 if (audioSourceStats) {
                     if (!this._config.incrementalSampling) mediaSourceStats = audioSourceStats;
-                    else if (mediaSource && this._sampled && this._sampled < mediaSource.updated) mediaSourceStats = audioSourceStats;
+                    else if (mediaSource && this._sampled && this._sampled <= mediaSource.updated) mediaSourceStats = audioSourceStats;
                 }
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 if (trackId && !isValidUuid(trackId)) {
                     logger.debug(`Invalid outbound audio track id ${trackId}, not be sampled`)
                     continue;
                 }
-                const { rtpStreamId } = this._trackRelations.get(trackId || "notId") || {};
+                const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const {
                     perDscpPacketsSent: perDscpPackets,
                     ...outboundStats
@@ -361,7 +365,7 @@ export class Sampler {
                     // perDscpId,
                     perDscpPacketsSent,
                     trackId,
-                    rtpStreamId,
+                    sfuStreamId,
                     ended,
                 }
                 yield [outboundAudioTrack, undefined];
@@ -371,14 +375,14 @@ export class Sampler {
                 let mediaSourceStats = {};
                 if (videoSourceStats) {
                     if (!this._config.incrementalSampling) mediaSourceStats = videoSourceStats;
-                    else if (mediaSource && this._sampled && this._sampled < mediaSource.updated) mediaSourceStats = videoSourceStats;
+                    else if (mediaSource && this._sampled && this._sampled <= mediaSource.updated) mediaSourceStats = videoSourceStats;
                 }
                 const trackId: string | undefined = sourceTrackId || senderTrackId;
                 if (trackId && !isValidUuid(trackId)) {
                     logger.debug(`Invalid outbound video track id ${trackId}, not be sampled`)
                     continue;
                 }
-                const { rtpStreamId } = this._trackRelations.get(trackId || "notId") || {};
+                const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const {
                     qualityLimitationDurations,
                     perDscpPacketsSent: perDscpPackets,
@@ -399,7 +403,7 @@ export class Sampler {
                     // perDscpId,
                     perDscpPacketsSent,
                     trackId,
-                    rtpStreamId,
+                    sfuStreamId,
                     ended,
                 }
                 yield [undefined, outboundVideoTrack];
@@ -412,7 +416,7 @@ export class Sampler {
         for (const inboundRtp of peerConnection.inboundRtps()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                inboundRtp.updated < this._sampled) {
+                inboundRtp.updated <= this._sampled) {
                 continue;
             }
             const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
@@ -421,12 +425,12 @@ export class Sampler {
                 logger.debug(`Invalid inbound track id ${trackId}, not be sampled`);
                 continue;
             }
-            const { rtpStreamId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
+            const { sfuSinkId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
             const codec = inboundRtp.getCodec();
             let codecStats = {};
             if (!this._config.incrementalSampling && codec?.stats) {
                 codecStats = codec?.stats;
-            } else if (codec?.stats && this._sampled && this._sampled < codec.updated) {
+            } else if (codec?.stats && this._sampled && this._sampled <= codec.updated) {
                 codecStats = codec?.stats;
             }
             const { perDscpPacketsReceived: perDscpPackets, ...inboundRtpStats } = inboundRtp.stats;
@@ -441,7 +445,7 @@ export class Sampler {
                     ...inboundRtpStats,
                     perDscpPacketsReceived,
                     trackId,
-                    rtpStreamId,
+                    sfuSinkId,
                     remoteClientId,
                     ended,
                     peerConnectionId: peerConnection.collectorId,
@@ -456,7 +460,7 @@ export class Sampler {
                     // to overwrite id and other stuffs:
                     ...inboundRtpStats,
                     trackId,
-                    rtpStreamId,
+                    sfuSinkId,
                     remoteClientId,
                     ended,
                     peerConnectionId: peerConnection.collectorId,
@@ -470,7 +474,7 @@ export class Sampler {
         for (const transport of peerConnection.transports()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                transport.updated < this._sampled) {
+                transport.updated <= this._sampled) {
                 continue;
             }
             const transportStats = transport.stats;
@@ -482,7 +486,7 @@ export class Sampler {
             /*eslint-disable @typescript-eslint/ban-types*/
             let remoteCandidateStats: Object = {};
             if (selectedCandidatePair) {
-                if (!this._config.incrementalSampling || !this._sampled || this._sampled < selectedCandidatePair.updated) {
+                if (!this._config.incrementalSampling || !this._sampled || this._sampled <= selectedCandidatePair.updated) {
                     candidatePairStats = makePrefixedObj(selectedCandidatePair.stats, `candidatePair`, true);
                     const localCandidate = selectedCandidatePair.getLocalCandidate();
                     localCandidateStats = localCandidate ? makePrefixedObj(localCandidate.stats, `local`, true) : {};
@@ -507,7 +511,7 @@ export class Sampler {
         for (const mediaSourceEntry of peerConnection.mediaSources()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                mediaSourceEntry.updated < this._sampled) {
+                mediaSourceEntry.updated <= this._sampled) {
                 continue;
             }
             const stats = mediaSourceEntry.stats;
@@ -522,7 +526,7 @@ export class Sampler {
         for (const codec of peerConnection.codecs()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                codec.updated < this._sampled) {
+                codec.updated <= this._sampled) {
                 continue;
             }
             const stats = codec.stats;
@@ -537,7 +541,7 @@ export class Sampler {
         for (const certificate of peerConnection.certificates()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                certificate.updated < this._sampled) {
+                certificate.updated <= this._sampled) {
                 continue;
             }
             const stats = certificate.stats;
@@ -552,7 +556,7 @@ export class Sampler {
         for (const iceLocalCandidate of peerConnection.localCandidates()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                iceLocalCandidate.updated < this._sampled) {
+                iceLocalCandidate.updated <= this._sampled) {
                 continue;
             }
             const stats = iceLocalCandidate.stats;
@@ -568,7 +572,7 @@ export class Sampler {
         for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                iceRemoteCandidate.updated < this._sampled) {
+                iceRemoteCandidate.updated <= this._sampled) {
                 continue;
             }
             const stats = iceRemoteCandidate.stats;
@@ -583,7 +587,7 @@ export class Sampler {
         for (const dataChannel of peerConnection.dataChannels()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                dataChannel.updated < this._sampled) {
+                dataChannel.updated <= this._sampled) {
                 continue;
             }
             const stats = dataChannel.stats;
@@ -598,7 +602,7 @@ export class Sampler {
         for (const iceServer of peerConnection.iceServers()) {
             if (this._config.incrementalSampling && 
                 this._sampled && 
-                iceServer.updated < this._sampled) {
+                iceServer.updated <= this._sampled) {
                 continue;
             }
             const url = iceServer.stats.url;

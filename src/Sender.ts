@@ -1,7 +1,9 @@
-import { Samples, AvroSamples } from "@observertc/schemas"
+import { Samples } from "@observertc/schemas"
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
 import { createTransport, Transport, TransportConfig, TransportState } from "./transports/Transport"
-import { logger } from "./utils/logger";
+import { createLogger } from "./utils/logger";
+
+const logger = createLogger("Sender");
 
 export type SenderConfig = {
     codec?: CodecConfig;
@@ -32,10 +34,10 @@ export class Sender {
         this._transport = createTransport(this._config.transport);
     }
     
-    public async close(): Promise<void> {
+    public close(): void {
         if (this._closed) {
             logger.warn(`Attempted to close the Sender twice`);
-            return Promise.resolve();
+            return;
         }
         this._closed = true;
     }

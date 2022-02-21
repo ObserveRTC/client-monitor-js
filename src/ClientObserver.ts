@@ -7,10 +7,12 @@ import { ClientDevices } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
 import { AdapterConfig } from "./adapters/Adapter";
 import { Timer } from "./utils/Timer";
-import { logger } from "./utils/logger";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator, AccumulatorConfig } from "./Accumulator";
 import { LogLevelDesc } from "loglevel";
+import { createLogger } from "./utils/logger";
+
+const logger = createLogger("ClientObserver");
 
 export type ClientObserverConfig = {
     /**
@@ -128,12 +130,14 @@ export interface IClientObserver {
      */
     send(): Promise<void>; 
 
-    close(): Promise<void>;
+    close(): void;
 }
 
 export class ClientObserver implements IClientObserver {
      /**
      * Sets the level of logging of the module
+     * 
+     * possible values are: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"
      */
     public static setLogLevel(level: LogLevelDesc) {
         logger.setLevel(level);
@@ -309,21 +313,19 @@ export class ClientObserver implements IClientObserver {
         this._eventer.emitSampleSent();
     }
 
-    public async close(): Promise<void> {
+    public close(): void {
         if (this._closed) {
             logger.warn(`Attempted to close twice`);
-            return Promise.resolve();
+            return;
         }
         this._closed = true;
         if (this._timer) {
             this._timer.clear();
         }
-        const promises: Promise<void>[] = [
-            this._collector.close(),
-            this._sampler.close(),
-            this._sender?.close() || Promise.resolve(),
-        ];
-        await Promise.all(promises);
+        this._collector.close();
+        this._sampler.close();
+        this._sender?.close();
+        this._statsStorage.clear();
     }
 
     private _makeCollector(): Collector {

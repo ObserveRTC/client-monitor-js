@@ -162,8 +162,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         }
     }
 
-    public trim(expirationThresholdInMs: number): void {
-        const maps: Map<string, StatsEntryAbs>[] = [
+    private _getEntryMaps(): Map<string, StatsEntryAbs>[] {
+        const result: Map<string, StatsEntryAbs>[] = [
             this._codecs,
             this._inboundRtps,
             this._outboundRtps,
@@ -183,6 +183,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             this._certificates,
             this._iceServers
         ];
+        return result;
+    }
+
+    public trim(expirationThresholdInMs: number): void {
+        const maps = this._getEntryMaps();
         for (const map of maps) {
             const toRemove: string[] = [];
             for (const statsEntry of map.values()) {
@@ -193,6 +198,13 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             for (const statsEntryId of toRemove) {
                 map.delete(statsEntryId);
             }
+        }
+    }
+
+    public clear(): void {
+        const maps = this._getEntryMaps();
+        for (const map of maps) {
+            map.clear();
         }
     }
 

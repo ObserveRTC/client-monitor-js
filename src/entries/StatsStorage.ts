@@ -1,8 +1,9 @@
 import { StatsEntry } from "../utils/StatsVisitor";
 import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, PeerConnectionEntry } from "./StatsEntryInterfaces";
 import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
-import { logger } from "../utils/logger";
+import { createLogger } from "../utils/logger";
 
+const logger = createLogger("StatsStorage");
 
 export interface StatsReader {
     peerConnections(): Generator<PeerConnectionEntry, void, undefined>;
@@ -46,6 +47,12 @@ export class StatsStorage implements StatsReader, StatsWriter {
     public trim(expirationThresholdInMs: number) {
         for (const pcEntry of this._peerConnections.values()) {
             pcEntry.trim(expirationThresholdInMs);
+        }
+    }
+
+    public clear() {
+        for (const pcEntry of this._peerConnections.values()) {
+            pcEntry.clear();
         }
     }
 

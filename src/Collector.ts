@@ -1,6 +1,8 @@
 import { Adapter, AdapterConfig, createAdapter } from "./adapters/Adapter";
-import { logger } from "./utils/logger";
 import { StatsWriter } from "./entries/StatsStorage";
+import { createLogger } from "./utils/logger";
+
+const logger = createLogger("Collector");
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type ScrappedStats = any;
@@ -62,7 +64,6 @@ export class Collector {
     }
 
     private _statsWriter?: StatsWriter;
-    private _pendingCollect?: Promise<void>
     private _config: CollectorConstructorConfig;
     private _statsCollectors: Map<string, PcStatsCollector> = new Map();
     private _adapter: Adapter;
@@ -84,15 +85,6 @@ export class Collector {
             logger.warn(`Output of the collector has not been set`);
             return;
         }
-        let complete: () => void = () => {
-            // empty function
-        };
-        this._pendingCollect = new Promise(resolve => {
-            complete = () => {
-                resolve();
-                this._pendingCollect = undefined;
-            }
-        });
         type ScrappedEntry = [string, ScrappedStats] | undefined;
         /* eslint-disable @typescript-eslint/no-explicit-any */
         const illConfigs: [string, any][] = [];
@@ -111,6 +103,10 @@ export class Collector {
         }
         for await (const scrappedEntry of promises) {
             if (scrappedEntry === undefined) continue;
+            if (this._closed) {
+                // if the collector is closed meanwhile it is collecting
+                return;
+            }
             /* eslint-disable @typescript-eslint/no-explicit-any */
             const [collectorId, scrappedStats] = scrappedEntry;
             for (const statsEntry of this._adapter.adapt(scrappedStats)) {
@@ -128,7 +124,6 @@ export class Collector {
             this.remove(collectorId);
             logger.warn(`collector ${collectorId} is removed due to reported error`, err);
         }
-        complete();
     }
 
     /**
@@ -159,15 +154,11 @@ export class Collector {
         }
     }
 
-    public async close(): Promise<void> {
+    public close(): void {
         if (this._closed) {
             logger.warn(`Attempted to close Collector twice`);
-            return Promise.resolve();
+            return;
         }
         this._closed = true;
-        if (this._pendingCollect) {
-            await this._pendingCollect;
-        }
-        this._statsCollectors.clear();
     }
 }

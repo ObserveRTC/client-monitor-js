@@ -1,6 +1,6 @@
 {
   "name": "@observertc/client-observer-js",
-  "version": "0.4.4",
+  "version": "1.0.0-beta.1",
   "description": "ObserveRTC Client Integration Library",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -28,7 +28,7 @@
   "author": "Balazs Kreith, Pallab Gain",
   "license": "MIT",
   "dependencies": {
-    "@observertc/schemas": "^2.0.0-beta.8",
+    "@observertc/schemas": "^2.0.0-beta.21",
     "@types/events": "^3.0.0",
     "@types/uuid": "^8.3.4",
     "bowser": "^2.11.0",

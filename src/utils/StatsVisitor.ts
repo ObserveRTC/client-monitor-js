@@ -1,7 +1,7 @@
 import { W3CStats as W3C } from "@observertc/schemas";
 import { logger } from "./logger";
 
-type StatsValue = 
+export type StatsValue = 
     W3C.RtcCodecStats |
     W3C.RtcInboundRtpStreamStats |
     W3C.RtcOutboundRTPStreamStats |
