@@ -19,8 +19,11 @@ export type CollectorConfig = {
 
 type CollectorConstructorConfig = CollectorConfig;
 
-const defaultConfig: CollectorConstructorConfig = {
+const supplyDefaultConfig = () => {
+    const defaultConfig: CollectorConstructorConfig = {
 
+    };
+    return defaultConfig;
 }
 
 /**
@@ -59,7 +62,7 @@ export class Collector {
     }
 
     public static create(config?: CollectorConfig) {
-        const appliedConfig = Object.assign(defaultConfig, config);
+        const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         return new Collector(appliedConfig);
     }
 

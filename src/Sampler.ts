@@ -58,10 +58,13 @@ export type TrackRelation = {
     remoteClientId?: string;
 }
 
-export const defaultConfig: SamplerConstructorConfig = {
-    roomId: uuidv4(),
-    clientId: uuidv4(),
-    incrementalSampling: true,
+export const supplyDefaultConfig = () => {
+    const defaultConfig: SamplerConstructorConfig = {
+        roomId: uuidv4(),
+        clientId: uuidv4(),
+        incrementalSampling: true,
+    };
+    return defaultConfig;
 }
 
 interface Builder {
@@ -79,7 +82,7 @@ export class Sampler {
             },
             build(): Sampler {
                 if (!config) throw new Error(`Cannot create a Sampler without config`);
-                const appliedConfig: SamplerConstructorConfig = Object.assign(defaultConfig, config);
+                const appliedConfig: SamplerConstructorConfig = Object.assign(supplyDefaultConfig(), config);
                 return new Sampler(appliedConfig);
             }
         }
@@ -87,7 +90,7 @@ export class Sampler {
     }
 
     public static create(config?: SamplerConfig): Sampler {
-        const appliedConfig = Object.assign(defaultConfig, config);
+        const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         return new Sampler(appliedConfig);
     }
     

@@ -23,10 +23,13 @@ export type AdapterConfig = {
 }
 
 type AdapterConstructorType = AdapterConfig;
+const supplyDefaultConfig = () => {
+    const defaultConfig: AdapterConstructorType = {
 
-const defaultConfig: AdapterConstructorType = {
-
+    };
+    return defaultConfig;
 }
+
 
 export interface Adapter {
     /*eslint-disable @typescript-eslint/no-explicit-any */
@@ -101,7 +104,7 @@ function createSafariAdapter(version?: string): Adapter {
 }
 
 export function createAdapter(providedConfig?: AdapterConfig): Adapter {
-    const config = Object.assign(defaultConfig, providedConfig);
+    const config = Object.assign(supplyDefaultConfig(), providedConfig);
     if (!config || !config.browserType) {
         return new DefaultAdapter();
     }

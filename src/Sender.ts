@@ -14,13 +14,16 @@ type SenderConstructConfig = SenderConfig & {
     transport: TransportConfig,
 }
 
-const defaultConfig: SenderConstructConfig = {
-    transport: {}
+const supplyDefaultConfig = () => {
+    const defaultConfig: SenderConstructConfig = {
+        transport: {}
+    };
+    return defaultConfig;
 }
 
 export class Sender {
     public static create(config?: SenderConfig) {
-        const appliedConfig = Object.assign(defaultConfig, config);
+        const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         return new Sender(appliedConfig);
     }
     private _closed = false;

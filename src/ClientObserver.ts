@@ -1,7 +1,7 @@
 import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from "@observertc/schemas"
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
-import { Sampler, SamplerConfig, defaultConfig as samplerDefaultConfig, TrackRelation } from "./Sampler";
+import { Sampler, SamplerConfig, supplyDefaultConfig as supplySamplerDefaultConfig, TrackRelation } from "./Sampler";
 import { Sender, SenderConfig } from "./Sender";
 import { ClientDevices } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
@@ -69,10 +69,13 @@ export type ClientObserverConfig = {
 
 type ConstructorConfig = ClientObserverConfig;
 
-const defaultConfig: ConstructorConfig = {
-    // samplingPeriodInMs: 5000,
-    // sendingPeriodInMs: 10000,
-    sampler: samplerDefaultConfig,
+const supplyDefaultConfig = () => {
+    const defaultConfig: ConstructorConfig = {
+        // samplingPeriodInMs: 5000,
+        // sendingPeriodInMs: 10000,
+        sampler: supplySamplerDefaultConfig(),
+    }
+    return defaultConfig;
 }
 
 export interface IClientObserver {
@@ -147,7 +150,7 @@ export class ClientObserver implements IClientObserver {
      * @param config the passed config
      */
     public static create(config?: ClientObserverConfig): ClientObserver {
-        const appliedConfig = config ? Object.assign(defaultConfig, config) : defaultConfig;
+        const appliedConfig = config ? Object.assign(supplyDefaultConfig(), config) : supplyDefaultConfig();
         return new ClientObserver(appliedConfig);
     }
 
