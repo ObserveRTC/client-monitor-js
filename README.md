@@ -7,6 +7,8 @@ ObserveRTC Client Integration Core Library
 
 ## Qucik Start
 
+Install it from [npm](https://www.npmjs.com/package/@observertc/client-observer-js) package repository.
+
 ```
 npm i @observertc/client-observer-js
 ```
@@ -54,6 +56,8 @@ With `stats` you accessing so called Entries. The interface for the entries visu
 ### Sample & Send
 
 UNDER DEVELOPMENT
+
+### Schema
 
 ## Configurations
 
@@ -154,3 +158,9 @@ const config = {
 };
 ```
 
+
+## Contribute
+
+## License
+
+Apache-2.0

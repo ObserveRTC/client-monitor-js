@@ -5,25 +5,103 @@ import { createLogger } from "../utils/logger";
 
 const logger = createLogger("StatsStorage");
 
+/**
+ * Interface to read the collected stats.
+ */
 export interface StatsReader {
+    /**
+     * Gives an iterator to read the collected peer connection stats and navigate to its relations.
+     */
     peerConnections(): Generator<PeerConnectionEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected codecs and navigate to its relations.
+     */
     codecs(): Generator<CodecEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected inbound-rtp stats and navigate to its relations.
+     */
     inboundRtps(): Generator<InboundRtpEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected outbound-rtp stats and navigate to its relations.
+     */
     outboundRtps(): Generator<OutboundRtpEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected remote-inbound-rtp stats and navigate to its relations.
+     */
     remoteInboundRtps(): Generator<RemoteInboundRtpEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected remote-outbound-rtp stats and navigate to its relations.
+     */
     remoteOutboundRtps(): Generator<RemoteOutboundRtpEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected media source stats and navigate to its relations.
+     */
     mediaSources(): Generator<MediaSourceEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected contributing sources and navigate to its relations.
+     */
     contributingSources(): Generator<ContributingSourceEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected data channel stats and navigate to its relations.
+     */
     dataChannels(): Generator<DataChannelEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected transceiver stats and navigate to its relations.
+     */
     transceivers(): Generator<TransceiverEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected media source stats and navigate to its relations.
+     */
     senders(): Generator<SenderEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected receiver stats and navigate to its relations.
+     */
     receivers(): Generator<ReceiverEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected transport stats and navigate to its relations.
+     */
     transports(): Generator<TransportEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the SCTP transport stats and navigate to its relations.
+     */
     sctpTransports(): Generator<SctpTransportEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected ICE candidate pair stats and navigate to its relations.
+     */
     iceCandidatePairs(): Generator<IceCandidatePairEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected local ICE candidate stats and navigate to its relations.
+     */
     localCandidates(): Generator<LocalCandidateEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected remote ICE candidate stats and navigate to its relations.
+     */
     remoteCandidates(): Generator<RemoteCandidateEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected certificate stats and navigate to its relations.
+     */
     certificates(): Generator<CertificateEntry, void, undefined>;
+
+    /**
+     * Gives an iterator to read the collected ICE server stats and navigate to its relations.
+     */
     iceServers(): Generator<IceServerEntry, void, undefined>;
 }
 

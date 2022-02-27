@@ -27,11 +27,20 @@ const supplyDefaultConfig = () => {
 }
 
 /**
- * 
+ * Interface for a peer connection stats collector
  */
 export interface PcStatsCollector {
+    /**
+     * The identifier of the collector and the peer connection provides the stats
+     */
     id: string;
+    /**
+     * an optional label of the collector added to the created sample by this collector
+     */
     label?: string;
+    /**
+     * A Promise based method provides the stats.
+     */
     getStats(): Promise<any>;
 }
 
