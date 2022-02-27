@@ -5,6 +5,16 @@ ObserveRTC Client Integration Core Library
 
 @observertc/client-observer-js is a client side library for observertc integration.
 
+Table of Contents:
+ * [Quick Start](#quick-start)
+   - [Collect WebRTC Stats](#collect-webrtc-stats)
+   - [Sample and Send](#sample-and-send)
+ * [Schema](#schema)
+ * [API docs](#api-docs)
+ * [Schema](#schema)
+ * [Configuration](#configuration)
+ * [License](#license)
+
 ## Qucik Start
 
 Install it from [npm](https://www.npmjs.com/package/@observertc/client-observer-js) package repository.
@@ -49,15 +59,21 @@ You can navigate through related stats:
 ```
 The example above shows how to get the remote inbound rtp stats related to the outbound rtp stats.
 
-With `stats` you accessing so called Entries. The interface for the entries visualized in the picture below:
+With `stats` you accessing to the [StatsStorage](https://observertc.github.io/client-observer-js/interfaces/StatsReader.html). StatsStorage provided entries can be used to navigate from stats type to another.
 
 ![Entry Navigations](docs/navigation.png)
 
-### Sample & Send
+### Sample and Send
 
 UNDER DEVELOPMENT
 
-### Schema
+## API docs
+
+https://observertc.github.io/client-observer-js/modules/ClientObserver.html
+
+## Schema
+
+The schema used to send samples can be found [here](https://www.npmjs.com/package/@observertc/schemas#Samples).
 
 ## Configurations
 
@@ -157,10 +173,6 @@ const config = {
     },
 };
 ```
-
-
-## Contribute
-
 ## License
 
 Apache-2.0
