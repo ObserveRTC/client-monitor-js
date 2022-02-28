@@ -6,6 +6,7 @@ import { ClientObserverImpl } from "./ClientObserverImpl";
 import { CollectorConfig, PcStatsCollector } from "./Collector";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
+import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
 import { SenderConfig } from "./Sender";
 import { logger } from "./utils/logger";
@@ -102,6 +103,11 @@ export interface ClientObserver {
      * Iterable iterator for the video input devices the observer obtained.
      */
     readonly videoInputs: IterableIterator<MediaDevice>;
+
+    /**
+     * Accessing the observer self metrics (last collecting time, etc)
+     */
+    readonly metrics: MetricsReader;
 
     /**
      * Accessing to the collected stats

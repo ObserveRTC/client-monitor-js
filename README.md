@@ -12,7 +12,7 @@ Table of Contents:
  * [Schema](#schema)
  * [API docs](#api-docs)
  * [Schema](#schema)
- * [Configuration](#configuration)
+ * [Configurations](#configurations)
  * [License](#license)
 
 ## Qucik Start

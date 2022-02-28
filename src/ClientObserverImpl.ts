@@ -12,6 +12,7 @@ import { Accumulator } from "./Accumulator";
 import { createLogger } from "./utils/logger";
 import { supplyDefaultConfig as supplySamplerDefaultConfig } from "./Sampler";
 import { ClientObserver, ClientObserverConfig } from "./ClientObserver";
+import { Metrics, MetricsReader } from "./Metrics";
 
 const logger = createLogger("ClientObserver");
 
@@ -42,6 +43,7 @@ export class ClientObserverImpl implements ClientObserver {
     private _eventer: EventsRelayer;
     private _statsStorage: StatsStorage;
     private _accumulator: Accumulator;
+    private _metrics: Metrics;
     private constructor(config: ConstructorConfig) {
         this._config = config;
         this._clientDevices = new ClientDevices();
@@ -53,6 +55,7 @@ export class ClientObserverImpl implements ClientObserver {
         this._sampler = this._makeSampler();
         this._sender = this._makeSender();
         this._timer = this._makeTimer();
+        this._metrics = new Metrics();
 
         this._sampler.addEngine(this._clientDevices.engine);
         this._sampler.addPlatform(this._clientDevices.platform);
@@ -71,6 +74,10 @@ export class ClientObserverImpl implements ClientObserver {
 
     public get os(): OperationSystem {
         return this._clientDevices.os;
+    }
+
+    public get metrics(): MetricsReader {
+        return this._metrics;
     }
 
     public get browser(): Browser {
@@ -150,9 +157,13 @@ export class ClientObserverImpl implements ClientObserver {
     }
 
     public async collect(): Promise<void> {
+        const started = Date.now();
         await this._collector.collect().catch(err => {
             logger.warn(`Error occurred while collecting`, err);
         });
+        const elapsedInMs = Date.now() - started;
+        this._metrics.setCollectingTimeInMs(elapsedInMs);
+        
         this._eventer.emitStatsCollected();
 
         if (this._config.statsExpirationTimeInMs) {

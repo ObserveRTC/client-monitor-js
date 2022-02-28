@@ -23,3 +23,4 @@ export type {
     IceServerEntry,
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
+export type { Metrics } from "./Metrics";
