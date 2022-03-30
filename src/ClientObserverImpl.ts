@@ -1,4 +1,4 @@
-import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from "@observertc/schemas"
+import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, version } from "@observertc/schemas"
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
@@ -13,6 +13,7 @@ import { createLogger } from "./utils/logger";
 import { supplyDefaultConfig as supplySamplerDefaultConfig } from "./Sampler";
 import { ClientObserver, ClientObserverConfig } from "./ClientObserver";
 import { Metrics, MetricsReader } from "./Metrics";
+import EventEmitter from "events";
 
 const logger = createLogger("ClientObserver");
 
@@ -27,8 +28,13 @@ const supplyDefaultConfig = () => {
     return defaultConfig;
 }
 
+logger.debug("Version of the loaded schema:", version);
+
 export class ClientObserverImpl implements ClientObserver {
     public static create(config?: ClientObserverConfig): ClientObserver {
+        if (config?.maxListeners !== undefined) {
+            EventEmitter.setMaxListeners(config.maxListeners);
+        }
         const appliedConfig = config ? Object.assign(supplyDefaultConfig(), config) : supplyDefaultConfig();
         return new ClientObserverImpl(appliedConfig);
     }

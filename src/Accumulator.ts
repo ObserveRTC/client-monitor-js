@@ -1,4 +1,4 @@
-import { ClientSample, Samples } from "@observertc/schemas"
+import { ClientSample, Samples, version as schemaVersion } from "@observertc/schemas"
 
 export type AccumulatorConfig = {
     maxClientSamples?: number;
@@ -20,7 +20,12 @@ export class Accumulator  {
         return new Accumulator(appliedConfig);
     }
 
-    private _samples: Samples = {};
+    // the first message constains the schema version
+    private _samples: Samples = {
+        meta: {
+            schemaVersion
+        }
+    };
     private _buffer: Samples[] = [];
     private _empty = true;
     private _config: AccumulatorConfig;

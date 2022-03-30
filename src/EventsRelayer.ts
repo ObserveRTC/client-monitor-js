@@ -33,7 +33,9 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
     }
     private _emitter: EventEmitter;
     private constructor() {
-        this._emitter = new EventEmitter();
+        this._emitter = new EventEmitter({
+            
+        });
     }
 
     onStatsCollected(listener: StatsCollectedListener): EventsRegister {

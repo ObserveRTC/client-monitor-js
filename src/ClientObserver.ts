@@ -13,6 +13,10 @@ import { logger } from "./utils/logger";
 
 export type ClientObserverConfig = {
     /**
+     * Sets the maximum number of listeners for event emitters
+     */
+    maxListeners?: number;
+    /**
      * By setting it, the observer calls the added statsCollectors periodically
      * and pulls the stats.
      * 
