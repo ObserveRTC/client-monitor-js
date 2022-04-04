@@ -1,24 +1,46 @@
 import { Samples } from "@observertc/schemas"
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
-import { createTransport, Transport, TransportConfig, TransportState } from "./transports/Transport"
+import { Transport, TransportState } from "./transports/Transport"
+import { WebsocketTransport, WebsocketTransportConfig } from "./transports/WebsocketTransport";
 import { createLogger } from "./utils/logger";
 
 const logger = createLogger("Sender");
 
 export type SenderConfig = {
-    codec?: CodecConfig;
-    debounceTimeInMs?: number;
+    /**
+     * Configure the format used to transport samples or receieve 
+     * feedback from the server.
+     * 
+     * Possible values: json, protobuf
+     * 
+     * DEFAULT: json
+     * 
+     */
+    format?: CodecConfig;
+    /**
+     * Websocket configuration to transport the samples
+     */
+    websocket?: WebsocketTransportConfig,
 }
 
-type SenderConstructConfig = SenderConfig & {
-    transport: TransportConfig,
-}
 
 const supplyDefaultConfig = () => {
-    const defaultConfig: SenderConstructConfig = {
-        transport: {}
+    const defaultConfig: SenderConfig = {
+    
     };
     return defaultConfig;
+}
+
+
+export type TransportConfig = {
+    websocket?: WebsocketTransportConfig;
+}
+export function createTransport(config: TransportConfig): Transport {
+    if (config.websocket) {
+        const result = WebsocketTransport.create(config.websocket);
+        return result;
+    }
+    throw new Error(`No transport is manifested for config ${config}`);
 }
 
 export class Sender {
@@ -27,14 +49,15 @@ export class Sender {
         return new Sender(appliedConfig);
     }
     private _closed = false;
-    private _config: SenderConstructConfig;
-    private _codec: Codec<Samples, ArrayBuffer>;
+    private _config: SenderConfig;
+    private _codec: Codec<Samples, Uint8Array>;
     private _transport: Transport
-    private constructor(config: SenderConstructConfig) {
+    private constructor(config: SenderConfig) {
         this._config = config;
-        const codecConfig = this._config.codec;
-        this._codec = createCodec<Samples>(codecConfig);
-        this._transport = createTransport(this._config.transport);
+        this._codec = createCodec<Samples>(this._config.format);
+        this._transport = createTransport({
+            websocket: config.websocket,
+        });
     }
     
     public close(): void {

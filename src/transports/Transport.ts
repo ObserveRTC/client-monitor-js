@@ -1,5 +1,3 @@
-import { WebsocketTransport, WebsocketTransportConfig } from "./WebsocketTransport";
-
 export enum TransportState {
     Created = "CREATED",
     Connecting = "CONNECTING",
@@ -12,14 +10,9 @@ type MessageListener = (data: string) => void;
 type ErrorListener = (err: any) => void;
 type StateChangedListener = (newState: TransportState) => void;
 
-export type TransportConfig = {
-    
-    websocket?: WebsocketTransportConfig;
-}
-
 export interface Transport {
     readonly state: TransportState;
-    send(data: ArrayBuffer): Promise<void>;
+    send(data: Uint8Array): Promise<void>;
 
     onReceived(listener: MessageListener): Transport;
     offReceived(listener: MessageListener): Transport;
@@ -35,11 +28,3 @@ export interface Transport {
     close(): void;
 }
 
-export function createTransport(config: TransportConfig): Transport {
-    let result: Transport | undefined;
-    if (config.websocket) {
-        result = WebsocketTransport.create(config.websocket);
-    }
-    if (!result) throw new Error(`No transport is manifested for config ${config}`);
-    return result;
-}

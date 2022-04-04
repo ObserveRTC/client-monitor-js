@@ -171,6 +171,39 @@ const config = {
          */
         incrementalSampling: true,
     },
+    /**
+     * Configure the sender component.
+     */
+    sender: {
+        /**
+         * Configure the format used to transport samples or receieve 
+         * feedback from the server.
+         * 
+         * Possible values: json, protobuf
+         * 
+         * DEFAULT: json
+         * 
+         */
+        format: "json",
+         /**
+         * Websocket configuration to transport the samples
+         */
+        websocket: {
+            /**
+             * Target urls in a priority order. If the Websocket has not succeeded for the first,
+             * it tries with the second. If no more url left the connection is failed
+             * 
+             */
+            urls: ["ws://localhost:7080/samples/myServiceId/myMediaUnitId"],
+            /**
+             * The maximum number of retries to connect to a server before,
+             * tha connection failed is stated.
+             * 
+             * DEFAULT: 3
+             */
+            maxRetries: 1,
+        }
+    }
 };
 ```
 

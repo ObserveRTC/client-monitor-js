@@ -6,11 +6,6 @@ import { W3CStats } from "@observertc/schemas";
 import { Firefox94Adapter } from "./Firefox94Adapter";
 import { Safari14Adapter } from "./Safari14Adapter";
 
-export enum AdapterTypes {
-    Chrome91Adapter = "Chrome91",
-    DefaultAdapter = "DefaultAdapter",
-}
-
 export type AdapterConfig = {
     /**
      * the type of the browser, e.g.: chrome, firefox, safari
@@ -41,29 +36,16 @@ function createChromeAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    switch (majorVersion) {
-        /*eslint-disable no-fallthrough */
-        case "99":
-        case "98":
-        case "97":
-        case "96":
-        case "95":
-        case "94":
-        case "93":
-        case "92":
-        case "91":
-        case "90":
-        case "89":
-        case "88":
-        case "87":
-        case "86":
-            return new Chrome86Adapter();
-        default:
-            logger.warn(`Cannot recognize chrome version ${version}`);
-        /* eslint-disable no-fallthrough */
-        case AdapterTypes.DefaultAdapter:
-            return new DefaultAdapter();
+    if (!Number.isInteger(majorVersion)) {
+        logger.warn(`Cannot recognize chrome version ${version}`);
+        return new DefaultAdapter();
     }
+    const majorVersionNumber = Number.parseInt(majorVersion);
+    if (majorVersionNumber < 86) {
+        logger.info(`There is no adapter for chrome before version 86`);
+        return new DefaultAdapter();
+    }
+    return new Chrome86Adapter();
 }
 
 
@@ -72,18 +54,16 @@ function createFirefoxAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    switch (majorVersion) {
-        case "94":
-        case "93":
-        case "92":
-        case "91":
-        case "90":
-            return new Firefox94Adapter();
-        default:
-            logger.warn(`Cannot recognize chrome version ${version}`);
-        case AdapterTypes.DefaultAdapter:
-            return new DefaultAdapter();
+    if (!Number.isInteger(majorVersion)) {
+        logger.warn(`Cannot recognize firefox version ${version}`);
+        return new DefaultAdapter();
     }
+    const majorVersionNumber = Number.parseInt(majorVersion);
+    if (majorVersionNumber < 94) {
+        logger.info(`There is no adapter for Firefox before version 94`);
+        return new DefaultAdapter();
+    }
+    return new Firefox94Adapter();
 }
 
 function createSafariAdapter(version?: string): Adapter {
@@ -91,16 +71,16 @@ function createSafariAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    switch (majorVersion) {
-        case "16":
-        case "15":
-        case "14":
-            return new Safari14Adapter();
-        default:
-            logger.warn(`Cannot recognize chrome version ${version}`);
-        case AdapterTypes.DefaultAdapter:
-            return new DefaultAdapter();
+    if (!Number.isInteger(majorVersion)) {
+        logger.warn(`Cannot recognize safari version ${version}`);
+        return new DefaultAdapter();
     }
+    const majorVersionNumber = Number.parseInt(majorVersion);
+    if (majorVersionNumber < 14) {
+        logger.info(`There is no adapter for safari before version 14`);
+        return new DefaultAdapter();
+    }
+    return new Safari14Adapter();
 }
 
 export function createAdapter(providedConfig?: AdapterConfig): Adapter {

@@ -1,7 +1,9 @@
-import { Base64Codec } from "./Base64Codec";
 import { FacadedCodec } from "./FacadedCodec";
-import { JsonCodec, JsonCodecConfig } from "./JsonCodec";
+import { JsonCodec } from "./JsonCodec";
+import { ProtobufCodec } from "./ProtobufCodec";
 import { TextCodec } from "./TextCodec";
+import { ProtobufSamplesJson } from "@observertc/schemas";
+import * as protobufjs from "protobufjs/light";
 
 export interface Encoder<U, R> {
     encode(data: U): R;
@@ -15,66 +17,24 @@ export interface Codec<U, R> extends Encoder<U, R>, Decoder<U, R> {
     
 }
 
-type FormatConfig = {
-    type: "json",
-    base64: boolean,
-    config: JsonCodecConfig;
-}
+export type CodecConfig = "json" | "protobuf";
 
-export type CodecConfig = {
-    format?: FormatConfig,
-}
-
-type CodecConstructorConfig = CodecConfig & {
-    format: FormatConfig,
-}
-
-const defaultConfig: CodecConstructorConfig = {
-    /**
-     * The format of the encoded / decoded sent / received data
-     */
-    format: {
-        /**
-         * The type of the format of the sent / received data.
-         * Supported formats are: "json"
-         * 
-         * DEFAULT: json
-         */
-        type: "json",
-        /**
-         * Indicate if the format is sent as base64 string or not.
-         * 
-         * DEFAULT: false
-         */
-        base64: false,
-        /**
-         * Type specific configuration fot the format encoding
-         * 
-         * DEFAULT: empty object
-         */
-        config: {
-
-        }
-    },
-}
-
-export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, ArrayBuffer> {
-    const config = Object.assign(defaultConfig, providedConfig);
-    let formatter: Codec<T, ArrayBuffer> | undefined;
-    const formatCodec = config.format;
-    if (formatCodec.type === "json") {
-        let strCodec: Codec<T, string> = JsonCodec.create(formatCodec.config as JsonCodecConfig);
-        if (formatCodec.base64) {
-            const base64Codec = Base64Codec.create();
-            strCodec = FacadedCodec.wrap(strCodec).then(base64Codec);
-        }
+export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, Uint8Array> {
+    const config = providedConfig ?? "json";
+    if (config === "json") {
+        const strCodec: Codec<T, string> = JsonCodec.create();
         const textCodec = TextCodec.create();
-        formatter = FacadedCodec.wrap(strCodec).then<ArrayBuffer>(textCodec);
+        const result = FacadedCodec.wrap(strCodec).then<Uint8Array>(textCodec);
+        return result;
+    } 
+    if (config === "protobuf") {
+        const root = protobufjs.Root.fromJSON(ProtobufSamplesJson);
+        const messageSchema = root.lookupType("org.observertc.schemas.protobuf.Samples");
+        const result = ProtobufCodec.create({
+            validate: false,
+            messageSchema,
+        });
+        return result;
     }
-    if (!formatter) {
-        throw new Error(`Unrecognized format config: ${formatCodec.type}`);
-    }
-    
-    const result = formatter
-    return result;
+    throw new Error(`Unrecognized format config: ${config}`);
 }

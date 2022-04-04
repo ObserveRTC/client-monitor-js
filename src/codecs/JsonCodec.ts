@@ -6,12 +6,17 @@ export type JsonCodecConfig = {
 
 type JsonCodecConstructorConfig = JsonCodecConfig;
 
-const defaultConfig: JsonCodecConstructorConfig = {
-    space: undefined,
+const supplyDefaultConfig = () => {
+    const result: JsonCodecConstructorConfig = {
+
+    }
+    return result;
 }
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export class JsonCodec implements Codec<any, string> {
     public static create(config?: JsonCodecConfig): JsonCodec {
+        const defaultConfig = supplyDefaultConfig();
         const appliedConfig = Object.assign(defaultConfig, config);
         return new JsonCodec(appliedConfig);
     }

@@ -565,7 +565,7 @@ export class Sampler {
             const stats = iceLocalCandidate.stats;
             const sampledLocalCandidate: IceLocalCandidate = {
                 ...stats,
-                peerConnectionId: peerConnection.id,
+                peerConnectionId: peerConnection.collectorId,
             };
             yield sampledLocalCandidate;
         }
@@ -581,7 +581,7 @@ export class Sampler {
             const stats = iceRemoteCandidate.stats;
             yield {
                 ...stats,
-                peerConnectionId: peerConnection.id,
+                peerConnectionId: peerConnection.collectorId,
             };
         }
     }
@@ -596,7 +596,7 @@ export class Sampler {
             const stats = dataChannel.stats;
             yield {
                 ...stats,
-                peerConnectionId: peerConnection.id ?? NULL_UUID,
+                peerConnectionId: peerConnection.collectorId ?? NULL_UUID,
             };
         }
     }

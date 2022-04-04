@@ -1,6 +1,5 @@
 import {  W3CStats as W3C } from "@observertc/schemas";
 import { Chrome86Adapter } from "../../src/adapters/Chrome86Adapter";
-import { StatsValue } from "../../src/utils/StatsVisitor";
 import { createBaseAdapterTests } from "../helpers/createBaseAdapterTests";
 import * as Generator from "../helpers/StatsGenerator";
 

@@ -1,4 +1,4 @@
-import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, version } from "@observertc/schemas"
+import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, version as schemaVersion } from "@observertc/schemas"
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
@@ -15,6 +15,7 @@ import { ClientObserver, ClientObserverConfig } from "./ClientObserver";
 import { Metrics, MetricsReader } from "./Metrics";
 import EventEmitter from "events";
 
+// import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientObserver");
 
 type ConstructorConfig = ClientObserverConfig;
@@ -28,7 +29,7 @@ const supplyDefaultConfig = () => {
     return defaultConfig;
 }
 
-logger.debug("Version of the loaded schema:", version);
+logger.debug("Version of the loaded schema:", schemaVersion);
 
 export class ClientObserverImpl implements ClientObserver {
     public static create(config?: ClientObserverConfig): ClientObserver {

@@ -6,7 +6,18 @@ import { createLogger } from "../utils/logger";
 const logger = createLogger("WebsocketTransport");
 
 export type WebsocketTransportConfig = {
+    /**
+     * Target urls in a priority order. If the Websocket has not succeeded for the first,
+     * it tries with the second. If no more url left the connection is failed
+     * 
+     */
     urls: string[];
+    /**
+     * The maximum number of retries to connect to a server before,
+     * tha connection failed is stated.
+     * 
+     * DEFAULT: 3
+     */
     maxRetries?: number;
 }
 
@@ -54,7 +65,7 @@ export class WebsocketTransport implements Transport {
         return this._state;
     }
 
-    public async send(message: ArrayBuffer): Promise<void> {
+    public async send(message: Uint8Array): Promise<void> {
         if (this._state !== TransportState.Connected) {
             throw new Error(`Transport must be Connected state to send any data`);
         }
@@ -131,7 +142,7 @@ export class WebsocketTransport implements Transport {
     }
 
 
-    private async _connect(tried = 0): Promise<void> {
+    private async _connect(): Promise<void> {
         if (this._state === TransportState.Closed) {
             return Promise.reject(`The transport is already closed`);
         }

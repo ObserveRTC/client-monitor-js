@@ -11,7 +11,7 @@ const defaultConfig: TextCodecConstructorConfig = {
 
 }
 
-export class TextCodec implements Codec<string, ArrayBuffer> {
+export class TextCodec implements Codec<string, Uint8Array> {
     public static create(config?: TextCodecConstructorConfig): TextCodec {
         const appliedConfig = Object.assign(defaultConfig, config);
         return new TextCodec(appliedConfig);

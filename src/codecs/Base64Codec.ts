@@ -5,11 +5,16 @@ export type Base64CodecConfig = {
     urlSafe?: boolean,
 }
 
-const defaultConfig: Base64CodecConfig = {
+const supplyDefaultConfig = () => {
+    const result: Base64CodecConfig = {
+
+    }
+    return result;
 }
 
 export class Base64Codec implements Codec<string, string> {
     public static create(config?: Base64CodecConfig): Base64Codec {
+        const defaultConfig = supplyDefaultConfig();
         const appliedConfig = Object.assign(defaultConfig, config);
         return new Base64Codec(appliedConfig);
     }
