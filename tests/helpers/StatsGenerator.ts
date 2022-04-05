@@ -1,6 +1,6 @@
 import { W3CStats as W3C } from "@observertc/schemas"
 import { RtcCodecType, RtcDataChannelState, RtcDtlsTransportState, RtcIceCandidateType, RtcMediaKind, RtcStatsIceCandidatePairState } from "@observertc/schemas/lib/w3c/W3cStatsIdentifiers";
-
+import { v4 as uuidv4 } from "uuid";
 const DEFAULT_START_TIMESTAMP = Date.now() - 50000;
 const DEFAULT_END_TIMESTAMP = Date.now();
 
@@ -18,7 +18,7 @@ const DEFAULT_RECEIVER_ID = "receiver_0_1";
 const DEFAULT_SENDER_ID = "sender_0_1";
 const DEFAULT_SCTP_TRANSPORT_ID = "sctp_transport_0_1";
 const DEFAULT_TRANSPORT_ID = "transport_0_1";
-const DEFAULT_TRACK_ID = "track_0_1";
+const DEFAULT_TRACK_ID = uuidv4();
 const DEFAULT_ICE_CANDIDATE_PAIR_ID = "candidatePair_0_1";
 const DEFAULT_LOCAL_CANDIDATE_ID = "local_candidate_0_1";
 const DEFAULT_REMOTE_CANDIDATE_ID = "remote_candidate_0_1";
@@ -203,6 +203,7 @@ export function createSenderStats(data?: any) {
         timestamp: generateRandomTimestampInMs(),
         kind: generateFrom<RtcMediaKind>("audio", "video"),
         ended: generateBoolean(),
+        trackIdentifier: DEFAULT_TRACK_ID,
         ...(data || {}),
     };
     return result;
@@ -214,6 +215,7 @@ export function createReceiverStats(data?: any) {
         timestamp: generateRandomTimestampInMs(),
         kind: generateFrom<RtcMediaKind>("audio", "video"),
         ended: generateBoolean(),
+        trackIdentifier: DEFAULT_TRACK_ID,
         ...(data || {}),
     };
     return result;

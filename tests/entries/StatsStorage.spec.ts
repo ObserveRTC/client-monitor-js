@@ -70,6 +70,7 @@ describe("StatsStorage", () => {
         });
         describe("When inboundRtps() is iterated", () => {
             const inboundRtp = Array.from(storage.inboundRtps())[0];
+            const expectedTrackId = Array.from(storage.receivers())[0].stats.trackIdentifier;
             it ("id equals to the stats.id", () => {
                 expect(inboundRtp.id).toBe(inboundRtpStats.id);
             });
@@ -96,9 +97,14 @@ describe("StatsStorage", () => {
                 const entry = inboundRtp.getRemoteOutboundRtp();
                 expect(entry!.stats).toEqual(remoteOutboundRtpStats);
             });
+            it ("getTrackId() returns the sender trackId field ", () => {
+                const actualTrackId = inboundRtp.getTrackId();
+                expect(expectedTrackId).toEqual(actualTrackId);
+            });
         });
         describe("When outboundRtps() is iterated", () => {
             const outboundRtp = Array.from(storage.outboundRtps())[0];
+            const expectedTrackId = Array.from(storage.senders())[0].stats.trackIdentifier;
             it ("id equals to the stats.id", () => {
                 expect(outboundRtp.id).toBe(outboundRtpStats.id);
             });
@@ -128,6 +134,10 @@ describe("StatsStorage", () => {
             it ("getRemoteInboundRtp() returns the ssrc field ", () => {
                 const entry = outboundRtp.getRemoteInboundRtp();
                 expect(entry!.stats).toEqual(remoteInboundRtpStats);
+            });
+            it ("getTrackId() returns the sender trackId field ", () => {
+                const actualTrackId = outboundRtp.getTrackId();
+                expect(actualTrackId).toEqual(expectedTrackId);
             });
         });
         describe("When remoteInboundRtps() is iterated", () => {
