@@ -303,6 +303,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     getSsrc: () => {
                         return newEntry.stats.ssrc;
                     },
+                    getTrackId: () => {
+                        const { stats: receiverStats } = newEntry.getReceiver() ?? {};
+                        return receiverStats?.trackIdentifier;
+                    },
                     getReceiver: () => {
                         const receiverId = newEntry.stats.receiverId;
                         return pc._receivers.get(receiverId);
@@ -365,6 +369,14 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     updated: this.created,
                     getSsrc: () => {
                         return newEntry.stats.ssrc;
+                    },
+                    getTrackId: () => {
+                        const { stats: senderStats } = newEntry.getSender() ?? {};
+                        if (senderStats?.trackIdentifier) {
+                            return senderStats.trackIdentifier;
+                        }
+                        const { stats: mediaSourceStats } = newEntry.getMediaSource() ?? {};
+                        return mediaSourceStats?.trackIdentifier;
                     },
                     getSender: () => {
                         const senderId = newEntry.stats.senderId;

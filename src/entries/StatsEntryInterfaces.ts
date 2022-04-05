@@ -54,6 +54,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      * Gets the SSRC of the Rtp session
      */
     getSsrc(): number | undefined;
+    getTrackId(): string | undefined;
     /**
      * Navigate to the related Remote-outbound entry based on inbound ssrc
      */
@@ -70,6 +71,7 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
      * Gets the SSRC of the Rtp session
      */
     getSsrc(): number | undefined;
+    getTrackId(): string | undefined;
     getMediaSource(): MediaSourceEntry | undefined;
     getSender(): SenderEntry | undefined;
     getRemoteInboundRtp(): RemoteInboundRtpEntry | undefined;
