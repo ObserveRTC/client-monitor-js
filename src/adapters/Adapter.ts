@@ -36,11 +36,15 @@ function createChromeAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    if (!Number.isInteger(majorVersion)) {
+    if (!majorVersion) {
         logger.warn(`Cannot recognize chrome version ${version}`);
         return new DefaultAdapter();
     }
     const majorVersionNumber = Number.parseInt(majorVersion);
+    if (!Number.isInteger(majorVersionNumber)) {
+        logger.warn(`Cannot recognize chrome version major number ${majorVersion}`);
+        return new DefaultAdapter();
+    }
     if (majorVersionNumber < 86) {
         logger.info(`There is no adapter for chrome before version 86`);
         return new DefaultAdapter();
@@ -54,13 +58,13 @@ function createFirefoxAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    if (!Number.isInteger(majorVersion)) {
+    if (!majorVersion) {
         logger.warn(`Cannot recognize firefox version ${version}`);
         return new DefaultAdapter();
     }
     const majorVersionNumber = Number.parseInt(majorVersion);
-    if (majorVersionNumber < 94) {
-        logger.info(`There is no adapter for Firefox before version 94`);
+    if (!Number.isInteger(majorVersionNumber)) {
+        logger.warn(`Cannot recognize firefox version major number ${majorVersion}`);
         return new DefaultAdapter();
     }
     return new Firefox94Adapter();
@@ -71,13 +75,13 @@ function createSafariAdapter(version?: string): Adapter {
         return new DefaultAdapter();
     }
     const majorVersion = version.split(".")[0];
-    if (!Number.isInteger(majorVersion)) {
+    if (!majorVersion) {
         logger.warn(`Cannot recognize safari version ${version}`);
         return new DefaultAdapter();
     }
     const majorVersionNumber = Number.parseInt(majorVersion);
-    if (majorVersionNumber < 14) {
-        logger.info(`There is no adapter for safari before version 14`);
+    if (!Number.isInteger(majorVersionNumber)) {
+        logger.warn(`Cannot recognize safari version major number ${majorVersion}`);
         return new DefaultAdapter();
     }
     return new Safari14Adapter();
