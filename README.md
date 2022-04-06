@@ -9,6 +9,7 @@ Table of Contents:
    - [Sample and Send](#sample-and-send)
  * [Schema](#schema)
  * [API docs](#api-docs)
+ * [NPM package](#npm-package)
  * [Schema](#schema)
  * [Examples](#examples)
     - [Calculate video tracks Fps](#calculate-video-tracks-fps)
@@ -97,6 +98,10 @@ observer.addStatsCollector({
 ## API docs
 
 https://observertc.github.io/client-observer-js/modules/ClientObserver.html
+
+## NPM package
+
+https://www.npmjs.com/package/@observertc/client-observer-js
 
 ## Schema
 
