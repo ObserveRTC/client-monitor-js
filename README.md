@@ -1,9 +1,7 @@
 ObserveRTC Client Integration Core Library
 ---
 
-# !!! UNDER DEVELOPMENT, NO STABLE VERSION IS AVAILABLE AT THE MOMENT! !!!
-
-@observertc/client-observer-js is a client side library for observertc integration.
+@observertc/client-observer-js is a client side library to process [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate you app to observertc components.
 
 Table of Contents:
  * [Quick Start](#quick-start)
@@ -65,7 +63,33 @@ With `stats` you accessing to the [StatsStorage](https://observertc.github.io/cl
 
 ### Sample and Send
 
-UNDER DEVELOPMENT
+Sampling means the client-observer creates a so-called ClientSample. ClientSample is a compound object contains a snapshot from the polled stats, added devices, constrainments, user errors, etc. ClientSample is created by a Sampler component.
+A created ClientSample is added to Samples object. Samples can be sent to the server by a Sender component.
+
+The above shown example can be extended to sample and send by adding the following configurations:
+
+```javascript
+import { ClientObserver } from "@observertc/client-observer-js";
+// see full config in Configuration section
+const config = {
+    collectingPeriodInMs: 5000,
+    samplingPeriodInMs: 10000,
+    sendingPeriodInMs: 10000,
+    sampler: {
+        roomId: "testRoom",
+    },
+    sender: {
+        websocket: {
+            urls: ["ws://localhost:7080/samples/myServiceId/myMediaUnitId"]
+        }
+    }
+};
+const observer = ClientObserver.create(config);
+observer.addStatsCollector({
+    id: "collectorId",
+    getStats: () => peerConnection.getStats(),
+});
+```
 
 ## API docs
 
@@ -74,6 +98,70 @@ https://observertc.github.io/client-observer-js/modules/ClientObserver.html
 ## Schema
 
 The schema used to send samples can be found [here](https://www.npmjs.com/package/@observertc/schemas#Samples).
+
+## Examples
+
+### Calculate video tracks Fps
+
+Assuming you have a configured and running observer and a collector you added to poll the stats from
+peer connection, here is an example to calculate the frame per sec for tracks.
+
+```javascript
+const observer = //.. defined above
+observer.onStatsCollected(() => {
+    const results = [];
+    const now = Date.now();
+    for (const inboundRtp of observer.stats.inboundRtps()) {
+        const trackId = inboundRtp.getTrackId();
+        const SSRC = inboundRtp.getSsrc();
+        const traceId = `${trackId}-${SSRC}`;
+        // lets extract what we need from the stats for inboundRtp: https://www.w3.org/TR/webrtc-stats/#inboundrtpstats-dict*
+        const { framesReceived, kind } = inboundRtp.stats;
+        if (kind !== "video") continue;
+        const trace = traces.get(traceId);
+        if (!trace) {
+            traces.set(traceId, {
+                framesReceived,
+                timestamp: now,
+            });
+            continue;
+        }
+        const elapsedTimeInS = now - trace.timestamp;
+        const fps = (framesReceived - trace.framesReceived) / elapsedTimeInS;
+        const peerConnectionId = inboundRtp.getPeerConnection()?.id;
+        results.push({
+            fps,
+            trackId,
+            peerConnectionId,
+        })
+        trace.timestamp = now;
+    }
+    // here you have the fps for every inbound track, ssrc pairs.
+    console.log(results);
+});
+```
+
+### Collect RTT measurements for peer connections
+
+```javascript
+const observer = //.. defined above
+observer.onStatsCollected(() => {
+    const RTTs = new Map();
+    for (const outboundRtp of observer.stats.outboundRtps()) {
+        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
+        const { roundTripTime } = remoteInboundRtp.stats;
+        const peerConnectionId = outboundRtp.getPeerConnection()?.collectorId;
+        let measurements = results.get(peerConnectionId);
+        if (!measurements) {
+            measurements = [];
+            RTTs.set(peerConnectionId, measurements);
+        }
+        measurements.push(roundTripTime);
+    }
+    // here you have the RTT measurements groupped by peer connections
+    console.log(Array.from(RTTs.entries()));
+});
+```
 
 ## Configurations
 
@@ -92,6 +180,13 @@ const config = {
      * DEFAULT: undefined
      */
     samplingPeriodInMs: 10000,
+
+    /**
+     * By setting it, the observer sends the samples periodically.
+     * 
+     * DEFAULT: undefined
+     */
+    sendingPeriodInMs: 10000;
 
     /**
      * By setting it stats items and entries are deleted if they are not updated.
