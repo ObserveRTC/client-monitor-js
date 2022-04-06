@@ -10,6 +10,9 @@ Table of Contents:
  * [Schema](#schema)
  * [API docs](#api-docs)
  * [Schema](#schema)
+ * [Examples](#examples)
+    - [Calculate video tracks Fps](#calculate-video-tracks-fps)
+    - [Collect RTT measurements for peer connections](#collect-rtt-measurements-for-peer-connections)
  * [Configurations](#configurations)
  * [License](#license)
 
