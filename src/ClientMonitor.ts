@@ -1,17 +1,16 @@
 import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat } from "@observertc/schemas";
 import { LogLevelDesc } from "loglevel";
-import { ClientObserver } from ".";
 import { AccumulatorConfig } from "./Accumulator";
-import { ClientObserverImpl } from "./ClientObserverImpl";
+import { ClientMonitorImpl } from "./ClientMonitorImpl";
 import { CollectorConfig, PcStatsCollector } from "./Collector";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
 import { SenderConfig } from "./Sender";
-import { logger } from "./utils/logger";
+import { setLevel as setLoggersLevel } from "./utils/logger";
 
-export type ClientObserverConfig = {
+export type ClientMonitorConfig = {
     /**
      * Sets the maximum number of listeners for event emitters
      */
@@ -71,7 +70,7 @@ export type ClientObserverConfig = {
 /**
  * Client Integration of ObserveRTC to monitor WebRTC clients.
  */
-export interface ClientObserver {
+export interface ClientMonitor {
 
     /**
      * Information about operation system the observer is obtained.
@@ -116,7 +115,7 @@ export interface ClientObserver {
     /**
      * Accessing to the collected stats
      */
-    readonly stats: StatsReader;
+    readonly storage: StatsReader;
 
     /**
      * Accessing to the possible events an application can subscibe to
@@ -237,7 +236,7 @@ export interface ClientObserver {
  * possible values are: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"
  */
 export function setLogLevel(level: LogLevelDesc) {
-    logger.setLevel(level);
+    setLoggersLevel(level);
 }
 
 /**
@@ -245,6 +244,6 @@ export function setLogLevel(level: LogLevelDesc) {
  * 
  * @param config the given config to setup the observer
  */
-export function create(config?: ClientObserverConfig): ClientObserver {
-    return ClientObserverImpl.create(config);
+export function create(config?: ClientMonitorConfig): ClientMonitor {
+    return ClientMonitorImpl.create(config);
 }

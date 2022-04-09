@@ -1,7 +1,7 @@
-ObserveRTC Client Integration Core Library
+ObserveRTC Client Integration Javascript Library
 ---
 
-@observertc/client-observer-js is a client side library to process [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate you app to observertc components.
+@observertc/client-monitor-js is a client side library to monitor [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate you app to observertc components.
 
 Table of Contents:
  * [Quick Start](#quick-start)
@@ -19,27 +19,27 @@ Table of Contents:
 
 ## Qucik Start
 
-Install it from [npm](https://www.npmjs.com/package/@observertc/client-observer-js) package repository.
+Install it from [npm](https://www.npmjs.com/package/@observertc/client-monitor-js) package repository.
 
 ```
-npm i @observertc/client-observer-js
+npm i @observertc/client-monitor-js
 ```
 
 ### Collect WebRTC Stats
 
 ```javascript
-import { ClientObserver } from "@observertc/client-observer-js";
+import { ClientMonitor } from "@observertc/client-monitor-js";
 // see full config in Configuration section
 const config = {
     collectingPeriodInMs: 5000,
 };
-const observer = ClientObserver.create(config);
-observer.addStatsCollector({
+const monitor = ClientMonitor.create(config);
+monitor.addStatsCollector({
     id: "collectorId",
     getStats: () => peerConnection.getStats(),
 });
-observer.events.onStatsCollected(() => {
-    for (const transport of observer.stats.transports()) {
+monitor.events.onStatsCollected(() => {
+    for (const transport of monitor.stats.transports()) {
         /// use the transport
         console.log(transport.stats.packetsSent);
     }
@@ -53,7 +53,7 @@ You can navigate through related stats:
 
 ```javascript
     // list outbound RTP stats
-    for (const outboundRtp of observer.stats.outboundRtps()) {
+    for (const outboundRtp of monitor.stats.outboundRtps()) {
         // get the remote inbound RTP stats belongs to the actual outbound RTP
         const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
         console.log(outboundRtp.stats, remoteInboundRtp.stats);
@@ -61,19 +61,19 @@ You can navigate through related stats:
 ```
 The example above shows how to get the remote inbound rtp stats related to the outbound rtp stats.
 
-With `stats` you accessing to the [StatsStorage](https://observertc.github.io/client-observer-js/interfaces/StatsReader.html). StatsStorage provided entries can be used to navigate from stats type to another.
+With `stats` you accessing to the [StatsStorage](https://observertc.github.io/client-monitor-js/interfaces/StatsReader.html). StatsStorage provided entries can be used to navigate from stats type to another.
 
 ![Entry Navigations](docs/navigation.png)
 
 ### Sample and Send
 
-Sampling means the client-observer creates a so-called ClientSample. ClientSample is a compound object contains a snapshot from the polled stats, added devices, constrainments, user errors, etc. ClientSample is created by a Sampler component.
+Sampling means the client-monitor creates a so-called ClientSample. ClientSample is a compound object contains a snapshot from the polled stats, added devices, constrainments, user errors, etc. ClientSample is created by a Sampler component.
 A created ClientSample is added to Samples object. Samples can be sent to the server by a Sender component.
 
 The above shown example can be extended to sample and send by adding the following configurations:
 
 ```javascript
-import { ClientObserver } from "@observertc/client-observer-js";
+import { ClientMontior } from "@observertc/client-monitor-js";
 // see full config in Configuration section
 const config = {
     collectingPeriodInMs: 5000,
@@ -88,8 +88,8 @@ const config = {
         }
     }
 };
-const observer = ClientObserver.create(config);
-observer.addStatsCollector({
+const monitor = ClientMontior.create(config);
+monitor.addStatsCollector({
     id: "collectorId",
     getStats: () => peerConnection.getStats(),
 });
@@ -97,11 +97,11 @@ observer.addStatsCollector({
 
 ## API docs
 
-https://observertc.github.io/client-observer-js/modules/ClientObserver.html
+https://observertc.github.io/client-monitor-js/modules/ClientMonitor.html
 
 ## NPM package
 
-https://www.npmjs.com/package/@observertc/client-observer-js
+https://www.npmjs.com/package/@observertc/client-monitor-js
 
 ## Schema
 
@@ -111,15 +111,14 @@ The schema used to send samples can be found [here](https://www.npmjs.com/packag
 
 ### Calculate video tracks Fps
 
-Assuming you have a configured and running observer and a collector you added to poll the stats from
+Assuming you have a configured and running monitor and a collector you added to poll the stats from
 peer connection, here is an example to calculate the frame per sec for tracks.
 
 ```javascript
-const observer = //.. defined above
-observer.onStatsCollected(() => {
-    const results = [];
+const monitor = //.. defined above
+monitor.onStatsCollected(() => {
     const now = Date.now();
-    for (const inboundRtp of observer.stats.inboundRtps()) {
+    for (const inboundRtp of monitor.storage.inboundRtps()) {
         const trackId = inboundRtp.getTrackId();
         const SSRC = inboundRtp.getSsrc();
         const traceId = `${trackId}-${SSRC}`;
@@ -134,28 +133,24 @@ observer.onStatsCollected(() => {
             });
             continue;
         }
-        const elapsedTimeInS = now - trace.timestamp;
+        const elapsedTimeInS = (now - trace.timestamp) / 1000;
         const fps = (framesReceived - trace.framesReceived) / elapsedTimeInS;
         const peerConnectionId = inboundRtp.getPeerConnection()?.id;
-        results.push({
-            fps,
-            trackId,
-            peerConnectionId,
-        })
+        trace.framesReceived = framesReceived;
         trace.timestamp = now;
+
+        console.log(`On peerConnection: ${peerConnectionId}, track ${trackId}, SSRC: ${SSRC} the FPS is ${fps}`);
     }
-    // here you have the fps for every inbound track, ssrc pairs.
-    console.log(results);
 });
 ```
 
 ### Collect RTT measurements for peer connections
 
 ```javascript
-const observer = //.. defined above
-observer.onStatsCollected(() => {
+const monitor = //.. defined above
+monitor.onStatsCollected(() => {
     const RTTs = new Map();
-    for (const outboundRtp of observer.stats.outboundRtps()) {
+    for (const outboundRtp of monitor.storage.outboundRtps()) {
         const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
         const { roundTripTime } = remoteInboundRtp.stats;
         const peerConnectionId = outboundRtp.getPeerConnection()?.collectorId;
@@ -176,21 +171,21 @@ observer.onStatsCollected(() => {
 ```javascript
 const config = {
     /**
-     * By setting it, the observer calls the added statsCollectors periodically
+     * By setting it, the monitor calls the added statsCollectors periodically
      * and pulls the stats.
      * 
      * DEFAULT: undefined
      */
     collectingPeriodInMs: 5000,
     /**
-     * By setting it, the observer make samples periodically.
+     * By setting it, the monitor make samples periodically.
      * 
      * DEFAULT: undefined
      */
     samplingPeriodInMs: 10000,
 
     /**
-     * By setting it, the observer sends the samples periodically.
+     * By setting it, the monitor sends the samples periodically.
      * 
      * DEFAULT: undefined
      */
@@ -206,14 +201,14 @@ const config = {
     /**
      * Collector Component related configurations
      * 
-     * DEFAULT: configured by the observer
+     * DEFAULT: configured by the monitor
      */
     collectors: {
         /**
          * Sets the adapter adapt different browser type and version 
          * provided stats.
          * 
-         * DEFAULT: configured by the observer
+         * DEFAULT: configured by the monitor
          */
         adapter: {
             /**
@@ -243,7 +238,7 @@ const config = {
          * 
          * DEFAULT: a generated unique value
          * 
-         * NOTE: if this value has not been set clients which are in the same room will not be matched at the observer
+         * NOTE: if this value has not been set clients which are in the same room will not be matched at the monitor
          */
         roomId: "testRoom",
 

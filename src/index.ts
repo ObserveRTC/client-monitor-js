@@ -1,6 +1,6 @@
 export type { PcStatsCollector } from "./Collector";
 export type { StatsReader } from "./entries/StatsStorage";
-export * as ClientObserver from "./ClientObserver";
+export * as ClientObserver from "./ClientMonitor";
 export type { MediaDevices } from "./utils/MediaDevices";
 export type { 
     CodecEntry, 
@@ -23,4 +23,3 @@ export type {
     IceServerEntry,
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
-export type { Metrics } from "./Metrics";

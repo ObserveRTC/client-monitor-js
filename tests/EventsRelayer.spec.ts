@@ -75,4 +75,26 @@ describe("EventsRelayer", () => {
         events.offSampleSent(listener);
         events.emitSampleSent();
     });
+
+    it('Relay SenderDisconnected if subscribed', done => {
+        const events = EventsRelayer.create();
+        events.onSenderDisconnected(() => {
+            done();
+        });
+        events.emitSenderDisconnected();
+    });
+
+    it('Not Relay SenderDisconnected if unsubscribed', done => {
+        const events = EventsRelayer.create();
+        const listener = () => {
+            throw new Error(`Should not be called`)
+        };
+        const doneListener = () => {
+            done();
+        }
+        events.onSenderDisconnected(listener);
+        events.onSenderDisconnected(doneListener);
+        events.offSenderDisconnected(listener);
+        events.emitSenderDisconnected();
+    });
 });

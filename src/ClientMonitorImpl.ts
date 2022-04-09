@@ -1,8 +1,8 @@
-import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, version as schemaVersion } from "@observertc/schemas"
+import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, Samples, version as schemaVersion } from "@observertc/schemas"
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
-import { Sender } from "./Sender";
+import { Sender, SenderConfig } from "./Sender";
 import { ClientDevices } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
 import { AdapterConfig } from "./adapters/Adapter";
@@ -11,14 +11,14 @@ import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
 import { createLogger } from "./utils/logger";
 import { supplyDefaultConfig as supplySamplerDefaultConfig } from "./Sampler";
-import { ClientObserver, ClientObserverConfig } from "./ClientObserver";
+import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import EventEmitter from "events";
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientObserver");
 
-type ConstructorConfig = ClientObserverConfig;
+type ConstructorConfig = ClientMonitorConfig;
 
 const supplyDefaultConfig = () => {
     const defaultConfig: ConstructorConfig = {
@@ -31,15 +31,18 @@ const supplyDefaultConfig = () => {
 
 logger.debug("Version of the loaded schema:", schemaVersion);
 
-export class ClientObserverImpl implements ClientObserver {
-    public static create(config?: ClientObserverConfig): ClientObserver {
+const TIMER_INVOKED_SEND_SENDER_NOT_EXISTS = "timerInvokedSendSenderNotExists";
+
+export class ClientMonitorImpl implements ClientMonitor {
+    public static create(config?: ClientMonitorConfig): ClientMonitor {
         if (config?.maxListeners !== undefined) {
             EventEmitter.setMaxListeners(config.maxListeners);
         }
         const appliedConfig = config ? Object.assign(supplyDefaultConfig(), config) : supplyDefaultConfig();
-        return new ClientObserverImpl(appliedConfig);
+        return new ClientMonitorImpl(appliedConfig);
     }
     private _closed = false;
+    private _flags = new Set<string>();
     private _config: ConstructorConfig;
     private _mediaDevices: MediaDevices;
     private _clientDevices: ClientDevices;
@@ -56,13 +59,13 @@ export class ClientObserverImpl implements ClientObserver {
         this._clientDevices = new ClientDevices();
         this._mediaDevices = new MediaDevices();
         this._statsStorage = new StatsStorage();
+        this._metrics = new Metrics();
         this._accumulator = Accumulator.create(config.accumulator);
         this._eventer = EventsRelayer.create();
         this._collector = this._makeCollector();
         this._sampler = this._makeSampler();
-        this._sender = this._makeSender();
-        this._timer = this._makeTimer();
-        this._metrics = new Metrics();
+        this._createSender();
+        this._createTimer();
 
         this._sampler.addEngine(this._clientDevices.engine);
         this._sampler.addPlatform(this._clientDevices.platform);
@@ -115,8 +118,27 @@ export class ClientObserverImpl implements ClientObserver {
         return this._eventer;
     }
 
-    public get stats(): StatsReader {
+    public get storage(): StatsReader {
         return this._statsStorage;
+    }
+
+    public connect(senderConfig: SenderConfig) {
+        if (this._sender) {
+            logger.warn(`Sender is already established`);
+            return;
+        }
+        this._config.sender = senderConfig;
+        this._createSender();
+    }
+
+    public disconnect(): void {
+        if (!this._sender) {
+            return;
+        }
+        if (!this._sender.closed) {
+            this._sender.close();
+        }
+        this._sender = undefined;
     }
 
     public addTrackRelation(trackRelation: TrackRelation): void {
@@ -191,23 +213,21 @@ export class ClientObserverImpl implements ClientObserver {
 
     public async send(): Promise<void> {
         if (!this._sender) {
-            throw new Error(`Cannot send samples, because no Sender has been configured`);
-        }
-        const promises: Promise<void>[] = [];
-        this._accumulator.drainTo(samples => {
-            if (!samples) return;
-            /* eslint-disable @typescript-eslint/no-non-null-assertion */
-            const promise = this._sender!.send(samples);
-            promises.push(promise);
-        });
-        await Promise.all(promises).catch(async err => {
-            logger.warn(err);
-            if (!this._sender) return;
-            if (!this._sender.closed) {
-                await this._sender.close();
+            if (this._flags.has(TIMER_INVOKED_SEND_SENDER_NOT_EXISTS)) {
+                return;
             }
-            this._sender = undefined;
+            this._flags.add(TIMER_INVOKED_SEND_SENDER_NOT_EXISTS);
+            logger.warn(`Cannot send samples, because no Sender has been configured`);
+            return;
+        }
+        const queue: Samples[] = [];
+        this._accumulator.drainTo(bufferedSamples => {
+            if (!bufferedSamples) return;
+            queue.push(bufferedSamples);
         });
+        for (const samples of queue) {
+            this._sender.send(samples);
+        }
         this._eventer.emitSampleSent();
     }
 
@@ -249,23 +269,36 @@ export class ClientObserverImpl implements ClientObserver {
         return result;
     }
 
-    private _makeSender(): Sender | undefined {
+    private _createSender(): void {
+        if (this._sender) {
+            logger.warn(`Attempted to replace an already established Sender component`);
+            return;
+        }
         const senderConfig = this._config.sender;
         if (!senderConfig) {
-            return undefined;
+            return;
         }
-        const result = Sender.create(senderConfig);
-        return result;
+        this._sender = Sender.create(senderConfig)
+            .onClosed(() => {
+                this._sender = undefined;
+            }).onError(() => {
+                this._eventer.emitSenderDisconnected();
+                this._sender = undefined;
+            })
     }
 
-    private _makeTimer(): Timer | undefined {
+    private _createTimer(): Timer | undefined {
+        if (this._timer) {
+            logger.warn(`Attempted to create timer twice`);
+            return;
+        }
         const {
             collectingPeriodInMs,
             samplingPeriodInMs,
             sendingPeriodInMs,
         } = this._config;
         if (!collectingPeriodInMs && !samplingPeriodInMs && !sendingPeriodInMs) {
-            return undefined;
+            return;
         }
         const result = new Timer();
         if (collectingPeriodInMs && 0 < collectingPeriodInMs) {
@@ -292,6 +325,6 @@ export class ClientObserverImpl implements ClientObserver {
                 context: "Sending Samples"
             });
         }
-        return result;
+        this._timer = result;
     }
 }

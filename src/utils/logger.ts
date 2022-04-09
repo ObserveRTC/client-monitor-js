@@ -26,14 +26,25 @@ const initLogger = (prefix: string): Logger.Logger => {
     return _logger
 };
 
+let actualLevel: Logger.LogLevelDesc = "info";
+
+const loggers = new Map();
 const createLogger = (moduleName: string) => {
-    return initLogger(`ObserveRTC::${moduleName}`);
+    const logger = initLogger(`ObserveRTC::${moduleName}`);
+    logger.setLevel(actualLevel);
+    loggers.set(moduleName, logger);
+    return logger;
 }
 
-const logger = initLogger(
-        'ObserverRTC',
-    )
+
+const setLevel = (level: Logger.LogLevelDesc) => {
+    for (const logger of loggers.values()) {
+        logger.setLevel(level);
+    }
+    actualLevel = level;
+};
+
 export {
-    logger,
     createLogger,
+    setLevel,
 }

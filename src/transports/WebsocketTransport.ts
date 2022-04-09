@@ -1,7 +1,7 @@
-import { Transport, TransportState } from "./Transport";
-import ReconnectingWebSocket from 'reconnecting-websocket';
-import { EventEmitter } from "events";
+import { EventEmitter } from 'events';
 import { createLogger } from "../utils/logger";
+import { Transport } from "./Transport";
+import { v4 as uuidv4 } from "uuid";
 
 const logger = createLogger("WebsocketTransport");
 
@@ -19,6 +19,10 @@ export type WebsocketTransportConfig = {
      * DEFAULT: 3
      */
     maxRetries?: number;
+    /**
+     * Protocols of the websocket
+     */
+    protocols?: string | string[],
 }
 
 type WebsocketTransportConstructorConfig = WebsocketTransportConfig & {
@@ -33,163 +37,175 @@ const supplyDefaultConfig = () => {
     return defaultConfig;
 }
 
-const ON_STATE_CHANGED_EVENT_NAME = "onStateChanged";
+
 const ON_RECEIVED_EVENT_NAME = "onReceived";
-const ON_ERROR_EVENT_NAME = "onError";
 
 export class WebsocketTransport implements Transport {
     public static create(config?: WebsocketTransportConfig): WebsocketTransport {
         const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         return new WebsocketTransport(appliedConfig)
     }
+
+    private _ws?: WebSocket;
     private _cancelTimer?: () => void;
-    private _config: WebsocketTransportConfig;
-    private _state: TransportState = TransportState.Created;
+    private _closed = false;
     private _emitter: EventEmitter = new EventEmitter();
-    private _ws?: ReconnectingWebSocket;
+    private _counter = 0;
+    private _sent?: Promise<void>;
+    private _lastRequest?: [string, Promise<void>];
+    private _config: WebsocketTransportConstructorConfig;
+
     private constructor(config: WebsocketTransportConstructorConfig) {
+        if (typeof WebSocket !== 'undefined') {
+            throw new Error(`No Websocket class has found in global namespace`);
+        }
         this._config = config;
     }
 
-    public connect(): Promise<void> {
-        if (this._state === TransportState.Closed) {
-            return Promise.reject(`The transport is already closed`);
-        }
-        if (this._state === TransportState.Connected) {
-            return Promise.resolve();
-        }
-        return this._connect();
-    }
-
-    public get state(): TransportState {
-        return this._state;
-    }
-
-    public async send(message: Uint8Array): Promise<void> {
-        if (this._state !== TransportState.Connected) {
-            throw new Error(`Transport must be Connected state to send any data`);
-        }
-        this._ws?.send(message);
-    }
-
     onReceived(listener: (data: string) => void): Transport {
-        if (this._state === TransportState.Closed) {
-            throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
-        }
         this._emitter.on(ON_RECEIVED_EVENT_NAME, listener);
-        return this;        
+        return this;
     }
-
     offReceived(listener: (data: string) => void): Transport {
-        if (this._state === TransportState.Closed) {
-            throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
-        }
         this._emitter.off(ON_RECEIVED_EVENT_NAME, listener);
         return this;
     }
 
-    onStateChanged(listener: (newState: TransportState) => void): Transport {
-        if (this._state === TransportState.Closed) {
-            throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
-        }
-        this._emitter.on(ON_STATE_CHANGED_EVENT_NAME, listener);
-        return this;
+    public get closed() {
+        return this._closed;
     }
 
-    offStateChanged(listener: (newState: TransportState) => void): Transport {
-        if (this._state === TransportState.Closed) {
-            throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
-        }
-        this._emitter.off(ON_STATE_CHANGED_EVENT_NAME, listener);
-        return this;
+    public get connected() {
+        return !!this._ws;
     }
 
-    /*eslint-disable @typescript-eslint/no-explicit-any */
-    onError(listener: (err: any) => void): Transport {
-        if (this._state === TransportState.Closed) {
-            throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
-        }
-        this._emitter.on(ON_ERROR_EVENT_NAME, listener);
-        return this;
-    }
-
-    /*eslint-disable @typescript-eslint/no-explicit-any */
-    offError(listener: (err: any) => void): Transport {
-        if (this._state === TransportState.Closed) {
-            throw new Error(`Cannot subscribe / unsubscribe events of a closed Transport`);
-        }
-        this._emitter.off(ON_ERROR_EVENT_NAME, listener);
-        return this;
-    }
-
-    public get closed(): boolean {
-        return this._state === TransportState.Closed;
-    }
-
-    public close(): void {
-        if (this._state === TransportState.Closed) {
+    /**
+     * Closes the WebSocket connection or connection attempt, if any. If the connection is already
+     * CLOSED, this method does nothing
+     */
+    public close(code = 1000, reason?: string) {
+        if (this._closed) {
+            logger.warn(`Attempted to close WebsocketTransport Twice`);
             return;
         }
-        if (this._ws) {
-            this._ws.close();
+        try {
+            if (this._ws) {
+                this._ws.close();
+            }
+            if (this._cancelTimer) {
+                this._cancelTimer();
+            }
+        } finally {
+            this._closed = true;
         }
-        if (this._cancelTimer) {
-            this._cancelTimer();
-        }
-        [ON_ERROR_EVENT_NAME, ON_RECEIVED_EVENT_NAME].forEach(eventType => this._emitter.removeAllListeners(eventType));
-        this._setState(TransportState.Closed);
-        this._emitter.removeAllListeners(ON_STATE_CHANGED_EVENT_NAME);
+        
     }
 
+    /**
+     * Enqueue specified data to be transmitted to the server over the WebSocket connection
+     */
+    public async send(data: ArrayBuffer): Promise<void> {
+        if (this._closed) {
+            throw new Error(`Transport is closed`);
+        }
+        const id = ++this._counter;
+        const clear = () => {
+            if (this._counter === id) {
+                this._sent = undefined;
+            }
+        };
+        let prerequisite: Promise<void>;
+        if (!this._ws) {
+            prerequisite = this._connect();
+        } else if (this._sent) {
+            prerequisite = this._sent;
+        } else {
+            prerequisite = Promise.resolve();
+        }
+        this._sent = prerequisite.then(async () => {
+            if (!this._ws) throw new Error(`No websocket to send data on`);
+            this._ws.send(data);
+            clear();
+        }).catch(err => {
+            clear();
+            throw err;
+        });
+        return this._sent;
+    }
 
     private async _connect(): Promise<void> {
-        if (this._state === TransportState.Closed) {
-            return Promise.reject(`The transport is already closed`);
+        if (this._closed) {
+            throw new Error(`Transport is closed`);
         }
-        if (this._state === TransportState.Connected) {
-            // log it
-            return Promise.resolve();
+        if (this._ws) {
+            logger.info(`Websocket is already connected`);
+            return;
         }
-        this._setState(TransportState.Connecting);
-        let urlIndex = 0;
-        const urlProvider = async () => {
-            urlIndex = ++urlIndex % this._config.urls.length;
-            const result = this._config.urls[urlIndex];
-            return result;
-        };
-        const protocols: string | undefined = undefined;
-        const options = {
-            maxRetries: this._config.maxRetries,
-        };
-        const rws = new ReconnectingWebSocket(urlProvider, protocols, options);
-        return new Promise((resolve, reject) => {
-            rws.addEventListener('open', () => {
-                this._ws = rws;
-                rws.addEventListener('message', (message) => {
-                    this._emitter.emit(ON_RECEIVED_EVENT_NAME, message);
-                });
-                rws.addEventListener('close', () => {
-                    this.close();
-                })
-                this._setState(TransportState.Connected);
-                resolve();
-            });
-            rws.addEventListener('error', (err) => {
-                logger.warn(err);
-                this._emitter.emit(ON_ERROR_EVENT_NAME, err);
+        const result = await this._createWebsocket();
+        result.addEventListener("message", data => {
+            this._emitter.emit(ON_RECEIVED_EVENT_NAME, data);
+        })
+        result.addEventListener("close", () => {
+            this._ws = undefined;
+            if (!this._closed) {
                 this.close();
-                reject(err);
-            });
+            }
+        });
+        result.addEventListener("error", err => {
+            this._ws = undefined;
+            logger.warn(`Error occurred in transport`, err);
+            if (!this._closed) {
+                this.close();
+            }
+        });
+        this._ws = result;
+    }
+
+    private async _createWebsocket(tried = 0): Promise<WebSocket> {
+        if (this._closed) {
+            throw new Error(`The transport is already closed`)
+        }
+        const { urls, maxRetries, protocols } = this._config;
+        const canRetry = tried < maxRetries * urls.length;
+        const url = urls[tried % urls.length]
+        return await new Promise<WebSocket>((resolve, reject) => {
+            const ws = new WebSocket(url, protocols);
+            if (ws.readyState === WebSocket.OPEN) {
+                resolve(ws);
+            } else {
+                // promise can be resolved or rejected only once, so no problem
+                ws.addEventListener("close", reject);
+                ws.addEventListener("error", reject);
+                ws.addEventListener("open", () => resolve(ws));
+            }
+        }).catch(async (err: any) => {
+            if (canRetry) {
+                logger.info(`Connection to ${url} is failed. Tried: ${tried}, Error:`, err);
+                await this._waitBeforeReconnect(tried + 1);
+                // if the transport is closed during waiting, 
+                // the call to connect again is going to be rejected
+                return await this._createWebsocket(tried + 1);
+            }
+            throw new Error(`Cannot connect to ${urls.join(", ")}.`);
         });
     }
 
-    private _setState(state: TransportState): void {
-        if (this._state === state) return;
-        const prevState = this._state;
-        this._state = state;
-        this._emitter.emit(ON_STATE_CHANGED_EVENT_NAME, {
-            prevState,
-            state,
+    private async _waitBeforeReconnect(executed: number) {
+        const base = executed + 1;
+        const max = 1 / base;
+        const random = Math.random();
+        const exp = 1 + Math.max(0.1, Math.min(random, max));
+        const timeout = Math.floor(Math.min(Math.pow(base, exp), 60) * 1000);
+        return new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+                this._cancelTimer = undefined;
+                resolve();
+            }, timeout);
+            this._cancelTimer = () => {
+                clearTimeout(timer);
+                this._cancelTimer = undefined;
+            };
+            logger.info(`Enforced waiting before reconnect is ${timeout}ms`);
         });
     }
 }

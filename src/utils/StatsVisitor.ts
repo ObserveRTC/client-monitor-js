@@ -1,5 +1,7 @@
 import { W3CStats as W3C } from "@observertc/schemas";
-import { logger } from "./logger";
+import { createLogger } from "./logger";
+
+const logger = createLogger(`StatsVisitor`);
 
 export type StatsValue = 
     W3C.RtcCodecStats |

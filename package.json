@@ -1,6 +1,6 @@
 {
-  "name": "@observertc/client-observer-js",
-  "version": "1.0.0-beta.10",
+  "name": "@observertc/client-monitor-js",
+  "version": "1.0.0-beta.20",
   "description": "ObserveRTC Client Integration Library",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -28,7 +28,7 @@
   "author": "Balazs Kreith, Pallab Gain",
   "license": "MIT",
   "dependencies": {
-    "@observertc/schemas": "^2.0.0-beta.54",
+    "@observertc/schemas": "^2.0.0-beta.57",
     "@types/events": "^3.0.0",
     "@types/protobufjs": "^6.0.0",
     "@types/uuid": "^8.3.4",
@@ -37,7 +37,6 @@
     "js-sha256": "^0.9.0",
     "loglevel": "^1.8.0",
     "protobufjs": "^6.11.2",
-    "reconnecting-websocket": "^4.4.0",
     "uuid": "^8.3.2"
   },
   "devDependencies": {
@@ -54,6 +53,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/observertc/client-observer-js"
+    "url": "https://github.com/observertc/client-monitor-js"
   }
 }

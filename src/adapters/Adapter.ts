@@ -1,10 +1,12 @@
 import { StatsEntry } from "../utils/StatsVisitor";
-import { logger } from "../utils/logger";
 import { Chrome86Adapter } from "./Chrome86Adapter";
 import { DefaultAdapter } from "./DefaultAdapter";
 import { W3CStats } from "@observertc/schemas";
 import { Firefox94Adapter } from "./Firefox94Adapter";
 import { Safari14Adapter } from "./Safari14Adapter";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger(`Adapter`);
 
 export type AdapterConfig = {
     /**

@@ -1,5 +1,7 @@
-import { logger } from "./logger";
 import { v4 as uuidv4 } from "uuid";
+import { createLogger } from "./logger";
+
+const logger = createLogger(`Timer`);
 
 export type Action = {
     type: "collect" | "sample" | "send",
