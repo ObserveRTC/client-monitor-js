@@ -149,6 +149,12 @@ export interface ClientMonitor {
     addStatsCollector(collector: PcStatsCollector): void;
 
     /**
+     * Add the local part of the Signal Description Protocol.
+     * The Monitor adds it to the next sample it creates and send it to the observer
+     * @param localSDP 
+     */
+    addLocalSDP(localSDP: string[]): void;
+    /**
      * removes a stats collector identified with id given when it was added.
      * 
      * @param id the id of the collector intended to be removed

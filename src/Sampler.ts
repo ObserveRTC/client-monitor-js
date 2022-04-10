@@ -103,6 +103,7 @@ export class Sampler {
     private _userMediaErrors?: string[];
     private _extensionStats?: ExtensionStat[];
     private _mediaDevices?: MediaDevice[];
+    private _localSDP?: string[];
 
     private _statsReader?: StatsReader;
     // private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
@@ -175,6 +176,11 @@ export class Sampler {
         this._extensionStats.push(stats);
     }
 
+    public addLocalSDP(localSDP: string[]): void {
+        if (!this._localSDP) this._localSDP = [];
+        this._localSDP.push(...localSDP);
+    }
+
     public addMediaDevice(mediaDevice: MediaDevice): void {
         if (!this._mediaDevices) this._mediaDevices = [];
         this._mediaDevices.push(mediaDevice);
@@ -206,6 +212,7 @@ export class Sampler {
             timeZoneOffsetInHours: this._timezoneOffset,
             marker: this._marker,
 
+            localSDPs: this._localSDP,
             engine: this._engine,
             platform: this._platform,
             browser: this._browser,
@@ -225,6 +232,7 @@ export class Sampler {
         this._userMediaErrors = undefined;
         this._extensionStats = undefined;
         this._mediaDevices = undefined;
+        this._localSDP = undefined;
         if (!this._statsReader) {
             logger.warn(`No StatsProvider has been assigned to Sampler`);
             this._sampled = clientSample.timestamp;

@@ -16,7 +16,7 @@ import { Metrics, MetricsReader } from "./Metrics";
 import EventEmitter from "events";
 
 // import * as proto from "./ProtobufSamples"
-const logger = createLogger("ClientObserver");
+const logger = createLogger("ClientMonitor");
 
 type ConstructorConfig = ClientMonitorConfig;
 
@@ -179,6 +179,10 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public addExtensionStats(stats: ExtensionStat): void {
         this._sampler.addExtensionStats(stats);
+    }
+
+    addLocalSDP(localSDP: string[]): void {
+        this._sampler.addLocalSDP(localSDP);
     }
 
     public setMarker(marker: string): void {
