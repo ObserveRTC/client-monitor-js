@@ -56,7 +56,7 @@ export class WebsocketTransport implements Transport {
     private _config: WebsocketTransportConstructorConfig;
 
     private constructor(config: WebsocketTransportConstructorConfig) {
-        if (typeof WebSocket !== 'undefined') {
+        if (typeof WebSocket === 'undefined') {
             throw new Error(`No Websocket class has found in global namespace`);
         }
         this._config = config;
