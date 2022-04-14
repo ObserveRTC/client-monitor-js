@@ -64,7 +64,9 @@ export class Collector {
             },
             build() {
                 if (!config) throw new Error(`Cannot build a Collector without a config`);
-                return new Collector(config);
+                const result = new Collector(config);
+                logger.debug(`Built`, config);
+                return result;
             }
         }
         return result;

@@ -91,7 +91,9 @@ export class Sampler {
 
     public static create(config?: SamplerConfig): Sampler {
         const appliedConfig = Object.assign(supplyDefaultConfig(), config);
-        return new Sampler(appliedConfig);
+        const result = new Sampler(appliedConfig);
+        logger.debug(`Created`, appliedConfig);
+        return result;
     }
     
     // all of the following fields until empty line must be reset after sampled

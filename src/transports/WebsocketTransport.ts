@@ -43,7 +43,9 @@ const ON_RECEIVED_EVENT_NAME = "onReceived";
 export class WebsocketTransport implements Transport {
     public static create(config?: WebsocketTransportConfig): WebsocketTransport {
         const appliedConfig = Object.assign(supplyDefaultConfig(), config);
-        return new WebsocketTransport(appliedConfig)
+        const result = new WebsocketTransport(appliedConfig);
+        logger.debug(`Created`, appliedConfig);
+        return result;
     }
 
     private _ws?: WebSocket;
@@ -85,7 +87,7 @@ export class WebsocketTransport implements Transport {
      */
     public close(code = 1000, reason?: string) {
         if (this._closed) {
-            logger.warn(`Attempted to close WebsocketTransport Twice`);
+            logger.warn(`Attempted to close twice`);
             return;
         }
         try {
@@ -106,7 +108,7 @@ export class WebsocketTransport implements Transport {
      */
     public async send(data: ArrayBuffer): Promise<void> {
         if (this._closed) {
-            throw new Error(`Transport is closed`);
+            throw new Error(`Failed to send data on an already closed transport`);
         }
         const id = ++this._counter;
         const clear = () => {
@@ -135,10 +137,10 @@ export class WebsocketTransport implements Transport {
 
     private async _connect(): Promise<void> {
         if (this._closed) {
-            throw new Error(`Transport is closed`);
+            throw new Error(`Failed to connect to an already closed transport`);
         }
         if (this._ws) {
-            logger.info(`Websocket is already connected`);
+            logger.info(`Already connected`);
             return;
         }
         const result = await this._createWebsocket();
@@ -159,6 +161,7 @@ export class WebsocketTransport implements Transport {
             }
         });
         this._ws = result;
+        logger.info(`Connected`);
     }
 
     private async _createWebsocket(tried = 0): Promise<WebSocket> {

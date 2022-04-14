@@ -251,4 +251,5 @@ export interface PeerConnectionEntry {
     remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
     certificates(): IterableIterator<CertificateEntry>;
     iceServers(): IterableIterator<IceServerEntry>;
+    trackIds(): IterableIterator<string>;
 }

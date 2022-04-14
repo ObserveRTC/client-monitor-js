@@ -66,6 +66,27 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         return this._config.collectorLabel;
     }
 
+    public *trackIds(): Generator<string, void, undefined> {
+        for (const receiver of this._receivers.values()) {
+            if (!receiver.stats) continue;
+            const { trackIdentifier } = receiver.stats;
+            if (!trackIdentifier) continue;
+            yield trackIdentifier;
+        }
+        for (const sender of this._senders.values()) {
+            if (!sender.stats) continue;
+            const { trackIdentifier } = sender.stats;
+            if (!trackIdentifier) continue;
+            yield trackIdentifier;
+        }
+        for (const mediaSource of this._mediaSources.values()) {
+            if (!mediaSource.stats) continue;
+            const { trackIdentifier } = mediaSource.stats;
+            if (!trackIdentifier) continue;
+            yield trackIdentifier;
+        }
+    }
+
     public receivers(): IterableIterator<ReceiverEntry> {
         return this._receivers.values();
     }

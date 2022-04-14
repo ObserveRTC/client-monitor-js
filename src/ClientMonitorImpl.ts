@@ -39,7 +39,9 @@ export class ClientMonitorImpl implements ClientMonitor {
             EventEmitter.setMaxListeners(config.maxListeners);
         }
         const appliedConfig = config ? Object.assign(supplyDefaultConfig(), config) : supplyDefaultConfig();
-        return new ClientMonitorImpl(appliedConfig);
+        const result = new ClientMonitorImpl(appliedConfig);
+        logger.debug("Created", appliedConfig);
+        return result;
     }
     private _closed = false;
     private _flags = new Set<string>();
