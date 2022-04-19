@@ -173,6 +173,13 @@ export class Collector {
             logger.warn(`Attempted to close Collector twice`);
             return;
         }
-        this._closed = true;
+        try {
+            for (const collectorId of this._statsCollectors.keys()) {
+                this.remove(collectorId);
+            }
+        } finally {
+            this._closed = true;
+            logger.info(`Closed`);
+        }
     }
 }

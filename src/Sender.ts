@@ -3,7 +3,6 @@ import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
 import { Transport } from "./transports/Transport"
 import { WebsocketTransport, WebsocketTransportConfig } from "./transports/WebsocketTransport";
 import { createLogger } from "./utils/logger";
-import { v4 as uuidv4 } from "uuid";
 import EventEmitter from "events";
 
 const logger = createLogger("Sender");
@@ -63,7 +62,7 @@ export class Sender {
         this._codec = createCodec<Samples>(this._config.format);
         this._transport = createTransport({
             websocket: config.websocket,
-        });
+        }).setFormat(this._config.format ?? "json");
     }
 
     public close(): void {
@@ -84,6 +83,7 @@ export class Sender {
             }
         } finally {
             this._closed = true;
+            logger.info(`Closed`);
         }
         if (err) {
             this._emitter.emit(ON_ERROR_EVENT_NAME, err);
@@ -114,6 +114,7 @@ export class Sender {
         // });
 
         this._transport.send(message).catch(err => {
+            logger.warn(err);
             if (!this._closed) {
                 this.close();
             }

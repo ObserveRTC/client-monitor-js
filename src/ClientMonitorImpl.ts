@@ -183,7 +183,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.addExtensionStats(stats);
     }
 
-    addLocalSDP(localSDP: string[]): void {
+    public addLocalSDP(localSDP: string[]): void {
         this._sampler.addLocalSDP(localSDP);
     }
 
@@ -223,7 +223,7 @@ export class ClientMonitorImpl implements ClientMonitor {
                 return;
             }
             this._flags.add(TIMER_INVOKED_SEND_SENDER_NOT_EXISTS);
-            logger.warn(`Cannot send samples, because no Sender has been configured`);
+            logger.warn(`No Sender is available to send data`);
             return;
         }
         const queue: Samples[] = [];
@@ -242,14 +242,18 @@ export class ClientMonitorImpl implements ClientMonitor {
             logger.warn(`Attempted to close twice`);
             return;
         }
-        this._closed = true;
-        if (this._timer) {
-            this._timer.clear();
+        try {
+            if (this._timer) {
+                this._timer.clear();
+            }
+            this._collector.close();
+            this._sampler.close();
+            this._sender?.close();
+            this._statsStorage.clear();
+        } finally {
+            this._closed = true;
+            logger.info(`Closed`);
         }
-        this._collector.close();
-        this._sampler.close();
-        this._sender?.close();
-        this._statsStorage.clear();
     }
 
     private _makeCollector(): Collector {
