@@ -206,6 +206,15 @@ export interface ClientMonitor {
     addExtensionStats(stats: ExtensionStat): void;
 
     /**
+     * Sets the identifier of the call the client participates.
+     * If the value is given then sample will contain the provided value, and the observer will (try) to use it.
+     * how strongly influence it the callId assigning process in the observer for samples coming from other client
+     * is depend on the callIdAssignMode of the observer.
+     * @param value a valid UUID
+     */
+    setCallId(value: string): void;
+
+    /**
      * Sets the marker added to every sample created by this observer.
      * Typically this is a delicate information for certain situation like develop, or debugging, where 
      * the generated reports by the observer can be distinguished by the markers.

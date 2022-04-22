@@ -1,8 +1,8 @@
-import { v4 as uuidv4 } from "uuid";
+import { v4 as uuidv4, validate } from "uuid";
 import { W3CStats as W3C, Browser, Certificate, ClientSample, MediaCodecStats, DataChannel, Engine, ExtensionStat, IceLocalCandidate, IceRemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "@observertc/schemas";
 import { makePrefixedObj, NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
-import { isValidUuid } from "./utils/validators";
+import { checkUuid, isValidUuid } from "./utils/validators";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
 import { createLogger } from "./utils/logger";
 
@@ -137,6 +137,11 @@ export class Sampler {
 
     public get callId(): string | undefined {
         return this._config.callId;
+    }
+
+    public setCallId(value: string): void {
+        checkUuid(value);
+        this._config.callId = value;
     }
 
     public addTrackRelation(trackRelation: TrackRelation): void {

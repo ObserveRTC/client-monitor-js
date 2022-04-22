@@ -13,6 +13,7 @@ import { createLogger } from "./utils/logger";
 import { supplyDefaultConfig as supplySamplerDefaultConfig } from "./Sampler";
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
+import * as validators from "./utils/validators";
 import EventEmitter from "events";
 
 // import * as proto from "./ProtobufSamples"
@@ -122,6 +123,11 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public get storage(): StatsReader {
         return this._statsStorage;
+    }
+
+    public setCallId(value: string) {
+        validators.checkUuid(value);
+        this._sampler.setCallId(value);
     }
 
     public connect(senderConfig: SenderConfig) {
@@ -245,6 +251,24 @@ export class ClientMonitorImpl implements ClientMonitor {
         try {
             if (this._timer) {
                 this._timer.clear();
+            }
+            if (this._sender) {
+                const queue: Samples[] = [];
+                this._accumulator.drainTo(bufferedSamples => {
+                    if (!bufferedSamples) return;
+                    queue.push(bufferedSamples);
+                });
+                if (queue.length < 1) queue.push({
+                    controls: {
+                        close: true,
+                    }
+                });
+                else queue[queue.length - 1].controls = {
+                    close: true,
+                };
+                for (const samples of queue) {
+                    this._sender.send(samples);
+                }
             }
             this._collector.close();
             this._sampler.close();
