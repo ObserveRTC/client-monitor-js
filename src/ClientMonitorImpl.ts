@@ -167,21 +167,29 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._statsStorage.unregister(collectorId);
     }
 
-    public addMediaDevice(device: MediaDevice): void {
-        this._mediaDevices.add(device);
-        this._sampler.addMediaDevice(device);
+    public addMediaDevice(...devices: MediaDevice[]): void {
+        if (!devices) return;
+        for (const device of devices) {
+            this._mediaDevices.add(device);
+            this._sampler.addMediaDevice(device);
+        }
     }
 
-    public removeMediaDevice(device: MediaDevice): void {
-        if (device.id === undefined) return;
-        this._mediaDevices.remove(device.id);
+    public removeMediaDevice(...devices: MediaDevice[]): void {
+        if (!devices) return;
+        for (const device of devices) {
+            if (device.id === undefined) return;
+            this._mediaDevices.remove(device.id);
+        }
     }
 
-    public addMediaConstraints(constrain: string): void {
-        this._sampler.addMediaConstraints(constrain);
+    public addMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
+        const message = JSON.stringify(constrains);
+        this._sampler.addMediaConstraints(message);
     }
 
-    public addUserMediaError(message: string): void {
+    public addUserMediaError(err: any): void {
+        const message = typeof err === 'string' ? err : JSON.stringify(err);
         this._sampler.addUserMediaError(message);
     }
 

@@ -168,14 +168,14 @@ export interface ClientMonitor {
      * MediaDevices added to the observer are sampled by a sampler when a ClientSample is created.
      * 
      */
-    addMediaDevice(device: MediaDevice): void;
+    addMediaDevice(...devices: MediaDevice[]): void;
 
     /**
      * Removes a media device used as an input for the real-time communication
      * 
-     * @param device 
+     * @param devices
      */
-    removeMediaDevice(device: MediaDevice): void;
+    removeMediaDevice(...device: MediaDevice[]): void;
 
     /**
      * Adds media constrain used to obtain media. 
@@ -185,7 +185,7 @@ export interface ClientMonitor {
      * 
      * @param constrain 
      */
-    addMediaConstraints(constrain: string): void;
+    addMediaConstraints(constrain: MediaStreamConstraints | MediaTrackConstraints): void;
 
     /**
      * Adds a user media error. Typically this is an error catched while obtaining getUserMedia from MediaDEevices
@@ -193,7 +193,7 @@ export interface ClientMonitor {
      * The obtained user media error is added to the observer are sampled by a sampler when a ClientSample is created.
      * @param message 
      */
-    addUserMediaError(message: string): void;
+    addUserMediaError(err: any): void;
 
     /**
      * Adds an application provided custom payload object to the observer.

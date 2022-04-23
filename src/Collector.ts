@@ -31,7 +31,8 @@ const supplyDefaultConfig = () => {
  */
 export interface PcStatsCollector {
     /**
-     * The identifier of the collector and the peer connection provides the stats
+     * The identifier of the collector provides the stats. 
+     * This must be a valid UUID.
      */
     id: string;
     /**
