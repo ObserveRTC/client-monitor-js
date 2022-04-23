@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { ClientSample } from "@observertc/schemas"
+import { ClientSample } from "@observertc/monitor-schemas"
 type StatsCollectedListener = () => void;
 type SampleCreatedListener = (clientSample: ClientSample) => void;
 type SampleSentListener = () => void;

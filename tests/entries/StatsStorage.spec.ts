@@ -1,5 +1,5 @@
 import { StatsStorage } from "../../src/entries/StatsStorage";
-import { W3CStats as W3C } from "@observertc/schemas";
+import { W3CStats as W3C } from "@observertc/monitor-schemas";
 import * as Generator from "../helpers/StatsGenerator";
 import { StatsEntry } from "../../src/utils/StatsVisitor";
 describe("StatsStorage", () => {

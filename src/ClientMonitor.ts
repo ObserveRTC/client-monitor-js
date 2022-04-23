@@ -1,4 +1,4 @@
-import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat } from "@observertc/schemas";
+import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat } from "@observertc/monitor-schemas";
 import { LogLevelDesc } from "loglevel";
 import { AccumulatorConfig } from "./Accumulator";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";

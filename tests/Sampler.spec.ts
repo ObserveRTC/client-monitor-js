@@ -3,8 +3,8 @@ import { Sampler } from "../src/Sampler";
 import { StatsStorage } from "../src/entries/StatsStorage";
 import { v4 as uuidv4 } from "uuid";
 import { createCodecStats, createDataChannelStats, createInboundRtpStats, createMediaSourceStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSenderStats, createTransportStats } from "./helpers/StatsGenerator";
-import { W3CStats } from "@observertc/schemas";
-import { RtcReceiverCompoundStats, RtcSenderCompoundStats } from "@observertc/schemas/lib/w3c/W3cStatsIdentifiers";
+import { W3CStats } from "@observertc/monitor-schemas";
+import { RtcReceiverCompoundStats, RtcSenderCompoundStats } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
 
 const StatsType = W3CStats.StatsType;
 

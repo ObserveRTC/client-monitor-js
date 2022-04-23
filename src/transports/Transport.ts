@@ -1,5 +1,5 @@
 import { CodecConfig } from "../codecs/Codec";
-import { version as schemaVersion } from "@observertc/schemas";
+import { version as schemaVersion } from "@observertc/monitor-schemas";
 
 type MessageListener = (data: string) => void;
 /*eslint-disable @typescript-eslint/no-explicit-any*/

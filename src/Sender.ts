@@ -1,4 +1,4 @@
-import { Samples } from "@observertc/schemas"
+import { Samples } from "@observertc/monitor-schemas"
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
 import { Transport } from "./transports/Transport"
 import { WebsocketTransport, WebsocketTransportConfig } from "./transports/WebsocketTransport";

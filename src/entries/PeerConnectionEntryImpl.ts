@@ -1,7 +1,7 @@
 import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
 import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs, PeerConnectionEntry } from "./StatsEntryInterfaces";
 import { hash } from "../utils/hash";
-import { W3CStats as W3C } from "@observertc/schemas";
+import { W3CStats as W3C } from "@observertc/monitor-schemas";
 
 type InboundRtpPair = {
     inboundRtpId?: string;

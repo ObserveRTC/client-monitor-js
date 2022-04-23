@@ -1,6 +1,6 @@
 
 import * as Bowser from "bowser";
-import { Browser, Engine, OperationSystem, Platform } from "@observertc/schemas"
+import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas"
 
 const UNKNOWN_OS: OperationSystem = {
     name: "Unkown",

@@ -1,4 +1,4 @@
-import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, Samples, version as schemaVersion } from "@observertc/schemas"
+import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, Samples, version as schemaVersion } from "@observertc/monitor-schemas"
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";

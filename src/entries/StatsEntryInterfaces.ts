@@ -1,4 +1,4 @@
-import { W3CStats as W3C } from "@observertc/schemas";
+import { W3CStats as W3C } from "@observertc/monitor-schemas";
 
 export interface StatsEntryAbs {
     id: string;

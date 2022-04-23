@@ -1,4 +1,4 @@
-import {  W3CStats as W3C } from "@observertc/schemas";
+import {  W3CStats as W3C } from "@observertc/monitor-schemas";
 import { Adapter } from "../../src/adapters/Adapter";
 import { StatsValue } from "../../src/utils/StatsVisitor";
 import * as Generator from "./StatsGenerator";

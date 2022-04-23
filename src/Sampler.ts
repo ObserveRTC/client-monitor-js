@@ -1,5 +1,5 @@
 import { v4 as uuidv4, validate } from "uuid";
-import { W3CStats as W3C, Browser, Certificate, ClientSample, MediaCodecStats, DataChannel, Engine, ExtensionStat, IceLocalCandidate, IceRemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "@observertc/schemas";
+import { W3CStats as W3C, Browser, Certificate, ClientSample, MediaCodecStats, DataChannel, Engine, ExtensionStat, IceLocalCandidate, IceRemoteCandidate, InboundAudioTrack, InboundVideoTrack, MediaDevice, MediaSourceStat, OperationSystem, OutboundAudioTrack, OutboundVideoTrack, PeerConnectionTransport, Platform } from "@observertc/monitor-schemas";
 import { makePrefixedObj, NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
 import { checkUuid, isValidUuid } from "./utils/validators";

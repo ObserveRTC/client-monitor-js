@@ -2,7 +2,7 @@ import { FacadedCodec } from "./FacadedCodec";
 import { JsonCodec } from "./JsonCodec";
 import { ProtobufCodec } from "./ProtobufCodec";
 import { TextCodec } from "./TextCodec";
-import { ProtobufSamplesJson } from "@observertc/schemas";
+import { ProtobufSamples } from "@observertc/monitor-schemas";
 import * as protobufjs from "protobufjs/light";
 
 export interface Encoder<U, R> {
@@ -28,8 +28,8 @@ export function createCodec<T>(providedConfig?: CodecConfig): Codec<T, Uint8Arra
         return result;
     } 
     if (config === "protobuf") {
-        const root = protobufjs.Root.fromJSON(ProtobufSamplesJson);
-        const messageSchema = root.lookupType("org.observertc.schemas.protobuf.Samples");
+        const parsed = protobufjs.parse(ProtobufSamples)
+        const messageSchema = parsed.root.lookupType("org.observertc.schemas.protobuf.Samples");
         const result = ProtobufCodec.create({
             validate: false,
             messageSchema,

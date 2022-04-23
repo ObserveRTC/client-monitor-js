@@ -1,5 +1,6 @@
-import { ProtobufSamplesJson } from "@observertc/schemas";
-import * as protobufjs from "protobufjs/light";
+import { ProtobufSamples } from "@observertc/monitor-schemas";
+import * as protobufjs from "protobufjs";
+
 
 import { Codec } from "./Codec";
 
@@ -10,8 +11,9 @@ export type ProtobufConfig = {
 
 type ProtobufConstructorConfig = ProtobufConfig;
 const supplyDefaultConfig = () => {
-    const root = protobufjs.Root.fromJSON(ProtobufSamplesJson);
-    const messageSchema = root.lookupType("org.observertc.schemas.protobuf.Samples");
+    // protobufjs.parse
+    const parsed = protobufjs.parse(ProtobufSamples);
+    const messageSchema = parsed.root.lookupType("org.observertc.schemas.protobuf.Samples");
     const result: ProtobufConstructorConfig = {
         validate: false,
         messageSchema,

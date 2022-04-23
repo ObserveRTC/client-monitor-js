@@ -1,4 +1,4 @@
-import { MediaDevice } from "@observertc/schemas"
+import { MediaDevice } from "@observertc/monitor-schemas"
 export type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
 const EMPTY_ARRAY: MediaDevice[] = [];
 export class MediaDevices {
