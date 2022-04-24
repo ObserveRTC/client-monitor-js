@@ -1,20 +1,20 @@
 ObserveRTC Client Integration Javascript Library
 ---
 
-@observertc/client-monitor-js is a client side library to monitor [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate you app to observertc components.
+@observertc/client-monitor-js is a client side library to monitor [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate your app to observertc components.
 
 Table of Contents:
+
  * [Quick Start](#quick-start)
-   - [Collect WebRTC Stats](#collect-webrtc-stats)
-   - [Sample and Send](#sample-and-send)
- * [Schema](#schema)
- * [API docs](#api-docs)
- * [NPM package](#npm-package)
- * [Schema](#schema)
+ * [Storage Navigations](#storage-navigation)
+ * [Connect to Observer](#connect-to-observer)
+ * [Configurations](#configurations)
  * [Examples](#examples)
     - [Calculate video tracks Fps](#calculate-video-tracks-fps)
     - [Collect RTT measurements for peer connections](#collect-rtt-measurements-for-peer-connections)
- * [Configurations](#configurations)
+ * [NPM package](#npm-package)
+ * [API docs](#api-docs)
+ * [Getting Involved](#getting-involved)
  * [License](#license)
 
 ## Qucik Start
@@ -25,7 +25,7 @@ Install it from [npm](https://www.npmjs.com/package/@observertc/client-monitor-j
 npm i @observertc/client-monitor-js
 ```
 
-### Collect WebRTC Stats
+Use it in your WebRTC application. 
 
 ```javascript
 import { ClientMonitor } from "@observertc/client-monitor-js";
@@ -38,39 +38,31 @@ monitor.addStatsCollector({
     id: "collectorId",
     getStats: () => peerConnection.getStats(),
 });
+
 monitor.events.onStatsCollected(() => {
-    for (const transport of monitor.stats.transports()) {
-        /// use the transport
-        console.log(transport.stats.packetsSent);
+    const storage = monitor.storage;
+    for (const inboundRtp of storage.inboundRtps()) {
+        const trackId = inboundRtp.getTrackId();
+        const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
+        console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
     }
 })
 ```
-The above example collect stats in every 5s.
-When stats are collected and stored it emits an event to notify the 
-application.
 
-You can navigate through related stats:
+The above example collect stats in every 5s. 
+When stats are collected the inboundRtp entries are iterated.
+The stats of the inboound-rtp, its corresponded trackId and remote outbound stats are logged.
 
-```javascript
-    // list outbound RTP stats
-    for (const outboundRtp of monitor.stats.outboundRtps()) {
-        // get the remote inbound RTP stats belongs to the actual outbound RTP
-        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
-        console.log(outboundRtp.stats, remoteInboundRtp.stats);
-    }
-```
-The example above shows how to get the remote inbound rtp stats related to the outbound rtp stats.
 
-With `stats` you accessing to the [StatsStorage](https://observertc.github.io/client-monitor-js/interfaces/StatsReader.html). StatsStorage provided entries can be used to navigate from stats type to another.
+## Storage Navigations
 
-![Entry Navigations](docs/navigation.png)
+ StatsStorage provided entries can be used to navigate from one stats type to another.
 
-### Sample and Send
+![Storage Navigations](figures/navigation.png)
 
-Sampling means the client-monitor creates a so-called ClientSample. ClientSample is a compound object contains a snapshot from the polled stats, added devices, constrainments, user errors, etc. ClientSample is created by a Sampler component.
-A created ClientSample is added to Samples object. Samples can be sent to the server by a Sender component.
+## Connect to Observer
 
-The above shown example can be extended to sample and send by adding the following configurations:
+The client-monitor can be connected to an [Observer](https://github.com/ObserveRTC/observer).
 
 ```javascript
 import { ClientMontior } from "@observertc/client-monitor-js";
@@ -78,7 +70,7 @@ import { ClientMontior } from "@observertc/client-monitor-js";
 const config = {
     collectingPeriodInMs: 5000,
     samplingPeriodInMs: 10000,
-    sendingPeriodInMs: 10000,
+    sendingPeriodInMs: 15000,
     sampler: {
         roomId: "testRoom",
     },
@@ -95,76 +87,8 @@ monitor.addStatsCollector({
 });
 ```
 
-## API docs
+The stats are collected in every 5s, but samples are only made in every 10s. Samples are sent to the observer in every 15s.
 
-https://observertc.github.io/client-monitor-js/modules/ClientMonitor.html
-
-## NPM package
-
-https://www.npmjs.com/package/@observertc/client-monitor-js
-
-## Schema
-
-The schema used to send samples can be found [here](https://www.npmjs.com/package/@observertc/schemas#Samples).
-
-## Examples
-
-### Calculate video tracks Fps
-
-Assuming you have a configured and running monitor and a collector you added to poll the stats from
-peer connection, here is an example to calculate the frame per sec for tracks.
-
-```javascript
-const monitor = //.. defined above
-monitor.onStatsCollected(() => {
-    const now = Date.now();
-    for (const inboundRtp of monitor.storage.inboundRtps()) {
-        const trackId = inboundRtp.getTrackId();
-        const SSRC = inboundRtp.getSsrc();
-        const traceId = `${trackId}-${SSRC}`;
-        // lets extract what we need from the stats for inboundRtp: https://www.w3.org/TR/webrtc-stats/#inboundrtpstats-dict*
-        const { framesReceived, kind } = inboundRtp.stats;
-        if (kind !== "video") continue;
-        const trace = traces.get(traceId);
-        if (!trace) {
-            traces.set(traceId, {
-                framesReceived,
-                timestamp: now,
-            });
-            continue;
-        }
-        const elapsedTimeInS = (now - trace.timestamp) / 1000;
-        const fps = (framesReceived - trace.framesReceived) / elapsedTimeInS;
-        const peerConnectionId = inboundRtp.getPeerConnection()?.id;
-        trace.framesReceived = framesReceived;
-        trace.timestamp = now;
-
-        console.log(`On peerConnection: ${peerConnectionId}, track ${trackId}, SSRC: ${SSRC} the FPS is ${fps}`);
-    }
-});
-```
-
-### Collect RTT measurements for peer connections
-
-```javascript
-const monitor = //.. defined above
-monitor.onStatsCollected(() => {
-    const RTTs = new Map();
-    for (const outboundRtp of monitor.storage.outboundRtps()) {
-        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
-        const { roundTripTime } = remoteInboundRtp.stats;
-        const peerConnectionId = outboundRtp.getPeerConnection()?.collectorId;
-        let measurements = results.get(peerConnectionId);
-        if (!measurements) {
-            measurements = [];
-            RTTs.set(peerConnectionId, measurements);
-        }
-        measurements.push(roundTripTime);
-    }
-    // here you have the RTT measurements groupped by peer connections
-    console.log(Array.from(RTTs.entries()));
-});
-```
 
 ## Configurations
 
@@ -189,7 +113,7 @@ const config = {
      * 
      * DEFAULT: undefined
      */
-    sendingPeriodInMs: 10000;
+    sendingPeriodInMs: 10000,
 
     /**
      * By setting it stats items and entries are deleted if they are not updated.
@@ -304,6 +228,81 @@ const config = {
     }
 };
 ```
+
+## NPM package
+
+https://www.npmjs.com/package/@observertc/client-monitor-js
+
+## API docs
+
+https://observertc.github.io/client-monitor-js/modules/ClientMonitor.html
+
+
+## Examples
+
+### Calculate video tracks Fps
+
+Assuming you have a configured and running monitor and a collector you added to poll the stats from
+peer connection, here is an example to calculate the frame per sec for tracks.
+
+```javascript
+const monitor = //.. defined above
+monitor.onStatsCollected(() => {
+    const now = Date.now();
+    for (const inboundRtp of monitor.storage.inboundRtps()) {
+        const trackId = inboundRtp.getTrackId();
+        const SSRC = inboundRtp.getSsrc();
+        const traceId = `${trackId}-${SSRC}`;
+        // lets extract what we need from the stats for inboundRtp: https://www.w3.org/TR/webrtc-stats/#inboundrtpstats-dict*
+        const { framesReceived, kind } = inboundRtp.stats;
+        if (kind !== "video") continue;
+        const trace = traces.get(traceId);
+        if (!trace) {
+            traces.set(traceId, {
+                framesReceived,
+                timestamp: now,
+            });
+            continue;
+        }
+        const elapsedTimeInS = (now - trace.timestamp) / 1000;
+        const fps = (framesReceived - trace.framesReceived) / elapsedTimeInS;
+        const peerConnectionId = inboundRtp.getPeerConnection()?.id;
+        trace.framesReceived = framesReceived;
+        trace.timestamp = now;
+
+        console.log(`On peerConnection: ${peerConnectionId}, track ${trackId}, SSRC: ${SSRC} the FPS is ${fps}`);
+    }
+});
+```
+
+### Collect RTT measurements for peer connections
+
+```javascript
+const monitor = //.. defined above
+monitor.onStatsCollected(() => {
+    const RTTs = new Map();
+    for (const outboundRtp of monitor.storage.outboundRtps()) {
+        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
+        const { roundTripTime } = remoteInboundRtp.stats;
+        const peerConnectionId = outboundRtp.getPeerConnection()?.collectorId;
+        let measurements = results.get(peerConnectionId);
+        if (!measurements) {
+            measurements = [];
+            RTTs.set(peerConnectionId, measurements);
+        }
+        measurements.push(roundTripTime);
+    }
+    // here you have the RTT measurements groupped by peer connections
+    console.log(Array.from(RTTs.entries()));
+});
+```
+
+## Getting Involved
+
+Client-monitor is made with the intention to provide an open-source monitoring solution for 
+WebRTC developers. We develop new features and maintaining the current 
+product with the help of the community. If you are interested in getting involved 
+please read our [contribution](CONTRIBUTING.md) guideline.
 
 ## License
 
