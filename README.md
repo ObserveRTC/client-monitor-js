@@ -1,4 +1,4 @@
-ObserveRTC Client Integration Javascript Library
+Javascript library to monitor WebRTC applications
 ---
 
 @observertc/client-monitor-js is a client side library to monitor [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate your app to observertc components.
