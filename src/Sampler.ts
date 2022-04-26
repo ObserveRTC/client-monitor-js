@@ -146,9 +146,11 @@ export class Sampler {
 
     public addTrackRelation(trackRelation: TrackRelation): void {
         this._trackRelations.set(trackRelation.trackId, trackRelation);
+        logger.debug(`Track relation for trackId: ${trackRelation.trackId} is set`, trackRelation);
     }
 
     public removeTrackRelation(trackId: string): void {
+        logger.debug(`Track relation for trackId: trackId: ${trackId} is removed`, this._trackRelations.get(trackId));
         this._trackRelations.delete(trackId);
     }
 
