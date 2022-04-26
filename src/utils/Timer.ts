@@ -3,8 +3,10 @@ import { createLogger } from "./logger";
 
 const logger = createLogger(`Timer`);
 
+export type ActionType = "collect" | "sample" | "send";
+
 export type Action = {
-    type: "collect" | "sample" | "send",
+    type: ActionType,
     process: () => void,
     fixedDelayInMs: number,
     maxInvoke?: number,
@@ -74,6 +76,19 @@ export class Timer {
         return id;
     }
 
+    public hasListener(type: ActionType) {
+        switch (type) {
+            case "collect":
+                return 0 < this._collecting.size;
+            case "sample":
+                return 0 < this._sampling.size;
+            case "send":
+                return 0 < this._sending.size;
+            default:
+                return false;
+        }
+    }
+
     public remove(id: string): void {
         let deleted = false;
         this._iterateInOrder(map => {
@@ -84,14 +99,20 @@ export class Timer {
         }
     }
 
-    public clear(): void {
+    public clear(actionType?: ActionType): void {
         if (this._timer) {
             clearTimeout(this._timer);
             this._timer = undefined;
         }
-        this._collecting.clear();
-        this._sampling.clear();
-        this._sending.clear();
+        if (!actionType || actionType === "collect") {
+            this._collecting.clear();
+        }
+        if (!actionType || actionType === "sample") {
+            this._sampling.clear();
+        }
+        if (!actionType || actionType === "send") {
+            this._sending.clear();
+        }
     }
 
     public _invoke(): void {

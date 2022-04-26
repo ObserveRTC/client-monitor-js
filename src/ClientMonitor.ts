@@ -224,6 +224,33 @@ export interface ClientMonitor {
     setMarker(marker: string): void;
 
     /**
+     * Sets the collecting period in milliseconds. Thee Monitor calls its collect method
+     * with a given time period
+     * 
+     * NOTE: if a timer has previously set for collecting this set will overrides it
+     * @param collectingPeriodInMs 
+     */
+    setCollectingPeriod(collectingPeriodInMs: number): void;
+
+    /**
+     * Sets the sampling period in milliseconds. Thee Monitor calls its sample method
+     * with a given time period
+     * 
+     * NOTE: if a timer has previously set for sampling this set will overrides it
+     * @param samplingPeriodInMs 
+     */
+    setSamplingPeriod(samplingPeriodInMs: number): void;
+
+    /**
+     * Sets the sending period in milliseconds. Thee Monitor calls its send method
+     * with a given time period
+     * 
+     * NOTE: if a timer has previously set for sending this set will overrides it
+     * @param sendingPeriodInMs 
+     */
+    setSendingPeriod(sendingPeriodInMs: number): void;
+
+    /**
      * Connect the client monitor to an observer
      * 
      * NOTE: if the monitor is already connected then the open connection will be closed first.

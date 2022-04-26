@@ -288,6 +288,63 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
+    public setCollectingPeriod(collectingPeriodInMs: number): void {
+        if (collectingPeriodInMs < 1) {
+            this._timer?.clear("collect");
+            return;
+        }
+        if (!this._timer) {
+            this._timer = new Timer();
+        }
+        if (this._timer.hasListener("collect")) {
+            this._timer.clear("collect");
+        }
+        this._timer.add({
+            type: "collect",
+            process: this.collect.bind(this),
+            fixedDelayInMs: collectingPeriodInMs,
+            context: "Collect Stats"
+        });
+    }
+
+    public setSamplingPeriod(samplingPeriodInMs: number): void {
+        if (samplingPeriodInMs < 1) {
+            this._timer?.clear("sample");
+            return;
+        }
+        if (!this._timer) {
+            this._timer = new Timer();
+        }
+        if (this._timer.hasListener("sample")) {
+            this._timer.clear("sample");
+        }
+        this._timer.add({
+            type: "sample",
+            process: this.sample.bind(this),
+            fixedDelayInMs: samplingPeriodInMs,
+            context: "Creating Sample"
+        });
+    }
+
+    public setSendingPeriod(sendingPeriodInMs: number): void {
+        if (sendingPeriodInMs < 1) {
+            this._timer?.clear("send");    
+            return;
+        }
+        if (!this._timer) {
+            this._timer = new Timer();
+        }
+        if (this._timer.hasListener("send")) {
+            this._timer.clear("send");
+        }
+        this._timer.add({
+            type: "send",
+            process: this.send.bind(this),
+            fixedDelayInMs: sendingPeriodInMs,
+            context: "Sending Samples"
+        });
+    }
+
     private _makeCollector(): Collector {
         const collectorConfig = this._config.collectors;
         const createdAdapterConfig: AdapterConfig = {
@@ -339,34 +396,14 @@ export class ClientMonitorImpl implements ClientMonitor {
             samplingPeriodInMs,
             sendingPeriodInMs,
         } = this._config;
-        if (!collectingPeriodInMs && !samplingPeriodInMs && !sendingPeriodInMs) {
-            return;
-        }
-        const result = new Timer();
         if (collectingPeriodInMs && 0 < collectingPeriodInMs) {
-            result.add({
-                type: "collect",
-                process: this.collect.bind(this),
-                fixedDelayInMs: collectingPeriodInMs,
-                context: "Collect Stats"
-            });
+            this.setCollectingPeriod(collectingPeriodInMs);
         }
         if (samplingPeriodInMs && 0 < samplingPeriodInMs) {
-            result.add({
-                type: "sample",
-                process: this.sample.bind(this),
-                fixedDelayInMs: samplingPeriodInMs,
-                context: "Creating Sample"
-            });
+            this.setSamplingPeriod(samplingPeriodInMs);
         }
         if (sendingPeriodInMs && 0 < sendingPeriodInMs) {
-            result.add({
-                type: "send",
-                process: this.send.bind(this),
-                fixedDelayInMs: sendingPeriodInMs,
-                context: "Sending Samples"
-            });
+            this.setSendingPeriod(sendingPeriodInMs);
         }
-        this._timer = result;
     }
 }
