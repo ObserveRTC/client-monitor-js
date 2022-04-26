@@ -224,6 +224,14 @@ export interface ClientMonitor {
     setMarker(marker: string): void;
 
     /**
+     * Connect the client monitor to an observer
+     * 
+     * NOTE: if the monitor is already connected then the open connection will be closed first.
+     * @param config 
+     */
+    connect(config: SenderConfig): void;
+
+    /**
      * Collect all stats simultenously and update the #this.stats storage.
      */
     collect(): Promise<void>;
