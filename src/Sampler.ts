@@ -446,7 +446,7 @@ export class Sampler {
                 logger.debug(`Invalid inbound track id ${trackId}, not be sampled`);
                 continue;
             }
-            const { sfuSinkId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
+            const { sfuStreamId, sfuSinkId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
             const codec = inboundRtp.getCodec();
             let codecStats = {};
             if (!this._config.incrementalSampling && codec?.stats) {
@@ -466,6 +466,7 @@ export class Sampler {
                     ...inboundRtpStats,
                     perDscpPacketsReceived,
                     trackId,
+                    sfuStreamId,
                     sfuSinkId,
                     remoteClientId,
                     ended,
@@ -481,6 +482,7 @@ export class Sampler {
                     // to overwrite id and other stuffs:
                     ...inboundRtpStats,
                     trackId,
+                    sfuStreamId,
                     sfuSinkId,
                     remoteClientId,
                     ended,
