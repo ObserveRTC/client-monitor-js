@@ -162,20 +162,14 @@ export interface ClientMonitor {
     removeStatsCollector(id: string): void;
     
     /**
-     * Adds a media device used as an input for the real time communication
-     * Typically this is the [MediaDevices.getUserMedia()](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
+     * Set the media devices used by the webrtc app
+     * Typically this is a list of [MediaDevices.getUserMedia()](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
      * 
-     * MediaDevices added to the observer are sampled by a sampler when a ClientSample is created.
+     * The client monitor kepp track of the already added devices, removes the one not updated, 
+     * and in the next sample sent to the observer only the new devices will be sent
      * 
      */
-    addMediaDevice(...devices: MediaDevice[]): void;
-
-    /**
-     * Removes a media device used as an input for the real-time communication
-     * 
-     * @param devices
-     */
-    removeMediaDevice(...device: MediaDevice[]): void;
+    setMediaDevices(...devices: MediaDevice[]): void;
 
     /**
      * Adds media constrain used to obtain media. 

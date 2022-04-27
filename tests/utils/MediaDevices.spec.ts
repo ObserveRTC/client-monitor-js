@@ -7,9 +7,13 @@ describe(`MediaDevices`, () => {
         id: "deviceId_0",
         kind: "audioinput",
     };
-    describe(`When mediadevice is added`, () => {
+    const anotherDevice: MediaDevice = {
+        id: "deviceId_1",
+        kind: "audioinput",
+    };
+    describe(`When mediadevice is added through update`, () => {
         it(`Then it can be retrieved`, () => {
-            devices.add(device);
+            devices.update(device);
             let invoked = 0;
 
             for (const d of devices.values()) {
@@ -24,19 +28,24 @@ describe(`MediaDevices`, () => {
             expect(invoked).toBe(2);
         });
     });
-    describe(`When mediadevice is removed`, () => {
+    describe(`When mediadevice is removed by update`, () => {
         it(`Then it cannot be retrieved`, () => {
-            devices.remove(device.id!);
-            let invoked = 0;
+            devices.update(device);
+            devices.update(anotherDevice);
+            let foundDevice = 0;
+            let foundAnotherDevice = 0;
 
             for (const d of devices.values()) {
-                ++invoked;
+                if (d.id === device.id) ++foundDevice;
+                if (d.id === anotherDevice.id) ++foundAnotherDevice;
             }
 
             for (const d of devices.values(device.kind!)) {
-                ++invoked;
+                if (d.id === device.id) ++foundDevice;
+                if (d.id === anotherDevice.id) ++foundAnotherDevice;
             }
-            expect(invoked).toBe(0);
+            expect(foundDevice).toBe(0);
+            expect(foundAnotherDevice).toBe(2);
         });
     });
 });

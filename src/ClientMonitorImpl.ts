@@ -167,19 +167,11 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._statsStorage.unregister(collectorId);
     }
 
-    public addMediaDevice(...devices: MediaDevice[]): void {
+    public setMediaDevices(...devices: MediaDevice[]): void {
         if (!devices) return;
-        for (const device of devices) {
-            this._mediaDevices.add(device);
+        this._mediaDevices.update(...devices);
+        for (const device of this._mediaDevices.sample()) {
             this._sampler.addMediaDevice(device);
-        }
-    }
-
-    public removeMediaDevice(...devices: MediaDevice[]): void {
-        if (!devices) return;
-        for (const device of devices) {
-            if (device.id === undefined) return;
-            this._mediaDevices.remove(device.id);
         }
     }
 
