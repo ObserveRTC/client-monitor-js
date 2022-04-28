@@ -58,11 +58,16 @@ export class Sender {
     private _emitter = new EventEmitter();
     private _transport: Transport
     private constructor(config: SenderConfig) {
+        logger.warn("THIS IS SPARTA");
         this._config = config;
         this._codec = createCodec<Samples>(this._config.format);
         this._transport = createTransport({
             websocket: config.websocket,
-        }).setFormat(this._config.format ?? "json");
+        })
+        .setFormat(this._config.format ?? "json")
+        .onReceived(message => {
+            logger.debug("Received message", message);
+        });
     }
 
     public close(): void {

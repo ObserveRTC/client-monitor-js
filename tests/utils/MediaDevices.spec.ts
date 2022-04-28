@@ -2,7 +2,6 @@ import { MediaDevice } from "@observertc/monitor-schemas";
 import { MediaDevices } from "../../src/utils/MediaDevices";
 
 describe(`MediaDevices`, () => {
-    const devices = new MediaDevices();
     const device: MediaDevice = {
         id: "deviceId_0",
         kind: "audioinput",
@@ -13,6 +12,7 @@ describe(`MediaDevices`, () => {
     };
     describe(`When mediadevice is added through update`, () => {
         it(`Then it can be retrieved`, () => {
+            const devices = new MediaDevices();
             devices.update(device);
             let invoked = 0;
 
@@ -30,6 +30,7 @@ describe(`MediaDevices`, () => {
     });
     describe(`When mediadevice is removed by update`, () => {
         it(`Then it cannot be retrieved`, () => {
+            const devices = new MediaDevices();
             devices.update(device);
             devices.update(anotherDevice);
             let foundDevice = 0;
@@ -46,6 +47,22 @@ describe(`MediaDevices`, () => {
             }
             expect(foundDevice).toBe(0);
             expect(foundAnotherDevice).toBe(2);
+        });
+    });
+
+    describe(`When mediadevice is added`, () => {
+        it(`Then it can be sampled once`, () => {
+            const devices = new MediaDevices();
+            devices.update(device);
+            let foundDevice = 0;
+
+            for (const d of devices.sample()) {
+                if (d.id === device.id) ++foundDevice;
+            }
+            for (const d of devices.sample()) {
+                if (d.id === device.id) ++foundDevice;
+            }
+            expect(foundDevice).toBe(1);
         });
     });
 });
