@@ -12,6 +12,15 @@ function hash(obj: any) {
     return objHash(obj);
 }
 
+function hashMediaSourceStat(obj: any) {
+    obj.frames = undefined;
+    obj.framesPerSecond = undefined;
+    obj.echoReturnLoss = undefined;
+    obj.totalSamplesDuration = undefined;
+    obj.echoReturnLossEnhancement = undefined;
+    return hash(obj);
+}
+
 type InboundRtpPair = {
     inboundRtpId?: string;
     remoteOutboundRtpId?: string;
@@ -288,7 +297,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             const pc = this._pc;
             const entries = pc._mediaSources;
             const entry = entries.get(stats.id);
-            const hashCode = hash(stats);
+            const hashCode = hashMediaSourceStat(stats);
             if (entry) {
                 entry.touched = this.created;
                 if (entry.hashCode === hashCode) {
