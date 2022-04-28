@@ -58,7 +58,6 @@ export class Sender {
     private _emitter = new EventEmitter();
     private _transport: Transport
     private constructor(config: SenderConfig) {
-        logger.warn("THIS IS SPARTA");
         this._config = config;
         this._codec = createCodec<Samples>(this._config.format);
         this._transport = createTransport({
