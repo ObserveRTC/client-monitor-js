@@ -1,7 +1,16 @@
 import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
 import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs, PeerConnectionEntry } from "./StatsEntryInterfaces";
-import { hash } from "../utils/hash";
+import { hash as objHash } from "../utils/hash";
 import { W3CStats as W3C } from "@observertc/monitor-schemas";
+
+function hash(obj: any) {
+    if (!obj) return objHash(obj);
+    // we strip out the timestamp field to create a hash here.
+    // timestamp in w3c means the last time it was accessed, and that 
+    // is irrelevant for us in this situation when we do hash
+    obj.timestamp = undefined;
+    return objHash(obj);
+}
 
 type InboundRtpPair = {
     inboundRtpId?: string;
