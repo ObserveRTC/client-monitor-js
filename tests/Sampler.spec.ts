@@ -106,46 +106,54 @@ describe("Sampler", () => {
         it('When audio inboundRtp is provided Then inboundAudioTrack is added', async () => {
             const statsStorage = makeStatsStorage();
             const sampler = makeIncrementalSampler(statsStorage);
-            const statsEntry: StatsEntry = [StatsType.inboundRtp, createInboundRtpStats({
+            const inboundTrackStatsEntry: StatsEntry = [StatsType.inboundRtp, createInboundRtpStats({
                 kind: "audio",
             })];
-            statsStorage.accept(COLLECTOR_ID, statsEntry);
+            statsStorage.accept(COLLECTOR_ID, inboundTrackStatsEntry);
+            const receiverStatsEntry: StatsEntry = [StatsType.receiver, createReceiverStats()];
+            statsStorage.accept(COLLECTOR_ID, receiverStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.inboundAudioTracks![0]).toMatchObject(statsEntry[1]);
+            expect(clientSample.inboundAudioTracks![0]).toMatchObject(inboundTrackStatsEntry[1]);
         });
         it('When video inboundRtp is provided Then inboundVideoTrack is added', async () => {
             const statsStorage = makeStatsStorage();
             const sampler = makeIncrementalSampler(statsStorage);
-            const statsEntry: StatsEntry = [StatsType.inboundRtp, createInboundRtpStats({
+            const inboundTrackStatsEntry: StatsEntry = [StatsType.inboundRtp, createInboundRtpStats({
                 kind: "video",
             })];
-            statsStorage.accept(COLLECTOR_ID, statsEntry);
+            statsStorage.accept(COLLECTOR_ID, inboundTrackStatsEntry);
+            const receiverStatsEntry: StatsEntry = [StatsType.receiver, createReceiverStats()];
+            statsStorage.accept(COLLECTOR_ID, receiverStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.inboundVideoTracks![0]).toMatchObject(statsEntry[1]);
+            expect(clientSample.inboundVideoTracks![0]).toMatchObject(inboundTrackStatsEntry[1]);
         });
         it('When audio outboundRtp is provided Then outboundAudioTrack is added', async () => {
             const statsStorage = makeStatsStorage();
             const sampler = makeIncrementalSampler(statsStorage);
-            const statsEntry: StatsEntry = [StatsType.outboundRtp, createOutboundRtpStats({
+            const outboundTrackStatsEntry: StatsEntry = [StatsType.outboundRtp, createOutboundRtpStats({
                 kind: "audio",
             })];
-            statsStorage.accept(COLLECTOR_ID, statsEntry);
+            statsStorage.accept(COLLECTOR_ID, outboundTrackStatsEntry);
+            const senderStatsEntry: StatsEntry = [StatsType.sender, createSenderStats()];
+            statsStorage.accept(COLLECTOR_ID, senderStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.outboundAudioTracks![0]).toMatchObject(statsEntry[1]);
+            expect(clientSample.outboundAudioTracks![0]).toMatchObject(outboundTrackStatsEntry[1]);
         });
         it('When video outboundRtp is provided Then outboundVideoTrack is added', async () => {
             const statsStorage = makeStatsStorage();
             const sampler = makeIncrementalSampler(statsStorage);
-            const statsEntry: StatsEntry = [StatsType.outboundRtp, createOutboundRtpStats({
+            const outboundTrackStatsEntry: StatsEntry = [StatsType.outboundRtp, createOutboundRtpStats({
                 kind: "video",
             })];
-            statsStorage.accept(COLLECTOR_ID, statsEntry);
+            statsStorage.accept(COLLECTOR_ID, outboundTrackStatsEntry);
+            const senderStatsEntry: StatsEntry = [StatsType.sender, createSenderStats()];
+            statsStorage.accept(COLLECTOR_ID, senderStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.outboundVideoTracks![0]).toMatchObject(statsEntry[1]);
+            expect(clientSample.outboundVideoTracks![0]).toMatchObject(outboundTrackStatsEntry[1]);
         });
         it('When remote-inbound-rtp is provided Then fields from remote-inbounds are added', async () => {
             const statsStorage = makeStatsStorage();
@@ -157,6 +165,8 @@ describe("Sampler", () => {
             const remoteInbStatsEntry: StatsEntry = [StatsType.remoteInboundRtp, createRemoteInboundRtpStats({
                 packetsReceived,
             })];
+            const senderStatsEntry: StatsEntry = [StatsType.sender, createSenderStats()];
+            statsStorage.accept(COLLECTOR_ID, senderStatsEntry);
             statsStorage.accept(COLLECTOR_ID, outbAudioStatsEntry);
             statsStorage.accept(COLLECTOR_ID, remoteInbStatsEntry);
 
@@ -175,6 +185,8 @@ describe("Sampler", () => {
             const remoteOutbStatsEntry: StatsEntry = [StatsType.remoteOutboundRtp, createRemoteOutboundRtpStats({
                 packetsSent,
             })];
+            const receiverStatsEntry: StatsEntry = [StatsType.receiver, createReceiverStats()];
+            statsStorage.accept(COLLECTOR_ID, receiverStatsEntry);
             statsStorage.accept(COLLECTOR_ID, inbAudioStatsEntry);
             statsStorage.accept(COLLECTOR_ID, remoteOutbStatsEntry);
 

@@ -149,12 +149,6 @@ export interface ClientMonitor {
     addStatsCollector(collector: PcStatsCollector): void;
 
     /**
-     * Add the local part of the Signal Description Protocol.
-     * The Monitor adds it to the next sample it creates and send it to the observer
-     * @param localSDP 
-     */
-    addLocalSDP(localSDP: string[]): void;
-    /**
      * removes a stats collector identified with id given when it was added.
      * 
      * @param id the id of the collector intended to be removed
@@ -162,15 +156,12 @@ export interface ClientMonitor {
     removeStatsCollector(id: string): void;
     
     /**
-     * Set the media devices used by the webrtc app
-     * Typically this is a list of [MediaDevices.getUserMedia()](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
-     * 
-     * The client monitor kepp track of the already added devices, removes the one not updated, 
-     * and in the next sample sent to the observer only the new devices will be sent
-     * 
+     * Add the local part of the Signal Description Protocol.
+     * The Monitor adds it to the next sample it creates and send it to the observer
+     * @param localSDP 
      */
-    setMediaDevices(...devices: MediaDevice[]): void;
-
+    addLocalSDP(localSDP: string[]): void;
+    
     /**
      * Adds media constrain used to obtain media. 
      * Typically this is the parameter given to MediaDevices.getUserMedia()
@@ -199,6 +190,24 @@ export interface ClientMonitor {
      */
     addExtensionStats(stats: ExtensionStat): void;
 
+    /**
+     * Set the media devices used by the webrtc app
+     * Typically this is a list of [MediaDevices.getUserMedia()](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
+     * 
+     * The client monitor kepp track of the already added devices, removes the one not updated, 
+     * and in the next sample sent to the observer only the new devices will be sent
+     * 
+     */
+    setMediaDevices(...devices: MediaDevice[]): void;
+
+    /**
+     * Sets the client displayed userId.
+     *
+     * This can change during the call, but the clientId must remains
+     * @param value 
+     */
+    setUserId(value: string): void;
+    
     /**
      * Sets the identifier of the call the client participates.
      * If the value is given then sample will contain the provided value, and the observer will (try) to use it.

@@ -1,6 +1,7 @@
 import { W3CStats as W3C } from "@observertc/monitor-schemas";
 
 export interface StatsEntryAbs {
+    appData: any;
     id: string;
     created: number;
     updated: number;

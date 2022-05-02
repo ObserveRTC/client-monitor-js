@@ -276,6 +276,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: CodecEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -308,6 +309,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: MediaSourceEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -330,6 +332,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const ssrcsToInboundRtpPairs = this._pc._ssrcsToInboundRtpPair;
                 const remoteOutboundRtps = this._pc._remoteOutboundRtps;
                 const newEntry: InboundRtpEntry = {
+                    appData: {},
                     id: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -397,6 +400,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const ssrcsToOutboundRtpPairs = this._pc._ssrcsToOutboundRtpPair;
                 const remoteInboundRtps = this._pc._remoteInboundRtps;
                 const newEntry: OutboundRtpEntry = {
+                    appData: {},
                     id: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -474,6 +478,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const ssrcsToOutboundRtpPair = this._pc._ssrcsToOutboundRtpPair;
                 const outboundRtps = this._pc._outboundRtps;
                 const newEntry: RemoteInboundRtpEntry = {
+                    appData: {},
                     id: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -532,6 +537,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const ssrcsToInboundRtpPair = this._pc._ssrcsToInboundRtpPair;
                 const inboundRtps = this._pc._inboundRtps;
                 const newEntry: RemoteOutboundRtpEntry = {
+                    appData: {},
                     id: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -595,6 +601,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: ContributingSourceEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -631,6 +638,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: DataChannelEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -658,6 +666,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: TransceiverEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -693,6 +702,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: SenderEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -725,6 +735,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: ReceiverEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -752,6 +763,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: TransportEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -799,6 +811,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: SctpTransportEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -831,6 +844,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: IceCandidatePairEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -873,6 +887,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: LocalCandidateEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -905,6 +920,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: RemoteCandidateEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -937,6 +953,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 return;
             }
             const newEntry: CertificateEntry = {
+                appData: {},
                 id: stats.id,
                 getPeerConnection: () => {
                     return pc;
@@ -963,6 +980,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 entry.stats = stats;
             } else {
                 entry = {
+                    appData: {},
                     id: stats.id,
                     getPeerConnection: () => {
                         return pc;

@@ -144,6 +144,10 @@ export class Sampler {
         this._config.callId = value;
     }
 
+    public setUserId(value: string) {
+        this._config.userId = value;
+    }
+
     public addTrackRelation(trackRelation: TrackRelation): void {
         this._trackRelations.set(trackRelation.trackId, trackRelation);
         logger.debug(`Track relation for trackId: ${trackRelation.trackId} is set`, trackRelation);
@@ -356,19 +360,19 @@ export class Sampler {
             } else if (codec?.stats && this._sampled && this._sampled <= codec.updated) {
                 codecStats = codec?.stats;
             }
-            const { ended, trackIdentifier: senderTrackId } = outboundRtp.getSender()?.stats || {};
+            const trackId = outboundRtp.getTrackId();
+            if (!trackId || !isValidUuid(trackId)) {
+                logger.debug(`TrackId ${trackId} either not a uuid or not exists`);
+                continue;
+            }
+            const { ended } = outboundRtp.getSender()?.stats || {};
             if (outboundRtp.stats.kind === "audio") {
                 /* eslint-disable @typescript-eslint/no-explicit-any */
-                const { trackIdentifier: sourceTrackId, ...audioSourceStats }: any = mediaSource ? mediaSource.stats as W3C.RtcAudioSourceStats : {};
+                const { trackIdentifier, ...audioSourceStats }: any = mediaSource ? mediaSource.stats as W3C.RtcAudioSourceStats : {};
                 let mediaSourceStats = {};
                 if (audioSourceStats) {
                     if (!this._config.incrementalSampling) mediaSourceStats = audioSourceStats;
                     else if (mediaSource && this._sampled && this._sampled <= mediaSource.updated) mediaSourceStats = audioSourceStats;
-                }
-                const trackId: string | undefined = sourceTrackId || senderTrackId;
-                if (trackId && !isValidUuid(trackId)) {
-                    logger.debug(`Invalid outbound audio track id ${trackId}, not be sampled`)
-                    continue;
                 }
                 const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const {
@@ -392,16 +396,11 @@ export class Sampler {
                 yield [outboundAudioTrack, undefined];
             }
             if (outboundRtp.stats.kind === "video") {
-                const { trackIdentifier: sourceTrackId, ...videoSourceStats}: any = mediaSource? mediaSource.stats as W3C.RtcVideoSourceStats : {};
+                const { trackIdentifier, ...videoSourceStats}: any = mediaSource? mediaSource.stats as W3C.RtcVideoSourceStats : {};
                 let mediaSourceStats = {};
                 if (videoSourceStats) {
                     if (!this._config.incrementalSampling) mediaSourceStats = videoSourceStats;
                     else if (mediaSource && this._sampled && this._sampled <= mediaSource.updated) mediaSourceStats = videoSourceStats;
-                }
-                const trackId: string | undefined = sourceTrackId || senderTrackId;
-                if (trackId && !isValidUuid(trackId)) {
-                    logger.debug(`Invalid outbound video track id ${trackId}, not be sampled`)
-                    continue;
                 }
                 const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const {
@@ -440,12 +439,13 @@ export class Sampler {
                 inboundRtp.updated <= this._sampled) {
                 continue;
             }
-            const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
-            const { ended, trackIdentifier: trackId } = inboundRtp.getReceiver()?.stats || {};
-            if (trackId && !isValidUuid(trackId)) {
-                logger.debug(`Invalid inbound track id ${trackId}, not be sampled`);
+            const trackId = inboundRtp.getTrackId();
+            if (!trackId || !isValidUuid(trackId)) {
+                logger.debug(`TrackId ${trackId} either not a uuid or not exists`);
                 continue;
             }
+            const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
+            const { ended } = inboundRtp.getReceiver()?.stats || {};
             const { sfuStreamId, sfuSinkId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
             const codec = inboundRtp.getCodec();
             let codecStats = {};

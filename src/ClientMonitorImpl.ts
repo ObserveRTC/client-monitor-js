@@ -175,6 +175,11 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
+    public setUserId(value: string): void {
+        if (!value) return;
+        this._sampler.setUserId(value);
+    }
+
     public addMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
         const message = JSON.stringify(constrains);
         this._sampler.addMediaConstraints(message);
