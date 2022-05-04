@@ -108,7 +108,13 @@ export class Sender {
         if (this._closed) {
             throw new Error(`Cannot use an already closed Sender`);
         }
-        const message = this._codec.encode(samples);
+        let message: Uint8Array | undefined = undefined;
+        try {
+            message = this._codec.encode(samples);
+        } catch(error) {
+            logger.warn(`Encoding error`, error);
+            return;
+        }
         
         // --- for observer decoding tests ---
         // const messageInBase64 = require("js-base64").Base64.fromUint8Array(message);

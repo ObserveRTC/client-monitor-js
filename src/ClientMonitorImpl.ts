@@ -220,12 +220,16 @@ export class ClientMonitorImpl implements ClientMonitor {
     }
 
     public async sample(): Promise<void> {
-        const clientSample = this._sampler.make();
-        if (!clientSample) return;
-        if (this._sender) {
-            this._accumulator.addClientSample(clientSample);    
+        try {
+            const clientSample = this._sampler.make();
+            if (!clientSample) return;
+            if (this._sender) {
+                this._accumulator.addClientSample(clientSample);    
+            }
+            this._eventer.emitSampleCreated(clientSample);
+        } catch (error) {
+            logger.warn(`An error occurred while sampling`, error);
         }
-        this._eventer.emitSampleCreated(clientSample);
     }
 
     public async send(): Promise<void> {
@@ -243,7 +247,11 @@ export class ClientMonitorImpl implements ClientMonitor {
             queue.push(bufferedSamples);
         });
         for (const samples of queue) {
-            this._sender.send(samples);
+            try {
+                this._sender.send(samples);
+            } catch (error) {
+                logger.warn(`An error occurred while sending`, error);
+            }
         }
         this._eventer.emitSampleSent();
     }
