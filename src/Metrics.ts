@@ -22,6 +22,9 @@ export interface MetricsReader {
 
 export interface MetricsWriter {
     setCollectingTimeInMs(value: number): void;
+    setLastCollected(value: number): void;
+    setLastSampled(value: number): void;
+    setLastSent(value: number): void;
 }
 
 export class Metrics implements MetricsReader, MetricsWriter {
@@ -37,7 +40,7 @@ export class Metrics implements MetricsReader, MetricsWriter {
         this._lastCollected = value;
     }
 
-    setlastSampled(value: number): void {
+    setLastSampled(value: number): void {
         this._lastSampled = value;
     }
 

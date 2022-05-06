@@ -22,7 +22,7 @@ describe("Metrics", () => {
 
     describe("When lastSampled is set", () => {
         const value = 1;
-        metrics.setlastSampled(value);
+        metrics.setLastSampled(value);
         it ("Then it can be read through the lastSampled interface", () => {
             expect(metrics.lastSampled).toBe(value);
         })
