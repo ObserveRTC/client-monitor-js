@@ -216,7 +216,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             const expirationThresholdInMs = Date.now() - this._config.statsExpirationTimeInMs;
             this._statsStorage.trim(expirationThresholdInMs);
         }
-        
+        this._metrics.setlastSampled(started + elapsedInMs);
     }
 
     public async sample(): Promise<void> {
@@ -227,6 +227,9 @@ export class ClientMonitorImpl implements ClientMonitor {
                 this._accumulator.addClientSample(clientSample);    
             }
             this._eventer.emitSampleCreated(clientSample);
+
+            const now = Date.now();
+            this._metrics.setlastSampled(now);
         } catch (error) {
             logger.warn(`An error occurred while sampling`, error);
         }
@@ -254,6 +257,9 @@ export class ClientMonitorImpl implements ClientMonitor {
             }
         }
         this._eventer.emitSampleSent();
+
+        const now = Date.now();
+        this._metrics.setlastSampled(now);
     }
 
     public close(): void {

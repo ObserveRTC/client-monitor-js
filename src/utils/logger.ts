@@ -44,7 +44,12 @@ const setLevel = (level: Logger.LogLevelDesc) => {
     actualLevel = level;
 };
 
+const getLevel = () => {
+    return actualLevel;
+}
+
 export {
     createLogger,
     setLevel,
+    getLevel,
 }
