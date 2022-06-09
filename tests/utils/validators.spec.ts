@@ -1,4 +1,4 @@
-import { checkUuid, isValidUuid } from "../../src/utils/validators";
+import { checkUuid, isValidJsonString, isValidUuid } from "../../src/utils/validators";
 const VALID_UUID_2 = "fdfbfc66-908d-11ec-b909-0242ac120002"; // v1
 const VALID_UUID_1 = "cf8494f8-f197-4b1e-b40a-68fd62c10680"; // v4
 const INVALID_UUID_1 = "Kf8494f8-f197-4b1e-b40a-68fd62c10680"; // invalid (first) character
@@ -22,6 +22,14 @@ describe("validators", () => {
         it ("When UUID is not valid Then it returns false", () => {
             expect(isValidUuid(INVALID_UUID_1)).toBe(false);
             expect(isValidUuid(INVALID_UUID_2)).toBe(false);
+        });
+    });
+    describe("isValidJsonString", () => {
+        it ("When a simple string is given then it is invalid", () => {
+            expect(isValidJsonString("my string")).toBe(false);
+        });
+        it ("When a jsonified string is given then it is valid", () => {
+            expect(isValidJsonString(JSON.stringify("my string"))).toBe(true);
         });
     })
 });

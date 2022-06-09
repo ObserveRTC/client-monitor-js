@@ -186,11 +186,15 @@ export class ClientMonitorImpl implements ClientMonitor {
     }
 
     public addUserMediaError(err: any): void {
-        const message = typeof err === 'string' ? err : JSON.stringify(err);
+        const message = JSON.stringify(err);
         this._sampler.addUserMediaError(message);
     }
 
     public addExtensionStats(stats: ExtensionStat): void {
+        if (!!stats.payload && !validators.isValidJsonString(stats.payload)) {
+            logger.warn("Extension stats payload must be a valid json string");
+            return;
+        }
         this._sampler.addExtensionStats(stats);
     }
 
