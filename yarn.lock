@@ -552,10 +552,10 @@
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
 
-"@observertc/monitor-schemas@^2.0.0-beta.65":
-  version "2.0.0-beta.65"
-  resolved "https://registry.yarnpkg.com/@observertc/monitor-schemas/-/monitor-schemas-2.0.0-beta.65.tgz#48f1305e7dc94680225333d1c6e9262b09bc41d9"
-  integrity sha512-v579zGAq5gwQQ1yutxOmIQ6jPSdq+/+udzJxfgt7xD6hIaq/63gj2WY1sQPtQNCMxnR2VDvNdTZNLocU5N9FRw==
+"@observertc/monitor-schemas@^2.0.1":
+  version "2.0.4"
+  resolved "https://registry.yarnpkg.com/@observertc/monitor-schemas/-/monitor-schemas-2.0.4.tgz#72ee2a98cea1e6bcad2ede49322d42822835831a"
+  integrity sha512-j3/apf/Z2yp3IyQi3EoGKymW1tBR70BQaGHn7f5daL9sX+hAApXWUqSlKtEDkygrYXlO5x0cb7CsNSI83Xk5AQ==
 
 "@protobufjs/aspromise@^1.1.1", "@protobufjs/aspromise@^1.1.2":
   version "1.1.2"
@@ -2707,10 +2707,10 @@ prompts@^2.0.1:
     kleur "^3.0.3"
     sisteransi "^1.0.5"
 
-protobufjs@*, protobufjs@^6.11.2:
-  version "6.11.2"
-  resolved "https://registry.yarnpkg.com/protobufjs/-/protobufjs-6.11.2.tgz#de39fabd4ed32beaa08e9bb1e30d08544c1edf8b"
-  integrity sha512-4BQJoPooKJl2G9j3XftkIXjoC9C0Av2NOrWmbLWT1vH32GcSUHjM0Arra6UfTsVyfMAuFzaLucXn1sadxJydAw==
+protobufjs@*, protobufjs@^6.11.3:
+  version "6.11.3"
+  resolved "https://registry.yarnpkg.com/protobufjs/-/protobufjs-6.11.3.tgz#637a527205a35caa4f3e2a9a4a13ddffe0e7af74"
+  integrity sha512-xL96WDdCZYdU7Slin569tFX712BxsxslWwAfAhCYjQKGTq7dAU91Lomy6nLLhh/dyGhk/YH4TwTSRxTzhuHyZg==
   dependencies:
     "@protobufjs/aspromise" "^1.1.2"
     "@protobufjs/base64" "^1.1.2"
