@@ -1,22 +1,48 @@
 import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
-import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, StatsEntryAbs, PeerConnectionEntry } from "./StatsEntryInterfaces";
+import {
+    ContributingSourceEntry,
+    CodecEntry,
+    InboundRtpEntry,
+    OutboundRtpEntry,
+    RemoteInboundRtpEntry,
+    RemoteOutboundRtpEntry,
+    DataChannelEntry,
+    TransceiverEntry,
+    SenderEntry,
+    ReceiverEntry,
+    TransportEntry,
+    SctpTransportEntry,
+    IceCandidatePairEntry,
+    LocalCandidateEntry,
+    RemoteCandidateEntry,
+    CertificateEntry,
+    IceServerEntry,
+    MediaSourceEntry,
+    StatsEntryAbs,
+    PeerConnectionEntry,
+    AudioPlayoutEntry,
+} from "./StatsEntryInterfaces";
 import { hash as objHash } from "../utils/hash";
 import { W3CStats as W3C } from "@observertc/monitor-schemas";
 
+/*eslint-disable @typescript-eslint/no-explicit-any */
 function hash(obj: any) {
     if (!obj) return objHash(obj);
     // we strip out the timestamp field to create a hash here.
-    // timestamp in w3c means the last time it was accessed, and that 
+    // timestamp in w3c means the last time it was accessed, and that
     // is irrelevant for us in this situation when we do hash
     obj.timestamp = undefined;
     return objHash(obj);
 }
 
+/*eslint-disable @typescript-eslint/no-explicit-any */
 function hashMediaSourceStat(obj: any) {
     obj.frames = undefined;
     obj.framesPerSecond = undefined;
     obj.echoReturnLoss = undefined;
     obj.totalSamplesDuration = undefined;
+    obj.totalAudioEnergy = undefined;
+    obj.audioLevel = undefined;
     obj.echoReturnLossEnhancement = undefined;
     return hash(obj);
 }
@@ -24,17 +50,17 @@ function hashMediaSourceStat(obj: any) {
 type InboundRtpPair = {
     inboundRtpId?: string;
     remoteOutboundRtpId?: string;
-}
+};
 
 type OutboundRtpPair = {
     outboundRtpId?: string;
     remoteInboundRtpId?: string;
-}
+};
 
 type PeerConnectionEntryConfig = {
-    collectorId: string,
-    collectorLabel?: string,
-}
+    collectorId: string;
+    collectorLabel?: string;
+};
 
 export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     public static create(config: PeerConnectionEntryConfig): PeerConnectionEntryImpl {
@@ -58,15 +84,18 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     private _mediaSources: Map<string, MediaSourceEntry> = new Map();
     private _contributingSources: Map<string, ContributingSourceEntry> = new Map();
     private _dataChannels: Map<string, DataChannelEntry> = new Map();
-    private _transceivers: Map<string, TransceiverEntry> = new Map();
-    private _senders: Map<string, SenderEntry> = new Map();
-    private _receivers: Map<string, ReceiverEntry> = new Map();
     private _transports: Map<string, TransportEntry> = new Map();
-    private _sctpTransports: Map<string, SctpTransportEntry> = new Map();
     private _iceCandidatePairs: Map<string, IceCandidatePairEntry> = new Map();
     private _localCandidates: Map<string, LocalCandidateEntry> = new Map();
     private _remoteCandidates: Map<string, RemoteCandidateEntry> = new Map();
     private _certificates: Map<string, CertificateEntry> = new Map();
+    private _audioPlayouts: Map<string, AudioPlayoutEntry> = new Map();
+    // Deprecated collections due to webrtc stats changes
+    // --------------------------------------------------
+    private _transceivers: Map<string, TransceiverEntry> = new Map();
+    private _senders: Map<string, SenderEntry> = new Map();
+    private _receivers: Map<string, ReceiverEntry> = new Map();
+    private _sctpTransports: Map<string, SctpTransportEntry> = new Map();
     private _iceServers: Map<string, IceServerEntry> = new Map();
     private constructor(config: PeerConnectionEntryConfig) {
         this._config = config;
@@ -169,6 +198,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         return this._iceServers.values();
     }
 
+    public audioPlayouts(): IterableIterator<AudioPlayoutEntry> {
+        return this._audioPlayouts.values();
+    }
+
     public get stats(): W3C.RtcPeerConnectionStats | undefined {
         return this._stats;
     }
@@ -220,7 +253,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             this._localCandidates,
             this._remoteCandidates,
             this._certificates,
-            this._iceServers
+            this._iceServers,
         ];
         return result;
     }
@@ -316,6 +349,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 },
                 stats,
                 hashCode,
+
                 touched: this.created,
                 created: this.created,
                 updated: this.created,
@@ -331,6 +365,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             if (!entry) {
                 const ssrcsToInboundRtpPairs = this._pc._ssrcsToInboundRtpPair;
                 const remoteOutboundRtps = this._pc._remoteOutboundRtps;
+                const audioPlayouts = this._pc._audioPlayouts;
                 const newEntry: InboundRtpEntry = {
                     appData: {},
                     id: stats.id,
@@ -346,11 +381,19 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         return newEntry.stats.ssrc;
                     },
                     getTrackId: () => {
+                        if (newEntry.stats.trackIdentifier) {
+                            return newEntry.stats.trackIdentifier;
+                        }
                         const { stats: receiverStats } = newEntry.getReceiver() ?? {};
                         return receiverStats?.trackIdentifier;
                     },
                     getReceiver: () => {
                         const receiverId = newEntry.stats.receiverId;
+                        // because receiver stats are deprecated, inbound-rtp entry no longer
+                        // required to have receiverId
+                        if (receiverId === undefined) {
+                            return undefined;
+                        }
                         return pc._receivers.get(receiverId);
                     },
                     getCodec: () => {
@@ -364,12 +407,21 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         return pc._transports.get(transportId);
                     },
                     getRemoteOutboundRtp: () => {
+                        if (newEntry.stats.remoteId) {
+                            return remoteOutboundRtps.get(newEntry.stats.remoteId);
+                        }
                         const ssrc = newEntry.getSsrc();
                         if (!ssrc) return undefined;
                         const inboundRtpPair = ssrcsToInboundRtpPairs.get(ssrc);
                         if (!inboundRtpPair || !inboundRtpPair.remoteOutboundRtpId) return undefined;
                         return remoteOutboundRtps.get(inboundRtpPair.remoteOutboundRtpId);
-                    }
+                    },
+                    getAudioPlayout: () => {
+                        if (!newEntry.stats?.playoutId) {
+                            return undefined;
+                        }
+                        return audioPlayouts.get(newEntry.stats.playoutId);
+                    },
                 };
                 entries.set(stats.id, newEntry);
                 const ssrc = newEntry.getSsrc();
@@ -377,7 +429,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     const ssrcsToInboundRtpPair = this._pc._ssrcsToInboundRtpPair;
                     let inboundRtpPair = ssrcsToInboundRtpPair.get(ssrc);
                     if (!inboundRtpPair) {
-                        inboundRtpPair = {}
+                        inboundRtpPair = {};
                         ssrcsToInboundRtpPair.set(ssrc, inboundRtpPair);
                     }
                     inboundRtpPair.inboundRtpId = newEntry.stats.id;
@@ -389,7 +441,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     entry.stats = stats;
                 }
             }
-            
         }
         visitOutboundRtp(stats: W3C.RtcOutboundRTPStreamStats): void {
             const pc = this._pc;
@@ -414,12 +465,15 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         return newEntry.stats.ssrc;
                     },
                     getTrackId: () => {
+                        const { stats: mediaSourceStats } = newEntry.getMediaSource() ?? {};
+                        if (mediaSourceStats != undefined) {
+                            return mediaSourceStats.trackIdentifier;
+                        }
                         const { stats: senderStats } = newEntry.getSender() ?? {};
                         if (senderStats?.trackIdentifier) {
                             return senderStats.trackIdentifier;
                         }
-                        const { stats: mediaSourceStats } = newEntry.getMediaSource() ?? {};
-                        return mediaSourceStats?.trackIdentifier;
+                        return undefined;
                     },
                     getSender: () => {
                         const senderId = newEntry.stats.senderId;
@@ -442,12 +496,15 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         return pc._mediaSources.get(mediaSourceId);
                     },
                     getRemoteInboundRtp: () => {
+                        if (newEntry.stats.remoteId) {
+                            return remoteInboundRtps.get(newEntry.stats.remoteId);
+                        }
                         const ssrc = newEntry.getSsrc();
                         if (!ssrc) return undefined;
                         const outboundRtpPair = ssrcsToOutboundRtpPairs.get(ssrc);
                         if (!outboundRtpPair || !outboundRtpPair.remoteInboundRtpId) return undefined;
                         return remoteInboundRtps.get(outboundRtpPair.remoteInboundRtpId);
-                    }
+                    },
                 };
                 entries.set(stats.id, newEntry);
                 entry = newEntry;
@@ -463,7 +520,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const ssrcsToOutboundRtpPair = this._pc._ssrcsToOutboundRtpPair;
                 let outboundRtpPair = ssrcsToOutboundRtpPair.get(ssrc);
                 if (!outboundRtpPair) {
-                    outboundRtpPair = {}
+                    outboundRtpPair = {};
                     ssrcsToOutboundRtpPair.set(ssrc, outboundRtpPair);
                 }
                 outboundRtpPair.outboundRtpId = entry.stats.id;
@@ -507,7 +564,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         const outboundRtpPair = ssrcsToOutboundRtpPair.get(ssrc);
                         if (!outboundRtpPair || !outboundRtpPair.outboundRtpId) return undefined;
                         return outboundRtps.get(outboundRtpPair.outboundRtpId);
-                    }
+                    },
                 };
                 entries.set(stats.id, newEntry);
                 const ssrc = newEntry.getSsrc();
@@ -515,7 +572,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     const ssrcsToOutboundRtpPair = this._pc._ssrcsToOutboundRtpPair;
                     let outboundRtpPair = ssrcsToOutboundRtpPair.get(ssrc);
                     if (!outboundRtpPair) {
-                        outboundRtpPair = {}
+                        outboundRtpPair = {};
                         ssrcsToOutboundRtpPair.set(ssrc, outboundRtpPair);
                     }
                     outboundRtpPair.remoteInboundRtpId = newEntry.stats.id;
@@ -566,14 +623,14 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         const inboundRtpPair = ssrcsToInboundRtpPair.get(ssrc);
                         if (!inboundRtpPair || !inboundRtpPair.inboundRtpId) return undefined;
                         return inboundRtps.get(inboundRtpPair.inboundRtpId);
-                    }
+                    },
                 };
                 entries.set(stats.id, newEntry);
                 const ssrc = newEntry.getSsrc();
                 if (ssrc) {
                     let inboundRtpPair = ssrcsToInboundRtpPair.get(ssrc);
                     if (!inboundRtpPair) {
-                        inboundRtpPair = {}
+                        inboundRtpPair = {};
                         ssrcsToInboundRtpPair.set(ssrc, inboundRtpPair);
                     }
                     inboundRtpPair.remoteOutboundRtpId = newEntry.stats.id;
@@ -614,7 +671,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 getInboundRtp: () => {
                     const inboundRtpId = newEntry.stats.inboundRtpStreamId;
                     return pc._inboundRtps.get(inboundRtpId);
-                }
+                },
             };
             entries.set(stats.id, newEntry);
         }
@@ -716,7 +773,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     const mediaSourceId = newEntry.stats.mediaSourceId;
                     if (!mediaSourceId) return undefined;
                     return pc._mediaSources.get(mediaSourceId);
-                }
+                },
             };
             entries.set(stats.id, newEntry);
         }
@@ -825,7 +882,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
                     return pc._transports.get(transportId);
-                }
+                },
             };
             entries.set(stats.id, newEntry);
         }
@@ -901,7 +958,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
                     return pc._transports.get(transportId);
-                }
+                },
             };
             entries.set(stats.id, newEntry);
         }
@@ -934,7 +991,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     const transportId = newEntry.stats.transportId;
                     if (!transportId) return undefined;
                     return pc._transports.get(transportId);
-                }
+                },
             };
             entries.set(stats.id, newEntry);
         }
@@ -994,5 +1051,33 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 entries.set(stats.id, entry);
             }
         }
-    }
+        visitAudioPlayout(stats: W3C.RTCAudioPlayoutStats): void {
+            const pc = this._pc;
+            const entries = pc._audioPlayouts;
+            let entry = entries.get(stats.id);
+            const hashCode = hash(stats);
+            if (entry) {
+                entry.touched = this.created;
+                if (entry.hashCode === hashCode) {
+                    return;
+                }
+                entry.updated = this.created;
+                entry.stats = stats;
+            } else {
+                entry = {
+                    appData: {},
+                    id: stats.id,
+                    getPeerConnection: () => {
+                        return pc;
+                    },
+                    stats,
+                    hashCode,
+                    touched: this.created,
+                    created: this.created,
+                    updated: this.created,
+                };
+                entries.set(stats.id, entry);
+            }
+        }
+    };
 }

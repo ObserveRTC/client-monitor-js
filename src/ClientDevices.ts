@@ -1,6 +1,5 @@
-
 import * as Bowser from "bowser";
-import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas"
+import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas";
 
 const UNKNOWN_OS: OperationSystem = {
     name: "Unkown",
@@ -35,7 +34,7 @@ export class ClientDevices {
         if (navigator) outerNavigator = navigator;
         else if (window && window.navigator) outerNavigator = window.navigator;
         else return this;
-        const parsedResult =  Bowser.parse(outerNavigator.userAgent);
+        const parsedResult = Bowser.parse(outerNavigator.userAgent);
         this._browser = Object.assign(this._browser, parsedResult.browser);
         this._engine = Object.assign(this._engine, parsedResult.engine);
         this._os = Object.assign(this._os, parsedResult.os);
@@ -43,14 +42,14 @@ export class ClientDevices {
         return this;
     }
 
-    public get os(): OperationSystem { 
+    public get os(): OperationSystem {
         return this._os;
     }
 
     public get browser(): Browser {
         return this._browser;
     }
-    
+
     public get platform(): Platform {
         return this._platform;
     }
@@ -59,4 +58,3 @@ export class ClientDevices {
         return this._engine;
     }
 }
-

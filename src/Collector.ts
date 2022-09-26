@@ -8,30 +8,28 @@ const logger = createLogger("Collector");
 type ScrappedStats = any;
 export type CollectorConfig = {
     /**
-     * Sets the adapter adapt different browser type and version 
+     * Sets the adapter adapt different browser type and version
      * provided stats.
-     * 
+     *
      * by default the adapter is "guessed" by the observer
      * extracting information about the browser type and version
      */
-    adapter?: AdapterConfig;    
-}
+    adapter?: AdapterConfig;
+};
 
 type CollectorConstructorConfig = CollectorConfig;
 
 const supplyDefaultConfig = () => {
-    const defaultConfig: CollectorConstructorConfig = {
-
-    };
+    const defaultConfig: CollectorConstructorConfig = {};
     return defaultConfig;
-}
+};
 
 /**
  * Interface for a peer connection stats collector
  */
 export interface PcStatsCollector {
     /**
-     * The identifier of the collector provides the stats. 
+     * The identifier of the collector provides the stats.
      * This must be a valid UUID.
      */
     id: string;
@@ -47,7 +45,7 @@ export interface PcStatsCollector {
 
 export interface StatsController {
     readonly id: string;
-    close(): Promise<void>
+    close(): Promise<void>;
 }
 
 interface Builder {
@@ -68,8 +66,8 @@ export class Collector {
                 const result = new Collector(config);
                 logger.debug(`Built`, config);
                 return result;
-            }
-        }
+            },
+        };
         return result;
     }
 
@@ -106,14 +104,16 @@ export class Collector {
         const promises: Promise<ScrappedEntry>[] = [];
         for (const statsConfig of this._statsCollectors.values()) {
             const { id: collectorId, getStats } = statsConfig;
-            const promise: Promise<ScrappedEntry> = new Promise(resolve => {
-                getStats().then(scrappedStats => {
-                    resolve([collectorId, scrappedStats]);
-                }).catch((err) => {
-                    illConfigs.push([collectorId, err]);
-                    resolve(undefined);
-                });
-            })
+            const promise: Promise<ScrappedEntry> = new Promise((resolve) => {
+                getStats()
+                    .then((scrappedStats) => {
+                        resolve([collectorId, scrappedStats]);
+                    })
+                    .catch((err) => {
+                        illConfigs.push([collectorId, err]);
+                        resolve(undefined);
+                    });
+            });
             promises.push(promise);
         }
         for await (const scrappedEntry of promises) {
@@ -147,11 +147,11 @@ export class Collector {
      */
     public add(pcStatsCollector: PcStatsCollector): void {
         if (this._closed) {
-            throw new Error(`Cannot add StatsCollector because the Collector is closed`)
+            throw new Error(`Cannot add StatsCollector because the Collector is closed`);
         }
         const { id: collectorId } = pcStatsCollector;
         if (this._statsCollectors.has(collectorId)) {
-            throw new Error(`StatsCollector with id ${collectorId} has already been added`)
+            throw new Error(`StatsCollector with id ${collectorId} has already been added`);
         }
         this._statsCollectors.set(collectorId, pcStatsCollector);
     }
@@ -162,7 +162,7 @@ export class Collector {
 
     public remove(collectorId: string): void {
         if (this._closed) {
-            throw new Error(`Cannot remove StatsCollector because the Collector is closed`)
+            throw new Error(`Cannot remove StatsCollector because the Collector is closed`);
         }
         if (!this._statsCollectors.delete(collectorId)) {
             logger.warn(`Collector with peer connection id ${collectorId} was not found`);

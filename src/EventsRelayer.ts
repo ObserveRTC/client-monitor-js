@@ -1,10 +1,9 @@
 import { EventEmitter } from "events";
-import { ClientSample } from "@observertc/monitor-schemas"
+import { ClientSample } from "@observertc/monitor-schemas";
 type StatsCollectedListener = () => void;
 type SampleCreatedListener = (clientSample: ClientSample) => void;
 type SampleSentListener = () => void;
 type SenderDisconnectedListener = () => void;
-
 
 export interface EventsRegister {
     onStatsCollected(listener: StatsCollectedListener): EventsRegister;
@@ -25,7 +24,6 @@ export interface EventsEmitter {
     emitSampleCreated(clientSample: ClientSample): void;
     emitSampleSent(): void;
     emitSenderDisconnected(): void;
-
 }
 
 const ON_STATS_COLLECTED_EVENT_NAME = "onStatsCollected";
@@ -35,20 +33,18 @@ const ON_SENDER_DISCONNECTED_EVENT_NAME = "onSamplesSent";
 
 export class EventsRelayer implements EventsRegister, EventsEmitter {
     public static create(): EventsRelayer {
-        return new EventsRelayer()
+        return new EventsRelayer();
     }
     private _emitter: EventEmitter;
     private constructor() {
-        this._emitter = new EventEmitter({
-            
-        });
+        this._emitter = new EventEmitter({});
     }
-    
+
     onStatsCollected(listener: StatsCollectedListener): EventsRegister {
         this._emitter.on(ON_STATS_COLLECTED_EVENT_NAME, listener);
         return this;
     }
-    
+
     emitStatsCollected(): void {
         this._emitter.emit(ON_STATS_COLLECTED_EVENT_NAME);
     }
@@ -76,7 +72,7 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
         this._emitter.on(ON_SAMPLES_SENT_EVENT_NAME, listener);
         return this;
     }
-    
+
     emitSampleSent(): void {
         this._emitter.emit(ON_SAMPLES_SENT_EVENT_NAME);
     }
@@ -94,10 +90,9 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
     emitSenderDisconnected(): void {
         this._emitter.emit(ON_SENDER_DISCONNECTED_EVENT_NAME);
     }
-    
+
     offSenderDisconnected(listener: SenderDisconnectedListener): EventsRegister {
         this._emitter.off(ON_SENDER_DISCONNECTED_EVENT_NAME, listener);
         return this;
     }
-
 }

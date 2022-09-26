@@ -2,7 +2,7 @@ import { StatsEntry } from "../src/utils/StatsVisitor";
 import { Sampler } from "../src/Sampler";
 import { StatsStorage } from "../src/entries/StatsStorage";
 import { v4 as uuidv4 } from "uuid";
-import { createCodecStats, createDataChannelStats, createInboundRtpStats, createMediaSourceStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSenderStats, createTransportStats } from "./helpers/StatsGenerator";
+import { createCodecStats, createDataChannelStats, createIceCandidatePairStats, createInboundRtpStats, createMediaSourceStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSenderStats, createTransportStats } from "./helpers/StatsGenerator";
 import { W3CStats } from "@observertc/monitor-schemas";
 import { RtcReceiverCompoundStats, RtcSenderCompoundStats } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
 
@@ -225,35 +225,14 @@ describe("Sampler", () => {
             const clientSample = sampler.make()!;
             expect(clientSample.dataChannels![0]).toMatchObject(statsEntry[1]);
         });
-        it('When sender is provided Then fields from outboundTracks have the fields', async () => {
+        it('When iceCandidatePair is provided Then iceCandidatePairs are added', async () => {
             const statsStorage = makeStatsStorage();
             const sampler = makeIncrementalSampler(statsStorage);
-            const outbAudioStatsEntry: StatsEntry = [StatsType.outboundRtp, createOutboundRtpStats({
-                kind: "audio",
-            })];
-            const senderStatsEntry: StatsEntry = [StatsType.sender, createSenderStats()];
-            statsStorage.accept(COLLECTOR_ID, outbAudioStatsEntry);
-            statsStorage.accept(COLLECTOR_ID, senderStatsEntry);
+            const statsEntry: StatsEntry = [StatsType.candidatePair, createIceCandidatePairStats()];
+            statsStorage.accept(COLLECTOR_ID, statsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.outboundAudioTracks![0]).toMatchObject({
-                ended: (senderStatsEntry[1] as RtcSenderCompoundStats).ended
-            });
-        });
-        it('When receiver is provided Then fields from inboundTracks have the fields', async () => {
-            const statsStorage = makeStatsStorage();
-            const sampler = makeIncrementalSampler(statsStorage);
-            const inbAudioStatsEntry: StatsEntry = [StatsType.inboundRtp, createInboundRtpStats({
-                kind: "audio",
-            })];
-            const receiverStatsEntry: StatsEntry = [StatsType.receiver, createReceiverStats()];
-            statsStorage.accept(COLLECTOR_ID, inbAudioStatsEntry);
-            statsStorage.accept(COLLECTOR_ID, receiverStatsEntry);
-
-            const clientSample = sampler.make()!;
-            expect(clientSample.inboundAudioTracks![0]).toMatchObject({
-                ended: (receiverStatsEntry[1] as RtcReceiverCompoundStats).ended
-            });
+            expect(clientSample.iceCandidatePairs![0]).toMatchObject(statsEntry[1]);
         });
     });
 });

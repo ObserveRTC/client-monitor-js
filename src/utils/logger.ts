@@ -1,29 +1,18 @@
-import * as Logger from 'loglevel'
+import * as Logger from "loglevel";
 
 const initLogger = (prefix: string): Logger.Logger => {
     // eslint-disable-next-line no-underscore-dangle
-    const _logger = Logger.getLogger(prefix)
+    const _logger = Logger.getLogger(prefix);
     // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-    _logger.methodFactory = (
-        methodName,
-        logLevel,
-        loggerName
-    ) => {
+    _logger.methodFactory = (methodName, logLevel, loggerName) => {
         const originalFactory = Logger.methodFactory,
-            rawMethod = originalFactory(
-                methodName,
-                logLevel,
-                loggerName
-            )
+            rawMethod = originalFactory(methodName, logLevel, loggerName);
         // eslint-disable-next-line @typescript-eslint/explicit-function-return-type,func-names
         return function (...params) {
-            rawMethod(
-                `${prefix} ${new Date().toUTCString()}`,
-                ...params
-            )
-        }
-    }
-    return _logger
+            rawMethod(`${prefix} ${new Date().toUTCString()}`, ...params);
+        };
+    };
+    return _logger;
 };
 
 let actualLevel: Logger.LogLevelDesc = "info";
@@ -34,8 +23,7 @@ const createLogger = (moduleName: string) => {
     logger.setLevel(actualLevel);
     loggers.set(moduleName, logger);
     return logger;
-}
-
+};
 
 const setLevel = (level: Logger.LogLevelDesc) => {
     for (const logger of loggers.values()) {
@@ -46,10 +34,6 @@ const setLevel = (level: Logger.LogLevelDesc) => {
 
 const getLevel = () => {
     return actualLevel;
-}
+};
 
-export {
-    createLogger,
-    setLevel,
-    getLevel,
-}
+export { createLogger, setLevel, getLevel };

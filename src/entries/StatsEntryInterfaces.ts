@@ -1,6 +1,7 @@
 import { W3CStats as W3C } from "@observertc/monitor-schemas";
 
 export interface StatsEntryAbs {
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     appData: any;
     id: string;
     created: number;
@@ -11,7 +12,7 @@ export interface StatsEntryAbs {
 }
 
 /**
- * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods 
+ * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods
  * to navigate to its relations
  */
 export interface CodecEntry extends StatsEntryAbs {
@@ -33,13 +34,9 @@ interface RtpStreamEntry {
     getCodec(): CodecEntry | undefined;
 }
 
-interface ReceivedRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {
-    
-}
+interface ReceivedRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 
-interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {
-
-}
+interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 
 /**
  * Wraps the [RTCInboundRtpStreamStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcinboundrtpstreamstats) and provide methods
@@ -60,6 +57,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      * Navigate to the related Remote-outbound entry based on inbound ssrc
      */
     getRemoteOutboundRtp(): RemoteOutboundRtpEntry | undefined;
+    getAudioPlayout(): AudioPlayoutEntry | undefined;
 }
 
 /**
@@ -109,6 +107,8 @@ export interface MediaSourceEntry extends StatsEntryAbs {
 /**
  * Wraps the [CodecStats]() and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface ContributingSourceEntry extends StatsEntryAbs {
     stats: W3C.RtcRtpContributingSourceStats;
@@ -126,6 +126,8 @@ export interface DataChannelEntry extends StatsEntryAbs {
 /**
  * Wraps the [RTCRtpTransceiverStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcrtptransceiverstats) and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface TransceiverEntry extends StatsEntryAbs {
     stats: W3C.RtcRtpTransceiverStats;
@@ -134,20 +136,23 @@ export interface TransceiverEntry extends StatsEntryAbs {
 }
 
 /**
- * Wraps the [RTCVideoSenderStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcvideoreceiverstats) or 
+ * Wraps the [RTCVideoSenderStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcvideoreceiverstats) or
  * [RTCAudioSenderStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcaudiosenderstats) and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface SenderEntry extends StatsEntryAbs {
     stats: W3C.RtcSenderCompoundStats;
     getMediaSource(): MediaSourceEntry | undefined;
-    
 }
 
 /**
- * Wraps the [RTCVideoReceiverStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcvideosenderstats) or 
+ * Wraps the [RTCVideoReceiverStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcvideosenderstats) or
  * [RTCAudioReceiverStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcaudiohandlerstats) and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface ReceiverEntry extends StatsEntryAbs {
     stats: W3C.RtcReceiverCompoundStats;
@@ -156,6 +161,8 @@ export interface ReceiverEntry extends StatsEntryAbs {
 /**
  * Wraps the [RTCTransportStats](https://www.w3.org/TR/webrtc-stats/#transportstats-dict*) and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface TransportEntry extends StatsEntryAbs {
     stats: W3C.RtcTransportStats;
@@ -168,6 +175,8 @@ export interface TransportEntry extends StatsEntryAbs {
 /**
  * Wraps the [RTCSctpTransportStats](https://www.w3.org/TR/webrtc-stats/#sctptransportstats-dict*) and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface SctpTransportEntry extends StatsEntryAbs {
     stats: W3C.RtcSctpTransportStats;
@@ -206,6 +215,7 @@ export interface RemoteCandidateEntry extends StatsEntryAbs {
 /**
  * Wraps the [RTCCertificateStats](https://www.w3.org/TR/webrtc-stats/#certificatestats-dict*) and provide methods
  * to navigate to its relations
+ *
  */
 export interface CertificateEntry extends StatsEntryAbs {
     stats: W3C.RtcCertificateStats;
@@ -214,9 +224,15 @@ export interface CertificateEntry extends StatsEntryAbs {
 /**
  * Wraps the [RTCIceServerStats](https://www.w3.org/TR/webrtc-stats/#dom-rtciceserverstats) and provide methods
  * to navigate to its relations
+ *
+ * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface IceServerEntry extends StatsEntryAbs {
     stats: W3C.RtcIceServerStats;
+}
+
+export interface AudioPlayoutEntry extends StatsEntryAbs {
+    stats: W3C.RTCAudioPlayoutStats;
 }
 
 /**

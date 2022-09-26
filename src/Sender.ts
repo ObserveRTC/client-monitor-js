@@ -1,6 +1,6 @@
-import { Samples } from "@observertc/monitor-schemas"
+import { Samples } from "@observertc/monitor-schemas";
 import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
-import { Transport } from "./transports/Transport"
+import { Transport } from "./transports/Transport";
 import { WebsocketTransport, WebsocketTransportConfig } from "./transports/WebsocketTransport";
 import { createLogger } from "./utils/logger";
 import EventEmitter from "events";
@@ -9,31 +9,29 @@ const logger = createLogger("Sender");
 
 export type SenderConfig = {
     /**
-     * Configure the codec used to transport samples or receieve 
+     * Configure the codec used to transport samples or receieve
      * feedback from the server.
-     * 
+     *
      * Possible values: json, protobuf
-     * 
+     *
      * DEFAULT: json
-     * 
+     *
      */
     format?: CodecConfig;
     /**
      * Websocket configuration to transport the samples
      */
-    websocket?: WebsocketTransportConfig,
-}
+    websocket?: WebsocketTransportConfig;
+};
 
 const supplyDefaultConfig = () => {
-    const defaultConfig: SenderConfig = {
-    
-    };
+    const defaultConfig: SenderConfig = {};
     return defaultConfig;
-}
+};
 
 export type TransportConfig = {
     websocket?: WebsocketTransportConfig;
-}
+};
 function createTransport(config: TransportConfig): Transport {
     if (config.websocket) {
         const result = WebsocketTransport.create(config.websocket);
@@ -56,17 +54,17 @@ export class Sender {
     private _config: SenderConfig;
     private _codec: Codec<Samples, Uint8Array>;
     private _emitter = new EventEmitter();
-    private _transport: Transport
+    private _transport: Transport;
     private constructor(config: SenderConfig) {
         this._config = config;
         this._codec = createCodec<Samples>(this._config.format);
         this._transport = createTransport({
             websocket: config.websocket,
         })
-        .setFormat(this._config.format ?? "json")
-        .onReceived(message => {
-            logger.debug("Received message", message);
-        });
+            .setFormat(this._config.format ?? "json")
+            .onReceived((message) => {
+                logger.debug("Received message", message);
+            });
     }
 
     public close(): void {
@@ -75,7 +73,8 @@ export class Sender {
         }
         this._close();
     }
-    
+
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     private _close(err?: any): void {
         if (this._closed) {
             logger.warn(`Attempted to close the Sender twice`);
@@ -94,10 +93,7 @@ export class Sender {
         } else {
             this._emitter.emit(ON_CLOSED_EVENT_NAME);
         }
-        [
-            ON_CLOSED_EVENT_NAME,
-            ON_ERROR_EVENT_NAME
-        ].forEach(eventType => this._emitter.removeAllListeners(eventType));
+        [ON_CLOSED_EVENT_NAME, ON_ERROR_EVENT_NAME].forEach((eventType) => this._emitter.removeAllListeners(eventType));
     }
 
     public get closed() {
@@ -111,11 +107,11 @@ export class Sender {
         let message: Uint8Array | undefined = undefined;
         try {
             message = this._codec.encode(samples);
-        } catch(error) {
+        } catch (error) {
             logger.warn(`Encoding error`, error);
             return;
         }
-        
+
         // --- for observer decoding tests ---
         // const messageInBase64 = require("js-base64").Base64.fromUint8Array(message);
         // logger.info({
@@ -123,12 +119,12 @@ export class Sender {
         //     messageInBase64
         // });
 
-        this._transport.send(message).catch(err => {
+        this._transport.send(message).catch((err) => {
             logger.warn(err);
             if (!this._closed) {
                 this.close();
             }
-        })
+        });
     }
 
     /*eslint-disable @typescript-eslint/no-explicit-any */

@@ -9,7 +9,6 @@ export function makePrefixedObj(obj: any, prefix?: string, camelCase?: boolean):
     return result;
 }
 
-
 /*eslint-disable @typescript-eslint/no-explicit-any */
 export function makeForwardDeltaObj(left: any, right: any): any {
     if (left === undefined || right === undefined) {

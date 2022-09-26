@@ -6,12 +6,12 @@ const logger = createLogger(`Timer`);
 export type ActionType = "collect" | "sample" | "send";
 
 export type Action = {
-    type: ActionType,
-    process: () => void,
-    fixedDelayInMs: number,
-    maxInvoke?: number,
-    context?: string,
-}
+    type: ActionType;
+    process: () => void;
+    fixedDelayInMs: number;
+    maxInvoke?: number;
+    context?: string;
+};
 
 abstract class ActionVisitor {
     visit(action: Action) {
@@ -33,11 +33,10 @@ abstract class ActionVisitor {
 }
 
 type StoredAction = Action & {
-    id: string,
-    nextInvokeInMs: number,
-    invoked: number,
-}
-
+    id: string;
+    nextInvokeInMs: number;
+    invoked: number;
+};
 
 export class Timer {
     private _timer?: ReturnType<typeof setTimeout>;
@@ -52,10 +51,10 @@ export class Timer {
             id,
             nextInvokeInMs: now + action.fixedDelayInMs,
             invoked: 0,
-        }
+        };
         /*eslint-disable @typescript-eslint/no-this-alias */
         const timer = this;
-        const visitor = new class extends ActionVisitor {
+        const visitor = new (class extends ActionVisitor {
             /*eslint-disable @typescript-eslint/no-unused-vars*/
             visitCollectTypeAction(_action: Action): void {
                 timer._collecting.set(id, storedAction);
@@ -68,7 +67,7 @@ export class Timer {
             visitSendTypeAction(_action: Action): void {
                 timer._sending.set(id, storedAction);
             }
-        };
+        })();
         visitor.visit(storedAction);
         if (!this._timer) {
             this._timer = setTimeout(this._invoke.bind(this), 0);
@@ -91,9 +90,9 @@ export class Timer {
 
     public remove(id: string): void {
         let deleted = false;
-        this._iterateInOrder(map => {
+        this._iterateInOrder((map) => {
             deleted = deleted || map.delete(id);
-        })
+        });
         if (!deleted) {
             logger.warn(`Cannot remove a not existing action`);
         }
@@ -119,7 +118,7 @@ export class Timer {
         const now: number = Date.now();
         let next: number = now + 60000;
         let remainingActionsNum = 0;
-        this._iterateInOrder(map => {
+        this._iterateInOrder((map) => {
             const actions = Array.from(map.values());
             for (const action of actions) {
                 let stretchInMs = 0;
@@ -133,9 +132,9 @@ export class Timer {
                 }
                 try {
                     action.process();
-                /*eslint-disable @typescript-eslint/no-explicit-any*/
+                    /*eslint-disable @typescript-eslint/no-explicit-any*/
                 } catch (err: any) {
-                    logger.warn(`Error occurred while executing timer action (${action.context})`)
+                    logger.warn(`Error occurred while executing timer action (${action.context})`);
                 }
                 action.nextInvokeInMs = now + action.fixedDelayInMs + stretchInMs;
                 next = Math.min(next, action.nextInvokeInMs);
@@ -146,7 +145,7 @@ export class Timer {
                     ++remainingActionsNum;
                 }
             }
-        })
+        });
         if (remainingActionsNum < 1) {
             this._timer = undefined;
             return;
