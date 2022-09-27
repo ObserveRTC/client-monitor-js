@@ -1,5 +1,26 @@
 import { StatsEntry } from "../utils/StatsVisitor";
-import { ContributingSourceEntry, CodecEntry, InboundRtpEntry, OutboundRtpEntry, RemoteInboundRtpEntry, RemoteOutboundRtpEntry, DataChannelEntry, TransceiverEntry, SenderEntry, ReceiverEntry, TransportEntry, SctpTransportEntry, IceCandidatePairEntry, LocalCandidateEntry, RemoteCandidateEntry, CertificateEntry, IceServerEntry, MediaSourceEntry, PeerConnectionEntry } from "./StatsEntryInterfaces";
+import {
+    ContributingSourceEntry,
+    CodecEntry,
+    InboundRtpEntry,
+    OutboundRtpEntry,
+    RemoteInboundRtpEntry,
+    RemoteOutboundRtpEntry,
+    DataChannelEntry,
+    TransceiverEntry,
+    SenderEntry,
+    ReceiverEntry,
+    TransportEntry,
+    SctpTransportEntry,
+    IceCandidatePairEntry,
+    LocalCandidateEntry,
+    RemoteCandidateEntry,
+    CertificateEntry,
+    IceServerEntry,
+    MediaSourceEntry,
+    PeerConnectionEntry,
+    AudioPlayoutEntry,
+} from "./StatsEntryInterfaces";
 import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
 import { createLogger } from "../utils/logger";
 
@@ -45,39 +66,14 @@ export interface StatsReader {
     mediaSources(): IterableIterator<MediaSourceEntry>;
 
     /**
-     * Gives an iterator to read the collected contributing sources and navigate to its relations.
-     */
-    contributingSources(): IterableIterator<ContributingSourceEntry>;
-
-    /**
      * Gives an iterator to read the collected data channel stats and navigate to its relations.
      */
     dataChannels(): IterableIterator<DataChannelEntry>;
 
     /**
-     * Gives an iterator to read the collected transceiver stats and navigate to its relations.
-     */
-    transceivers(): IterableIterator<TransceiverEntry>;
-
-    /**
-     * Gives an iterator to read the collected media source stats and navigate to its relations.
-     */
-    senders(): IterableIterator<SenderEntry>;
-
-    /**
-     * Gives an iterator to read the collected receiver stats and navigate to its relations.
-     */
-    receivers(): IterableIterator<ReceiverEntry>;
-
-    /**
      * Gives an iterator to read the collected transport stats and navigate to its relations.
      */
     transports(): IterableIterator<TransportEntry>;
-
-    /**
-     * Gives an iterator to read the SCTP transport stats and navigate to its relations.
-     */
-    sctpTransports(): IterableIterator<SctpTransportEntry>;
 
     /**
      * Gives an iterator to read the collected ICE candidate pair stats and navigate to its relations.
@@ -95,14 +91,55 @@ export interface StatsReader {
     remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
 
     /**
+     * Gives an iterator to read the collected Audio Playout stats and navigate to its relations.
+     */
+    audioPlayouts(): IterableIterator<AudioPlayoutEntry>;
+
+    /**
+     * Gives an iterator to read the collected transceiver stats and navigate to its relations.
+     */
+    transceivers(): IterableIterator<TransceiverEntry>;
+
+    /**
+     * Gives an iterator to read the collected media source stats and navigate to its relations.
+     *
+     * The corresponded stats (sender stats) are deprecated and will be removed from browser
+     */
+    senders(): IterableIterator<SenderEntry>;
+
+    /**
+     * Gives an iterator to read the collected receiver stats and navigate to its relations.
+     *
+     * The corresponded stats (receiver stats) are deprecated and will be removed from browser
+     */
+    receivers(): IterableIterator<ReceiverEntry>;
+
+    /**
+     * Gives an iterator to read the SCTP transport stats and navigate to its relations.
+     *
+     * The corresponded stats (sctp-transport stats) are deprecated and will be removed from browser
+     */
+    sctpTransports(): IterableIterator<SctpTransportEntry>;
+
+    /**
      * Gives an iterator to read the collected certificate stats and navigate to its relations.
+     *
      */
     certificates(): IterableIterator<CertificateEntry>;
 
     /**
      * Gives an iterator to read the collected ICE server stats and navigate to its relations.
+     *
+     * The corresponded stats (ice-server stats) are deprecated and will be removed from browser
      */
     iceServers(): IterableIterator<IceServerEntry>;
+
+    /**
+     * Gives an iterator to read the collected contributing sources and navigate to its relations.
+     *
+     * The corresponded stats (csrc stats) are deprecated and will be removed from browser
+     */
+    contributingSources(): IterableIterator<ContributingSourceEntry>;
 }
 
 export interface StatsWriter {
@@ -205,6 +242,14 @@ export class StatsStorage implements StatsReader, StatsWriter {
     public *dataChannels(): Generator<DataChannelEntry, void, undefined> {
         for (const pcEntry of this._peerConnections.values()) {
             for (const entry of pcEntry.dataChannels()) {
+                yield entry;
+            }
+        }
+    }
+
+    public *audioPlayouts(): Generator<AudioPlayoutEntry, void, undefined> {
+        for (const pcEntry of this._peerConnections.values()) {
+            for (const entry of pcEntry.audioPlayouts()) {
                 yield entry;
             }
         }

@@ -18,26 +18,26 @@ export type ClientMonitorConfig = {
     /**
      * By setting it, the observer calls the added statsCollectors periodically
      * and pulls the stats.
-     * 
+     *
      * DEFAULT: undefined
      */
     collectingPeriodInMs?: number;
     /**
      * By setting it, the observer make samples periodically.
-     * 
+     *
      * DEFAULT: undefined
      */
     samplingPeriodInMs?: number;
     /**
      * By setting it, the observer sends the samples periodically.
-     * 
+     *
      * DEFAULT: undefined
      */
     sendingPeriodInMs?: number;
 
     /**
      * By setting it stats items and entries are deleted if they are not updated.
-     * 
+     *
      * DEFAULT: undefined
      */
     statsExpirationTimeInMs?: number;
@@ -49,29 +49,28 @@ export type ClientMonitorConfig = {
 
     /**
      * Sampling Component Related configurations
-     * 
+     *
      */
     sampler: SamplerConfig;
 
     /**
      * Sending Component Related congurations
-     * 
+     *
      * default: undefined, means no sample is sent
      */
     sender?: SenderConfig;
 
     /**
-     * If the sender component is configured, 
+     * If the sender component is configured,
      * accumulator sets the buffer between sampling and sending.
      */
-    accumulator?: AccumulatorConfig,
+    accumulator?: AccumulatorConfig;
 };
 
 /**
  * Client Integration of ObserveRTC to monitor WebRTC clients.
  */
 export interface ClientMonitor {
-
     /**
      * Information about operation system the observer is obtained.
      */
@@ -124,25 +123,25 @@ export interface ClientMonitor {
 
     /**
      * Adds a track relations to bind tracks to clients and SFUs
-     * 
-     * @param trackRelation 
+     *
+     * @param trackRelation
      */
     addTrackRelation(trackRelation: TrackRelation): void;
 
     /**
      * Removes a track relation assoviated with the given track id.
-     * 
-     * @param trackId 
+     *
+     * @param trackId
      */
     removeTrackRelation(trackId: string): void;
 
     /**
-     * Adds a [peer connection stats collector](https://www.w3.org/TR/webrtc-stats/#guidelines-for-getstats-results-caching-throttling) 
+     * Adds a [peer connection stats collector](https://www.w3.org/TR/webrtc-stats/#guidelines-for-getstats-results-caching-throttling)
      * to retrieve measurements.
-     * 
-     * Note that one stats collector is for one peer connection, and the id of the collector 
+     *
+     * Note that one stats collector is for one peer connection, and the id of the collector
      * is assigned as the sample peerConnectionId.
-     * 
+     *
      * @param collector properties of the collector (id, the promise based getStats() supplier and the optional label)
      * @throws Error if the id has already been added.
      */
@@ -150,34 +149,35 @@ export interface ClientMonitor {
 
     /**
      * removes a stats collector identified with id given when it was added.
-     * 
+     *
      * @param id the id of the collector intended to be removed
      */
     removeStatsCollector(id: string): void;
-    
+
     /**
      * Add the local part of the Signal Description Protocol.
      * The Monitor adds it to the next sample it creates and send it to the observer
-     * @param localSDP 
+     * @param localSDP
      */
     addLocalSDP(localSDP: string[]): void;
-    
+
     /**
-     * Adds media constrain used to obtain media. 
+     * Adds media constrain used to obtain media.
      * Typically this is the parameter given to MediaDevices.getUserMedia()
-     * 
+     *
      * constrain added to the observer are sampled by a sampler when a ClientSample is created.
-     * 
-     * @param constrain 
+     *
+     * @param constrain
      */
     addMediaConstraints(constrain: MediaStreamConstraints | MediaTrackConstraints): void;
 
     /**
      * Adds a user media error. Typically this is an error catched while obtaining getUserMedia from MediaDEevices
-     * 
+     *
      * The obtained user media error is added to the observer are sampled by a sampler when a ClientSample is created.
-     * @param message 
+     * @param message
      */
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     addUserMediaError(err: any): void;
 
     /**
@@ -185,7 +185,7 @@ export interface ClientMonitor {
      * This is typically extra information the application wants to obtain and send to the backend.
      * The added information is obtained by the sampler and ClientSample holds and send these information to the observer.
      * The observer will send forward this information together with which call it belonged to.
-     * 
+     *
      * @param stats arbitrary information intended to send
      */
     addExtensionStats(stats: ExtensionStat): void;
@@ -193,10 +193,10 @@ export interface ClientMonitor {
     /**
      * Set the media devices used by the webrtc app
      * Typically this is a list of [MediaDevices.getUserMedia()](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
-     * 
-     * The client monitor kepp track of the already added devices, removes the one not updated, 
+     *
+     * The client monitor kepp track of the already added devices, removes the one not updated,
      * and in the next sample sent to the observer only the new devices will be sent
-     * 
+     *
      */
     setMediaDevices(...devices: MediaDevice[]): void;
 
@@ -204,10 +204,10 @@ export interface ClientMonitor {
      * Sets the client displayed userId.
      *
      * This can change during the call, but the clientId must remains
-     * @param value 
+     * @param value
      */
     setUserId(value: string): void;
-    
+
     /**
      * Sets the identifier of the call the client participates.
      * If the value is given then sample will contain the provided value, and the observer will (try) to use it.
@@ -219,45 +219,45 @@ export interface ClientMonitor {
 
     /**
      * Sets the marker added to every sample created by this observer.
-     * Typically this is a delicate information for certain situation like develop, or debugging, where 
+     * Typically this is a delicate information for certain situation like develop, or debugging, where
      * the generated reports by the observer can be distinguished by the markers.
-     * 
-     * @param marker 
+     *
+     * @param marker
      */
     setMarker(marker: string): void;
 
     /**
      * Sets the collecting period in milliseconds. Thee Monitor calls its collect method
      * with a given time period
-     * 
+     *
      * NOTE: if a timer has previously set for collecting this set will overrides it
-     * @param collectingPeriodInMs 
+     * @param collectingPeriodInMs
      */
     setCollectingPeriod(collectingPeriodInMs: number): void;
 
     /**
      * Sets the sampling period in milliseconds. Thee Monitor calls its sample method
      * with a given time period
-     * 
+     *
      * NOTE: if a timer has previously set for sampling this set will overrides it
-     * @param samplingPeriodInMs 
+     * @param samplingPeriodInMs
      */
     setSamplingPeriod(samplingPeriodInMs: number): void;
 
     /**
      * Sets the sending period in milliseconds. Thee Monitor calls its send method
      * with a given time period
-     * 
+     *
      * NOTE: if a timer has previously set for sending this set will overrides it
-     * @param sendingPeriodInMs 
+     * @param sendingPeriodInMs
      */
     setSendingPeriod(sendingPeriodInMs: number): void;
 
     /**
      * Connect the client monitor to an observer
-     * 
+     *
      * NOTE: if the monitor is already connected then the open connection will be closed first.
-     * @param config 
+     * @param config
      */
     connect(config: SenderConfig): void;
 
@@ -272,10 +272,10 @@ export interface ClientMonitor {
     sample(): Promise<void>;
 
     /**
-     * Send Samples to an observer endpoint. [Samples](https://www.npmjs.com/package/@observertc/schemas#Samples) are 
+     * Send Samples to an observer endpoint. [Samples](https://www.npmjs.com/package/@observertc/schemas#Samples) are
      * accumulated ClientSamples (and/or SfuSamples) send to an endpoint for further analysis.
      */
-    send(): Promise<void>; 
+    send(): Promise<void>;
 
     /**
      * Close the ClientObserver, clear the storage, and statscollectors.
@@ -283,9 +283,9 @@ export interface ClientMonitor {
     close(): void;
 }
 
- /**
+/**
  * Sets the level of logging of the module
- * 
+ *
  * possible values are: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"
  */
 export function setLogLevel(level: LogLevelDesc) {
@@ -294,7 +294,7 @@ export function setLogLevel(level: LogLevelDesc) {
 
 /**
  * Create ClientObserver
- * 
+ *
  * @param config the given config to setup the observer
  */
 export function create(config?: ClientMonitorConfig): ClientMonitor {

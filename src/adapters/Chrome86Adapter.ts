@@ -7,7 +7,7 @@ const logger = createLogger("Chrome86Adapter");
 export class Chrome86Adapter implements Adapter {
     /*eslint-disable @typescript-eslint/no-explicit-any */
     public *adapt(rtcStats: any): Generator<StatsEntry | undefined, void, undefined> {
-        if (!rtcStats || !rtcStats.values || typeof rtcStats.values !== 'function') {
+        if (!rtcStats || !rtcStats.values || typeof rtcStats.values !== "function") {
             logger.warn(`not rtcStats object is provided to the adapter: `, rtcStats);
             return;
         }
@@ -22,7 +22,7 @@ export class Chrome86Adapter implements Adapter {
         for (let rtcStatValue of rtcStats.values()) {
             const rawType = rtcStatValue.type;
             if (!rtcStatValue) continue;
-            if (!rawType || typeof rawType !== 'string') continue;
+            if (!rawType || typeof rawType !== "string") continue;
             if (rawType === "track") continue;
             if (rawType === "inbound-rtp" || rawType === "outbound-rtp") {
                 if (rtcStatValue.trackId) {
@@ -31,7 +31,7 @@ export class Chrome86Adapter implements Adapter {
                         rtcStatValue = {
                             ...trackStats,
                             ...rtcStatValue,
-                        }
+                        };
                         if (rawType === "outbound-rtp") {
                             senders.set(trackStats.id, trackStats);
                         } else if (rawType === "inbound-rtp") {

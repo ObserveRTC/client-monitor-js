@@ -30,7 +30,7 @@ export class FacadedCodec<TIn = any, TOut = any> implements Codec<TIn, TOut> {
             decode(data: TNextOut): TIn {
                 const decodedValue: TOut = nextCodec.decode(data);
                 return actualCodec.decode(decodedValue);
-            }
-       })
+            },
+        });
     }
 }

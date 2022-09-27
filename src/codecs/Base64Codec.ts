@@ -1,16 +1,14 @@
 import { Codec } from "./Codec";
-import { Base64 } from 'js-base64';
+import { Base64 } from "js-base64";
 
 export type Base64CodecConfig = {
-    urlSafe?: boolean,
-}
+    urlSafe?: boolean;
+};
 
 const supplyDefaultConfig = () => {
-    const result: Base64CodecConfig = {
-
-    }
+    const result: Base64CodecConfig = {};
     return result;
-}
+};
 
 export class Base64Codec implements Codec<string, string> {
     public static create(config?: Base64CodecConfig): Base64Codec {
@@ -25,7 +23,7 @@ export class Base64Codec implements Codec<string, string> {
     }
 
     encode(data: string): string {
-        return Base64.encode(data, this._config.urlSafe)
+        return Base64.encode(data, this._config.urlSafe);
     }
 
     decode(data: string) {

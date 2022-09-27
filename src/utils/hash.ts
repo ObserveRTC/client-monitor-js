@@ -1,4 +1,4 @@
-import { sha256 } from 'js-sha256';
+import { sha256 } from "js-sha256";
 
 /*eslint-disable @typescript-eslint/no-explicit-any */
 export function hash(obj: any): string {
@@ -40,7 +40,7 @@ export function hash(obj: any): string {
             digester.update("undefined");
             break;
         case "symbol":
-            digester.update((obj as symbol).toString())
+            digester.update((obj as symbol).toString());
             break;
     }
     return digester.hex();

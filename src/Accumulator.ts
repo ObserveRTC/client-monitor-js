@@ -1,20 +1,20 @@
-import { ClientSample, Samples } from "@observertc/monitor-schemas"
+import { ClientSample, Samples } from "@observertc/monitor-schemas";
 
 export type AccumulatorConfig = {
     maxClientSamples?: number;
     forwardIfEmpty?: boolean;
-}
+};
 
 const supplyDefaultConfig = () => {
     const defaultConfig: AccumulatorConfig = {
         forwardIfEmpty: false,
     };
     return defaultConfig;
-}
+};
 
 export type SamplesListener = (samples?: Samples) => void;
 
-export class Accumulator  {
+export class Accumulator {
     public static create(config?: AccumulatorConfig) {
         const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         return new Accumulator(appliedConfig);
@@ -43,7 +43,7 @@ export class Accumulator  {
         }
         const buffer = this._buffer;
         this._buffer = [];
-        buffer.forEach(samples => {
+        buffer.forEach((samples) => {
             consumer(samples);
         });
     }
@@ -61,9 +61,9 @@ export class Accumulator  {
         }
     }
 
-    private _buffering() : void {
+    private _buffering(): void {
         if (this._empty) return;
-        this._buffer.push(this._samples)
+        this._buffer.push(this._samples);
         this._samples = {};
         this._empty = true;
     }

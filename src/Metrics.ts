@@ -51,7 +51,7 @@ export class Metrics implements MetricsReader, MetricsWriter {
     public get collectingTimeInMs(): number | undefined {
         return this._collectingTimeInMs;
     }
-    
+
     public get lastCollected(): number | undefined {
         return this._lastCollected;
     }
@@ -63,5 +63,4 @@ export class Metrics implements MetricsReader, MetricsWriter {
     public get lastSent(): number | undefined {
         return this._lastSent;
     }
-
 }

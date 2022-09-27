@@ -202,7 +202,7 @@ export function createSenderStats(data?: any) {
         type: W3C.StatsType.sender,
         timestamp: generateRandomTimestampInMs(),
         kind: generateFrom<RtcMediaKind>("audio", "video"),
-        ended: generateBoolean(),
+        // ended: generateBoolean(),
         trackIdentifier: DEFAULT_TRACK_ID,
         ...(data || {}),
     };
@@ -214,7 +214,7 @@ export function createReceiverStats(data?: any) {
         type: W3C.StatsType.receiver,
         timestamp: generateRandomTimestampInMs(),
         kind: generateFrom<RtcMediaKind>("audio", "video"),
-        ended: generateBoolean(),
+        // ended: generateBoolean(),
         trackIdentifier: DEFAULT_TRACK_ID,
         ...(data || {}),
     };

@@ -1,15 +1,11 @@
 import { Codec } from "./Codec";
 
 /*eslint-disable  @typescript-eslint/ban-types*/
-export type TextCodecConfig = {
-
-}
+export type TextCodecConfig = {};
 
 type TextCodecConstructorConfig = TextCodecConfig;
 
-const defaultConfig: TextCodecConstructorConfig = {
-
-}
+const defaultConfig: TextCodecConstructorConfig = {};
 
 export class TextCodec implements Codec<string, Uint8Array> {
     public static create(config?: TextCodecConstructorConfig): TextCodec {

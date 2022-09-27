@@ -1,4 +1,13 @@
-import { Browser, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, Samples, version as schemaVersion } from "@observertc/monitor-schemas"
+import {
+    Browser,
+    Engine,
+    ExtensionStat,
+    MediaDevice,
+    OperationSystem,
+    Platform,
+    Samples,
+    version as schemaVersion,
+} from "@observertc/monitor-schemas";
 import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
@@ -26,9 +35,9 @@ const supplyDefaultConfig = () => {
         // samplingPeriodInMs: 5000,
         // sendingPeriodInMs: 10000,
         sampler: supplySamplerDefaultConfig(),
-    }
+    };
     return defaultConfig;
-}
+};
 
 logger.debug("Version of the loaded schema:", schemaVersion);
 
@@ -75,13 +84,13 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.addBrowser(this._clientDevices.browser);
         this._sampler.addOs(this._clientDevices.os);
     }
-    
-    public get clientId() : string {
+
+    public get clientId(): string {
         /* eslint-disable @typescript-eslint/no-non-null-assertion */
         return this._sampler.clientId!;
     }
 
-    public get callId() : string | undefined {
+    public get callId(): string | undefined {
         return this._sampler.callId;
     }
 
@@ -185,6 +194,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.addMediaConstraints(message);
     }
 
+    /*eslint-disable @typescript-eslint/no-explicit-any */
     public addUserMediaError(err: any): void {
         const message = JSON.stringify(err);
         this._sampler.addUserMediaError(message);
@@ -208,12 +218,12 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public async collect(): Promise<void> {
         const started = Date.now();
-        await this._collector.collect().catch(err => {
+        await this._collector.collect().catch((err) => {
             logger.warn(`Error occurred while collecting`, err);
         });
         const elapsedInMs = Date.now() - started;
         this._metrics.setCollectingTimeInMs(elapsedInMs);
-        
+
         this._eventer.emitStatsCollected();
 
         if (this._config.statsExpirationTimeInMs) {
@@ -228,7 +238,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             const clientSample = this._sampler.make();
             if (!clientSample) return;
             if (this._sender) {
-                this._accumulator.addClientSample(clientSample);    
+                this._accumulator.addClientSample(clientSample);
             }
             this._eventer.emitSampleCreated(clientSample);
 
@@ -249,7 +259,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         const queue: Samples[] = [];
-        this._accumulator.drainTo(bufferedSamples => {
+        this._accumulator.drainTo((bufferedSamples) => {
             if (!bufferedSamples) return;
             queue.push(bufferedSamples);
         });
@@ -277,18 +287,20 @@ export class ClientMonitorImpl implements ClientMonitor {
             }
             if (this._sender) {
                 const queue: Samples[] = [];
-                this._accumulator.drainTo(bufferedSamples => {
+                this._accumulator.drainTo((bufferedSamples) => {
                     if (!bufferedSamples) return;
                     queue.push(bufferedSamples);
                 });
-                if (queue.length < 1) queue.push({
-                    controls: {
+                if (queue.length < 1)
+                    queue.push({
+                        controls: {
+                            close: true,
+                        },
+                    });
+                else
+                    queue[queue.length - 1].controls = {
                         close: true,
-                    }
-                });
-                else queue[queue.length - 1].controls = {
-                    close: true,
-                };
+                    };
                 for (const samples of queue) {
                     this._sender.send(samples);
                 }
@@ -318,7 +330,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             type: "collect",
             process: this.collect.bind(this),
             fixedDelayInMs: collectingPeriodInMs,
-            context: "Collect Stats"
+            context: "Collect Stats",
         });
     }
 
@@ -337,13 +349,13 @@ export class ClientMonitorImpl implements ClientMonitor {
             type: "sample",
             process: this.sample.bind(this),
             fixedDelayInMs: samplingPeriodInMs,
-            context: "Creating Sample"
+            context: "Creating Sample",
         });
     }
 
     public setSendingPeriod(sendingPeriodInMs: number): void {
         if (sendingPeriodInMs < 1) {
-            this._timer?.clear("send");    
+            this._timer?.clear("send");
             return;
         }
         if (!this._timer) {
@@ -356,7 +368,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             type: "send",
             process: this.send.bind(this),
             fixedDelayInMs: sendingPeriodInMs,
-            context: "Sending Samples"
+            context: "Sending Samples",
         });
     }
 
@@ -364,21 +376,20 @@ export class ClientMonitorImpl implements ClientMonitor {
         const collectorConfig = this._config.collectors;
         const createdAdapterConfig: AdapterConfig = {
             browserType: this._clientDevices.browser?.name,
-            browserVersion: this._clientDevices.browser?.version,       
+            browserVersion: this._clientDevices.browser?.version,
         };
-        const appliedCollectorsConfig: CollectorConfig = Object.assign({ adapter: createdAdapterConfig }, collectorConfig);
-        const result = Collector.builder()
-            .withConfig(appliedCollectorsConfig)
-            .build();
+        const appliedCollectorsConfig: CollectorConfig = Object.assign(
+            { adapter: createdAdapterConfig },
+            collectorConfig
+        );
+        const result = Collector.builder().withConfig(appliedCollectorsConfig).build();
         result.statsAcceptor = this._statsStorage;
         return result;
     }
 
     private _makeSampler(): Sampler {
         const samplerConfig = this._config.sampler;
-        const result = Sampler.builder()
-            .withConfig(samplerConfig)
-            .build();
+        const result = Sampler.builder().withConfig(samplerConfig).build();
         result.statsProvider = this._statsStorage;
         return result;
     }
@@ -395,10 +406,11 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sender = Sender.create(senderConfig)
             .onClosed(() => {
                 this._sender = undefined;
-            }).onError(() => {
+            })
+            .onError(() => {
                 this._eventer.emitSenderDisconnected();
                 this._sender = undefined;
-            })
+            });
     }
 
     private _createTimer(): Timer | undefined {
@@ -406,11 +418,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             logger.warn(`Attempted to create timer twice`);
             return;
         }
-        const {
-            collectingPeriodInMs,
-            samplingPeriodInMs,
-            sendingPeriodInMs,
-        } = this._config;
+        const { collectingPeriodInMs, samplingPeriodInMs, sendingPeriodInMs } = this._config;
         if (collectingPeriodInMs && 0 < collectingPeriodInMs) {
             this.setCollectingPeriod(collectingPeriodInMs);
         }
