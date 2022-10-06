@@ -31,10 +31,36 @@ export type StatsValue =
     | W3C.RtcIceServerStats;
 
 export type StatsEntry = [W3C.StatsType, StatsValue];
+export type Timestamps = {
+    maxTimestamp?: number,
+    minTimestamp?: number,
+}
 
 export abstract class StatsVisitor {
+    private _minTimestamp?: number;
+    private _maxTimestamp?: number;
+
+    public get minTimestamp(): number | undefined {
+        return this._minTimestamp;
+    }
+
+    public get maxTimestamp(): number | undefined {
+        return this._maxTimestamp;
+    }
+
+    public resetTimestamps() {
+        this._maxTimestamp = undefined;
+        this._minTimestamp = undefined;
+    }
+
     public visit(statsEntry: StatsEntry): void {
         const [statsType, statsValue] = statsEntry;
+        if (this._minTimestamp === undefined || statsValue.timestamp < this._minTimestamp) {
+            this._minTimestamp = statsValue.timestamp;
+        }
+        if (this._maxTimestamp === undefined || this._maxTimestamp < statsValue.timestamp) {
+            this._maxTimestamp = statsValue.timestamp;
+        }
         try {
             switch (statsType) {
                 case W3C.StatsType.codec:

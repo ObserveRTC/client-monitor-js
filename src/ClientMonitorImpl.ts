@@ -35,6 +35,8 @@ const supplyDefaultConfig = () => {
         // samplingPeriodInMs: 5000,
         // sendingPeriodInMs: 10000,
         sampler: supplySamplerDefaultConfig(),
+        
+        bufferingSamples: true,
     };
     return defaultConfig;
 };
@@ -184,8 +186,8 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
-    public setUserId(value: string): void {
-        if (!value) return;
+    public setUserId(value?: string | null): void {
+        if (value === undefined || value === null) return;
         this._sampler.setUserId(value);
     }
 
@@ -237,7 +239,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         try {
             const clientSample = this._sampler.make();
             if (!clientSample) return;
-            if (this._sender) {
+            if (this._sender || this._config.bufferingSamples) {
                 this._accumulator.addClientSample(clientSample);
             }
             this._eventer.emitSampleCreated(clientSample);

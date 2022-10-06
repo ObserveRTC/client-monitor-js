@@ -43,6 +43,13 @@ export type ClientMonitorConfig = {
     statsExpirationTimeInMs?: number;
 
     /**
+     * By setting this flag to true the samples are buffered even if no sender is available.
+     * This is useful if the sender is set later than the monitor is created, so no samples will be lost.
+     * 
+     */
+    bufferingSamples?: boolean;
+
+    /**
      * Collector Component related configurations
      */
     collectors?: CollectorConfig;
@@ -203,10 +210,10 @@ export interface ClientMonitor {
     /**
      * Sets the client displayed userId.
      *
-     * This can change during the call, but the clientId must remains
+     * This can change during the call, but the clientId must remain the same
      * @param value
      */
-    setUserId(value: string): void;
+    setUserId(value?: string | undefined): void;
 
     /**
      * Sets the identifier of the call the client participates.
