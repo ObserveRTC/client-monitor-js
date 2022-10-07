@@ -215,7 +215,6 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public async collect(): Promise<void> {
         const started = Date.now();
-        this._collectClientDevices();
         await this._collector.collect().catch((err) => {
             logger.warn(`Error occurred while collecting`, err);
         });
@@ -233,6 +232,7 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public async sample(): Promise<void> {
         try {
+            this._collectClientDevices();
             const clientSample = this._sampler.make();
             if (!clientSample) return;
             if (this._sender || this._config.bufferingSamples) {
@@ -373,9 +373,6 @@ export class ClientMonitorImpl implements ClientMonitor {
     }
 
     private _collectClientDevices(): void {
-        if (!this._clientDevices.changed) {
-            return;
-        }
         this._clientDevices.collect();
         if (this._clientDevices.isOsChanged) {
             this._sampler.addOs(this._clientDevices.os);
