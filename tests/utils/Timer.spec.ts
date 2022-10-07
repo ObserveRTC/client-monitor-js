@@ -16,7 +16,7 @@ describe("Timer", () => {
         timer.clear();
     });
     it('When two process are added Then both are invoked', async () => {
-        const timer = new Timer();
+        const timer = new Timer(100);
         let process1: number = 0;
         let process2: number = 0;
         timer.add({
@@ -35,17 +35,17 @@ describe("Timer", () => {
             setTimeout(resolve, 700);
         });
         timer.clear();
-        expect(process1).toBe(2);
-        expect(process2).toBe(1);
+        expect(process1).toBe(3);
+        expect(process2).toBe(2);
     });
 
-    it('When Timer is cleared Then it does not invoke processes', async () => {
-        const timer = new Timer();
+    it('When Timer is cleared Then it does invoke processes', async () => {
+        const timer = new Timer(100);
         let invoked: number = 0;
         timer.add({
             type: "collect",
             process: () => ++invoked,
-            fixedDelayInMs: 250,
+            fixedDelayInMs: 500,
         });
         await new Promise(resolve => {
             setTimeout(resolve, 350);
@@ -54,6 +54,26 @@ describe("Timer", () => {
         await new Promise(resolve => {
             setTimeout(resolve, 1050);
         });
+        expect(invoked).toBe(1);
+    });
+
+    it('When Timer is cleared and initial delay is added Then it does invoke processes after the initial delay', async () => {
+        const timer = new Timer(100);
+        let invoked: number = 0;
+        timer.add({
+            type: "collect",
+            process: () => ++invoked,
+            fixedDelayInMs: 500,
+            initialDelayInMs: 500
+        });
+        await new Promise(resolve => {
+            setTimeout(resolve, 250);
+        });
+        expect(invoked).toBe(0);
+        await new Promise(resolve => {
+            setTimeout(resolve, 500);
+        });
+        timer.clear();
         expect(invoked).toBe(1);
     });
 

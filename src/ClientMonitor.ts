@@ -36,6 +36,13 @@ export type ClientMonitorConfig = {
     sendingPeriodInMs?: number;
 
     /**
+     * Set the ticking time of the timer invokes processes for collecting, sampling, and sending.
+     * 
+     * DEFAULT: 1000
+     */
+    tickingTimeInMs?: number;
+
+    /**
      * By setting it stats items and entries are deleted if they are not updated.
      *
      * DEFAULT: undefined

@@ -1,10 +1,10 @@
 import * as Bowser from "bowser";
 import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas";
 import { createLogger } from "./utils/logger";
+import { hash } from "./utils/hash";
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientDevices");
-
 
 const UNKNOWN_OS: OperationSystem = {
     name: "Unkown",
@@ -28,12 +28,22 @@ const UNKNOWN_ENGINE: Engine = {
     version: undefined,
 };
 
+type Hashes = {
+    browser?: string,
+    platform?: string,
+    engine?: string,
+    os?: string,
+}
+
 export class ClientDevices {
     private _os: OperationSystem = UNKNOWN_OS;
     private _browser: Browser = UNKNOWN_BROWSER;
     private _platform: Platform = UNKNOWN_PLATFORM;
     private _engine: Engine = UNKNOWN_ENGINE;
     private _warned = false;
+
+    private _actualHashes?: Hashes;
+    private _pivotHashes?: Hashes;
 
     public constructor() {
        this.collect();
@@ -56,7 +66,12 @@ export class ClientDevices {
                 logger.warn(`Cannot collect media devices and navigator data, because an error occurred`, err);
             }
         }
-        
+        this._actualHashes = {
+            os: hash(this._os),
+            browser: hash(this._browser),
+            platform: hash(this._platform),
+            engine: hash(this._engine),
+        };
     }
 
     public get os(): OperationSystem {
@@ -73,5 +88,31 @@ export class ClientDevices {
 
     public get engine(): Engine {
         return this._engine;
+    }
+
+    public get isOsChanged(): boolean {
+        return this._pivotHashes?.os !== this._actualHashes?.os;
+    }
+
+    public get isBrowserChanged(): boolean {
+        return this._pivotHashes?.browser !== this._actualHashes?.browser;
+    }
+
+    public get isPlatformChanged(): boolean {
+        return this._pivotHashes?.platform !== this._actualHashes?.platform;
+    }
+
+    public get isEngineChanged(): boolean {
+        return this._pivotHashes?.engine !== this._actualHashes?.engine;
+    }
+
+    public get changed(): boolean {
+        return this.isOsChanged || this.isBrowserChanged || this.isPlatformChanged || this.isEngineChanged;
+    }
+
+    public pivot(): void {
+        this._pivotHashes = {
+            ...this._actualHashes,
+        }
     }
 }

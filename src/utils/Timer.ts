@@ -8,34 +8,17 @@ export type ActionType = "collect" | "sample" | "send";
 export type Action = {
     type: ActionType;
     process: () => void;
+    initialDelayInMs?: number;
     fixedDelayInMs: number;
     maxInvoke?: number;
     context?: string;
 };
 
-abstract class ActionVisitor {
-    visit(action: Action) {
-        switch (action.type) {
-            case "collect":
-                this.visitCollectTypeAction(action);
-                break;
-            case "sample":
-                this.visitSampleTypeAction(action);
-                break;
-            case "send":
-                this.visitSendTypeAction(action);
-                break;
-        }
-    }
-    abstract visitCollectTypeAction(action: Action): void;
-    abstract visitSampleTypeAction(action: Action): void;
-    abstract visitSendTypeAction(action: Action): void;
-}
-
 type StoredAction = Action & {
     id: string;
-    nextInvokeInMs: number;
-    invoked: number;
+    created: number;
+    invoked?: number;
+    invocations: number;
 };
 
 export class Timer {
@@ -43,32 +26,30 @@ export class Timer {
     private _collecting: Map<string, StoredAction> = new Map();
     private _sending: Map<string, StoredAction> = new Map();
     private _sampling: Map<string, StoredAction> = new Map();
+    private _tickInMs: number;
+    
+    public constructor(tickInMs?: number) {
+        if (tickInMs === undefined) {
+            this._tickInMs = 1000;
+        } else if (0 < tickInMs) {
+            this._tickInMs = tickInMs;
+        } else {
+            throw new Error(`Ticking time must be positive`);
+        }
+        
+    }
+
     public add(action: Action): string {
         const id: string = uuidv4();
         const now = Date.now();
         const storedAction: StoredAction = {
             ...action,
             id,
-            nextInvokeInMs: now + action.fixedDelayInMs,
-            invoked: 0,
+            created: now,
+            invocations: 0,
         };
+        this._getMap(storedAction.type).set(id, storedAction);
         /*eslint-disable @typescript-eslint/no-this-alias */
-        const timer = this;
-        const visitor = new (class extends ActionVisitor {
-            /*eslint-disable @typescript-eslint/no-unused-vars*/
-            visitCollectTypeAction(_action: Action): void {
-                timer._collecting.set(id, storedAction);
-            }
-            /*eslint-disable @typescript-eslint/no-unused-vars*/
-            visitSampleTypeAction(_action: Action): void {
-                timer._sampling.set(id, storedAction);
-            }
-            /*eslint-disable @typescript-eslint/no-unused-vars*/
-            visitSendTypeAction(_action: Action): void {
-                timer._sending.set(id, storedAction);
-            }
-        })();
-        visitor.visit(storedAction);
         if (!this._timer) {
             this._timer = setTimeout(this._invoke.bind(this), 0);
         }
@@ -76,87 +57,92 @@ export class Timer {
     }
 
     public hasListener(type: ActionType) {
+        return this._getMap(type).size;
+    }
+
+    private _getMap(type: ActionType): Map<string, StoredAction> {
         switch (type) {
             case "collect":
-                return 0 < this._collecting.size;
+                return this._collecting;
             case "sample":
-                return 0 < this._sampling.size;
+                return this._sampling;
             case "send":
-                return 0 < this._sending.size;
-            default:
-                return false;
+                return this._sending;
         }
     }
 
     public remove(id: string): void {
         let deleted = false;
-        this._iterateInOrder((map) => {
-            deleted = deleted || map.delete(id);
-        });
+        for (const action of Array.from(this._iterable())) {
+            if (action.id === id) {
+                deleted = this._getMap(action.type).delete(id);
+            }
+        }
         if (!deleted) {
             logger.warn(`Cannot remove a not existing action`);
         }
     }
 
     public clear(actionType?: ActionType): void {
-        if (this._timer) {
-            clearTimeout(this._timer);
-            this._timer = undefined;
-        }
-        if (!actionType || actionType === "collect") {
+        if (!actionType) {
             this._collecting.clear();
-        }
-        if (!actionType || actionType === "sample") {
             this._sampling.clear();
-        }
-        if (!actionType || actionType === "send") {
             this._sending.clear();
+        } else {
+            this._getMap(actionType).clear();
+        }
+        if (Array.from(this._iterable()).length < 1) {
+            if (this._timer) {
+                clearTimeout(this._timer);
+                this._timer = undefined;
+            }
         }
     }
 
     public _invoke(): void {
         const now: number = Date.now();
-        let next: number = now + 60000;
-        let remainingActionsNum = 0;
-        this._iterateInOrder((map) => {
-            const actions = Array.from(map.values());
-            for (const action of actions) {
-                let stretchInMs = 0;
-                const remainingTimeInMs = action.nextInvokeInMs - now;
-                if (10 < remainingTimeInMs) {
-                    next = Math.min(next, action.nextInvokeInMs);
-                    ++remainingActionsNum;
+        for (const storedAction of Array.from(this._iterable())) {
+            if (storedAction.initialDelayInMs) {
+                if (now <= storedAction.created + storedAction.initialDelayInMs) {
                     continue;
-                } else if (0 < remainingTimeInMs) {
-                    stretchInMs = remainingTimeInMs;
-                }
-                try {
-                    action.process();
-                    /*eslint-disable @typescript-eslint/no-explicit-any*/
-                } catch (err: any) {
-                    logger.warn(`Error occurred while executing timer action (${action.context})`);
-                }
-                action.nextInvokeInMs = now + action.fixedDelayInMs + stretchInMs;
-                next = Math.min(next, action.nextInvokeInMs);
-                ++action.invoked;
-                if (action.maxInvoke && action.maxInvoke <= action.invoked) {
-                    map.delete(action.id);
-                } else {
-                    ++remainingActionsNum;
                 }
             }
-        });
-        if (remainingActionsNum < 1) {
-            this._timer = undefined;
-            return;
+            if (storedAction.maxInvoke) {
+                if (storedAction.maxInvoke <= storedAction.invocations) {
+                    continue;
+                }
+            }
+            let doInvoke = false;
+            if (storedAction.invoked === undefined) {
+                doInvoke = true;
+            } else {
+                doInvoke = storedAction.invoked + storedAction.fixedDelayInMs <= now;
+            }
+            if (!doInvoke) {
+                continue;
+            }
+            
+            try {
+                storedAction.process();
+                /*eslint-disable @typescript-eslint/no-explicit-any*/
+            } catch (err: any) {
+                logger.warn(`Error occurred while executing timer action (${storedAction.context})`);
+            }
+            storedAction.invoked = now;
+            ++storedAction.invocations;
         }
-        const delayInMs = next - now;
-        this._timer = setTimeout(this._invoke.bind(this), delayInMs);
+        this._timer = setTimeout(this._invoke.bind(this), this._tickInMs);
     }
 
-    private _iterateInOrder(consumer: (map: Map<string, StoredAction>) => void) {
-        for (const map of [this._collecting, this._sampling, this._sending]) {
-            consumer(map);
+    private *_iterable(): IterableIterator<StoredAction> {
+        for (const process of Array.from(this._collecting.values())) {
+            yield process;
+        }
+        for (const process of Array.from(this._sampling.values())) {
+            yield process;
+        }
+        for (const process of Array.from(this._sending.values())) {
+            yield process;
         }
     }
 }
