@@ -36,6 +36,13 @@ export type ClientMonitorConfig = {
     sendingPeriodInMs?: number;
 
     /**
+     * Set the ticking time of the timer invokes processes for collecting, sampling, and sending.
+     * 
+     * DEFAULT: 1000
+     */
+    tickingTimeInMs?: number;
+
+    /**
      * By setting it stats items and entries are deleted if they are not updated.
      *
      * DEFAULT: undefined
@@ -203,10 +210,10 @@ export interface ClientMonitor {
     /**
      * Sets the client displayed userId.
      *
-     * This can change during the call, but the clientId must remains
+     * This can change during the call, but the clientId must remain the same
      * @param value
      */
-    setUserId(value: string): void;
+    setUserId(value?: string | undefined): void;
 
     /**
      * Sets the identifier of the call the client participates.

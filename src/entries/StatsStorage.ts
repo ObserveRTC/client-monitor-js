@@ -140,6 +140,11 @@ export interface StatsReader {
      * The corresponded stats (csrc stats) are deprecated and will be removed from browser
      */
     contributingSources(): IterableIterator<ContributingSourceEntry>;
+
+    /**
+     * The timestamp of the stats representing the collected rtc stats
+     */
+    readonly statsTimestamp: number | undefined;
 }
 
 export interface StatsWriter {
@@ -157,6 +162,17 @@ export class StatsStorage implements StatsReader, StatsWriter {
             return;
         }
         pcEntry.update(statsEntry);
+    }
+
+    public get statsTimestamp(): number | undefined {
+        let result: number | undefined;
+        for (const pc of Array.from(this._peerConnections.values())) {
+            if (pc.statsTimestamp === undefined) continue;
+            if (result === undefined || pc.statsTimestamp < result) {
+                result = pc.statsTimestamp;
+            }
+        }
+        return result;
     }
 
     public trim(expirationThresholdInMs: number) {

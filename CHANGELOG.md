@@ -1,3 +1,8 @@
+## 1.2.0
+ * Make timer tick based instead of calculated next delays
+ * Be able to collect samples if sender is not available
+ * add maxSamples config option to accumulator
+
 ## 1.1.0
  * Fix continous media source meta sending due to constantly changing `audioLevel`
  * add ice-candidate-pairs according to schema changes in 2.1.0^

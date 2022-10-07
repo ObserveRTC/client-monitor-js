@@ -1,4 +1,4 @@
-import { StatsEntry, StatsVisitor } from "../utils/StatsVisitor";
+import { StatsEntry, StatsVisitor, Timestamps } from "../utils/StatsVisitor";
 import {
     ContributingSourceEntry,
     CodecEntry,
@@ -70,6 +70,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
     public readonly created: number;
     private _config: PeerConnectionEntryConfig;
+    private _statsTimestamp?: number;
     private _updated: number;
     private _touched: number;
     private _stats?: W3C.RtcPeerConnectionStats;
@@ -218,6 +219,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         return this._touched;
     }
 
+    public get statsTimestamp(): number | undefined {
+        return this._statsTimestamp;
+    }
+
     public codecs(): IterableIterator<CodecEntry> {
         return this._codecs.values();
     }
@@ -232,6 +237,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         if (visitor.touched) {
             this._touched = visitor.created;
         }
+        this._statsTimestamp = visitor.maxTimestamp;
     }
 
     private _getEntryMaps(): Map<string, StatsEntryAbs>[] {
@@ -288,7 +294,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             super();
             this._pc = outer;
         }
-        visit(statsEntry: StatsEntry) {
+        visit(statsEntry: StatsEntry): void {
             super.visit(statsEntry);
             this.touched = true;
         }

@@ -64,6 +64,11 @@ export type SamplerConfig = {
      * DEFAULT: true
      */
     incrementalSampling?: boolean;
+
+    /**
+     * Indicate if the sampler should use the timestamp provided by the rtcstats (the minimum of the peer connection stats will be used as the timestamp of the sample)
+     */
+    useStatsSample?: boolean;
 };
 
 type SamplerConstructorConfig = SamplerConfig & {
@@ -83,6 +88,7 @@ export const supplyDefaultConfig = () => {
         roomId: uuidv4(),
         clientId: uuidv4(),
         incrementalSampling: true,
+        useStatsSample: true,
     };
     return defaultConfig;
 };
@@ -236,7 +242,6 @@ export class Sampler {
         if (this._closed) {
             throw new Error(`Cannot sample a closed Sampler`);
         }
-        const now = Date.now();
         const clientSample: ClientSample = {
             callId: this._config.callId,
             clientId: this._config.clientId,
@@ -255,7 +260,7 @@ export class Sampler {
             userMediaErrors: this._userMediaErrors,
             extensionStats: this._extensionStats,
             mediaDevices: this._mediaDevices,
-            timestamp: now,
+            timestamp: Date.now(),
         };
         ++this._sampleSeq;
         this._engine = undefined;
@@ -271,7 +276,13 @@ export class Sampler {
             logger.warn(`No StatsProvider has been assigned to Sampler`);
             this._sampled = clientSample.timestamp;
             return clientSample;
+        } else if (this._config.useStatsSample) {
+            const statsTimestamp = this._statsReader.statsTimestamp;
+            if (statsTimestamp) {
+                clientSample.timestamp = statsTimestamp;
+            }
         }
+        
         let inboundAudioTracks: InboundAudioTrack[] | undefined;
         let inboundVideoTracks: InboundVideoTrack[] | undefined;
         let outboundAudioTracks: OutboundAudioTrack[] | undefined;

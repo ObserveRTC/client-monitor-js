@@ -34,6 +34,7 @@ const supplyDefaultConfig = () => {
     const defaultConfig: ConstructorConfig = {
         // samplingPeriodInMs: 5000,
         // sendingPeriodInMs: 10000,
+        tickingTimeInMs: 1000,
         sampler: supplySamplerDefaultConfig(),
     };
     return defaultConfig;
@@ -78,11 +79,6 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler = this._makeSampler();
         this._createSender();
         this._createTimer();
-
-        this._sampler.addEngine(this._clientDevices.engine);
-        this._sampler.addPlatform(this._clientDevices.platform);
-        this._sampler.addBrowser(this._clientDevices.browser);
-        this._sampler.addOs(this._clientDevices.os);
     }
 
     public get clientId(): string {
@@ -184,8 +180,8 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
-    public setUserId(value: string): void {
-        if (!value) return;
+    public setUserId(value?: string | null): void {
+        if (value === undefined || value === null) return;
         this._sampler.setUserId(value);
     }
 
@@ -235,11 +231,10 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public async sample(): Promise<void> {
         try {
+            this._collectClientDevices();
             const clientSample = this._sampler.make();
             if (!clientSample) return;
-            if (this._sender) {
-                this._accumulator.addClientSample(clientSample);
-            }
+            this._accumulator.addClientSample(clientSample);
             this._eventer.emitSampleCreated(clientSample);
 
             const now = Date.now();
@@ -321,7 +316,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         if (!this._timer) {
-            this._timer = new Timer();
+            this._timer = new Timer(this._config.tickingTimeInMs);
         }
         if (this._timer.hasListener("collect")) {
             this._timer.clear("collect");
@@ -340,7 +335,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         if (!this._timer) {
-            this._timer = new Timer();
+            this._timer = new Timer(this._config.tickingTimeInMs);
         }
         if (this._timer.hasListener("sample")) {
             this._timer.clear("sample");
@@ -349,6 +344,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             type: "sample",
             process: this.sample.bind(this),
             fixedDelayInMs: samplingPeriodInMs,
+            initialDelayInMs: samplingPeriodInMs,
             context: "Creating Sample",
         });
     }
@@ -359,7 +355,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         if (!this._timer) {
-            this._timer = new Timer();
+            this._timer = new Timer(this._config.tickingTimeInMs);
         }
         if (this._timer.hasListener("send")) {
             this._timer.clear("send");
@@ -368,8 +364,26 @@ export class ClientMonitorImpl implements ClientMonitor {
             type: "send",
             process: this.send.bind(this),
             fixedDelayInMs: sendingPeriodInMs,
+            initialDelayInMs: sendingPeriodInMs,
             context: "Sending Samples",
         });
+    }
+
+    private _collectClientDevices(): void {
+        this._clientDevices.collect();
+        if (this._clientDevices.isOsChanged) {
+            this._sampler.addOs(this._clientDevices.os);
+        }
+        if (this._clientDevices.isBrowserChanged) {
+            this._sampler.addBrowser(this._clientDevices.browser);
+        }
+        if (this._clientDevices.isPlatformChanged) {
+            this._sampler.addPlatform(this._clientDevices.platform);
+        }
+        if (this._clientDevices.isEngineChanged) {
+            this._sampler.addEngine(this._clientDevices.engine);
+        }
+        this._clientDevices.pivot();
     }
 
     private _makeCollector(): Collector {

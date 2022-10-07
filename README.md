@@ -571,6 +571,14 @@ const config = {
     statsExpirationTimeInMs: 60000,
 
     /**
+     * By setting this flag to true the samples are buffered even if no sender is available.
+     * This is useful if the sender is set later than the monitor is created, so no samples will be lost.
+     * 
+     * DEFAULT: true
+     */
+    bufferingSamples: true;
+
+    /**
      * Collector Component related configurations
      * 
      * DEFAULT: configured by the monitor
@@ -640,6 +648,13 @@ const config = {
          * DEFAULT: true
          */
         incrementalSampling: true,
+
+        /**
+        * Indicate if the sampler should use the timestamp provided by the rtcstats (the minimum of the peer connection stats will be used as the timestamp of the sample)
+        * 
+        * DEFAULT: true
+        */
+        useStatsSample: true,
     },
     /**
      * Configure the sender component.
@@ -673,6 +688,34 @@ const config = {
              */
             maxRetries: 1,
         }
+    },
+
+    /**
+     * Configuration for the samples accumulator to balance the transfer the size of the Samples 
+     * prepared to be sent to the server
+     * 
+     */
+    accumulator: {
+        /**
+         * Sets the maximum number of client sample allowed to be in one Sample
+         * 
+         * DEFAULT: 100
+         */
+        maxClientSamples: 100,
+
+        /**
+         * Sets the maximum number of Samples the accumulator can hold
+         * 
+         * DEFAULT: 10
+         */
+        maxSamples: 10,
+
+        /**
+         * Forward a Sample to the server even if it is empty
+         * 
+         * DEFAULT: false
+         */
+        forwardIfEmpty: false
     }
 };
 ```
