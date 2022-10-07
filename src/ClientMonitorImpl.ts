@@ -35,7 +35,6 @@ const supplyDefaultConfig = () => {
         // samplingPeriodInMs: 5000,
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
-        bufferingSamples: true,
         sampler: supplySamplerDefaultConfig(),
     };
     return defaultConfig;
@@ -235,9 +234,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             this._collectClientDevices();
             const clientSample = this._sampler.make();
             if (!clientSample) return;
-            if (this._sender || this._config.bufferingSamples) {
-                this._accumulator.addClientSample(clientSample);
-            }
+            this._accumulator.addClientSample(clientSample);
             this._eventer.emitSampleCreated(clientSample);
 
             const now = Date.now();

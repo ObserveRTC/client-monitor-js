@@ -1,12 +1,35 @@
 import { ClientSample, Samples } from "@observertc/monitor-schemas";
+import { createLogger } from "./utils/logger";
+
+const logger = createLogger("Accumulator");
 
 export type AccumulatorConfig = {
+    /**
+     * Sets the maximum number of client sample allowed to be in one Sample
+     * 
+     * DEFAULT: 100
+     */
     maxClientSamples?: number;
+
+    /**
+     * Sets the maximum number of Samples the accumulator can hold
+     * 
+     * DEFAULT: 10
+     */
+    maxSamples?: number;
+
+    /**
+     * Forward a Sample to the server even if it is empty
+     * 
+     * DEFAULT: false
+     */
     forwardIfEmpty?: boolean;
 };
 
 const supplyDefaultConfig = () => {
     const defaultConfig: AccumulatorConfig = {
+        maxClientSamples: 100,
+        maxSamples: 10,
         forwardIfEmpty: false,
     };
     return defaultConfig;
@@ -56,7 +79,7 @@ export class Accumulator {
         }
         clientSamples.push(clientSample);
         this._empty = false;
-        if (this._config.maxClientSamples && clientSamples.length <= this._config.maxClientSamples) {
+        if (this._config.maxClientSamples && this._config.maxClientSamples <= clientSamples.length) {
             this._buffering();
         }
     }
@@ -64,6 +87,12 @@ export class Accumulator {
     private _buffering(): void {
         if (this._empty) return;
         this._buffer.push(this._samples);
+        while (this._config.maxSamples && this._config.maxSamples < this._buffer.length) {
+            const removedSamples = this._buffer.shift();
+            logger.warn(`Sample is removed from the accumulator buffer due to its limitation: 
+                (maxSamples: ${this._config.maxSamples}, maxClientSample in one sample: ${this._config.maxClientSamples})`, removedSamples
+            );
+        }
         this._samples = {};
         this._empty = true;
     }

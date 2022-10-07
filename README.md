@@ -688,6 +688,34 @@ const config = {
              */
             maxRetries: 1,
         }
+    },
+
+    /**
+     * Configuration for the samples accumulator to balance the transfer the size of the Samples 
+     * prepared to be sent to the server
+     * 
+     */
+    accumulator: {
+        /**
+         * Sets the maximum number of client sample allowed to be in one Sample
+         * 
+         * DEFAULT: 100
+         */
+        maxClientSamples: 100,
+
+        /**
+         * Sets the maximum number of Samples the accumulator can hold
+         * 
+         * DEFAULT: 10
+         */
+        maxSamples: 10,
+
+        /**
+         * Forward a Sample to the server even if it is empty
+         * 
+         * DEFAULT: false
+         */
+        forwardIfEmpty: false
     }
 };
 ```

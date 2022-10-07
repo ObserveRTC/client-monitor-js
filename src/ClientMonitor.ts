@@ -50,13 +50,6 @@ export type ClientMonitorConfig = {
     statsExpirationTimeInMs?: number;
 
     /**
-     * By setting this flag to true the samples are buffered even if no sender is available.
-     * This is useful if the sender is set later than the monitor is created, so no samples will be lost.
-     * 
-     */
-    bufferingSamples?: boolean;
-
-    /**
      * Collector Component related configurations
      */
     collectors?: CollectorConfig;
