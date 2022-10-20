@@ -393,8 +393,8 @@ export class Sampler {
             const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats || {};
             const mediaSource = outboundRtp.getMediaSource();
             const trackId = outboundRtp.getTrackId();
-            if (!trackId || !isValidUuid(trackId)) {
-                logger.debug(`TrackId ${trackId} either not a uuid or does not exist`);
+            if (!trackId) {
+                logger.debug(`TrackId ${trackId} was not provided`);
                 continue;
             }
             if (outboundRtp.stats.kind === "audio") {
@@ -453,8 +453,8 @@ export class Sampler {
                 continue;
             }
             const trackId = inboundRtp.getTrackId();
-            if (!trackId || !isValidUuid(trackId)) {
-                logger.debug(`TrackId ${trackId} either not a uuid or not exists`);
+            if (!trackId) {
+                logger.debug(`TrackId ${trackId} was not provided`);
                 continue;
             }
             const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
