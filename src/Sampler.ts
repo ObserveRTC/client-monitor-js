@@ -166,8 +166,16 @@ export class Sampler {
     }
 
     public setCallId(value: string): void {
-        checkUuid(value);
+        if (!isValidUuid(value)) {
+            logger.warn(`The given callId ${value} is not a valid UUID`);
+            return;
+        }
+        if (this._config.callId && this._config.callId !== value) {
+            logger.warn(`Cannot override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`);
+            return;
+        }
         this._config.callId = value;
+        logger.debug(`CallId is set to ${value}`);
     }
 
     public setUserId(value: string) {

@@ -131,7 +131,10 @@ export class ClientMonitorImpl implements ClientMonitor {
     }
 
     public setCallId(value: string) {
-        validators.checkUuid(value);
+        if (!validators.isValidUuid(value)) {
+            logger.warn(`CallId (${value}) must be a valid UUID`);
+            return;
+        }
         this._sampler.setCallId(value);
     }
 
