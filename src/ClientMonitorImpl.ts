@@ -1,5 +1,6 @@
 import {
     Browser,
+    CustomCallEvent,
     Engine,
     ExtensionStat,
     MediaDevice,
@@ -24,6 +25,8 @@ import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
 import EventEmitter from "events";
+import { MediaosupDeviceSurrogate } from "./integrations/MediasoupIntegration";
+import { Integrations } from "./integrations/Integrations";
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientMonitor");
@@ -54,6 +57,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         logger.debug("Created", appliedConfig);
         return result;
     }
+
     private _closed = false;
     private _flags = new Set<string>();
     private _config: ConstructorConfig;
@@ -67,6 +71,8 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _statsStorage: StatsStorage;
     private _accumulator: Accumulator;
     private _metrics: Metrics;
+    private _integrations: Integrations;
+
     private constructor(config: ConstructorConfig) {
         this._config = config;
         this._clientDevices = new ClientDevices();
@@ -77,13 +83,14 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._eventer = EventsRelayer.create();
         this._collector = this._makeCollector();
         this._sampler = this._makeSampler();
+        this._integrations = new Integrations(this);
         this._createSender();
         this._createTimer();
     }
 
-    public get clientId(): string {
+    public get clientId(): string | undefined{
         /* eslint-disable @typescript-eslint/no-non-null-assertion */
-        return this._sampler.clientId!;
+        return this._sampler.clientId;
     }
 
     public get callId(): string | undefined {
@@ -128,6 +135,22 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public get storage(): StatsReader {
         return this._statsStorage;
+    }
+
+    public get integrations(): Integrations {
+        return this._integrations;
+    }
+
+    setRoomId(value: string): void {
+        this._sampler.setRoomId(value);
+    }
+
+    setClientId(value: string): void {
+        if (!validators.isValidUuid(value)) {
+            logger.warn(`ClientId (${value}) must be a valid UUID`);
+            return;
+        }
+        this._sampler.setCallId(value);
     }
 
     public setCallId(value: string) {
@@ -205,6 +228,10 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         this._sampler.addExtensionStats(stats);
+    }
+
+    public addCustomCallEvent(event: CustomCallEvent) {
+        this._sampler.addCustomCallEvent(event);
     }
 
     public addLocalSDP(localSDP: string[]): void {

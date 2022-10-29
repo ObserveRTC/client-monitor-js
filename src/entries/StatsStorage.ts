@@ -20,6 +20,8 @@ import {
     MediaSourceEntry,
     PeerConnectionEntry,
     AudioPlayoutEntry,
+    // InboundTrackEntry,
+    // OutboundTrackEntry,
 } from "./StatsEntryInterfaces";
 import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
 import { createLogger } from "../utils/logger";
@@ -30,6 +32,26 @@ const logger = createLogger("StatsStorage");
  * Interface to read the collected stats.
  */
 export interface StatsReader {
+
+    // /**
+    //  * Gets the PeerConnection related stats
+    //  * @param peerConnectionId the id of the peer connection added to the stats collector
+    //  */
+    // getInboundTrackStats(trackId: string): InboundTrackEntry | undefined;
+
+    // /**
+    //  * Gets the PeerConnection related stats
+    //  * @param peerConnectionId the id of the peer connection added to the stats collector
+    //  */
+    // getOutboundTrackStats(trackId: string): OutboundTrackEntry | undefined;
+
+    // /**
+    //  * Gets the PeerConnection related stats
+    //  * @param peerConnectionId the id of the peer connection added to the stats collector
+    //  */
+    // getPeerConnectionStats(peerConnectionId: string): PeerConnectionEntry | undefined;
+    
+
     /**
      * Gives an iterator to read the collected peer connection stats and navigate to its relations.
      */
@@ -155,6 +177,9 @@ export interface StatsWriter {
 
 export class StatsStorage implements StatsReader, StatsWriter {
     private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
+    // private _inboundTrackRtps: Map<string, InboundRtpEntry[]> = new Map();
+    // private _outboundTrackRtps: Map<string, OutboundRtpEntry> = new Map();
+
     public accept(collectorId: string, statsEntry: StatsEntry): void {
         const pcEntry = this._peerConnections.get(collectorId);
         if (!pcEntry) {
@@ -162,6 +187,9 @@ export class StatsStorage implements StatsReader, StatsWriter {
             return;
         }
         pcEntry.update(statsEntry);
+        // for (const inboundRtp of this.inboundRtps()) {
+        //     const trackId = inboundRtp.getTrackId();
+        // }
     }
 
     public get statsTimestamp(): number | undefined {

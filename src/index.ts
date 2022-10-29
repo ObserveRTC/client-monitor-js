@@ -1,6 +1,6 @@
 export type { PcStatsCollector } from "./Collector";
 export type { StatsReader } from "./entries/StatsStorage";
-export * as ClientMonitor from "./ClientMonitor";
+export * as ObserveRTC from "./ClientMonitor";
 export type { MediaDevices } from "./utils/MediaDevices";
 export type { TrackRelation } from "./Sampler";
 export type {

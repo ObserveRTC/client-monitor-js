@@ -1,10 +1,11 @@
-import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat } from "@observertc/monitor-schemas";
+import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat, CustomCallEvent } from "@observertc/monitor-schemas";
 import { LogLevelDesc } from "loglevel";
 import { AccumulatorConfig } from "./Accumulator";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";
 import { CollectorConfig, PcStatsCollector } from "./Collector";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
+import { Integrations } from "./integrations/Integrations";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
 import { SenderConfig } from "./Sender";
@@ -129,6 +130,11 @@ export interface ClientMonitor {
     readonly events: EventsRegister;
 
     /**
+     * Accessing to built-in integrations for different providers
+     */
+    readonly integrations: Integrations;
+
+    /**
      * Adds a track relations to bind tracks to clients and SFUs
      *
      * @param trackRelation
@@ -188,6 +194,12 @@ export interface ClientMonitor {
     addUserMediaError(err: any): void;
 
     /**
+     * Adds custom call event will be sent along with the sample to the observer. The 
+     * added event will be reported as CallEvent by the observer.
+     */
+    addCustomCallEvent(event: CustomCallEvent): void;
+
+    /**
      * Adds an application provided custom payload object to the observer.
      * This is typically extra information the application wants to obtain and send to the backend.
      * The added information is obtained by the sampler and ClientSample holds and send these information to the observer.
@@ -214,6 +226,20 @@ export interface ClientMonitor {
      * @param value
      */
     setUserId(value?: string | undefined): void;
+
+    /**
+     * Sets the roomId for samples. If the roomId is set by configuration, this cause a warning, but no effect.
+     * If the roomId was not set before the first sample is created, the Sampler assign a random UUID value.
+     * @param value the id of the room matches among participants in the same service
+     */
+    setRoomId(value?: string): void;
+
+    /**
+     * Sets the clientId for samples. If the clientId is set by configuration, this cause no effect.
+     * If the clientId was not set before the first sample is created, the Sampler assign a random UUID value.
+     * @param value the identifier of the client, must be a valid UUID
+     */
+    setClientId(value?: string): void;
 
     /**
      * Sets the identifier of the call the client participates.

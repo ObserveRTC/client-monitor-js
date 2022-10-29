@@ -1,9 +1,9 @@
 import { EventEmitter } from "events";
 import { ClientSample } from "@observertc/monitor-schemas";
-type StatsCollectedListener = () => void;
-type SampleCreatedListener = (clientSample: ClientSample) => void;
-type SampleSentListener = () => void;
-type SenderDisconnectedListener = () => void;
+export type StatsCollectedListener = () => void;
+export type SampleCreatedListener = (clientSample: ClientSample) => void;
+export type SampleSentListener = () => void;
+export type SenderDisconnectedListener = () => void;
 
 export interface EventsRegister {
     onStatsCollected(listener: StatsCollectedListener): EventsRegister;
