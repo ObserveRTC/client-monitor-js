@@ -164,17 +164,15 @@ export class MediasoupIntegration implements Integration {
             };
             const dataProducerListener: MediasoupTransportObserverListener = (data) => {
                 const dataProducer = data as MediasoupDataProducerSurrogate;
-                // @typescript-eslint/no-empty-function
-                dataProducer.observer.once("close", () => {
+                // dataProducer.observer.once("close", () => {
 
-                });
+                // });
             };
             const dataConsumerListener: MediasoupTransportObserverListener = (data) => {
                 const dataConsumer = data as MediasoupDataConsumerSurrogate;
-                // @typescript-eslint/no-empty-function
-                dataConsumer.observer.once("close", () => {
+                // dataConsumer.observer.once("close", () => {
                     
-                });
+                // });
             };
 
             transport.observer.on("newproducer", producerListener);
