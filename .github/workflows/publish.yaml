@@ -34,8 +34,7 @@ jobs:
       - name: Make snapshot version
         if: steps.job_context.outputs.branch != 'master'
         run: |
-          cat package.json
-          npm version ${{ steps.job_context.outputs.version }}-SNAPSHOT.${{ github.sha }}
+          npm version ${{ steps.job_context.outputs.version }}-SNAPSHOT.${{ github.sha }} --git-tag-version false
 
       - uses: JS-DevTools/npm-publish@v1
         with:
