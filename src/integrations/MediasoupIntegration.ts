@@ -76,10 +76,10 @@ export class MediasoupIntegration implements Integration {
     readonly type = "mediasoup";
     readonly id = uuidv4();
     readonly version: string;
+    readonly clientMonitor: ClientMonitor;
 
     private _closed = false;
     private _device: MediaosupDeviceSurrogate;
-    private _clientMonitor: ClientMonitor;
     private _trackIds = new Set<string>();
     private _statsCollectedListener: StatsCollectedListener;
     private _producers = new Map<string, MediasoupProducerSurrogate>();
@@ -90,14 +90,14 @@ export class MediasoupIntegration implements Integration {
 
     public constructor(clientMontor: ClientMonitor, device: MediaosupDeviceSurrogate, version?: string) {
         this.version = version ?? "undefined";
-        this._clientMonitor = clientMontor;
+        this.clientMonitor = clientMontor;
         this._device = device;
         this._device.observer.on("", transport => {
             const producerListener: MediasoupTransportObserverListener = (data) => {
                 const producer = data as MediasoupProducerSurrogate;
 
                 const pausedListener = () => {
-                    this._clientMonitor.addCustomCallEvent({
+                    this.clientMonitor.addCustomCallEvent({
                         name: "MEDIA_TRACK_PAUSED",
                         mediaTrackId: producer.track.id,
                         timestamp: Date.now(),
@@ -106,7 +106,7 @@ export class MediasoupIntegration implements Integration {
                 producer.observer.on("pause", pausedListener);
 
                 const resumedListener = () => {
-                    this._clientMonitor.addCustomCallEvent({
+                    this.clientMonitor.addCustomCallEvent({
                         name: "MEDIA_TRACK_PAUSED",
                         mediaTrackId: producer.track.id,
                         timestamp: Date.now(),
@@ -131,7 +131,7 @@ export class MediasoupIntegration implements Integration {
                 const consumer = data as MediasoupConsumerSurrogate;
 
                 const pausedListener = () => {
-                    this._clientMonitor.addCustomCallEvent({
+                    this.clientMonitor.addCustomCallEvent({
                         name: "MEDIA_TRACK_PAUSED",
                         mediaTrackId: consumer.track.id,
                         timestamp: Date.now(),
@@ -140,7 +140,7 @@ export class MediasoupIntegration implements Integration {
                 consumer.observer.on("pause", pausedListener);
 
                 const resumedListener = () => {
-                    this._clientMonitor.addCustomCallEvent({
+                    this.clientMonitor.addCustomCallEvent({
                         name: "MEDIA_TRACK_RESUMED",
                         mediaTrackId: consumer.track.id,
                         timestamp: Date.now(),
@@ -162,25 +162,25 @@ export class MediasoupIntegration implements Integration {
                     this._consumers.delete(consumer.id);
                 });
             };
-            const dataProducerListener: MediasoupTransportObserverListener = (data) => {
-                const dataProducer = data as MediasoupDataProducerSurrogate;
-                // dataProducer.observer.once("close", () => {
+            // const dataProducerListener: MediasoupTransportObserverListener = (data) => {
+            //     const dataProducer = data as MediasoupDataProducerSurrogate;
+            //     dataProducer.observer.once("close", () => {
 
-                // });
-            };
-            const dataConsumerListener: MediasoupTransportObserverListener = (data) => {
-                const dataConsumer = data as MediasoupDataConsumerSurrogate;
-                // dataConsumer.observer.once("close", () => {
+            //     });
+            // };
+            // const dataConsumerListener: MediasoupTransportObserverListener = (data) => {
+            //     const dataConsumer = data as MediasoupDataConsumerSurrogate;
+            //     dataConsumer.observer.once("close", () => {
                     
-                // });
-            };
+            //     });
+            // };
 
             transport.observer.on("newproducer", producerListener);
             transport.observer.on("newconsumer", consumerListener);
-            transport.observer.on("newdataproducer", dataProducerListener);
-            transport.observer.on("newdataconsumer", dataConsumerListener);
+            // transport.observer.on("newdataproducer", dataProducerListener);
+            // transport.observer.on("newdataconsumer", dataConsumerListener);
             const peerConnectionId = uuidv4();
-            this._clientMonitor.addStatsCollector({
+            this.clientMonitor.addStatsCollector({
                 id: peerConnectionId,
                 label: transport.direction,
                 getStats: async () => {
@@ -188,22 +188,22 @@ export class MediasoupIntegration implements Integration {
                 }
             });
             transport.observer.once("close", () => {
-                this._clientMonitor.removeStatsCollector(peerConnectionId);
+                this.clientMonitor.removeStatsCollector(peerConnectionId);
                 transport.observer.removeListener("newproducer", producerListener);
                 transport.observer.removeListener("newconsumer", consumerListener);
-                transport.observer.removeListener("newdataproducer", dataProducerListener);
-                transport.observer.removeListener("newdataconsumer", dataConsumerListener);
+                // transport.observer.removeListener("newdataproducer", dataProducerListener);
+                // transport.observer.removeListener("newdataconsumer", dataConsumerListener);
             });
         });
         this._statsCollectedListener = () => {
             this._refresh();
         };
-        this._clientMonitor.events.onStatsCollected(this._statsCollectedListener);
+        this.clientMonitor.events.onStatsCollected(this._statsCollectedListener);
         logger.debug("Mediasoup Integration is initialized");
     }
 
     private _addTrack(trackId: string, sfuStreamId: string, sfuSinkId?: string) {
-        this._clientMonitor.addTrackRelation({
+        this.clientMonitor.addTrackRelation({
             trackId,
             sfuStreamId,
             sfuSinkId,
@@ -213,13 +213,12 @@ export class MediasoupIntegration implements Integration {
     }
 
     private _removeTrack(trackId: string) {
-        this._clientMonitor.removeTrackRelation(trackId);
+        this.clientMonitor.removeTrackRelation(trackId);
         this._trackIds.delete(trackId);
         logger.debug(`Track ${trackId} is unbound`);
     }
 
     private _refresh(): void {
-        // this._producers.
         const removedTrackIds = new Set<string>(this._trackIds);
         for (const producer of Array.from(this._producers.values())) {
             const bound = removedTrackIds.delete(producer.track.id);
@@ -263,7 +262,7 @@ export class MediasoupIntegration implements Integration {
         }
         this._closed = true;
         
-        this._clientMonitor.events.offStatsCollected(this._statsCollectedListener);
+        this.clientMonitor.events.offStatsCollected(this._statsCollectedListener);
         for (const trackId of Array.from(this._trackIds)) {
             this._removeTrack(trackId);
         }

@@ -1,3 +1,4 @@
+import { CustomCallEvent } from "@observertc/monitor-schemas";
 import { ClientMonitor } from "../ClientMonitor";
 import { MediaosupDeviceSurrogate, MediasoupIntegration } from "./MediasoupIntegration";
 
@@ -5,6 +6,7 @@ export interface Integration {
     readonly type: "mediasoup";
     readonly id: string;
     readonly closed: boolean;
+    readonly clientMonitor: ClientMonitor;
     close(): void;
 }
 
