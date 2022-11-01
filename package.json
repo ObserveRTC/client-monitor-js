@@ -14,8 +14,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.js src/*",
     "build": "tsc",
-    "test": "jest --config jest.config.js",
-    "postversion": "git push && git push --tags"
+    "test": "jest --config jest.config.js"
   },
   "keywords": [
     "webrtc",
