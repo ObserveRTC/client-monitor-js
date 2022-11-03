@@ -11,19 +11,15 @@ export interface StatsEntryAbs {
     hashCode: string;
 }
 
-// export interface OutboundTrackEntry {
-//     trackId: string;
-//     getTransport(): TransportEntry | undefined;
-//     getReceiver(): ReceiverEntry | undefined;
-//     inboundRtps(): IterableIterator<InboundRtpEntry>;
-// }
+export interface OutboundTrackEntry {
+    trackId: string;
+    outboundRtps(): IterableIterator<InboundRtpEntry>;
+}
 
-// export interface InboundTrackEntry {
-//     trackId: string;
-//     getTransport(): TransportEntry | undefined;
-//     getSender(): SenderEntry | undefined;
-//     outboundRtps(): IterableIterator<OutboundRtpEntry>;
-// }
+export interface InboundTrackEntry {
+    trackId: string;
+    inboundRtps(): IterableIterator<OutboundRtpEntry>;
+}
 
 /**
  * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods

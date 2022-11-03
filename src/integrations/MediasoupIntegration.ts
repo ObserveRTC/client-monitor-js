@@ -4,6 +4,7 @@ import { ClientMonitor } from "../ClientMonitor";
 import { StatsCollectedListener } from "../EventsRelayer";
 import { Integration } from "./Integrations";
 import { createLogger } from "../utils/logger";
+import { InboundTrackEntry, OutboundTrackEntry } from "../entries/StatsEntryInterfaces";
 
 const logger = createLogger("MediasoupIntegration");
 
@@ -273,17 +274,26 @@ export class MediasoupIntegration implements Integration {
         
     }
 
-    public getProducerStats(producerId: string) {
+    public getProducerTrackStatsEntry(producerId: string): OutboundTrackEntry | undefined {
         if (this._closed) {
             throw new Error(`Cannot get producer stats, because the resource is closed`);
         }
-        // this._clientMonitor.storage.
+        const producer = this._producers.get(producerId);
+        if (!producer) {
+            return;
+        }
+        return this.clientMonitor.storage.getOutboundTrack(producer.track.id);
     }
 
-    public getConsumerStats(consumerId: string) {
+    public getConsumerTrackStatsEntry(consumerId: string): InboundTrackEntry | undefined {
         if (this._closed) {
             throw new Error(`Cannot get consumer stats, because the resource is closed`);
         }
+        const consumer = this._consumers.get(consumerId);
+        if (!consumer) {
+            return;
+        }
+        return this.clientMonitor.storage.getInboundTrack(consumer.track.id);
     }
 
 
