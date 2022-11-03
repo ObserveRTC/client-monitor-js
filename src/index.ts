@@ -24,3 +24,6 @@ export type {
     IceServerEntry,
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
+export type { Integration } from "./integrations/Integrations";
+export type { MediasoupIntegration } from "./integrations/MediasoupIntegration";
+
