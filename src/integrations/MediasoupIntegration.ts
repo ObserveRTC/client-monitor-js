@@ -93,7 +93,7 @@ export class MediasoupIntegration implements Integration {
         this.version = version ?? "undefined";
         this.clientMonitor = clientMontor;
         this._device = device;
-        this._device.observer.on("", transport => {
+        this._device.observer.on("newtransport", transport => {
             const producerListener: MediasoupTransportObserverListener = (data) => {
                 const producer = data as MediasoupProducerSurrogate;
 
