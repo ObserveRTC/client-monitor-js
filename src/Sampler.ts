@@ -95,28 +95,7 @@ export const supplyDefaultConfig = () => {
     return defaultConfig;
 };
 
-interface Builder {
-    withConfig(value: SamplerConfig): Builder;
-    build(): Sampler;
-}
-
 export class Sampler {
-    public static builder(): Builder {
-        let config: SamplerConfig | undefined;
-        const result: Builder = {
-            withConfig(value: SamplerConfig): Builder {
-                config = value;
-                return result;
-            },
-            build(): Sampler {
-                if (!config) throw new Error(`Cannot create a Sampler without config`);
-                const appliedConfig: SamplerConstructorConfig = Object.assign(supplyDefaultConfig(), config);
-                return new Sampler(appliedConfig);
-            },
-        };
-        return result;
-    }
-
     public static create(config?: SamplerConfig): Sampler {
         const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         const result = new Sampler(appliedConfig);

@@ -414,12 +414,13 @@ export class ClientMonitorImpl implements ClientMonitor {
         );
         const result = CollectorsImpl.create(appliedCollectorsConfig);
         result.statsAcceptor = this._statsStorage;
+        result.clientMonitor = this;
         return result;
     }
 
     private _makeSampler(): Sampler {
         const samplerConfig = this._config.sampler;
-        const result = Sampler.builder().withConfig(samplerConfig).build();
+        const result = Sampler.create(samplerConfig);
         result.statsProvider = this._statsStorage;
         return result;
     }

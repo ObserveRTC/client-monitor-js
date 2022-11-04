@@ -6,6 +6,8 @@ Javascript library to monitor WebRTC applications
 Table of Contents:
 
  * [Quick Start](#quick-start)
+ * [Integrations](#integrations)
+    - [Mediasoup](#mediasoup)
  * [Client Monitor Storage](#client-monitor-storage)
  * [Connect to Observer](#connect-to-observer)
  * [Configurations](#configurations)
@@ -27,16 +29,13 @@ npm i @observertc/client-monitor-js
 Use it in your WebRTC application. 
 
 ```javascript
-import { ClientMonitor } from "@observertc/client-monitor-js";
+import { createClientMonitor } from "@observertc/client-monitor-js";
 // see full config in Configuration section
 const config = {
     collectingPeriodInMs: 5000,
 };
-const monitor = ClientMonitor.create(config);
-monitor.addStatsCollector({
-    id: "collectorId",
-    getStats: () => peerConnection.getStats(),
-});
+const monitor = createClientMonitor(config);
+const statsCollector = monitor.collectors.collectFromRTCPeerConnection(peerConnection);
 
 monitor.events.onStatsCollected(() => {
     const storage = monitor.storage;
@@ -45,12 +44,31 @@ monitor.events.onStatsCollected(() => {
         const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
         console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
     }
+    statsCollector.close();
 })
 ```
 
-The above example collect stats in every 5s. 
-When stats are collected the inboundRtp entries are iterated.
-The stats of the inboound-rtp, its corresponded trackId and remote outbound stats are logged.
+The above example do as follows:
+ 1. create a client monitor, which collect stats every 5s
+ 2. setup a stats collector from a peer connection
+ 3. register an event called after stats are collected
+ 4. print out the inbound rtps and then close the stats collector we registered in step 3.
+
+## Integrations
+
+### Mediasoup
+
+```javascript
+import { createClientMonitor } from "@observertc/client-monitor-js";
+import mediasoup from "mediaousp-client";
+
+const mediasoupDevice = new mediasoupClient.Device();
+const config = {
+    collectingPeriodInMs: 5000,
+};
+const monitor = createClientMonitor(config);
+const statsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
+```
 
 
 ## Client Monitor Storage
