@@ -107,11 +107,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
         transport.observer.on("newconsumer", newConsumerListener);
         
-        transport.observer.once("close", () => {
-            transport.observer.removeListener("newproducer", newProducerListener);
-            transport.observer.removeListener("newconsumer", newConsumerListener);
-        });
-
         const statsProvider: StatsProvider = {
             id: uuid(),
             label: transport.direction,
@@ -119,7 +114,17 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 return transport.getStats();
             },
         }
+        this._statsProviders.set(statsProvider.id, statsProvider);
         this.onStatsProviderAdded(statsProvider);
+
+        transport.observer.once("close", () => {
+            transport.observer.removeListener("newproducer", newProducerListener);
+            transport.observer.removeListener("newconsumer", newConsumerListener);
+
+            if (this._statsProviders.delete(statsProvider.id)) {
+                this.onStatsProviderRemoved(statsProvider);
+            }
+        });
     }
 
     private _addProducer(producer: MediasoupProducerSurrogate): void {
@@ -202,6 +207,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         if (this._closed) {
             return;
         }
+        let failed = 0;
         try {
             const removedTrackIds = new Set<string>(this._trackIds);
             for (const producer of Array.from(this._producers.values())) {
@@ -226,8 +232,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             for (const trackId of Array.from(removedTrackIds)) {
                 this._removeTrack(trackId);
             }
+            failed = 0;
         } catch (err) {
             logger.warn("Error occurred while refreshing track relations", err);
+            if (2 < ++failed) {
+                logger.warn("The refresh failed 3 consecutive time, the collector will be closed");
+                this.close();
+            }
         }
     }
 
