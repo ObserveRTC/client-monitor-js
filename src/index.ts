@@ -5,7 +5,6 @@ export type { StatsReader } from "./entries/StatsStorage";
 export type {
     ClientMonitor,
     ClientMonitorConfig,
-    createClientMonitor
 } from "./ClientMonitor";
 
 export type { MediaDevices } from "./utils/MediaDevices";
@@ -31,4 +30,15 @@ export type {
     IceServerEntry,
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
+
+import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
+import { ClientMonitorImpl } from "./ClientMonitorImpl";
+/**
+ * Create ClientObserver
+ *
+ * @param config the given config to setup the observer
+ */
+export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor {
+    return ClientMonitorImpl.create(config);
+}
 

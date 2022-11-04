@@ -305,11 +305,3 @@ export function setLogLevel(level: LogLevelDesc) {
     setLoggersLevel(level);
 }
 
-/**
- * Create ClientObserver
- *
- * @param config the given config to setup the observer
- */
-export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor {
-    return ClientMonitorImpl.create(config);
-}
