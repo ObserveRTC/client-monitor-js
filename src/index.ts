@@ -1,4 +1,4 @@
-export type { StatsCollector, StatsProvider } from "./Collectors/StatsCollector";
+export type { StatsCollector, StatsProvider } from "./collectors/StatsCollector";
 export type { MediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
 export type { PeerConnectionStatsCollector } from "./collectors/PeerConnectionStatsCollector";
 export type { StatsReader } from "./entries/StatsStorage";
