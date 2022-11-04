@@ -2,10 +2,9 @@ import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat,
 import { LogLevelDesc } from "loglevel";
 import { AccumulatorConfig } from "./Accumulator";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";
-import { CollectorConfig, PcStatsCollector } from "./Collector";
+import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
-import { Integrations } from "./integrations/Integrations";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
 import { SenderConfig } from "./Sender";
@@ -53,7 +52,7 @@ export type ClientMonitorConfig = {
     /**
      * Collector Component related configurations
      */
-    collectors?: CollectorConfig;
+    collectors?: CollectorsConfig;
 
     /**
      * Sampling Component Related configurations
@@ -132,7 +131,7 @@ export interface ClientMonitor {
     /**
      * Accessing to built-in integrations for different providers
      */
-    readonly integrations: Integrations;
+    readonly collectors: Collectors;
 
     /**
      * Adds a track relations to bind tracks to clients and SFUs
@@ -147,25 +146,6 @@ export interface ClientMonitor {
      * @param trackId
      */
     removeTrackRelation(trackId: string): void;
-
-    /**
-     * Adds a [peer connection stats collector](https://www.w3.org/TR/webrtc-stats/#guidelines-for-getstats-results-caching-throttling)
-     * to retrieve measurements.
-     *
-     * Note that one stats collector is for one peer connection, and the id of the collector
-     * is assigned as the sample peerConnectionId.
-     *
-     * @param collector properties of the collector (id, the promise based getStats() supplier and the optional label)
-     * @throws Error if the id has already been added.
-     */
-    addStatsCollector(collector: PcStatsCollector): void;
-
-    /**
-     * removes a stats collector identified with id given when it was added.
-     *
-     * @param id the id of the collector intended to be removed
-     */
-    removeStatsCollector(id: string): void;
 
     /**
      * Add the local part of the Signal Description Protocol.
@@ -330,6 +310,7 @@ export function setLogLevel(level: LogLevelDesc) {
  *
  * @param config the given config to setup the observer
  */
-export function create(config?: ClientMonitorConfig): ClientMonitor {
+export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor {
     return ClientMonitorImpl.create(config);
 }
+

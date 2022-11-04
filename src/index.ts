@@ -1,6 +1,13 @@
-export type { PcStatsCollector } from "./Collector";
+export type { StatsCollector, StatsProvider } from "./Collectors/StatsCollector";
+export type { MediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
+export type { PeerConnectionStatsCollector } from "./collectors/PeerConnectionStatsCollector";
 export type { StatsReader } from "./entries/StatsStorage";
-export * as ObserveRTC from "./ClientMonitor";
+export type {
+    ClientMonitor,
+    ClientMonitorConfig,
+    createClientMonitor
+} from "./ClientMonitor";
+
 export type { MediaDevices } from "./utils/MediaDevices";
 export type { TrackRelation } from "./Sampler";
 export type {
@@ -24,6 +31,4 @@ export type {
     IceServerEntry,
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
-export type { Integration } from "./integrations/Integrations";
-export type { MediasoupIntegration } from "./integrations/MediasoupIntegration";
 

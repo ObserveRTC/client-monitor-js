@@ -9,7 +9,6 @@ import {
     Samples,
     version as schemaVersion,
 } from "@observertc/monitor-schemas";
-import { CollectorConfig, Collector, PcStatsCollector } from "./Collector";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
 import { Sender, SenderConfig } from "./Sender";
@@ -25,8 +24,7 @@ import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
 import EventEmitter from "events";
-import { MediaosupDeviceSurrogate } from "./integrations/MediasoupIntegration";
-import { Integrations } from "./integrations/Integrations";
+import { Collectors, CollectorsConfig, CollectorsImpl } from "./Collectors";
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientMonitor");
@@ -63,7 +61,7 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _config: ConstructorConfig;
     private _mediaDevices: MediaDevices;
     private _clientDevices: ClientDevices;
-    private _collector: Collector;
+    private _collectors: CollectorsImpl;
     private _sampler: Sampler;
     private _sender?: Sender;
     private _timer?: Timer;
@@ -71,7 +69,6 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _statsStorage: StatsStorage;
     private _accumulator: Accumulator;
     private _metrics: Metrics;
-    private _integrations: Integrations;
 
     private constructor(config: ConstructorConfig) {
         this._config = config;
@@ -81,9 +78,8 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._metrics = new Metrics();
         this._accumulator = Accumulator.create(config.accumulator);
         this._eventer = EventsRelayer.create();
-        this._collector = this._makeCollector();
+        this._collectors = this._makeCollector();
         this._sampler = this._makeSampler();
-        this._integrations = new Integrations(this);
         this._createSender();
         this._createTimer();
     }
@@ -137,8 +133,8 @@ export class ClientMonitorImpl implements ClientMonitor {
         return this._statsStorage;
     }
 
-    public get integrations(): Integrations {
-        return this._integrations;
+    public get collectors(): Collectors {
+        return this._collectors;
     }
 
     setRoomId(value: string): void {
@@ -188,16 +184,6 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.removeTrackRelation(trackId);
     }
 
-    public addStatsCollector(collector: PcStatsCollector): void {
-        this._collector.add(collector);
-        this._statsStorage.register(collector.id, collector.label);
-    }
-
-    public removeStatsCollector(collectorId: string): void {
-        this._collector.remove(collectorId);
-        this._statsStorage.unregister(collectorId);
-    }
-
     public setMediaDevices(...devices: MediaDevice[]): void {
         if (!devices) return;
         this._mediaDevices.update(...devices);
@@ -244,7 +230,7 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public async collect(): Promise<void> {
         const started = Date.now();
-        await this._collector.collect().catch((err) => {
+        await this._collectors.collect().catch((err) => {
             logger.warn(`Error occurred while collecting`, err);
         });
         const elapsedInMs = Date.now() - started;
@@ -330,7 +316,7 @@ export class ClientMonitorImpl implements ClientMonitor {
                     this._sender.send(samples);
                 }
             }
-            this._collector.close();
+            this._collectors.close();
             this._sampler.close();
             this._sender?.close();
             this._statsStorage.clear();
@@ -416,17 +402,17 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._clientDevices.pivot();
     }
 
-    private _makeCollector(): Collector {
-        const collectorConfig = this._config.collectors;
+    private _makeCollector(): CollectorsImpl {
+        const collectorsConfig = this._config.collectors;
         const createdAdapterConfig: AdapterConfig = {
             browserType: this._clientDevices.browser?.name,
             browserVersion: this._clientDevices.browser?.version,
         };
-        const appliedCollectorsConfig: CollectorConfig = Object.assign(
+        const appliedCollectorsConfig: CollectorsConfig = Object.assign(
             { adapter: createdAdapterConfig },
-            collectorConfig
+            collectorsConfig
         );
-        const result = Collector.builder().withConfig(appliedCollectorsConfig).build();
+        const result = CollectorsImpl.create(appliedCollectorsConfig);
         result.statsAcceptor = this._statsStorage;
         return result;
     }

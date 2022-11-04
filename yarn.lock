@@ -575,10 +575,10 @@
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
 
-"@observertc/monitor-schemas@2.2.0-SNAPSHOT.54d6ca40925c30f5f35bff35b40059c554ea0f54":
-  version "2.2.0-SNAPSHOT.54d6ca40925c30f5f35bff35b40059c554ea0f54"
-  resolved "https://registry.yarnpkg.com/@observertc/monitor-schemas/-/monitor-schemas-2.2.0-SNAPSHOT.54d6ca40925c30f5f35bff35b40059c554ea0f54.tgz#c6f17871c6dc150f205f63879c6e13a8441132a7"
-  integrity sha512-0nJB0h1EAsCi8+MNEcigKh+WdHGWF64lSfWFvlPTk5FnrPqUSNS5PqjgmTSWpAJs3kW3HFil5ICdeHvsWaiNuQ==
+"@observertc/monitor-schemas@2.2.0-SNAPSHOT.08a432335fee953aa5ebaeb7a81b12b5d41a5d78":
+  version "2.2.0-SNAPSHOT.08a432335fee953aa5ebaeb7a81b12b5d41a5d78"
+  resolved "https://registry.yarnpkg.com/@observertc/monitor-schemas/-/monitor-schemas-2.2.0-SNAPSHOT.08a432335fee953aa5ebaeb7a81b12b5d41a5d78.tgz#ea3671dd7adfe5925a210661cca9cf0cf44580c7"
+  integrity sha512-XSD/w3O3xTW6YW0lFvRPIQlhZvqmFBcEF3NJDkNM8/w1QrlBm77ZmDVs5kVxm8MbYL/zFeYHn32eUgLsiKIm8g==
 
 "@protobufjs/aspromise@^1.1.1", "@protobufjs/aspromise@^1.1.2":
   version "1.1.2"
