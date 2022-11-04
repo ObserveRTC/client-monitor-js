@@ -198,28 +198,34 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         if (this._closed) {
             return;
         }
-        const removedTrackIds = new Set<string>(this._trackIds);
-        for (const producer of Array.from(this._producers.values())) {
-            const bound = removedTrackIds.delete(producer.track.id);
-            if (!bound) {
-                this._addTrack(
-                    producer.track.id,
-                    producer.id
-                )
+        try {
+            const removedTrackIds = new Set<string>(this._trackIds);
+            logger.warn(this._producers);
+            for (const producer of Array.from(this._producers.values())) {
+                logger.warn(producer);
+                const bound = removedTrackIds.delete(producer.track.id);
+                if (!bound) {
+                    this._addTrack(
+                        producer.track.id,
+                        producer.id
+                    )
+                }
             }
-        }
-        for (const consumer of Array.from(this._consumers.values())) {
-            const bound = removedTrackIds.delete(consumer.track.id);
-            if (!bound) {
-                this._addTrack(
-                    consumer.track.id,
-                    consumer.producerId,
-                    consumer.id
-                )
+            for (const consumer of Array.from(this._consumers.values())) {
+                const bound = removedTrackIds.delete(consumer.track.id);
+                if (!bound) {
+                    this._addTrack(
+                        consumer.track.id,
+                        consumer.producerId,
+                        consumer.id
+                    )
+                }
             }
-        }
-        for (const trackId of Array.from(removedTrackIds)) {
-            this._removeTrack(trackId);
+            for (const trackId of Array.from(removedTrackIds)) {
+                this._removeTrack(trackId);
+            }
+        } catch (err) {
+            logger.warn("Error occurred while refreshing track relations", err);
         }
     }
 
