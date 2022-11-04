@@ -81,6 +81,7 @@ export class CollectorsImpl implements Collectors {
     }
 
     public set clientMonitor(value: ClientMonitor) {
+        console.warn("COLLECTORS");
         this._clientMonitor = value;
     }
 
