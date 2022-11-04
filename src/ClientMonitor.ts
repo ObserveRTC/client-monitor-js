@@ -313,4 +313,3 @@ export function setLogLevel(level: LogLevelDesc) {
 export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor {
     return ClientMonitorImpl.create(config);
 }
-

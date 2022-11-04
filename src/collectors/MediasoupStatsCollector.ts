@@ -42,6 +42,10 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         this._clientMonitor.events.onStatsCollected(this._refresh);
         
     }
+
+    public get closed() {
+        return this._closed;
+    }
     
     public close() {
         if (this._closed) {

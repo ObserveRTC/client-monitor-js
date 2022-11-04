@@ -116,6 +116,8 @@ export class CollectorsImpl implements Collectors {
             logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
             return;
         }
+
+        /* eslint-disable @typescript-eslint/no-this-alias */
         const collectors = this;
         const pcStatsCollector = new class extends PeerConnectionStatsCollector {
             protected onClosed(): void {
@@ -137,6 +139,8 @@ export class CollectorsImpl implements Collectors {
             logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
             return;
         }
+
+        /* eslint-disable @typescript-eslint/no-this-alias */
         const collectors = this;
         const mediasoupStatsCollector = new class extends MediasoupStatsCollector {
             get statsProviders(): IterableIterator<StatsProvider> {
