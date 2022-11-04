@@ -9,6 +9,7 @@ import { MediasoupConsumerSurrogate,
     MediasoupTransportSurrogate,
     MediasoupTransportObserverListener
 } from "./MediasoupSurrogates";
+import { StatsCollectedListener } from "../EventsRelayer";
 
 const logger = createLogger("MediasoupStatsCollector");
 
@@ -27,6 +28,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
     private _producers = new Map<string, MediasoupProducerSurrogate>();
     private _consumers = new Map<string, MediasoupConsumerSurrogate>();
     private _disposeDeviceListener?: DisposedListener;
+    private _statsCollectedListener?: StatsCollectedListener;
 
     public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor) {
         this._clientMonitor = clientMonitor;
@@ -39,7 +41,10 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             this._disposeDeviceListener = undefined;
         }
         this._device.observer.on("newtransport", newTransportListener);
-        this._clientMonitor.events.onStatsCollected(this._refresh);
+        this._statsCollectedListener = () => {
+            this._refresh();
+        }
+        this._clientMonitor.events.onStatsCollected(this._statsCollectedListener);
         
     }
 
@@ -56,12 +61,16 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         if (this._disposeDeviceListener) {
             this._disposeDeviceListener();
         }
+        if (this._statsCollectedListener) {
+            this._clientMonitor.events.offStatsCollected(this._statsCollectedListener);
+            this._statsCollectedListener = undefined;
+        }
         const statsProviders = Array.from(this._statsProviders.values());
         this._statsProviders.clear();
         for (const statsProvider of statsProviders) {
             this.onStatsProviderRemoved(statsProvider);
         }
-        this._clientMonitor.events.offStatsCollected(this._refresh);
+        
         this.onClosed();
     }
     
@@ -200,9 +209,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
         try {
             const removedTrackIds = new Set<string>(this._trackIds);
-            logger.warn(this._producers);
             for (const producer of Array.from(this._producers.values())) {
-                logger.warn(producer);
                 const bound = removedTrackIds.delete(producer.track.id);
                 if (!bound) {
                     this._addTrack(
