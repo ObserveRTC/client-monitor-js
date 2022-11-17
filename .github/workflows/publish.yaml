@@ -22,7 +22,7 @@ jobs:
         run: yarn build
 
       - name: Test
-        run: yarn test --detectOpenHandles
+        run: yarn test --detectOpenHandles --forceExit
       
       - name: Setup Custom Contexts
         shell: bash
