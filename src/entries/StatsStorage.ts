@@ -421,10 +421,11 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
             let inboundTrackEntry = this._inboundTrackEntries.get(trackId);
             if (!inboundTrackEntry) {
-                const inboundRtpEntries = new Map();
+                const inboundRtpEntries = new Map<string, InboundRtpEntry>();
                 inboundTrackEntry = {
                     trackId,
                     inboundRtpEntries,
+                    getPeerConnection: () => inboundRtpEntry.getPeerConnection(),
                     inboundRtps: () => inboundRtpEntries.values(),
                 }
                 this._inboundTrackEntries.set(inboundTrackEntry.trackId, inboundTrackEntry);
@@ -447,10 +448,11 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
             let outboundTrackEntry = this._outboundTrackEntries.get(trackId);
             if (!outboundTrackEntry) {
-                const outboundRtpEntries = new Map();
+                const outboundRtpEntries = new Map<string, OutboundRtpEntry>();
                 outboundTrackEntry = {
                     trackId,
                     outboundRtpEntries,
+                    getPeerConnection: () => outboundRtpEntry.getPeerConnection(),
                     outboundRtps: () => outboundRtpEntries.values(),
                 }
                 this._outboundTrackEntries.set(outboundTrackEntry.trackId, outboundTrackEntry);

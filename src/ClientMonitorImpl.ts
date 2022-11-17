@@ -11,7 +11,7 @@ import {
 } from "@observertc/monitor-schemas";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
-import { Sender, SenderConfig } from "./Sender";
+import { Sender, SenderConfig, SentSamplesCallback } from "./Sender";
 import { ClientDevices } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
 import { AdapterConfig } from "./adapters/Adapter";
@@ -245,7 +245,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._metrics.setLastCollected(started + elapsedInMs);
     }
 
-    public async sample(): Promise<void> {
+    public sample(): void {
         try {
             this._collectClientDevices();
             const clientSample = this._sampler.make();
@@ -260,7 +260,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
-    public async send(): Promise<void> {
+    public send(callback?: SentSamplesCallback): void {
         if (!this._sender) {
             if (this._flags.has(TIMER_INVOKED_SEND_SENDER_NOT_EXISTS)) {
                 return;
@@ -276,7 +276,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         });
         for (const samples of queue) {
             try {
-                this._sender.send(samples);
+                this._sender.send(samples, callback);
             } catch (error) {
                 logger.warn(`An error occurred while sending`, error);
             }
@@ -339,7 +339,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
         this._timer.add({
             type: "collect",
-            process: this.collect.bind(this),
+            asyncProcess: this.collect.bind(this),
             fixedDelayInMs: collectingPeriodInMs,
             context: "Collect Stats",
         });

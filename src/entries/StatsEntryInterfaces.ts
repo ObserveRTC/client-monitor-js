@@ -13,12 +13,14 @@ export interface StatsEntryAbs {
 
 export interface OutboundTrackEntry {
     trackId: string;
-    outboundRtps(): IterableIterator<InboundRtpEntry>;
+    getPeerConnection(): PeerConnectionEntry;
+    outboundRtps(): IterableIterator<OutboundRtpEntry>;
 }
 
 export interface InboundTrackEntry {
     trackId: string;
-    inboundRtps(): IterableIterator<OutboundRtpEntry>;
+    getPeerConnection(): PeerConnectionEntry;
+    inboundRtps(): IterableIterator<InboundRtpEntry>;
 }
 
 /**

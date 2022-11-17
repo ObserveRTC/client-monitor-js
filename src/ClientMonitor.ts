@@ -1,13 +1,12 @@
 import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat, CustomCallEvent } from "@observertc/monitor-schemas";
 import { LogLevelDesc } from "loglevel";
 import { AccumulatorConfig } from "./Accumulator";
-import { ClientMonitorImpl } from "./ClientMonitorImpl";
 import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
-import { SenderConfig } from "./Sender";
+import { SenderConfig, SentSamplesCallback } from "./Sender";
 import { setLevel as setLoggersLevel } from "./utils/logger";
 
 export type ClientMonitorConfig = {
@@ -282,13 +281,13 @@ export interface ClientMonitor {
     /**
      * Make [ClientSample](https://www.npmjs.com/package/@observertc/schemas#ClientSample) from a collected stats
      */
-    sample(): Promise<void>;
+    sample(): void;
 
     /**
      * Send Samples to an observer endpoint. [Samples](https://www.npmjs.com/package/@observertc/schemas#Samples) are
      * accumulated ClientSamples (and/or SfuSamples) send to an endpoint for further analysis.
      */
-    send(): Promise<void>;
+    send(callback?: SentSamplesCallback): void;
 
     /**
      * Close the ClientObserver, clear the storage, and statscollectors.

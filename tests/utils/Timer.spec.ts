@@ -15,6 +15,63 @@ describe("Timer", () => {
         });
         timer.clear();
     });
+
+    it('When async process is added Then it is invoked', async () => {
+        const timer = new Timer();
+        await new Promise<void>(resolve => {
+            timer.add({
+                type: "collect",
+                asyncProcess: async () => resolve(),
+                fixedDelayInMs: 10,
+            });
+        });
+        timer.clear();
+    });
+
+    it('When two async process is added They are invoked sequentially', async () => {
+        const timer = new Timer();
+        await new Promise<void>(resolve => {
+            let run = false;
+            let finished = 0;
+            timer.add({
+                type: "collect",
+                asyncProcess: async () => {
+                    if (run) throw new Error(`Test failed, because of parallel async execution of the invoked function in the timer`);
+                    run = true;
+                    await new Promise<void>(_resolve => {
+                        setTimeout(() => {
+                            run = false;
+                            _resolve();
+                            if (1 < ++finished) {
+                                resolve();
+                            }
+                            
+                        }, 100);
+                    });
+                },
+                fixedDelayInMs: 10,
+            });
+            timer.add({
+                type: "collect",
+                asyncProcess: async () => {
+                    if (run) throw new Error(`Test failed, because of parallel async execution of the invoked function in the timer`);
+                    run = true;
+                    await new Promise<void>(_resolve => {
+                        setTimeout(() => {
+                            run = false;
+                            _resolve();
+                            if (1 < ++finished) {
+                                resolve();
+                            }
+                            
+                        }, 100);
+                    });
+                },
+                fixedDelayInMs: 10,
+            });
+        });
+        timer.clear();
+    });
     it('When two process are added Then both are invoked', async () => {
         const timer = new Timer(100);
         let process1: number = 0;

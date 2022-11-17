@@ -1,4 +1,4 @@
-
+import { W3CStats } from "@observertc/monitor-schemas"
 
 export interface MediaTrackSurrogate {
     readonly id: string;
@@ -60,7 +60,8 @@ export type MediasoupTransportObserverListener = (data:
     MediasoupProducerSurrogate | 
     MediasoupConsumerSurrogate |
     MediasoupDataProducerSurrogate | 
-    MediasoupDataConsumerSurrogate
+    MediasoupDataConsumerSurrogate |
+    W3CStats.RtcIceTransportState
 ) => void;
 
 export interface MediasoupTransportObserver {

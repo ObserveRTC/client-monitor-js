@@ -7,6 +7,8 @@ import EventEmitter from "events";
 
 const logger = createLogger("Sender");
 
+export type SentSamplesCallback = (error?: Error) => void;
+
 export type SenderConfig = {
     /**
      * Configure the codec used to transport samples or receieve
@@ -100,7 +102,7 @@ export class Sender {
         return this._closed;
     }
 
-    public send(samples: Samples): void {
+    public send(samples: Samples, callback?: SentSamplesCallback): void {
         if (this._closed) {
             throw new Error(`Cannot use an already closed Sender`);
         }
@@ -119,9 +121,16 @@ export class Sender {
         //     messageInBase64
         // });
 
-        this._transport.send(message).catch((err) => {
+        this._transport.send(message).then(() => {
+            if (!this._closed && callback) {
+                callback();
+            }
+        }).catch((err) => {
             logger.warn(err);
             if (!this._closed) {
+                if (callback) {
+                    callback(new Error(`Error occurred while sending` + err));
+                }
                 this.close();
             }
         });

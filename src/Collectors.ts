@@ -36,23 +36,15 @@ interface SavedStatsCollector extends StatsCollector {
 }
 
 export interface Collectors extends Iterable<StatsCollector> {
-    hasStatsCollector(collectorId: string): boolean;
+    hasCollector(collectorId: string): boolean;
+    removeCollector(collectorId: string): boolean;
     
-    /**
-     * Adds a [peer connection stats collector](https://www.w3.org/TR/webrtc-stats/#guidelines-for-getstats-results-caching-throttling)
-     * to retrieve measurements.
-     *
-     * Note that one stats collector is for one peer connection, and the id of the collector
-     * is assigned as the sample peerConnectionId.
-     *
-     * @param collector properties of the collector (id, the promise based getStats() supplier and the optional label)
-     * @throws Error if the id has already been added.
-     */
-    collectFromGetStats(getStats: () => Promise<ScrappedStats>): StatsCollector | undefined;
+    addGetStats(getStats: () => Promise<ScrappedStats>): StatsCollector | undefined;
     
-    collectFromStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined;
-    collectFromRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined;
-    collectFromMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined;
+    addStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined;
+    addRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined;
+    addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined;
+    
 }
 
 export class CollectorsImpl implements Collectors {
@@ -84,15 +76,19 @@ export class CollectorsImpl implements Collectors {
         this._clientMonitor = value;
     }
 
-    public collectFromGetStats(getStats: () => Promise<ScrappedStats>, label?: string): StatsCollector {
-        return this.collectFromStatsProvider({
+    public removeCollector(collectorId: string): boolean {
+        return this._removeStatsCollector(collectorId);
+    }
+
+    public addGetStats(getStats: () => Promise<ScrappedStats>, label?: string): StatsCollector {
+        return this.addStatsProvider({
             id: uuid(),
             label,
             getStats
         });
     }
 
-    public collectFromStatsProvider(statsProvider: StatsProvider): StatsCollector {
+    public addStatsProvider(statsProvider: StatsProvider): StatsCollector {
         const collectorId = statsProvider.id;
         if (!this._statsWriter) {
             logger.warn(`Added statsProvider with id ${statsProvider.id} cannot be added to the storage, because it is not assigned to the Collectors resource`);
@@ -111,7 +107,7 @@ export class CollectorsImpl implements Collectors {
         return result;
     }
 
-    public collectFromRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined {
+    public addRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined {
         if (!this._clientMonitor) {
             logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
             return;
@@ -134,7 +130,7 @@ export class CollectorsImpl implements Collectors {
         return pcStatsCollector;
     }
 
-    public collectFromMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined {
+    public addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined {
         if (!this._clientMonitor) {
             logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
             return;
@@ -212,7 +208,7 @@ export class CollectorsImpl implements Collectors {
         }
     }
 
-    public hasStatsCollector(statsCollectorId: string): boolean {
+    public hasCollector(statsCollectorId: string): boolean {
         return this._statsCollectors.has(statsCollectorId);
     }
 
@@ -237,24 +233,30 @@ export class CollectorsImpl implements Collectors {
      * Adds a collector for a stats of a peer connection
      * @param pcStatsCollector Collector wanted to add.
      */
-    private _addStatsCollector(statsCollector: SavedStatsCollector): void {
+    private _addStatsCollector(statsCollector: SavedStatsCollector): boolean {
         if (this._closed) {
-            throw new Error(`Cannot add StatsCollector because the Collector is closed`);
+            logger.warn(`Cannot add StatsCollector because the Collector is closed`);
+            return false;
         }
         const { id: collectorId } = statsCollector;
         if (this._statsCollectors.has(collectorId)) {
-            throw new Error(`StatsCollector with id ${collectorId} has already been added`);
+            logger.warn(`StatsCollector with id ${collectorId} has already been added`);
+            return false;
         }
         this._statsCollectors.set(collectorId, statsCollector);
+        return true;
     }
 
-    private _removeStatsCollector(collectorId: string): void {
+    private _removeStatsCollector(collectorId: string): boolean {
         if (this._closed) {
-            throw new Error(`Cannot remove StatsCollector because the Collector is closed`);
+            logger.warn(`Cannot remove StatsCollector because the Collector is closed`);
+            return false;
         }
         if (!this._statsCollectors.delete(collectorId)) {
             logger.warn(`Collector with peer connection id ${collectorId} was not found`);
+            return false;
         }
+        return true;
     }
 
 }

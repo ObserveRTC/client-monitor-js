@@ -7,7 +7,8 @@ export type ActionType = "collect" | "sample" | "send";
 
 export type Action = {
     type: ActionType;
-    process: () => void;
+    process?: () => void;
+    asyncProcess?: () => Promise<void>;
     initialDelayInMs?: number;
     fixedDelayInMs: number;
     maxInvoke?: number;
@@ -40,6 +41,10 @@ export class Timer {
     }
 
     public add(action: Action): string {
+        if (!action.process && !action.asyncProcess) {
+            logger.warn(`Action has no process or asyncProcess to be invoked cannot be added to the timer`);
+            return "Unknown";
+        }
         const id: string = uuidv4();
         const now = Date.now();
         const storedAction: StoredAction = {
@@ -99,7 +104,7 @@ export class Timer {
         }
     }
 
-    public _invoke(): void {
+    public async _invoke(): Promise<void> {
         const now: number = Date.now();
         for (const storedAction of Array.from(this._iterable())) {
             if (storedAction.initialDelayInMs) {
@@ -123,7 +128,13 @@ export class Timer {
             }
             
             try {
-                storedAction.process();
+                if (storedAction.process) {
+                    storedAction.process();
+                } else if (storedAction.asyncProcess){
+                    await storedAction.asyncProcess().catch(err => {
+                        logger.warn(`Error occurred while invoking action for ${storedAction.type}. context: ${storedAction.context}`, err);
+                    });
+                }
                 /*eslint-disable @typescript-eslint/no-explicit-any*/
             } catch (err: any) {
                 logger.warn(`Error occurred while executing timer action (${storedAction.context})`);

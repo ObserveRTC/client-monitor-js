@@ -7,6 +7,7 @@ export type {
     ClientMonitorConfig,
 } from "./ClientMonitor";
 
+export type { SentSamplesCallback } from "./Sender";
 export type { MediaDevices } from "./utils/MediaDevices";
 export type { TrackRelation } from "./Sampler";
 export type {

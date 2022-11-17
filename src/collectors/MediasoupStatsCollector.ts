@@ -9,7 +9,7 @@ import { MediasoupConsumerSurrogate,
     MediasoupTransportSurrogate,
     MediasoupTransportObserverListener
 } from "./MediasoupSurrogates";
-import { StatsCollectedListener } from "../EventsRelayer";
+import { W3CStats } from "@observertc/monitor-schemas"
 
 const logger = createLogger("MediasoupStatsCollector");
 
@@ -107,6 +107,17 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
         transport.observer.on("newconsumer", newConsumerListener);
         
+        const connectionStateChangeListener: MediasoupTransportObserverListener = data => {
+            const connectionState = data as W3CStats.RtcIceTransportState;
+            this._clientMonitor.addCustomCallEvent({
+                name: "CONNECTION_STATE_CHANGED",
+                peerConnectionId: this.id,
+                value: connectionState,
+                timestamp: Date.now(),
+            });
+        }
+        transport.observer.on("connectionstatechange", connectionStateChangeListener);
+
         const statsProvider: StatsProvider = {
             id: uuid(),
             label: transport.direction,
@@ -120,6 +131,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         transport.observer.once("close", () => {
             transport.observer.removeListener("newproducer", newProducerListener);
             transport.observer.removeListener("newconsumer", newConsumerListener);
+            transport.observer.removeListener("connectionstatechange", connectionStateChangeListener);
 
             if (this._statsProviders.delete(statsProvider.id)) {
                 this.onStatsProviderRemoved(statsProvider);
