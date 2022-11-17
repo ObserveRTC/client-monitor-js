@@ -38,5 +38,5 @@ jobs:
 
       - uses: JS-DevTools/npm-publish@v1
         with:
-          access: public
+          access: public --detectOpenHandles --forceExit
           token: ${{ secrets.NPM_TOKEN }}
