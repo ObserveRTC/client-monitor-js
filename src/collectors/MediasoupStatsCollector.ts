@@ -146,7 +146,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
         const pausedListener = () => {
             this._clientMonitor.addCustomCallEvent({
-                name: "MEDIA_TRACK_PAUSED",
+                name: "PRODUCER_PAUSED",
                 mediaTrackId: producer.track.id,
                 timestamp: Date.now(),
             });
@@ -155,7 +155,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
 
         const resumedListener = () => {
             this._clientMonitor.addCustomCallEvent({
-                name: "MEDIA_TRACK_RESUMED",
+                name: "PRODUCER_RESUMED",
                 mediaTrackId: producer.track.id,
                 timestamp: Date.now(),
             });
@@ -184,7 +184,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
 
         const pausedListener = () => {
             this._clientMonitor.addCustomCallEvent({
-                name: "MEDIA_TRACK_PAUSED",
+                name: "CONSUMER_PAUSED",
                 mediaTrackId: consumer.track.id,
                 timestamp: Date.now(),
             });
@@ -193,7 +193,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
 
         const resumedListener = () => {
             this._clientMonitor.addCustomCallEvent({
-                name: "MEDIA_TRACK_RESUMED",
+                name: "CONSUMER_RESUMED",
                 mediaTrackId: consumer.track.id,
                 timestamp: Date.now(),
             });
@@ -248,7 +248,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         } catch (err) {
             logger.warn("Error occurred while refreshing track relations", err);
             if (2 < ++failed) {
-                logger.warn("The refresh failed 3 consecutive time, the collector will be closed");
+                logger.warn("The refresh failed 3 consecutive times, the collector will be closed");
                 this.close();
             }
         }
