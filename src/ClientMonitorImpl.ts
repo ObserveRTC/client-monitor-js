@@ -438,8 +438,11 @@ export class ClientMonitorImpl implements ClientMonitor {
             .onClosed(() => {
                 this._sender = undefined;
             })
+            .onTransportReady(() => {
+                this._eventer.emitConnected();
+            })
             .onError(() => {
-                this._eventer.emitSenderDisconnected();
+                this._eventer.emitDisconnected();
                 this._sender = undefined;
             });
     }

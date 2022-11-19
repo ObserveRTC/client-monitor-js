@@ -136,6 +136,22 @@ export class Sender {
         });
     }
 
+    onTransportReady(listener: () => void): Sender {
+        if (this._closed) {
+            throw new Error(`Cannot subscribe / unsubscribe events of a closed Sender`);
+        }
+        this._transport.onReady(listener);
+        return this;
+    }
+
+    offTransportReady(listener: () => void): Sender {
+        if (this._closed) {
+            return this;
+        }
+        this._transport.offReady(listener);
+        return this;
+    }
+
     /*eslint-disable @typescript-eslint/no-explicit-any */
     onError(listener: (err: any) => void): Sender {
         if (this._closed) {

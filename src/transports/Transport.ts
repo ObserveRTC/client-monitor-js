@@ -2,6 +2,8 @@ import { CodecConfig } from "../codecs/Codec";
 import { version as schemaVersion } from "@observertc/monitor-schemas";
 
 type MessageListener = (data: string) => void;
+type ReadyListener = () => void;
+
 /*eslint-disable @typescript-eslint/no-explicit-any*/
 
 export function makeUrl(baseUrl: string, format?: CodecConfig) {
@@ -17,6 +19,8 @@ export function makeUrl(baseUrl: string, format?: CodecConfig) {
 export interface Transport {
     send(data: Uint8Array): Promise<void>;
 
+    onReady(listener: ReadyListener): Transport;
+    offReady(listener: ReadyListener): Transport;
     onReceived(listener: MessageListener): Transport;
     offReceived(listener: MessageListener): Transport;
     setFormat(format: CodecConfig): Transport;

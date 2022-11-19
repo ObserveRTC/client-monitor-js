@@ -4,6 +4,7 @@ export type StatsCollectedListener = () => void;
 export type SampleCreatedListener = (clientSample: ClientSample) => void;
 export type SampleSentListener = () => void;
 export type SenderDisconnectedListener = () => void;
+export type SenderConnectedListener = () => void;
 
 export interface EventsRegister {
     onStatsCollected(listener: StatsCollectedListener): EventsRegister;
@@ -15,21 +16,26 @@ export interface EventsRegister {
     onSampleSent(listener: SampleSentListener): EventsRegister;
     offSampleSent(listener: SampleSentListener): EventsRegister;
 
-    onSenderDisconnected(listener: SenderDisconnectedListener): EventsRegister;
-    offSenderDisconnected(listener: SenderDisconnectedListener): EventsRegister;
+    onConnected(listener: SenderConnectedListener): EventsRegister;
+    offConnected(listener: SenderConnectedListener): EventsRegister;
+
+    onDisconnected(listener: SenderDisconnectedListener): EventsRegister;
+    offDisconnected(listener: SenderDisconnectedListener): EventsRegister;
 }
 
 export interface EventsEmitter {
     emitStatsCollected(peerConnectionId: string): void;
     emitSampleCreated(clientSample: ClientSample): void;
     emitSampleSent(): void;
-    emitSenderDisconnected(): void;
+    emitDisconnected(): void;
+    emitConnected(): void;
 }
 
 const ON_STATS_COLLECTED_EVENT_NAME = "onStatsCollected";
 const ON_SAMPLE_CREATED_EVENT_NAME = "onSampleCreated";
 const ON_SAMPLES_SENT_EVENT_NAME = "onSamplesSent";
-const ON_SENDER_DISCONNECTED_EVENT_NAME = "onSamplesSent";
+const ON_SENDER_DISCONNECTED_EVENT_NAME = "onSenderConnected";
+const ON_SENDER_CONNECTED_EVENT_NAME = "onSenderDisconnected";
 
 export class EventsRelayer implements EventsRegister, EventsEmitter {
     public static create(): EventsRelayer {
@@ -82,16 +88,30 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
         return this;
     }
 
-    onSenderDisconnected(listener: SenderDisconnectedListener): EventsRegister {
+    onConnected(listener: SenderConnectedListener): EventsRegister {
+        this._emitter.on(ON_SENDER_CONNECTED_EVENT_NAME, listener);
+        return this;
+    }
+
+    emitConnected(): void {
+        this._emitter.emit(ON_SENDER_CONNECTED_EVENT_NAME);
+    }
+
+    offConnected(listener: SenderConnectedListener): EventsRegister {
+        this._emitter.off(ON_SENDER_CONNECTED_EVENT_NAME, listener);
+        return this;
+    }
+
+    onDisconnected(listener: SenderDisconnectedListener): EventsRegister {
         this._emitter.on(ON_SENDER_DISCONNECTED_EVENT_NAME, listener);
         return this;
     }
 
-    emitSenderDisconnected(): void {
+    emitDisconnected(): void {
         this._emitter.emit(ON_SENDER_DISCONNECTED_EVENT_NAME);
     }
 
-    offSenderDisconnected(listener: SenderDisconnectedListener): EventsRegister {
+    offDisconnected(listener: SenderDisconnectedListener): EventsRegister {
         this._emitter.off(ON_SENDER_DISCONNECTED_EVENT_NAME, listener);
         return this;
     }
