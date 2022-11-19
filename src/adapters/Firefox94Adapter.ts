@@ -12,6 +12,7 @@ export class Firefox94Adapter implements Adapter {
             return;
         }
         for (const rtcStatValue of rtcStats.values()) {
+            logger.warn("rtcStatValue", rtcStatValue);
             const rawType = rtcStatValue.type;
             if (!rtcStatValue) continue;
             if (!rawType || typeof rawType !== "string") continue;
