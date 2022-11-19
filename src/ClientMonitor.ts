@@ -1,5 +1,4 @@
 import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat, CustomCallEvent } from "@observertc/monitor-schemas";
-import { LogLevelDesc } from "loglevel";
 import { AccumulatorConfig } from "./Accumulator";
 import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";
@@ -7,7 +6,6 @@ import { EventsRegister } from "./EventsRelayer";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
 import { SenderConfig, SentSamplesCallback } from "./Sender";
-import { setLevel as setLoggersLevel } from "./utils/logger";
 
 export type ClientMonitorConfig = {
     /**
@@ -294,13 +292,3 @@ export interface ClientMonitor {
      */
     close(): void;
 }
-
-/**
- * Sets the level of logging of the module
- *
- * possible values are: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"
- */
-export function setLogLevel(level: LogLevelDesc) {
-    setLoggersLevel(level);
-}
-

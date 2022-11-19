@@ -62,7 +62,7 @@ The above example do as follows:
 import { createClientMonitor } from "@observertc/client-monitor-js";
 import mediasoup from "mediaousp-client";
 
-const mediasoupDevice = new mediasoupClient.Device();
+const mediasoupDevice = new mediasoup.Device();
 const config = {
     collectingPeriodInMs: 5000,
 };
