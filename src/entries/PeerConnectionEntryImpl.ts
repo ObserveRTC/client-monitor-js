@@ -71,6 +71,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     public readonly created: number;
     private _config: PeerConnectionEntryConfig;
     private _statsTimestamp?: number;
+    private _lastStatsEntry?: StatsEntry;
     private _updated: number;
     private _touched: number;
     private _stats?: W3C.RtcPeerConnectionStats;
@@ -112,6 +113,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
     public get collectorLabel(): string | undefined {
         return this._config.collectorLabel;
+    }
+
+    public get lastStatsEntry() {
+        return this._lastStatsEntry;
     }
 
     public *trackIds(): Generator<string, void, undefined> {
@@ -238,6 +243,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             this._touched = visitor.created;
         }
         this._statsTimestamp = visitor.maxTimestamp;
+        this._lastStatsEntry = statsEntry;
     }
 
     private _getEntryMaps(): Map<string, StatsEntryAbs>[] {

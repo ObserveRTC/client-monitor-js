@@ -37,7 +37,7 @@ describe("EventsRelayer", () => {
         events.onStatsCollected(() => {
             done();
         });
-        events.emitStatsCollected();
+        events.emitStatsCollected([]);
     });
 
     it('Not Relay StatsCollected if unsubscribed', done => {
@@ -51,7 +51,7 @@ describe("EventsRelayer", () => {
         events.onStatsCollected(listener);
         events.onStatsCollected(doneListener);
         events.offStatsCollected(listener);
-        events.emitStatsCollected();
+        events.emitStatsCollected([]);
     });
 
     it('Relay SampleSent if subscribed', done => {

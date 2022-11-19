@@ -243,6 +243,15 @@ export class StatsStorage implements StatsReader, StatsWriter {
         pcEntry.clear();
     }
 
+    public *lastStatsEntries(): Generator<StatsEntry, void, undefined> {
+        for (const pcEntry of this._peerConnections.values()) {
+            const statsEntry = pcEntry.lastStatsEntry;
+            if (statsEntry) {
+                yield statsEntry;
+            }
+        }
+    }
+
     public *peerConnections(): Generator<PeerConnectionEntryImpl, void, undefined> {
         for (const pcEntry of this._peerConnections.values()) {
             yield pcEntry;

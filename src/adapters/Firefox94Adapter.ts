@@ -11,7 +11,7 @@ export class Firefox94Adapter implements Adapter {
             logger.warn(`not rtcStats object is provided to the adapter: `, rtcStats);
             return;
         }
-        logger.warn("rtcStatValue", rtcStats, Array.from(rtcStats.values()));
+        // logger.warn("rtcStatValue", rtcStats, Array.from(rtcStats.values()));
         for (const rtcStatValue of rtcStats.values()) {
             const rawType = rtcStatValue.type;
             if (!rtcStatValue) continue;

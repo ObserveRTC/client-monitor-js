@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { ClientSample } from "@observertc/monitor-schemas";
-export type StatsCollectedListener = () => void;
+import { StatsEntry } from "./utils/StatsVisitor";
+export type StatsCollectedListener = (statsEntries: StatsEntry[]) => void;
 export type SampleCreatedListener = (clientSample: ClientSample) => void;
 export type SampleSentListener = () => void;
 export type SenderDisconnectedListener = () => void;
@@ -24,7 +25,7 @@ export interface EventsRegister {
 }
 
 export interface EventsEmitter {
-    emitStatsCollected(peerConnectionId: string): void;
+    emitStatsCollected(statsEntries: StatsEntry[]): void;
     emitSampleCreated(clientSample: ClientSample): void;
     emitSampleSent(): void;
     emitDisconnected(): void;
@@ -51,8 +52,8 @@ export class EventsRelayer implements EventsRegister, EventsEmitter {
         return this;
     }
 
-    emitStatsCollected(): void {
-        this._emitter.emit(ON_STATS_COLLECTED_EVENT_NAME);
+    emitStatsCollected(statsEntries: StatsEntry[]): void {
+        this._emitter.emit(ON_STATS_COLLECTED_EVENT_NAME, statsEntries);
     }
 
     offStatsCollected(listener: StatsCollectedListener): EventsRegister {
