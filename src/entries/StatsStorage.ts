@@ -190,7 +190,6 @@ export class StatsStorage implements StatsReader, StatsWriter {
     private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
     private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
     private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
-    private _lastStats: Map<string, StatsEntry> = new Map();
 
     public accept(collectorId: string, statsEntry: StatsEntry): void {
         const pcEntry = this._peerConnections.get(collectorId);
@@ -201,7 +200,6 @@ export class StatsStorage implements StatsReader, StatsWriter {
         pcEntry.update(statsEntry);
         this._updateInboundTrackEntries();
         this._updateOutboundTrackEntries();
-        this._lastStats.set(collectorId, statsEntry);
     }
 
     public get statsTimestamp(): number | undefined {
@@ -243,12 +241,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
             return;
         }
         this._peerConnections.delete(collectorId);
-        this._lastStats.delete(collectorId);
         pcEntry.clear();
-    }
-
-    public lastStats(): StatsEntry[] {
-        return Array.from(this._lastStats.values());
     }
 
     public *peerConnections(): Generator<PeerConnectionEntryImpl, void, undefined> {

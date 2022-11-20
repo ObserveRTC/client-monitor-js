@@ -10,7 +10,7 @@ import { MediasoupStatsCollector,  } from "./collectors/MediasoupStatsCollector"
 
 const logger = createLogger("Collector");
 
-type ScrappedEntry = [string, ScrappedEntry];
+type ScrappedEntry = [string, ScrappedStats];
 
 export type CollectorsConfig = {
     /**
@@ -32,7 +32,7 @@ const supplyDefaultConfig = () => {
 
 interface SavedStatsCollector extends StatsCollector {
     readonly statsProviders: Iterable<StatsProvider>;
-    
+
     // getScrappedEntries(): Promise<ScrappedEntry[]>;
 }
 
@@ -58,6 +58,7 @@ export class CollectorsImpl implements Collectors {
     private _clientMonitor?: ClientMonitor;
     private _config: CollectorsConstructorConfig;
     private _statsCollectors: Map<string, SavedStatsCollector> = new Map();
+    private _lastScrappedStats: Map<string, ScrappedStats> = new Map();
     private _adapter: Adapter;
     private _closed = false;
     private constructor(config: CollectorsConstructorConfig) {
@@ -191,6 +192,7 @@ export class CollectorsImpl implements Collectors {
             }
             /* eslint-disable @typescript-eslint/no-explicit-any */
             const [collectorId, scrappedStats] = scrappedEntry;
+            this._lastScrappedStats.set(collectorId, scrappedStats);
             for (const statsEntry of this._adapter.adapt(scrappedStats)) {
                 if (!statsEntry) continue;
                 try {
@@ -207,6 +209,10 @@ export class CollectorsImpl implements Collectors {
             this._removeStatsCollector(collectorId);
             logger.warn(`collector ${collectorId} is removed due to reported error`, err);
         }
+    }
+
+    public lastStats(): ScrappedStats[] {
+        return Array.from(this._lastScrappedStats.values());
     }
 
     public hasCollector(statsCollectorId: string): boolean {
@@ -253,6 +259,9 @@ export class CollectorsImpl implements Collectors {
             logger.warn(`Cannot remove StatsCollector because the Collector is closed`);
             return false;
         }
+        
+        this._lastScrappedStats.delete(collectorId);
+
         if (!this._statsCollectors.delete(collectorId)) {
             logger.warn(`Collector with peer connection id ${collectorId} was not found`);
             return false;

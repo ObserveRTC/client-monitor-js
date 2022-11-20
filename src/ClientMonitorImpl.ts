@@ -236,7 +236,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         const elapsedInMs = Date.now() - started;
 
         this._metrics.setCollectingTimeInMs(elapsedInMs);
-        this._eventer.emitStatsCollected(this._statsStorage.lastStats());
+        this._eventer.emitStatsCollected(this._collectors.lastStats());
 
         if (this._config.statsExpirationTimeInMs) {
             const expirationThresholdInMs = Date.now() - this._config.statsExpirationTimeInMs;
