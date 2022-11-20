@@ -192,7 +192,11 @@ export class CollectorsImpl implements Collectors {
             }
             /* eslint-disable @typescript-eslint/no-explicit-any */
             const [collectorId, scrappedStats] = scrappedEntry;
-            this._lastScrappedStats.set(collectorId, scrappedStats);
+            if (scrappedStats?.values) {
+                const stats = Array.from(scrappedStats.values());
+                this._lastScrappedStats.set(collectorId, stats);
+            }
+            
             for (const statsEntry of this._adapter.adapt(scrappedStats)) {
                 if (!statsEntry) continue;
                 try {
