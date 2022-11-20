@@ -32,6 +32,7 @@ const supplyDefaultConfig = () => {
 
 interface SavedStatsCollector extends StatsCollector {
     readonly statsProviders: Iterable<StatsProvider>;
+    
     // getScrappedEntries(): Promise<ScrappedEntry[]>;
 }
 
@@ -116,13 +117,13 @@ export class CollectorsImpl implements Collectors {
         /* eslint-disable @typescript-eslint/no-this-alias */
         const collectors = this;
         const pcStatsCollector = new class extends PeerConnectionStatsCollector {
-            protected onClosed(): void {
+            protected _close(): void {
                 collectors._removeStatsCollector(pcStatsCollector.id);
             }
-            protected onStatsProviderAdded(statsProvider: StatsProvider): void {
+            protected _addStatsProvider(statsProvider: StatsProvider): void {
                 collectors._statsWriter?.register(statsProvider.id, statsProvider.label);
             }
-            protected onStatsProviderRemoved(statsProvider: StatsProvider): void {
+            protected _removeStatsProvider(statsProvider: StatsProvider): void {
                 collectors._statsWriter?.unregister(statsProvider.id);
             }
 

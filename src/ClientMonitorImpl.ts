@@ -234,10 +234,9 @@ export class ClientMonitorImpl implements ClientMonitor {
             logger.warn(`Error occurred while collecting`, err);
         });
         const elapsedInMs = Date.now() - started;
-        const stats = Array.from(this._statsStorage.lastStats());
 
         this._metrics.setCollectingTimeInMs(elapsedInMs);
-        this._eventer.emitStatsCollected(stats);
+        this._eventer.emitStatsCollected(this._statsStorage.lastStats());
 
         if (this._config.statsExpirationTimeInMs) {
             const expirationThresholdInMs = Date.now() - this._config.statsExpirationTimeInMs;

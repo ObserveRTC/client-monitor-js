@@ -43,7 +43,7 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
             label,
             getStats: async () => peerConnection.getStats(),
         }
-        this.onStatsProviderAdded(this._statsProvider);
+        this._addStatsProvider(this._statsProvider);
     }
 
     public close() {
@@ -55,11 +55,11 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
         if (this._disposer) {
             this._disposer();
         }
-        this.onStatsProviderRemoved(this._statsProvider);
-        this.onClosed();
+        this._removeStatsProvider(this._statsProvider);
+        this._close();
     }
 
-    protected abstract onClosed(): void;
-    protected abstract onStatsProviderAdded(statsProvider: StatsProvider): void;
-    protected abstract onStatsProviderRemoved(statsProvider: StatsProvider): void;
+    protected abstract _close(): void;
+    protected abstract _addStatsProvider(statsProvider: StatsProvider): void;
+    protected abstract _removeStatsProvider(statsProvider: StatsProvider): void;
 }
