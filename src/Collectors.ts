@@ -82,7 +82,7 @@ export class CollectorsImpl implements Collectors {
         return this._removeStatsCollector(collectorId);
     }
 
-    public addGetStats(getStats: () => Promise<ScrappedStats>, label?: string): StatsCollector {
+    public addGetStats(getStats: () => Promise<ScrappedStats>, label?: string): StatsCollector | undefined {
         return this.addStatsProvider({
             id: uuid(),
             label,
@@ -90,10 +90,11 @@ export class CollectorsImpl implements Collectors {
         });
     }
 
-    public addStatsProvider(statsProvider: StatsProvider): StatsCollector {
+    public addStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined{
         const collectorId = statsProvider.id;
         if (!this._statsWriter) {
             logger.warn(`Added statsProvider with id ${statsProvider.id} cannot be added to the storage, because it is not assigned to the Collectors resource`);
+            return;
         }
         const close = () => {
             this._removeStatsCollector(collectorId);
@@ -105,7 +106,9 @@ export class CollectorsImpl implements Collectors {
             close,
         }
         this._statsWriter?.register(collectorId, statsProvider.label);
-        this._addStatsCollector(result);
+        if (!this._addStatsCollector(result)) {
+            return;
+        }
         return result;
     }
 
@@ -117,7 +120,7 @@ export class CollectorsImpl implements Collectors {
 
         /* eslint-disable @typescript-eslint/no-this-alias */
         const collectors = this;
-        const pcStatsCollector = new class extends PeerConnectionStatsCollector {
+        const pcStatsCollector = new class extends PeerConnectionStatsCollector implements SavedStatsCollector {
             protected _close(): void {
                 collectors._removeStatsCollector(pcStatsCollector.id);
             }
@@ -129,6 +132,10 @@ export class CollectorsImpl implements Collectors {
             }
 
         }(peerConnection, this._clientMonitor);
+
+        if (!this._addStatsCollector(pcStatsCollector)) {
+            return;
+        }
         return pcStatsCollector;
     }
 
@@ -154,7 +161,10 @@ export class CollectorsImpl implements Collectors {
                 collectors._statsWriter?.unregister(statsProvider.id);
             }
         }(mediasoupDevice, this._clientMonitor);
-        this._addStatsCollector(mediasoupStatsCollector);
+
+        if (!this._addStatsCollector(mediasoupStatsCollector)) {
+            return;
+        }
         return mediasoupStatsCollector;
     }
 

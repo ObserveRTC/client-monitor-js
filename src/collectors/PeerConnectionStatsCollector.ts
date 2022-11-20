@@ -32,7 +32,6 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
             });
         }
         peerConnection.addEventListener("connectionstatechange", connectionStateChangeListener);
-
         this._disposer = () => {
             peerConnection.removeEventListener("connectionstatechange", connectionStateChangeListener);
             this._disposer = undefined;
@@ -44,6 +43,10 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
             getStats: async () => peerConnection.getStats(),
         }
         this._addStatsProvider(this._statsProvider);
+    }
+
+    public get statsProviders(): Iterable<StatsProvider> {
+        return [this._statsProvider];
     }
 
     public close() {
