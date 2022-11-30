@@ -41,6 +41,7 @@ export interface MediasoupDataProducerObserverSurrogate {
 }
 
 export interface MediasoupDataProducerSurrogate {
+    readonly id: string;
     readonly observer: MediasoupDataProducerObserverSurrogate;
 }
 
@@ -53,6 +54,8 @@ export interface MediasoupDataConsumerObserverSurrogate {
 }
 
 export interface MediasoupDataConsumerSurrogate {
+    readonly id: string;
+    readonly dataProducerId: string;
     readonly observer: MediasoupDataConsumerObserverSurrogate;
 }
 

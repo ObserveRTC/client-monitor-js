@@ -7,9 +7,7 @@ import { MediasoupConsumerSurrogate,
     MediasoupProducerSurrogate,
     MediaosupDeviceSurrogate,
     MediasoupTransportSurrogate,
-    MediasoupTransportObserverListener,
-    MediasoupDataConsumerSurrogate,
-    MediasoupDataProducerSurrogate
+    MediasoupTransportObserverListener
 } from "./MediasoupSurrogates";
 import { W3CStats } from "@observertc/monitor-schemas"
 
@@ -29,8 +27,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
     private _trackIds = new Set<string>();
     private _producers = new Map<string, MediasoupProducerSurrogate>();
     private _consumers = new Map<string, MediasoupConsumerSurrogate>();
-    private _dataProducers = new Map<string, MediasoupDataProducerSurrogate>();
-    private _dataConsumers = new Map<string, MediasoupDataConsumerSurrogate>();
     private _disposeDeviceListener?: DisposedListener;
 
     public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor) {
@@ -110,16 +106,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             this._addConsumer(data as MediasoupConsumerSurrogate);
         }
         transport.observer.on("newconsumer", newConsumerListener);
-
-        const newDataConsumerListener: MediasoupTransportObserverListener = data => {
-            this._addDataConsumer(data as MediasoupDataConsumerSurrogate);
-        }
-        transport.observer.on("newdataconsumer", newDataConsumerListener);
-
-        const newDataProducerListener: MediasoupTransportObserverListener = data => {
-            this._addDataProducer(data as MediasoupDataProducerSurrogate);
-        }
-        transport.observer.on("newdataproducer", newDataProducerListener);
         
         const connectionStateChangeListener: MediasoupTransportObserverListener = data => {
             const connectionState = data as W3CStats.RtcIceTransportState;
@@ -145,8 +131,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         transport.observer.once("close", () => {
             transport.observer.removeListener("newproducer", newProducerListener);
             transport.observer.removeListener("newconsumer", newConsumerListener);
-            transport.observer.removeListener("newdataconsumer", newDataConsumerListener);
-            transport.observer.removeListener("newdataproducer", newDataProducerListener);
             transport.observer.removeListener("connectionstatechange", connectionStateChangeListener);
 
             if (this._statsProviders.delete(statsProvider.id)) {
@@ -165,9 +149,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 name: "PRODUCER_PAUSED",
                 mediaTrackId: producer.track.id,
                 timestamp: Date.now(),
-                attachments: JSON.stringify({
-                    producerId: producer.id,
-                })
             });
         };
         producer.observer.on("pause", pausedListener);
@@ -177,9 +158,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 name: "PRODUCER_RESUMED",
                 mediaTrackId: producer.track.id,
                 timestamp: Date.now(),
-                attachments: JSON.stringify({
-                    producerId: producer.id,
-                })
             });
         };
         producer.observer.on("resume", resumedListener);
@@ -195,18 +173,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             producer.observer.removeListener("resume", resumedListener);
             this._removeTrack(producer.track.id);
             this._producers.delete(producer.id);
-        });
-    }
-
-    private _addDataProducer(dataProducer: MediasoupDataProducerSurrogate): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
-            return;
-        }
-
-        this._dataProducers.set(dataProducer.id, dataProducer);
-        dataProducer.observer.once("close", () => {
-            this._dataProducers.delete(dataProducer.id);
         });
     }
 
@@ -249,18 +215,6 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         });
     }
 
-    private _addDataConsumer(dataConsumer: MediasoupDataConsumerSurrogate): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
-            return;
-        }
-
-        this._dataConsumers.set(dataConsumer.id, dataConsumer);
-        dataConsumer.observer.once("close", () => {
-            this._dataConsumers.delete(dataConsumer.id);
-        });
-    }
-
     private _refresh(): void {
         if (this._closed) {
             return;
@@ -294,7 +248,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         } catch (err) {
             logger.warn("Error occurred while refreshing track relations", err);
             if (2 < ++failed) {
-                logger.warn("The refresh for track relations failed 3 consecutive times, the collector will be closed");
+                logger.warn("The refresh failed 3 consecutive times, the collector will be closed");
                 this.close();
             }
         }

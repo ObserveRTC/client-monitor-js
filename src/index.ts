@@ -32,6 +32,8 @@ export type {
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
 
+export type { CustomCallEvent } from "@observertc/monitor-schemas";
+
 import { LogLevelDesc } from "loglevel";
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";
