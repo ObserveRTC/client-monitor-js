@@ -27,7 +27,7 @@ describe("Collector", () => {
                 accept,
             } as StatsWriter;
             collector.addStatsProvider({
-                id: COLLECTOR_ID,
+                peerConnectionId: COLLECTOR_ID,
                 getStats: makeGetStats(scrappedValue),
             });
             await collector.collect();
@@ -284,7 +284,7 @@ describe("Collector", () => {
             const collector = CollectorsImpl.create();
             collector.close();
             const addedCollector = collector.addStatsProvider({
-                id: "statsCollectorId",
+                peerConnectionId: "statsCollectorId",
                 getStats: () => Promise.resolve(),
             });
             expect(addedCollector).toBe(undefined);
@@ -311,12 +311,12 @@ describe("Collector", () => {
         it("When inserting a collectorId is already added, Then the new collector does not override the previous one", async () => {
             const collector = CollectorsImpl.create();
             collector.addStatsProvider({
-                id: "statsCollectorId",
+                peerConnectionId: "peerConnectionId",
                 getStats: async () => {
                 }
             });
             const addedCollector = collector.addStatsProvider({
-                id: "statsCollectorId",
+                peerConnectionId: "peerConnectionId",
                 getStats: async () => {
                 }
             });
@@ -326,7 +326,7 @@ describe("Collector", () => {
             const collector = CollectorsImpl.create();
             let invoked = false;
             collector.addStatsProvider({
-                id: "statsCollectorId",
+                peerConnectionId: "peerConnectionId",
                 getStats: async () => {
                     invoked = true;
                 }
@@ -352,7 +352,7 @@ describe("Collector", () => {
             } as StatsWriter;
             const statsCollectorId = "COLLECTOR_ID";
             collector.addStatsProvider({
-                id: statsCollectorId,
+                peerConnectionId: statsCollectorId,
                 getStats: () => Promise.resolve(),
             });
 
@@ -362,7 +362,7 @@ describe("Collector", () => {
             const collector = CollectorsImpl.create();
             const statsCollectorId = "COLLECTOR_ID";
             collector.addStatsProvider({
-                id: statsCollectorId,
+                peerConnectionId: statsCollectorId,
                 getStats: () => Promise.resolve(),
             });
             collector.removeCollector(statsCollectorId);
