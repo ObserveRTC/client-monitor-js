@@ -18,12 +18,16 @@ const logger = createLogger("MediasoupStatsCollector");
 
 type DisposedListener = () => void;
 
+interface MediasoupStatsProvider extends StatsProvider {
+    key: string,
+}
+
 export abstract class MediasoupStatsCollector implements StatsCollector {
 
     readonly id = uuid();
 
     private _closed = false;
-    private _statsProviders = new Map<string, StatsProvider>();
+    private _statsProviders = new Map<string, MediasoupStatsProvider>();
     private _device: MediaosupDeviceSurrogate;
     private _clientMonitor: ClientMonitor;
     private _trackIds = new Set<string>();
@@ -66,11 +70,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
         const statsProviders = Array.from(this._statsProviders.values());
         this._statsProviders.clear();
-        for (const statsProvider of statsProviders) {
-            this.onStatsProviderRemoved(statsProvider);
+
+        const peerConnectionIds = new Set<string>(statsProviders.map(statsProvider => statsProvider.peerConnectionId));
+        for (const peerConnectionId of peerConnectionIds) {
+            this._removePeerConnection(peerConnectionId);
         }
         
-        this.onClosed();
+        this._close();
     }
     
     protected getStatsProviders(): IterableIterator<StatsProvider> {
@@ -101,13 +107,26 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             // might happens that we closed this collector, but the device tached something
             return;
         }
+
+        const peerConnectionId = transport.id || uuid();
+        const statsProviderKey = `transport-${peerConnectionId}`;
+        const statsProvider: MediasoupStatsProvider = {
+            key: statsProviderKey,
+            peerConnectionId,
+            label: transport.direction,
+            getStats: async () => {
+                return transport.getStats();
+            },
+        }
+        this._statsProviders.set(statsProviderKey, statsProvider);
+        
         const newProducerListener: MediasoupTransportObserverListener = data => {
-            this._addProducer(data as MediasoupProducerSurrogate);
+            this._addProducer(data as MediasoupProducerSurrogate, statsProvider);
         }
         transport.observer.on("newproducer", newProducerListener);
 
         const newConsumerListener: MediasoupTransportObserverListener = data => {
-            this._addConsumer(data as MediasoupConsumerSurrogate);
+            this._addConsumer(data as MediasoupConsumerSurrogate, statsProvider);
         }
         transport.observer.on("newconsumer", newConsumerListener);
 
@@ -125,22 +144,12 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             const connectionState = data as W3CStats.RtcIceTransportState;
             this._clientMonitor.addCustomCallEvent({
                 name: "CONNECTION_STATE_CHANGED",
-                peerConnectionId: this.id,
+                peerConnectionId,
                 value: connectionState,
                 timestamp: Date.now(),
             });
         }
         transport.observer.on("connectionstatechange", connectionStateChangeListener);
-
-        const statsProvider: StatsProvider = {
-            id: uuid(),
-            label: transport.direction,
-            getStats: async () => {
-                return transport.getStats();
-            },
-        }
-        this._statsProviders.set(statsProvider.id, statsProvider);
-        this.onStatsProviderAdded(statsProvider);
 
         transport.observer.once("close", () => {
             transport.observer.removeListener("newproducer", newProducerListener);
@@ -148,14 +157,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             transport.observer.removeListener("newdataconsumer", newDataConsumerListener);
             transport.observer.removeListener("newdataproducer", newDataProducerListener);
             transport.observer.removeListener("connectionstatechange", connectionStateChangeListener);
-
-            if (this._statsProviders.delete(statsProvider.id)) {
-                this.onStatsProviderRemoved(statsProvider);
-            }
+            
+            this._statsProviders.delete(statsProviderKey);
+            this._removePeerConnection(peerConnectionId);
         });
     }
 
-    private _addProducer(producer: MediasoupProducerSurrogate): void {
+    private _addProducer(producer: MediasoupProducerSurrogate, parent: MediasoupStatsProvider): void {
         if (this._closed) {
             // might happens that we closed this collector, but the device tached something
             return;
@@ -189,11 +197,24 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             producer.id
         );
         
+        const statsProviderKey = `producer-${producer.id}`
+        const statsProvider: MediasoupStatsProvider = {
+            key: statsProviderKey,
+            peerConnectionId: parent.peerConnectionId,
+            label: parent.label,
+            getStats: async () => {
+                return producer.getStats();
+            },
+        }
+        this._statsProviders.set(statsProviderKey, statsProvider);
         this._producers.set(producer.id, producer);
+
         producer.observer.once("close", () => {
             producer.observer.removeListener("pause", pausedListener);
             producer.observer.removeListener("resume", resumedListener);
             this._removeTrack(producer.track.id);
+        
+            this._statsProviders.delete(statsProviderKey);
             this._producers.delete(producer.id);
         });
     }
@@ -210,7 +231,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         });
     }
 
-    private _addConsumer(consumer: MediasoupConsumerSurrogate): void {
+    private _addConsumer(consumer: MediasoupConsumerSurrogate, parent: MediasoupStatsProvider): void {
         if (this._closed) {
             // might happens that we closed this collector, but the device tached something
             return;
@@ -240,11 +261,24 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             consumer.id
         );
         
+        const statsProviderKey = `consumer-${consumer.id}`
+        const statsProvider: MediasoupStatsProvider = {
+            key: statsProviderKey,
+            peerConnectionId: parent.peerConnectionId,
+            label: parent.label,
+            getStats: async () => {
+                return consumer.getStats();
+            },
+        }
+        this._statsProviders.set(statsProviderKey, statsProvider);
         this._consumers.set(consumer.id, consumer);
+
         consumer.observer.once("close", () => {
             consumer.observer.removeListener("pause", pausedListener);
             consumer.observer.removeListener("resume", resumedListener);
             this._removeTrack(consumer.track.id);
+            
+            this._statsProviders.delete(statsProviderKey);
             this._consumers.delete(consumer.id);
         });
     }
@@ -300,8 +334,8 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
     }
 
-    protected abstract onClosed(): void;
-    protected abstract onStatsProviderAdded(statsProvider: StatsProvider): void;
-    protected abstract onStatsProviderRemoved(statsProvider: StatsProvider): void;
-   
+    protected abstract _close(): void;
+    protected abstract _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void;
+    protected abstract _removePeerConnection(peerConnectionId: string): void;
+
 }

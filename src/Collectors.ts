@@ -84,28 +84,28 @@ export class CollectorsImpl implements Collectors {
 
     public addGetStats(getStats: () => Promise<ScrappedStats>, label?: string): StatsCollector | undefined {
         return this.addStatsProvider({
-            id: uuid(),
+            peerConnectionId: uuid(),
             label,
             getStats
         });
     }
 
     public addStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined{
-        const collectorId = statsProvider.id;
+        const peerConnectionId = statsProvider.peerConnectionId;
         if (!this._statsWriter) {
-            logger.warn(`Added statsProvider with id ${statsProvider.id} cannot be added to the storage, because it is not assigned to the Collectors resource`);
+            logger.warn(`Added statsProvider with id ${statsProvider.peerConnectionId} cannot be added to the storage, because it is not assigned to the Collectors resource`);
             return;
         }
         const close = () => {
-            this._removeStatsCollector(collectorId);
-            this._statsWriter?.unregister(collectorId);
+            this._removeStatsCollector(peerConnectionId);
+            this._statsWriter?.unregister(peerConnectionId);
         };
         const result: SavedStatsCollector = {
-            id: collectorId,
+            id: peerConnectionId,
             statsProviders: [statsProvider],
             close,
         }
-        this._statsWriter?.register(collectorId, statsProvider.label);
+        this._statsWriter?.register(peerConnectionId, statsProvider.label);
         if (!this._addStatsCollector(result)) {
             return;
         }
@@ -124,11 +124,11 @@ export class CollectorsImpl implements Collectors {
             protected _close(): void {
                 collectors._removeStatsCollector(pcStatsCollector.id);
             }
-            protected _addStatsProvider(statsProvider: StatsProvider): void {
-                collectors._statsWriter?.register(statsProvider.id, statsProvider.label);
+            protected _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void {
+                collectors._statsWriter?.register(peerConnectionId, peerConnectionLabel);
             }
-            protected _removeStatsProvider(statsProvider: StatsProvider): void {
-                collectors._statsWriter?.unregister(statsProvider.id);
+            protected _removePeerConnection(peerConnectionId: string): void {
+                collectors._statsWriter?.unregister(peerConnectionId);
             }
 
         }(peerConnection, this._clientMonitor);
@@ -151,14 +151,14 @@ export class CollectorsImpl implements Collectors {
             get statsProviders(): IterableIterator<StatsProvider> {
                 return mediasoupStatsCollector.getStatsProviders();
             }
-            protected onClosed(): void {
+            protected _close(): void {
                 collectors._removeStatsCollector(mediasoupStatsCollector.id);
             }
-            protected onStatsProviderAdded(statsProvider: StatsProvider): void {
-                collectors._statsWriter?.register(statsProvider.id, statsProvider.label);
+            protected _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void {
+                collectors._statsWriter?.register(peerConnectionId, peerConnectionLabel);
             }
-            protected onStatsProviderRemoved(statsProvider: StatsProvider): void {
-                collectors._statsWriter?.unregister(statsProvider.id);
+            protected _removePeerConnection(peerConnectionId: string): void {
+                collectors._statsWriter?.unregister(peerConnectionId);
             }
         }(mediasoupDevice, this._clientMonitor);
 
@@ -176,6 +176,7 @@ export class CollectorsImpl implements Collectors {
             logger.warn(`Output of the collector has not been set`);
             return;
         }
+
         /* eslint-disable @typescript-eslint/no-explicit-any */
         const failedCollectors: [string, any][] = [];
         const promises: Promise<ScrappedEntry | undefined>[] = [];
@@ -184,7 +185,7 @@ export class CollectorsImpl implements Collectors {
             for (const statsProvider of statsProviders) {
                 const promise: Promise<ScrappedEntry | undefined> = statsProvider.getStats()
                     .then(scrappedStats => {
-                        const scrappedEntry: ScrappedEntry = [statsProvider.id, scrappedStats];
+                        const scrappedEntry: ScrappedEntry = [statsProvider.peerConnectionId, scrappedStats];
                         return scrappedEntry;
                     })
                     .catch((err) => {
@@ -194,6 +195,10 @@ export class CollectorsImpl implements Collectors {
                 promises.push(promise);
             }
         }
+
+        // reset the memory field
+        this._lastScrappedStats.clear();
+
         for await (const scrappedEntry of promises) {
             if (scrappedEntry === undefined) continue;
             if (this._closed) {
@@ -203,8 +208,9 @@ export class CollectorsImpl implements Collectors {
             /* eslint-disable @typescript-eslint/no-explicit-any */
             const [collectorId, scrappedStats] = scrappedEntry;
             if (scrappedStats?.values) {
-                const stats = Array.from(scrappedStats.values());
-                this._lastScrappedStats.set(collectorId, stats);
+                const lastScrappedStats = this._lastScrappedStats.get(collectorId) || [];
+                lastScrappedStats.push(...Array.from(scrappedStats.values()));
+                this._lastScrappedStats.set(collectorId, lastScrappedStats);
             }
             
             for (const statsEntry of this._adapter.adapt(scrappedStats)) {
@@ -215,7 +221,6 @@ export class CollectorsImpl implements Collectors {
                     failedCollectors.push([collectorId, err]);
                 }
             }    
-            
         }
         for (const failedCollector of failedCollectors) {
             // remove and log problems

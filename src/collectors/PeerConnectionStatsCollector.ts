@@ -38,11 +38,11 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
         }
 
         this._statsProvider = {
-            id: this.id,
+            peerConnectionId: this.id,
             label,
             getStats: async () => peerConnection.getStats(),
         }
-        this._addStatsProvider(this._statsProvider);
+        this._addPeerConnection(this.id);
     }
 
     public get statsProviders(): Iterable<StatsProvider> {
@@ -58,11 +58,12 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
         if (this._disposer) {
             this._disposer();
         }
-        this._removeStatsProvider(this._statsProvider);
+        this._removePeerConnection(this.id);
         this._close();
     }
 
+    protected abstract _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void;
+    protected abstract _removePeerConnection(peerConnectionId: string): void;
+
     protected abstract _close(): void;
-    protected abstract _addStatsProvider(statsProvider: StatsProvider): void;
-    protected abstract _removeStatsProvider(statsProvider: StatsProvider): void;
 }

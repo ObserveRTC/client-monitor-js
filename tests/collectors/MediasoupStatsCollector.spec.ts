@@ -1,14 +1,14 @@
-import { StatsCollector, StatsProvider } from "./StatsCollector";
+import { StatsCollector, StatsProvider } from "../../src/collectors/StatsCollector";
 import { v4 as uuid } from "uuid";
-import { ClientMonitor } from "../ClientMonitor";
-import { createLogger } from "../utils/logger";
+import { ClientMonitor } from "../../src/ClientMonitor";
+import { createLogger } from "../../src/utils/logger";
 import { MediasoupConsumerSurrogate, 
     MediasoupDeviceObserverListener, 
     MediasoupProducerSurrogate,
     MediaosupDeviceSurrogate,
     MediasoupTransportSurrogate,
     MediasoupTransportObserverListener
-} from "./MediasoupSurrogates";
+} from "../../src/collectors/MediasoupSurrogates";
 import { W3CStats } from "@observertc/monitor-schemas"
 
 const logger = createLogger("MediasoupStatsCollector");
@@ -119,13 +119,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         transport.observer.on("connectionstatechange", connectionStateChangeListener);
 
         const statsProvider: StatsProvider = {
-            id: uuid(),
+            peerConnectionId: uuid(),
             label: transport.direction,
             getStats: async () => {
                 return transport.getStats();
             },
         }
-        this._statsProviders.set(statsProvider.id, statsProvider);
+        this._statsProviders.set(statsProvider.peerConnectionId, statsProvider);
         this.onStatsProviderAdded(statsProvider);
 
         transport.observer.once("close", () => {
@@ -133,7 +133,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             transport.observer.removeListener("newconsumer", newConsumerListener);
             transport.observer.removeListener("connectionstatechange", connectionStateChangeListener);
 
-            if (this._statsProviders.delete(statsProvider.id)) {
+            if (this._statsProviders.delete(statsProvider.peerConnectionId)) {
                 this.onStatsProviderRemoved(statsProvider);
             }
         });

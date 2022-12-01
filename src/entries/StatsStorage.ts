@@ -226,12 +226,12 @@ export class StatsStorage implements StatsReader, StatsWriter {
     }
 
 
-    public register(collectorId: string, collectorLabel?: string): void {
+    public register(peerConnectionId: string, collectorLabel?: string): void {
         const pcEntry = PeerConnectionEntryImpl.create({
-            collectorId,
+            collectorId: peerConnectionId,
             collectorLabel,
         });
-        this._peerConnections.set(collectorId, pcEntry);
+        this._peerConnections.set(peerConnectionId, pcEntry);
     }
 
     public unregister(collectorId: string): void {

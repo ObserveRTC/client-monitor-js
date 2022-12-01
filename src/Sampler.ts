@@ -25,7 +25,7 @@ import {
 } from "@observertc/monitor-schemas";
 import { NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
-import { checkUuid, isValidUuid } from "./utils/validators";
+import { isValidUuid } from "./utils/validators";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
 import { createLogger } from "./utils/logger";
 
@@ -446,9 +446,7 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<[OutboundAudioTrack | undefined, OutboundVideoTrack | undefined], void, undefined> {
         for (const outboundRtp of peerConnection.outboundRtps()) {
-            if (this._config.incrementalSampling && this._sampled && outboundRtp.updated <= this._sampled) {
-                continue;
-            }
+            // we always want to send an updatefor outbound track
             const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats || {};
             const mediaSource = outboundRtp.getMediaSource();
             const trackId = outboundRtp.getTrackId();

@@ -15,7 +15,7 @@ export interface MediasoupProducerSurrogate {
     readonly id: string;
     readonly observer: MediasoupProducerObserverSurrogate;   
     readonly track: MediaTrackSurrogate;
-
+    getStats(): Promise<any>;
 }
 
 export type MediasoupConsumerObserverListener = (data: any) => void;
@@ -30,6 +30,7 @@ export interface MediasoupConsumerSurrogate {
     readonly producerId: string;
     readonly observer: MediasoupConsumerObserverSurrogate;
     readonly track: MediaTrackSurrogate;
+    getStats(): Promise<any>;
 }
 
 

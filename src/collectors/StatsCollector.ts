@@ -6,10 +6,9 @@ export type ScrappedStats = any;
  */
 export interface StatsProvider {
     /**
-     * A generated identifier of the stats provider (peer connection) assigned to 
-     * the provided samples and reports originated from this stats
+     * An identifier of the peer connection the stats belongs to
      */
-    readonly id: string;
+    readonly peerConnectionId: string;
 
     /**
      * An additional label attached to the peer connection stats
