@@ -13,8 +13,8 @@ export class Firefox94Adapter implements Adapter {
         }
         // logger.warn("rtcStatValue", rtcStats, Array.from(rtcStats.values()));
         for (const rtcStatValue of rtcStats.values()) {
-            const rawType = rtcStatValue.type;
             if (!rtcStatValue) continue;
+            const rawType = rtcStatValue.type;
             if (!rawType || typeof rawType !== "string") continue;
             if (
                 rawType === "inbound-rtp" ||
@@ -27,6 +27,11 @@ export class Firefox94Adapter implements Adapter {
                     delete rtcStatValue.mediaType;
                 }
             }
+            // firefox put the track identifier inside brackets ({})
+            if (rtcStatValue.trackIdentifier) {
+                rtcStatValue.trackIdentifier = rtcStatValue.trackIdentifier.replace("{", "").replace("}", "");
+            }
+
 
             yield castStats(rawType, rtcStatValue);
         }

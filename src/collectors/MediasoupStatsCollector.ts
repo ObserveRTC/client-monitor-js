@@ -154,12 +154,15 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                     values: () => {
                         /*eslint-disable @typescript-eslint/no-explicit-any */
                         return Array.from(rtcStats.values()).filter((stats: any) => {
-                            if (this._config.pollProducers && stats.type === "outbound-rtp") {
-                                return false;
+                            if (this._config.pollProducers) {
+                                return stats?.type !== W3CStats.StatsType.outboundRtp && 
+                                    stats?.type !== W3CStats.StatsType.remoteInboundRtp;
                             }
-                            if (this._config.pollConsumers && stats.type === "inbound-rtp") {
-                                return false;
+                            if (this._config.pollConsumers) {
+                                return stats?.type !== W3CStats.StatsType.inboundRtp && 
+                                    stats?.type !== W3CStats.StatsType.remoteOutboundRtp;
                             }
+                            return true;
                         })
                     }
                 }
@@ -260,7 +263,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
                     return rtcStats;
                 }
-                if (this._config.forgeSenderStats) {
+                if (!this._config.forgeSenderStats) {
                     // if we don't have to add the forged sender stats, then we can rest (in piece)
                     return rtcStats;
                 }
@@ -280,6 +283,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                                 if (stats.type === "outbound-rtp") {
                                     stats.senderId = senderStats.id
                                 }
+                                return stats;
                             });
                         result.push(senderStats);
                         return result;
@@ -368,6 +372,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                                 if (stats.type === "inbound-rtp") {
                                     stats.trackIdentifier = consumer.track.id;
                                 }
+                                return stats;
                             });
                     }
                 }
