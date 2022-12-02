@@ -24,7 +24,8 @@ const EMPTY_ITERATOR: Iterable<any> = new class implements Iterable<any> {
     }
 }
 
-export function wrapValueWithIterator<T>(value: T): Iterator<T, T, undefined> {
+
+export function createEmptyIterator<T>(value: T): Iterator<T, T, undefined> {
     const result = new class implements Iterator<T, T, undefined> {
         next() {
             return {
@@ -36,10 +37,40 @@ export function wrapValueWithIterator<T>(value: T): Iterator<T, T, undefined> {
     return result;
 }
 
+export function wrapValueWithIterator<T>(value: T): Iterator<T, T, undefined> {
+    let invoked = false;
+    const result = new class implements Iterator<T, T, undefined> {
+        next() {
+            if (!invoked) {
+                invoked = true;
+                return {
+                    done: false,
+                    value,
+                };
+            }
+            return {
+                done: true,
+                value,
+            };
+        }
+    }
+    return result;
+}
+
 export function wrapValueWithIterable<T>(value: T): Iterable<T> {
     const result = new class implements Iterable<T> {
         [Symbol.iterator](): Iterator<T, any, undefined> {
             return wrapValueWithIterator(value);
+        }
+    }
+    return result;
+}
+
+
+export function createEmptyIterable<T>(value: T): Iterable<T> {
+    const result = new class implements Iterable<T> {
+        [Symbol.iterator](): Iterator<T, any, undefined> {
+            return createEmptyIterator(value);
         }
     }
     return result;

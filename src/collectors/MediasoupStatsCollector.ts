@@ -12,7 +12,7 @@ import { MediasoupConsumerSurrogate,
     MediasoupDataProducerSurrogate
 } from "./MediasoupSurrogates";
 import { W3CStats } from "@observertc/monitor-schemas"
-import { wrapValueWithIterable } from "../utils/common";
+import { createEmptyIterable, createEmptyIterator, wrapValueWithIterable } from "../utils/common";
 import { RtcReceiverCompoundStats, RtcSenderCompoundStats } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
 
 const logger = createLogger("MediasoupStatsCollector");
@@ -232,7 +232,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             label: parent.label,
             getStats: async () => {
                 if (!this._config.forgeSenderStats) {
-                    return wrapValueWithIterable<any>(undefined);
+                    return {
+                        values: () => createEmptyIterable<any>(null)
+                    }
                 }
                 const stats: RtcSenderCompoundStats = {
                     id: `forged-sender-stats-${producer.id}`,
@@ -241,7 +243,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                     kind: producer.kind,
                     timestamp: Date.now(),
                 }
-                return wrapValueWithIterable<RtcSenderCompoundStats>(stats);
+                return {
+                    values: () => wrapValueWithIterable<RtcSenderCompoundStats>(stats)
+                };
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
@@ -306,7 +310,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             label: parent.label,
             getStats: async () => {
                 if (!this._config.forgeReceiverStats) {
-                    return wrapValueWithIterable<any>(undefined);
+                    return {
+                        values: () => createEmptyIterable<any>(null)
+                    }
                 }
                 const stats: RtcReceiverCompoundStats = {
                     id: `forged-receiver-stats-${consumer.id}`,
@@ -315,7 +321,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                     kind: consumer.kind,
                     timestamp: Date.now(),
                 }
-                return wrapValueWithIterable<RtcSenderCompoundStats>(stats);
+                return {
+                    values: () => wrapValueWithIterable<RtcSenderCompoundStats>(stats)
+                };
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);

@@ -2,7 +2,7 @@ import { Adapter, castStats } from "./Adapter";
 import { StatsEntry } from "../utils/StatsVisitor";
 import { createLogger } from "../utils/logger";
 
-const logger = createLogger("Safari14Adapter");
+const logger = createLogger("Firefox94Adapter");
 
 export class Firefox94Adapter implements Adapter {
     /*eslint-disable @typescript-eslint/no-explicit-any */
