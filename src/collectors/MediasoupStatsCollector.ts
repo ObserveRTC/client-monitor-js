@@ -12,8 +12,12 @@ import { MediasoupConsumerSurrogate,
     MediasoupDataProducerSurrogate
 } from "./MediasoupSurrogates";
 import { W3CStats } from "@observertc/monitor-schemas"
+import { wrapValueWithIterable } from "../utils/common";
+import { RtcReceiverCompoundStats, RtcSenderCompoundStats } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
 
 const logger = createLogger("MediasoupStatsCollector");
+
+
 
 
 type DisposedListener = () => void;
@@ -22,11 +26,26 @@ interface MediasoupStatsProvider extends StatsProvider {
     key: string,
 }
 
+type MediasoupStatsCollectorConfig = {
+    /**
+     * Since firefox does not provide mediaSource or any object can actually connect
+     * outbound-rtp to tracks, we need this hack
+     */
+    forgeSenderStats: boolean,
+
+    /**
+     * Since firefox does not provide trackIdentifier for inbound-rtp-track stats, without 
+     * this hack we cannot identify the track for the stats.
+     */
+    forgeReceiverStats: boolean,
+}
+
 export abstract class MediasoupStatsCollector implements StatsCollector {
 
     readonly id = uuid();
 
     private _closed = false;
+    private _config: MediasoupStatsCollectorConfig;
     private _statsProviders = new Map<string, MediasoupStatsProvider>();
     private _device: MediaosupDeviceSurrogate;
     private _clientMonitor: ClientMonitor;
@@ -37,15 +56,23 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
     private _dataConsumers = new Map<string, MediasoupDataConsumerSurrogate>();
     private _disposeDeviceListener?: DisposedListener;
 
-    public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor) {
+    public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor, config?: MediasoupStatsCollectorConfig) {
         this._clientMonitor = clientMonitor;
         this._device = device;
+        
+        const isFirefox = (clientMonitor.browser.name ?? "unknown").toLowerCase() === "firefox";
+        this._config = config ?? {
+            forgeSenderStats: isFirefox,
+            forgeReceiverStats: isFirefox,
+        };
+
         const newTransportListener: MediasoupDeviceObserverListener = transport => {
             this._addTransport(transport);
         };
         const statsCollectedListener = () => {
             this._refresh();
         };
+        
         this._clientMonitor.events.onStatsCollected(statsCollectedListener);
         this._disposeDeviceListener = () => {
             device.observer.removeListener("newtransport", newTransportListener);
@@ -119,7 +146,8 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
-        
+        this._addPeerConnection(peerConnectionId, statsProvider.label);
+
         const newProducerListener: MediasoupTransportObserverListener = data => {
             this._addProducer(data as MediasoupProducerSurrogate, statsProvider);
         }
@@ -203,7 +231,17 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             peerConnectionId: parent.peerConnectionId,
             label: parent.label,
             getStats: async () => {
-                return producer.getStats();
+                if (!this._config.forgeSenderStats) {
+                    return wrapValueWithIterable<any>(undefined);
+                }
+                const stats: RtcSenderCompoundStats = {
+                    id: `forged-sender-stats-${producer.id}`,
+                    type: "sender",
+                    trackIdentifier: producer.track.id,
+                    kind: producer.kind,
+                    timestamp: Date.now(),
+                }
+                return wrapValueWithIterable<RtcSenderCompoundStats>(stats);
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
@@ -267,7 +305,17 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             peerConnectionId: parent.peerConnectionId,
             label: parent.label,
             getStats: async () => {
-                return consumer.getStats();
+                if (!this._config.forgeReceiverStats) {
+                    return wrapValueWithIterable<any>(undefined);
+                }
+                const stats: RtcReceiverCompoundStats = {
+                    id: `forged-receiver-stats-${consumer.id}`,
+                    type: "receiver",
+                    trackIdentifier: consumer.track.id,
+                    kind: consumer.kind,
+                    timestamp: Date.now(),
+                }
+                return wrapValueWithIterable<RtcSenderCompoundStats>(stats);
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);

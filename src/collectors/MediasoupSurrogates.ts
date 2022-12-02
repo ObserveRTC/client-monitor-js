@@ -15,6 +15,7 @@ export interface MediasoupProducerSurrogate {
     readonly id: string;
     readonly observer: MediasoupProducerObserverSurrogate;   
     readonly track: MediaTrackSurrogate;
+    readonly kind: "audio" | "video";
     getStats(): Promise<any>;
 }
 
@@ -30,6 +31,7 @@ export interface MediasoupConsumerSurrogate {
     readonly producerId: string;
     readonly observer: MediasoupConsumerObserverSurrogate;
     readonly track: MediaTrackSurrogate;
+    readonly kind: "audio" | "video";
     getStats(): Promise<any>;
 }
 
