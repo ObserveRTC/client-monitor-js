@@ -27,17 +27,16 @@ interface MediasoupStatsProvider extends StatsProvider {
 }
 
 type MediasoupStatsCollectorConfig = {
+    pollConsumers: boolean,
+    pollProducers: boolean,
+
     /**
      * Since firefox does not provide mediaSource or any object can actually connect
      * outbound-rtp to tracks, we need this hack
      */
     forgeSenderStats: boolean,
 
-    /**
-     * Since firefox does not provide trackIdentifier for inbound-rtp-track stats, without 
-     * this hack we cannot identify the track for the stats.
-     */
-    forgeReceiverStats: boolean,
+    addInboundTrackIdentifier: boolean,
 }
 
 export abstract class MediasoupStatsCollector implements StatsCollector {
@@ -63,7 +62,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         const isFirefox = (clientMonitor.browser.name ?? "unknown").toLowerCase() === "firefox";
         this._config = config ?? {
             forgeSenderStats: isFirefox,
-            forgeReceiverStats: isFirefox,
+            pollConsumers: isFirefox,
+            pollProducers: isFirefox,
+            addInboundTrackIdentifier: isFirefox
         };
 
         const newTransportListener: MediasoupDeviceObserverListener = transport => {
@@ -142,7 +143,26 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             peerConnectionId,
             label: transport.direction,
             getStats: async () => {
-                return transport.getStats();
+                if (!this._config.pollConsumers || !this._config.pollProducers) {
+                    return await transport.getStats();
+                }
+                const rtcStats = await transport.getStats();
+                if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
+                    return rtcStats;
+                }
+                return {
+                    values: () => {
+                        /*eslint-disable @typescript-eslint/no-explicit-any */
+                        return Array.from(rtcStats.values()).filter((stats: any) => {
+                            if (this._config.pollProducers && stats.type === "outbound-rtp") {
+                                return false;
+                            }
+                            if (this._config.pollConsumers && stats.type === "inbound-rtp") {
+                                return false;
+                            }
+                        })
+                    }
+                }
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
@@ -231,21 +251,40 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             peerConnectionId: parent.peerConnectionId,
             label: parent.label,
             getStats: async () => {
-                if (!this._config.forgeSenderStats) {
+                if (!this._config.pollProducers) {
                     return {
-                        values: () => createEmptyIterable<any>(null)
+                        values: () => createEmptyIterable<any>(undefined)
                     }
                 }
-                const stats: RtcSenderCompoundStats = {
-                    id: `forged-sender-stats-${producer.id}`,
+                const rtcStats = await producer.getStats();
+                if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
+                    return rtcStats;
+                }
+                if (this._config.forgeSenderStats) {
+                    // if we don't have to add the forged sender stats, then we can rest (in piece)
+                    return rtcStats;
+                }
+                const senderStats: RtcSenderCompoundStats = {
+                    id: `client-monitor-forged-sender-stats-${producer.id}`,
                     type: "sender",
                     trackIdentifier: producer.track.id,
                     kind: producer.kind,
                     timestamp: Date.now(),
                 }
                 return {
-                    values: () => wrapValueWithIterable<RtcSenderCompoundStats>(stats)
-                };
+                    values: () => {
+                        /*eslint-disable @typescript-eslint/no-explicit-any */
+                        const result: any[] = Array.from(rtcStats.values())
+                            /*eslint-disable @typescript-eslint/no-explicit-any */
+                            .map((stats: any) => {
+                                if (stats.type === "outbound-rtp") {
+                                    stats.senderId = senderStats.id
+                                }
+                            });
+                        result.push(senderStats);
+                        return result;
+                    }
+                }
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
@@ -309,21 +348,29 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             peerConnectionId: parent.peerConnectionId,
             label: parent.label,
             getStats: async () => {
-                if (!this._config.forgeReceiverStats) {
+                if (!this._config.pollConsumers) {
                     return {
-                        values: () => createEmptyIterable<any>(null)
+                        values: () => createEmptyIterable<any>(undefined)
                     }
                 }
-                const stats: RtcReceiverCompoundStats = {
-                    id: `forged-receiver-stats-${consumer.id}`,
-                    type: "receiver",
-                    trackIdentifier: consumer.track.id,
-                    kind: consumer.kind,
-                    timestamp: Date.now(),
+                const rtcStats = await consumer.getStats();
+                if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
+                    return rtcStats;
+                }
+                if (!this._config.addInboundTrackIdentifier) {
+                    return rtcStats;
                 }
                 return {
-                    values: () => wrapValueWithIterable<RtcSenderCompoundStats>(stats)
-                };
+                    values: () => {
+                        return Array.from(rtcStats.values())
+                            /*eslint-disable @typescript-eslint/no-explicit-any */
+                            .map((stats: any) => {
+                                if (stats.type === "inbound-rtp") {
+                                    stats.trackIdentifier = consumer.track.id;
+                                }
+                            });
+                    }
+                }
             },
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
