@@ -74,5 +74,19 @@ describe("Firefox94Adapter", () => {
             const polledStats = actual![1] as RtcRemoteOutboundRTPStreamStats;
             expect(polledStats.kind).toBe("audio");
         });
+        it (`When trackIdentifier is provided with brackets Then adapter replaces it`, () => {
+            const inboundRtpStats: any = {
+                ...Generator.createInboundRtpStats(),
+                trackIdentifier: "{trackIdentifier}",
+            };
+            let actual: StatsEntry | undefined;
+            delete inboundRtpStats.kind;
+            const stats = makeRtcStats(inboundRtpStats);
+            for (const item of adapter.adapt(stats)) {
+                actual = item;
+            }
+            const polledStats = actual![1] as RtcInboundRtpStreamStats;
+            expect(polledStats.trackIdentifier).toBe("trackIdentifier");
+        });
     }); 
 });

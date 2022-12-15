@@ -186,7 +186,7 @@ export class WebsocketTransport implements Transport {
         });
         result.addEventListener("close", (closeEvent) => {
             // check for observer close reasons code:
-            if (4224 <= closeEvent.code && closeEvent.code <= 4230) {
+            if (4224 <= closeEvent.code && closeEvent.code <= 4231) {
                 // most likely observer close reasons
                 logger.warn(`Closed by the observer, reason: ${closeEvent.reason}`);
             } else {
