@@ -20,9 +20,14 @@ import {
     MediaSourceEntry,
     PeerConnectionEntry,
     AudioPlayoutEntry,
+    OutboundTrackEntry,
+    InboundTrackEntry,
+    // InboundTrackEntry,
+    // OutboundTrackEntry,
 } from "./StatsEntryInterfaces";
 import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
 import { createLogger } from "../utils/logger";
+import { ScrappedStats } from "../collectors/StatsCollector";
 
 const logger = createLogger("StatsStorage");
 
@@ -30,6 +35,26 @@ const logger = createLogger("StatsStorage");
  * Interface to read the collected stats.
  */
 export interface StatsReader {
+
+    /**
+     * Gets stats related to a track, for which the media direction is inbound
+     * @param trackId the id of the track
+     */
+    getInboundTrack(trackId: string): InboundTrackEntry | undefined;
+
+    /**
+     * Gets stats related to a track, for which the media direction is outbound
+     * @param trackId the id of the track
+     */
+    getOutboundTrack(trackId: string): OutboundTrackEntry | undefined;
+
+    // /**
+    //  * Gets the PeerConnection related stats
+    //  * @param peerConnectionId the id of the peer connection added to the stats collector
+    //  */
+    // getPeerConnectionStats(peerConnectionId: string): PeerConnectionEntry | undefined;
+    
+
     /**
      * Gives an iterator to read the collected peer connection stats and navigate to its relations.
      */
@@ -153,8 +178,19 @@ export interface StatsWriter {
     accept(collectorId: string, statsEntry: StatsEntry): void;
 }
 
+interface InnerInboundTrackEntry extends InboundTrackEntry {
+    inboundRtpEntries: Map<string, InboundRtpEntry>;
+}
+
+interface InnerOutboundTrackEntry extends OutboundTrackEntry {
+    outboundRtpEntries: Map<string, OutboundRtpEntry>;
+}
+
 export class StatsStorage implements StatsReader, StatsWriter {
     private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
+    private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
+    private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
+
     public accept(collectorId: string, statsEntry: StatsEntry): void {
         const pcEntry = this._peerConnections.get(collectorId);
         if (!pcEntry) {
@@ -162,6 +198,8 @@ export class StatsStorage implements StatsReader, StatsWriter {
             return;
         }
         pcEntry.update(statsEntry);
+        this._updateInboundTrackEntries();
+        this._updateOutboundTrackEntries();
     }
 
     public get statsTimestamp(): number | undefined {
@@ -182,23 +220,28 @@ export class StatsStorage implements StatsReader, StatsWriter {
     }
 
     public clear() {
-        for (const pcEntry of this._peerConnections.values()) {
-            pcEntry.clear();
+        for (const collectorId of Array.from(this._peerConnections.keys())) {
+            this.unregister(collectorId);
         }
     }
 
-    public register(collectorId: string, collectorLabel?: string): void {
+
+    public register(peerConnectionId: string, collectorLabel?: string): void {
         const pcEntry = PeerConnectionEntryImpl.create({
-            collectorId,
+            collectorId: peerConnectionId,
             collectorLabel,
         });
-        this._peerConnections.set(collectorId, pcEntry);
+        this._peerConnections.set(peerConnectionId, pcEntry);
     }
 
     public unregister(collectorId: string): void {
-        if (!this._peerConnections.delete(collectorId)) {
+        const pcEntry = this._peerConnections.get(collectorId);
+        if (!pcEntry) {
             logger.warn(`Peer Connection Entry does not exist for collectorId ${collectorId}`);
+            return;
         }
+        this._peerConnections.delete(collectorId);
+        pcEntry.clear();
     }
 
     public *peerConnections(): Generator<PeerConnectionEntryImpl, void, undefined> {
@@ -356,6 +399,69 @@ export class StatsStorage implements StatsReader, StatsWriter {
             for (const entry of pcEntry.inboundRtps()) {
                 yield entry;
             }
+        }
+    }
+
+    public getInboundTrack(trackId: string): InboundTrackEntry | undefined {
+        return this._inboundTrackEntries.get(trackId);
+    }
+
+    public getOutboundTrack(trackId: string): OutboundTrackEntry | undefined {
+        return this._outboundTrackEntries.get(trackId);
+    }
+
+
+    private _updateInboundTrackEntries() {
+        const trackIdsToRemove = new Set(this._inboundTrackEntries.keys());
+        for (const inboundRtpEntry of this.inboundRtps()) {
+            const trackId = inboundRtpEntry.getTrackId();
+            if (!trackId) {
+                continue;
+            }
+            trackIdsToRemove.delete(trackId);
+
+            let inboundTrackEntry = this._inboundTrackEntries.get(trackId);
+            if (!inboundTrackEntry) {
+                const inboundRtpEntries = new Map<string, InboundRtpEntry>();
+                inboundTrackEntry = {
+                    trackId,
+                    inboundRtpEntries,
+                    getPeerConnection: () => inboundRtpEntry.getPeerConnection(),
+                    inboundRtps: () => inboundRtpEntries.values(),
+                }
+                this._inboundTrackEntries.set(inboundTrackEntry.trackId, inboundTrackEntry);
+            }
+            inboundTrackEntry.inboundRtpEntries.set(inboundRtpEntry.id, inboundRtpEntry);
+        }
+        if (0 < trackIdsToRemove.size) {
+            Array.from(trackIdsToRemove).forEach(trackId => this._inboundTrackEntries.delete(trackId));
+        }
+    }
+
+    private _updateOutboundTrackEntries() {
+        const trackIdsToRemove = new Set(this._outboundTrackEntries.keys());
+        for (const outboundRtpEntry of this.outboundRtps()) {
+            const trackId = outboundRtpEntry.getTrackId();
+            if (!trackId) {
+                continue;
+            }
+            trackIdsToRemove.delete(trackId);
+
+            let outboundTrackEntry = this._outboundTrackEntries.get(trackId);
+            if (!outboundTrackEntry) {
+                const outboundRtpEntries = new Map<string, OutboundRtpEntry>();
+                outboundTrackEntry = {
+                    trackId,
+                    outboundRtpEntries,
+                    getPeerConnection: () => outboundRtpEntry.getPeerConnection(),
+                    outboundRtps: () => outboundRtpEntries.values(),
+                }
+                this._outboundTrackEntries.set(outboundTrackEntry.trackId, outboundTrackEntry);
+            }
+            outboundTrackEntry.outboundRtpEntries.set(outboundRtpEntry.id, outboundRtpEntry);
+        }
+        if (0 < trackIdsToRemove.size) {
+            Array.from(trackIdsToRemove).forEach(trackId => this._outboundTrackEntries.delete(trackId));
         }
     }
 }

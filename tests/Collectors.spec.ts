@@ -1,6 +1,6 @@
 import { W3CStats as W3C } from "@observertc/monitor-schemas";
 import { StatsEntry } from "../src/utils/StatsVisitor";
-import { Collector } from "../src/Collector";
+import { CollectorsImpl } from "../src/Collectors";
 import { StatsWriter } from "../src/entries/StatsStorage";
 import { createCertificateStats, createCodecStats, createCsrcStats, createDataChannelStats, createIceCandidatePairStats, createIceLocalCandidateStats, createIceRemoteCandidateStats, createIceServerStats, createInboundRtpStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSctpTransportStats, createSenderStats, createTransceiverStats } from "./helpers/StatsGenerator";
 
@@ -20,14 +20,14 @@ describe("Collector", () => {
     describe("Smoke Tests", () => {
         const COLLECTOR_ID = "collectorId";
         const execCollector = async (scrappedValue: any, accept: (collectorId: string, statsEntry: StatsEntry) => void) => {
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
             collector.statsAcceptor = {
                 register: () => {},
                 unregister: () => {},
                 accept,
             } as StatsWriter;
-            collector.add({
-                id: COLLECTOR_ID,
+            collector.addStatsProvider({
+                peerConnectionId: COLLECTOR_ID,
                 getStats: makeGetStats(scrappedValue),
             });
             await collector.collect();
@@ -270,7 +270,7 @@ describe("Collector", () => {
 
     describe("Error tests", () => {
         it("When a statsCollector throws an exception, Then it is removed", async () => {
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
             const statsCollectorId = "COLLECTOR_ID";
             collector.statsAcceptor = {
                 register: () => {},
@@ -278,29 +278,28 @@ describe("Collector", () => {
                 accept: () => {},
             };
             await collector.collect();
-            expect(collector.has(statsCollectorId)).toBe(false);
+            expect(collector.hasCollector(statsCollectorId)).toBe(false);
         });
-        it("When Collector is closed and new statsCollector is added, Then the Collector throws an error", async () => {
-            const collector = Collector.create();
+        it("When Collector is closed and new statsCollector is added, Then the Collector added is undefined", async () => {
+            const collector = CollectorsImpl.create();
             collector.close();
-            expect(() => {
-                collector.add({
-                    id: "statsCollectorId",
-                    getStats: () => Promise.resolve(),
-                });
-            }).toThrowError();
+            const addedCollector = collector.addStatsProvider({
+                peerConnectionId: "statsCollectorId",
+                getStats: () => Promise.resolve(),
+            });
+            expect(addedCollector).toBe(undefined);
         });
-        it("When Collector is closed and a statsCollector is removed, Then the Collector throws an error", async () => {
-            const collector = Collector.create();
+        it("When Collector is closed and a statsCollector is removed, Then the Collector return false", async () => {
+            const collector = CollectorsImpl.create();
             collector.close();
-            expect(() => {
-                collector.remove("collectorId");
-            }).toThrowError();
+            
+            const removed = collector.removeCollector("collectorId");
+            expect(removed).toBe(false);
         });
         it("When Collector is closed and collect() method is invoked, Then the Collector throws an error", async () => {
             let collected = false;
             let notCollected = false;
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
             collector.close();
             await collector.collect().then(() => collected = true).catch(() => notCollected = true);
             expect(collected).toBe(false);
@@ -310,26 +309,24 @@ describe("Collector", () => {
 
     describe("Misuse reaction tests", () => {
         it("When inserting a collectorId is already added, Then the new collector does not override the previous one", async () => {
-            const collector = Collector.create();
-            collector.add({
-                id: "statsCollectorId",
+            const collector = CollectorsImpl.create();
+            collector.addStatsProvider({
+                peerConnectionId: "peerConnectionId",
                 getStats: async () => {
                 }
             });
-            
-            expect(() => {
-                collector.add({
-                    id: "statsCollectorId",
-                    getStats: async () => {
-                    }
-                });
-            }).toThrowError();
+            const addedCollector = collector.addStatsProvider({
+                peerConnectionId: "peerConnectionId",
+                getStats: async () => {
+                }
+            });
+            expect(addedCollector).toBe(undefined);
         });
         it("When no statsWriter is assigned, Then the collector does not collect anything", async () => {
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
             let invoked = false;
-            collector.add({
-                id: "statsCollectorId",
+            collector.addStatsProvider({
+                peerConnectionId: "peerConnectionId",
                 getStats: async () => {
                     invoked = true;
                 }
@@ -341,31 +338,36 @@ describe("Collector", () => {
 
     describe("Specification tests", () => {
         it("When Create a new Collector, Then the collector exists", async () => {
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
 
             expect(collector).not.toBe(undefined);
         });
         
         it("When add a new statsCollector, Then the collector has it", async () => {
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
+            collector.statsAcceptor = {
+                register: () => {},
+                unregister: () => {},
+                accept: () => {},
+            } as StatsWriter;
             const statsCollectorId = "COLLECTOR_ID";
-            collector.add({
-                id: statsCollectorId,
+            collector.addStatsProvider({
+                peerConnectionId: statsCollectorId,
                 getStats: () => Promise.resolve(),
             });
 
-            expect(collector.has(statsCollectorId)).toBe(true);
+            expect(collector.hasCollector(statsCollectorId)).toBe(true);
         });
         it("When remove a new statsCollector, Then the collector does not have it", async () => {
-            const collector = Collector.create();
+            const collector = CollectorsImpl.create();
             const statsCollectorId = "COLLECTOR_ID";
-            collector.add({
-                id: statsCollectorId,
+            collector.addStatsProvider({
+                peerConnectionId: statsCollectorId,
                 getStats: () => Promise.resolve(),
             });
-            collector.remove(statsCollectorId);
+            collector.removeCollector(statsCollectorId);
 
-            expect(collector.has(statsCollectorId)).toBe(false);
+            expect(collector.hasCollector(statsCollectorId)).toBe(false);
         });
     });
 });

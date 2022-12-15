@@ -11,6 +11,18 @@ export interface StatsEntryAbs {
     hashCode: string;
 }
 
+export interface OutboundTrackEntry {
+    trackId: string;
+    getPeerConnection(): PeerConnectionEntry;
+    outboundRtps(): IterableIterator<OutboundRtpEntry>;
+}
+
+export interface InboundTrackEntry {
+    trackId: string;
+    getPeerConnection(): PeerConnectionEntry;
+    inboundRtps(): IterableIterator<InboundRtpEntry>;
+}
+
 /**
  * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods
  * to navigate to its relations

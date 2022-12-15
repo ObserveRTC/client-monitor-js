@@ -10,6 +10,73 @@ export function makePrefixedObj(obj: any, prefix?: string, camelCase?: boolean):
 }
 
 /*eslint-disable @typescript-eslint/no-explicit-any */
+const EMPTY_ITERATOR: Iterable<any> = new class implements Iterable<any> {
+    /*eslint-disable @typescript-eslint/no-explicit-any */
+    [Symbol.iterator](): Iterator<any, any, undefined> {
+        return {
+            next: () => {
+                return {
+                    done: true,
+                    value: null,
+                }
+            }
+        }
+    }
+}
+
+
+export function createEmptyIterator<T>(value: T): Iterator<T, T, undefined> {
+    const result = new class implements Iterator<T, T, undefined> {
+        next() {
+            return {
+                done: true,
+                value,
+            }
+        }
+    }
+    return result;
+}
+
+export function wrapValueWithIterator<T>(value: T): Iterator<T, T, undefined> {
+    let invoked = false;
+    const result = new class implements Iterator<T, T, undefined> {
+        next() {
+            if (!invoked) {
+                invoked = true;
+                return {
+                    done: false,
+                    value,
+                };
+            }
+            return {
+                done: true,
+                value,
+            };
+        }
+    }
+    return result;
+}
+
+export function wrapValueWithIterable<T>(value: T): Iterable<T> {
+    const result = new class implements Iterable<T> {
+        [Symbol.iterator](): Iterator<T, any, undefined> {
+            return wrapValueWithIterator(value);
+        }
+    }
+    return result;
+}
+
+
+export function createEmptyIterable<T>(value: T): Iterable<T> {
+    const result = new class implements Iterable<T> {
+        [Symbol.iterator](): Iterator<T, any, undefined> {
+            return createEmptyIterator(value);
+        }
+    }
+    return result;
+}
+
+/*eslint-disable @typescript-eslint/no-explicit-any */
 export function makeForwardDeltaObj(left: any, right: any): any {
     if (left === undefined || right === undefined) {
         if (left === undefined && right === undefined) return undefined;

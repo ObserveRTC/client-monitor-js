@@ -20,10 +20,12 @@ import {
     PeerConnectionTransport,
     Platform,
     IceCandidatePair,
+    CustomCallEvent,
+    CustomObserverEvent,
 } from "@observertc/monitor-schemas";
 import { NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
-import { checkUuid, isValidUuid } from "./utils/validators";
+import { isValidUuid } from "./utils/validators";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
 import { createLogger } from "./utils/logger";
 
@@ -72,8 +74,8 @@ export type SamplerConfig = {
 };
 
 type SamplerConstructorConfig = SamplerConfig & {
-    roomId: string;
-    clientId: string;
+    roomId?: string;
+    clientId?: string;
 };
 
 export type TrackRelation = {
@@ -93,28 +95,7 @@ export const supplyDefaultConfig = () => {
     return defaultConfig;
 };
 
-interface Builder {
-    withConfig(value: SamplerConfig): Builder;
-    build(): Sampler;
-}
-
 export class Sampler {
-    public static builder(): Builder {
-        let config: SamplerConfig | undefined;
-        const result: Builder = {
-            withConfig(value: SamplerConfig): Builder {
-                config = value;
-                return result;
-            },
-            build(): Sampler {
-                if (!config) throw new Error(`Cannot create a Sampler without config`);
-                const appliedConfig: SamplerConstructorConfig = Object.assign(supplyDefaultConfig(), config);
-                return new Sampler(appliedConfig);
-            },
-        };
-        return result;
-    }
-
     public static create(config?: SamplerConfig): Sampler {
         const appliedConfig = Object.assign(supplyDefaultConfig(), config);
         const result = new Sampler(appliedConfig);
@@ -130,6 +111,8 @@ export class Sampler {
     private _mediaConstraints?: string[];
     private _userMediaErrors?: string[];
     private _extensionStats?: ExtensionStat[];
+    private _customCallEvents?: CustomCallEvent[];
+    private _customObservedEvents?: CustomObserverEvent[];
     private _mediaDevices?: MediaDevice[];
     private _localSDP?: string[];
 
@@ -146,7 +129,7 @@ export class Sampler {
         if (config.callId && !isValidUuid(config.callId)) {
             throw new Error(`Sampler.config.callId must be a valid UUID`);
         }
-        if (!isValidUuid(config.clientId)) {
+        if (config.clientId && !isValidUuid(config.clientId)) {
             throw new Error(`Sampler.config.clientId must be a valid UUID`);
         }
 
@@ -157,7 +140,7 @@ export class Sampler {
         this._statsReader = value;
     }
 
-    public get clientId(): string {
+    public get clientId(): string | undefined {
         return this._config.clientId;
     }
 
@@ -165,9 +148,65 @@ export class Sampler {
         return this._config.callId;
     }
 
+    public get roomId(): string | undefined {
+        return this._config.roomId;
+    }
+
+    public setRoomId(value: string): void {
+        if (!isValidUuid(value)) {
+            logger.warn(`The given callId ${value} is not a valid UUID`);
+            return;
+        }
+        if (this._config.roomId && this._config.roomId !== value) {
+            const message = `Attempted to override an already set roomId. (actual roomId: ${this._config.roomId}, attempted new roomId: ${value})`;
+            this.addCustomObserverEvent({
+                name: "DETECTED_SETUP_ERROR",
+                message,
+                timestamp: Date.now(),
+            });
+            logger.warn(message);
+            return;
+        }
+        this._config.roomId = value;
+        logger.debug(`RoomId is set to ${value}`);
+    }
+
     public setCallId(value: string): void {
-        checkUuid(value);
+        if (!isValidUuid(value)) {
+            logger.warn(`The given callId ${value} is not a valid UUID`);
+            return;
+        }
+        if (this._config.callId && this._config.callId !== value) {
+            const message = `Attempted to override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`;
+            this.addCustomObserverEvent({
+                name: "DETECTED_SETUP_ERROR",
+                message,
+                timestamp: Date.now(),
+            });
+            logger.warn(message);
+            return;
+        }
         this._config.callId = value;
+        logger.debug(`CallId is set to ${value}`);
+    }
+
+    public setClientId(value: string): void {
+        if (!isValidUuid(value)) {
+            logger.warn(`The given callId ${value} is not a valid UUID`);
+            return;
+        }
+        if (this._config.clientId && this._config.clientId !== value) {
+            const message = `Attempted to override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`;
+            this.addCustomObserverEvent({
+                name: "DETECTED_SETUP_ERROR",
+                message,
+                timestamp: Date.now(),
+            });
+            logger.warn(message);
+            return;
+        }
+        this._config.clientId = value;
+        logger.debug(`ClientId is set to ${value}`);
     }
 
     public setUserId(value: string) {
@@ -215,6 +254,16 @@ export class Sampler {
         this._extensionStats.push(stats);
     }
 
+    public addCustomCallEvent(event: CustomCallEvent) {
+        if (!this._customCallEvents) this._customCallEvents = [];
+        this._customCallEvents.push(event);
+    }
+
+    public addCustomObserverEvent(event: CustomObserverEvent) {
+        if (!this._customObservedEvents) this._customObservedEvents = [];
+        this._customObservedEvents.push(event);
+    }
+
     public addLocalSDP(localSDP: string[]): void {
         if (!this._localSDP) this._localSDP = [];
         this._localSDP.push(...localSDP);
@@ -242,6 +291,14 @@ export class Sampler {
         if (this._closed) {
             throw new Error(`Cannot sample a closed Sampler`);
         }
+        if (!this._config.roomId) {
+            this._config.roomId = uuidv4();
+            logger.warn(`RoomId was undefined at the first sample, it is set to ${this._config.roomId}, but the server is unable to match samples without matching roomId`);
+        }
+        if (!this._config.clientId) {
+            this._config.clientId = uuidv4();
+            logger.info(`ClientId was undefined at the first sample, it is set to ${this._config.clientId}`);
+        }
         const clientSample: ClientSample = {
             callId: this._config.callId,
             clientId: this._config.clientId,
@@ -259,6 +316,7 @@ export class Sampler {
             mediaConstraints: this._mediaConstraints,
             userMediaErrors: this._userMediaErrors,
             extensionStats: this._extensionStats,
+            customCallEvents: this._customCallEvents,
             mediaDevices: this._mediaDevices,
             timestamp: Date.now(),
         };
@@ -270,6 +328,7 @@ export class Sampler {
         this._mediaConstraints = undefined;
         this._userMediaErrors = undefined;
         this._extensionStats = undefined;
+        this._customCallEvents = undefined;
         this._mediaDevices = undefined;
         this._localSDP = undefined;
         if (!this._statsReader) {
@@ -387,9 +446,7 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<[OutboundAudioTrack | undefined, OutboundVideoTrack | undefined], void, undefined> {
         for (const outboundRtp of peerConnection.outboundRtps()) {
-            if (this._config.incrementalSampling && this._sampled && outboundRtp.updated <= this._sampled) {
-                continue;
-            }
+            // we always want to send an updatefor outbound track
             const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats || {};
             const mediaSource = outboundRtp.getMediaSource();
             const trackId = outboundRtp.getTrackId();

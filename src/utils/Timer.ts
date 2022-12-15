@@ -7,7 +7,8 @@ export type ActionType = "collect" | "sample" | "send";
 
 export type Action = {
     type: ActionType;
-    process: () => void;
+    process?: () => void;
+    asyncProcess?: () => Promise<void>;
     initialDelayInMs?: number;
     fixedDelayInMs: number;
     maxInvoke?: number;
@@ -27,8 +28,9 @@ export class Timer {
     private _sending: Map<string, StoredAction> = new Map();
     private _sampling: Map<string, StoredAction> = new Map();
     private _tickInMs: number;
+    private _maxTimeoutInMs: number;
     
-    public constructor(tickInMs?: number) {
+    public constructor(tickInMs?: number, maxTimeoutInMs?: number) {
         if (tickInMs === undefined) {
             this._tickInMs = 1000;
         } else if (0 < tickInMs) {
@@ -36,10 +38,15 @@ export class Timer {
         } else {
             throw new Error(`Ticking time must be positive`);
         }
+        this._maxTimeoutInMs = maxTimeoutInMs ?? 30000;
         
     }
 
     public add(action: Action): string {
+        if (!action.process && !action.asyncProcess) {
+            logger.warn(`Action has no process or asyncProcess to be invoked cannot be added to the timer`);
+            return "Unknown";
+        }
         const id: string = uuidv4();
         const now = Date.now();
         const storedAction: StoredAction = {
@@ -51,7 +58,7 @@ export class Timer {
         this._getMap(storedAction.type).set(id, storedAction);
         /*eslint-disable @typescript-eslint/no-this-alias */
         if (!this._timer) {
-            this._timer = setTimeout(this._invoke.bind(this), 0);
+            this._timer = setTimeout(this._invoke.bind(this), action.initialDelayInMs ?? 0);
         }
         return id;
     }
@@ -91,17 +98,16 @@ export class Timer {
         } else {
             this._getMap(actionType).clear();
         }
-        if (Array.from(this._iterable()).length < 1) {
-            if (this._timer) {
-                clearTimeout(this._timer);
-                this._timer = undefined;
-            }
+        if (this._timer) {
+            clearTimeout(this._timer);
+            this._timer = undefined;
         }
     }
 
-    public _invoke(): void {
+    public async _invoke(): Promise<void> {
         const now: number = Date.now();
-        for (const storedAction of Array.from(this._iterable())) {
+        const storedActions = Array.from(this._iterable());
+        for (const storedAction of storedActions) {
             if (storedAction.initialDelayInMs) {
                 if (now <= storedAction.created + storedAction.initialDelayInMs) {
                     continue;
@@ -109,8 +115,13 @@ export class Timer {
             }
             if (storedAction.maxInvoke) {
                 if (storedAction.maxInvoke <= storedAction.invocations) {
+                    // let's remove it then
+                    this._getMap(storedAction.type).delete(storedAction.id);
                     continue;
                 }
+            }
+            if (storedAction.initialDelayInMs && now - storedAction.initialDelayInMs < storedAction.created) {
+                continue;
             }
             let doInvoke = false;
             if (storedAction.invoked === undefined) {
@@ -121,9 +132,15 @@ export class Timer {
             if (!doInvoke) {
                 continue;
             }
-            
             try {
-                storedAction.process();
+                if (storedAction.process) {
+                    storedAction.process();
+                } else if (storedAction.asyncProcess){
+                    // if async process ever surfaced it has to have a timeout in order to preve
+                    await storedAction.asyncProcess().catch(err => {
+                        logger.warn(`Error occurred while invoking action for ${storedAction.type}. context: ${storedAction.context}`, err);
+                    });
+                }
                 /*eslint-disable @typescript-eslint/no-explicit-any*/
             } catch (err: any) {
                 logger.warn(`Error occurred while executing timer action (${storedAction.context})`);
@@ -131,7 +148,9 @@ export class Timer {
             storedAction.invoked = now;
             ++storedAction.invocations;
         }
-        this._timer = setTimeout(this._invoke.bind(this), this._tickInMs);
+        if (0 < storedActions.length) {
+            this._timer = setTimeout(this._invoke.bind(this), this._tickInMs);
+        }
     }
 
     private *_iterable(): IterableIterator<StoredAction> {

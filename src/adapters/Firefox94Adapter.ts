@@ -2,7 +2,7 @@ import { Adapter, castStats } from "./Adapter";
 import { StatsEntry } from "../utils/StatsVisitor";
 import { createLogger } from "../utils/logger";
 
-const logger = createLogger("Safari14Adapter");
+const logger = createLogger("Firefox94Adapter");
 
 export class Firefox94Adapter implements Adapter {
     /*eslint-disable @typescript-eslint/no-explicit-any */
@@ -11,9 +11,10 @@ export class Firefox94Adapter implements Adapter {
             logger.warn(`not rtcStats object is provided to the adapter: `, rtcStats);
             return;
         }
+        // logger.warn("rtcStatValue", rtcStats, Array.from(rtcStats.values()));
         for (const rtcStatValue of rtcStats.values()) {
-            const rawType = rtcStatValue.type;
             if (!rtcStatValue) continue;
+            const rawType = rtcStatValue.type;
             if (!rawType || typeof rawType !== "string") continue;
             if (
                 rawType === "inbound-rtp" ||
@@ -26,6 +27,11 @@ export class Firefox94Adapter implements Adapter {
                     delete rtcStatValue.mediaType;
                 }
             }
+            // firefox put the track identifier inside brackets ({})
+            if (rtcStatValue.trackIdentifier) {
+                rtcStatValue.trackIdentifier = rtcStatValue.trackIdentifier.replace("{", "").replace("}", "");
+            }
+
 
             yield castStats(rawType, rtcStatValue);
         }

@@ -37,7 +37,7 @@ describe("EventsRelayer", () => {
         events.onStatsCollected(() => {
             done();
         });
-        events.emitStatsCollected();
+        events.emitStatsCollected([]);
     });
 
     it('Not Relay StatsCollected if unsubscribed', done => {
@@ -51,7 +51,7 @@ describe("EventsRelayer", () => {
         events.onStatsCollected(listener);
         events.onStatsCollected(doneListener);
         events.offStatsCollected(listener);
-        events.emitStatsCollected();
+        events.emitStatsCollected([]);
     });
 
     it('Relay SampleSent if subscribed', done => {
@@ -76,15 +76,15 @@ describe("EventsRelayer", () => {
         events.emitSampleSent();
     });
 
-    it('Relay SenderDisconnected if subscribed', done => {
+    it('Relay Disconnected if subscribed', done => {
         const events = EventsRelayer.create();
-        events.onSenderDisconnected(() => {
+        events.onDisconnected(() => {
             done();
         });
-        events.emitSenderDisconnected();
+        events.emitDisconnected();
     });
 
-    it('Not Relay SenderDisconnected if unsubscribed', done => {
+    it('Not Relay Disconnected if unsubscribed', done => {
         const events = EventsRelayer.create();
         const listener = () => {
             throw new Error(`Should not be called`)
@@ -92,9 +92,31 @@ describe("EventsRelayer", () => {
         const doneListener = () => {
             done();
         }
-        events.onSenderDisconnected(listener);
-        events.onSenderDisconnected(doneListener);
-        events.offSenderDisconnected(listener);
-        events.emitSenderDisconnected();
+        events.onDisconnected(listener);
+        events.onDisconnected(doneListener);
+        events.offDisconnected(listener);
+        events.emitDisconnected();
+    });
+
+    it('Relay Connected if subscribed', done => {
+        const events = EventsRelayer.create();
+        events.onConnected(() => {
+            done();
+        });
+        events.emitConnected();
+    });
+
+    it('Not Relay Connected if unsubscribed', done => {
+        const events = EventsRelayer.create();
+        const listener = () => {
+            throw new Error(`Should not be called`)
+        };
+        const doneListener = () => {
+            done();
+        }
+        events.onConnected(listener);
+        events.onConnected(doneListener);
+        events.offConnected(listener);
+        events.emitConnected();
     });
 });

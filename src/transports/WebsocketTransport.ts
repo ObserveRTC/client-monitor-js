@@ -44,6 +44,7 @@ const supplyDefaultConfig = () => {
 };
 
 const ON_RECEIVED_EVENT_NAME = "onReceived";
+const ON_READY_EVENT_NAME = "onReady";
 
 export class WebsocketTransport implements Transport {
     public static create(config?: WebsocketTransportConfig): WebsocketTransport {
@@ -81,6 +82,16 @@ export class WebsocketTransport implements Transport {
 
     public offReceived(listener: (data: string) => void): Transport {
         this._emitter.off(ON_RECEIVED_EVENT_NAME, listener);
+        return this;
+    }
+
+    public onReady(listener: () => void): Transport {
+        this._emitter.on(ON_READY_EVENT_NAME, listener);
+        return this;
+    }
+
+    public offReady(listener: () => void): Transport {
+        this._emitter.off(ON_READY_EVENT_NAME, listener);
         return this;
     }
 
@@ -175,7 +186,7 @@ export class WebsocketTransport implements Transport {
         });
         result.addEventListener("close", (closeEvent) => {
             // check for observer close reasons code:
-            if (4224 <= closeEvent.code && closeEvent.code <= 4230) {
+            if (4224 <= closeEvent.code && closeEvent.code <= 4231) {
                 // most likely observer close reasons
                 logger.warn(`Closed by the observer, reason: ${closeEvent.reason}`);
             } else {
@@ -195,6 +206,7 @@ export class WebsocketTransport implements Transport {
         });
         this._ws = result;
         logger.info(`Connected to ${this._ws.url}`);
+        this._emitter.emit(ON_READY_EVENT_NAME);
     }
 
     private async _createWebsocket(tried = 0): Promise<WebSocket> {

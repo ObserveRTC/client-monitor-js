@@ -1,14 +1,11 @@
-import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat } from "@observertc/monitor-schemas";
-import { LogLevelDesc } from "loglevel";
+import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat, CustomCallEvent } from "@observertc/monitor-schemas";
 import { AccumulatorConfig } from "./Accumulator";
-import { ClientMonitorImpl } from "./ClientMonitorImpl";
-import { CollectorConfig, PcStatsCollector } from "./Collector";
+import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
-import { SenderConfig } from "./Sender";
-import { setLevel as setLoggersLevel } from "./utils/logger";
+import { SenderConfig, SentSamplesCallback } from "./Sender";
 
 export type ClientMonitorConfig = {
     /**
@@ -52,13 +49,13 @@ export type ClientMonitorConfig = {
     /**
      * Collector Component related configurations
      */
-    collectors?: CollectorConfig;
+    collectors?: CollectorsConfig;
 
     /**
      * Sampling Component Related configurations
      *
      */
-    sampler: SamplerConfig;
+    sampler?: SamplerConfig;
 
     /**
      * Sending Component Related congurations
@@ -129,6 +126,11 @@ export interface ClientMonitor {
     readonly events: EventsRegister;
 
     /**
+     * Accessing to built-in integrations for different providers
+     */
+    readonly collectors: Collectors;
+
+    /**
      * Adds a track relations to bind tracks to clients and SFUs
      *
      * @param trackRelation
@@ -141,25 +143,6 @@ export interface ClientMonitor {
      * @param trackId
      */
     removeTrackRelation(trackId: string): void;
-
-    /**
-     * Adds a [peer connection stats collector](https://www.w3.org/TR/webrtc-stats/#guidelines-for-getstats-results-caching-throttling)
-     * to retrieve measurements.
-     *
-     * Note that one stats collector is for one peer connection, and the id of the collector
-     * is assigned as the sample peerConnectionId.
-     *
-     * @param collector properties of the collector (id, the promise based getStats() supplier and the optional label)
-     * @throws Error if the id has already been added.
-     */
-    addStatsCollector(collector: PcStatsCollector): void;
-
-    /**
-     * removes a stats collector identified with id given when it was added.
-     *
-     * @param id the id of the collector intended to be removed
-     */
-    removeStatsCollector(id: string): void;
 
     /**
      * Add the local part of the Signal Description Protocol.
@@ -188,6 +171,12 @@ export interface ClientMonitor {
     addUserMediaError(err: any): void;
 
     /**
+     * Adds custom call event will be sent along with the sample to the observer. The 
+     * added event will be reported as CallEvent by the observer.
+     */
+    addCustomCallEvent(event: CustomCallEvent): void;
+
+    /**
      * Adds an application provided custom payload object to the observer.
      * This is typically extra information the application wants to obtain and send to the backend.
      * The added information is obtained by the sampler and ClientSample holds and send these information to the observer.
@@ -214,6 +203,20 @@ export interface ClientMonitor {
      * @param value
      */
     setUserId(value?: string | undefined): void;
+
+    /**
+     * Sets the roomId for samples. If the roomId is set by configuration, this cause a warning, but no effect.
+     * If the roomId was not set before the first sample is created, the Sampler assign a random UUID value.
+     * @param value the id of the room matches among participants in the same service
+     */
+    setRoomId(value?: string): void;
+
+    /**
+     * Sets the clientId for samples. If the clientId is set by configuration, this cause no effect.
+     * If the clientId was not set before the first sample is created, the Sampler assign a random UUID value.
+     * @param value the identifier of the client, must be a valid UUID
+     */
+    setClientId(value?: string): void;
 
     /**
      * Sets the identifier of the call the client participates.
@@ -276,34 +279,16 @@ export interface ClientMonitor {
     /**
      * Make [ClientSample](https://www.npmjs.com/package/@observertc/schemas#ClientSample) from a collected stats
      */
-    sample(): Promise<void>;
+    sample(): void;
 
     /**
      * Send Samples to an observer endpoint. [Samples](https://www.npmjs.com/package/@observertc/schemas#Samples) are
      * accumulated ClientSamples (and/or SfuSamples) send to an endpoint for further analysis.
      */
-    send(): Promise<void>;
+    send(callback?: SentSamplesCallback): void;
 
     /**
      * Close the ClientObserver, clear the storage, and statscollectors.
      */
     close(): void;
-}
-
-/**
- * Sets the level of logging of the module
- *
- * possible values are: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"
- */
-export function setLogLevel(level: LogLevelDesc) {
-    setLoggersLevel(level);
-}
-
-/**
- * Create ClientObserver
- *
- * @param config the given config to setup the observer
- */
-export function create(config?: ClientMonitorConfig): ClientMonitor {
-    return ClientMonitorImpl.create(config);
 }

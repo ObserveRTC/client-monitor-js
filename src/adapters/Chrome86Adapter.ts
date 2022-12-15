@@ -20,8 +20,8 @@ export class Chrome86Adapter implements Adapter {
         const senders = new Map<string, any>();
         const receivers = new Map<string, any>();
         for (let rtcStatValue of rtcStats.values()) {
-            const rawType = rtcStatValue.type;
             if (!rtcStatValue) continue;
+            const rawType = rtcStatValue.type;
             if (!rawType || typeof rawType !== "string") continue;
             if (rawType === "track") continue;
             if (rawType === "inbound-rtp" || rawType === "outbound-rtp") {
