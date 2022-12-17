@@ -68,6 +68,16 @@ const config = {
 };
 const monitor = createClientMonitor(config);
 const statsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
+
+monitor.events.onStatsCollected(() => {
+    const storage = monitor.storage;
+    for (const inboundRtp of storage.inboundRtps()) {
+        const trackId = inboundRtp.getTrackId();
+        const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
+        console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
+    }
+    statsCollector.close();
+})
 ```
 
 
