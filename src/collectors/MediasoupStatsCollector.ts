@@ -68,7 +68,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         };
 
         const newTransportListener: MediasoupDeviceObserverListener = transport => {
-            this._addTransport(transport);
+            this.addTransport(transport);
         };
         const statsCollectedListener = () => {
             this._refresh();
@@ -130,7 +130,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         logger.debug(`Track ${trackId} is unbound`);
     }
 
-    private _addTransport(transport: MediasoupTransportSurrogate): void {
+    public addTransport(transport: MediasoupTransportSurrogate): void {
         if (this._closed) {
             // might happens that we closed this collector, but the device tached something
             return;

@@ -67,7 +67,7 @@ const config = {
     collectingPeriodInMs: 5000,
 };
 const monitor = createClientMonitor(config);
-const statsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
+const mediasoupStatsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
 
 monitor.events.onStatsCollected(() => {
     const storage = monitor.storage;
@@ -76,8 +76,19 @@ monitor.events.onStatsCollected(() => {
         const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
         console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
     }
-    statsCollector.close();
+    mediasoupStatsCollector.close();
 })
+```
+
+**Important Note**: The created collector is hooked on the device 'newtransport' event, 
+and can detect transports automatically when they are created after the device is added.
+If you create transports before you add the device to the monitor,  
+transports you created before will not be monitored automatically, you need to add them 
+to the statscollector, like this:
+
+```javascript
+const myTransport = // your transport created before the device is added to the monitor
+mediasoupStatsCollector.addTransport(myTransport)
 ```
 
 

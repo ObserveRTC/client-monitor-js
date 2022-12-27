@@ -1,3 +1,7 @@
+## 1.3.1
+ * Change visibility of MediasoupStatsCollector `addTransport` method to be public
+ * make imported schema version to be 2.2.0 instead of the last snapshot
+
 ## 1.3.0
  * Change the concept of add and removing stats collectors responsible from the clientMonitor to the Collectors
  * Make warn log instead of throwing exception In case a provided callId is invalid 
