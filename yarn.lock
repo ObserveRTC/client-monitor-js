@@ -575,10 +575,10 @@
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
 
-"@observertc/monitor-schemas@2.2.0-SNAPSHOT.08a432335fee953aa5ebaeb7a81b12b5d41a5d78":
-  version "2.2.0-SNAPSHOT.08a432335fee953aa5ebaeb7a81b12b5d41a5d78"
-  resolved "https://registry.yarnpkg.com/@observertc/monitor-schemas/-/monitor-schemas-2.2.0-SNAPSHOT.08a432335fee953aa5ebaeb7a81b12b5d41a5d78.tgz#ea3671dd7adfe5925a210661cca9cf0cf44580c7"
-  integrity sha512-XSD/w3O3xTW6YW0lFvRPIQlhZvqmFBcEF3NJDkNM8/w1QrlBm77ZmDVs5kVxm8MbYL/zFeYHn32eUgLsiKIm8g==
+"@observertc/monitor-schemas@2.2.0":
+  version "2.2.0"
+  resolved "https://registry.yarnpkg.com/@observertc/monitor-schemas/-/monitor-schemas-2.2.0.tgz#46430d2671faf64e4c71052606fd0c96a11f5fcd"
+  integrity sha512-ZzVFjD4DLrNwgOzGFaC+5DrU6D/8GE4jXMj2gp44lA2UgbKWdD8vaPufCJu2m0dU+S37ftKbNJAycvWUO9hC4w==
 
 "@protobufjs/aspromise@^1.1.1", "@protobufjs/aspromise@^1.1.2":
   version "1.1.2"
