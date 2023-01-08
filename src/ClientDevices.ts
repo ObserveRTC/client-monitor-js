@@ -1,7 +1,67 @@
 import * as Bowser from "bowser";
-import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas";
 import { createLogger } from "./utils/logger";
 import { hash } from "./utils/hash";
+
+/**
+* WebRTC App provided information related to the operation system the client uses.
+*/
+export type OperationSystem = {
+    /**
+    * The name of the operation system (e.g.: linux) the webrtc app uses
+    */
+    name?: string;
+    /**
+    * The version of the operation system
+    */
+    version?: string;
+    /**
+    * The name of the version of the operation system
+    */
+    versionName?: string;
+};
+/**
+* WebRTC App provided information related to the browser the client uses.
+*/
+export type Browser = {
+    /**
+    * The name of the operation system (e.g.: linux) the webrtc app uses
+    */
+    name?: string;
+    /**
+    * The version of the operation system
+    */
+    version?: string;
+};
+/**
+* WebRTC App provided information related to the platform the client uses.
+*/
+export type Platform = {
+    /**
+    * The name of the platform
+    */
+    type?: string;
+    /**
+    * The name of the vendor
+    */
+    vendor?: string;
+    /**
+    * The name of the model
+    */
+    model?: string;
+};
+/**
+* WebRTC App provided information related to the engine the client uses.
+*/
+export type Engine = {
+    /**
+    * The name of the Engine
+    */
+    name?: string;
+    /**
+    * The version of the engine
+    */
+    version?: string;
+};
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientDevices");

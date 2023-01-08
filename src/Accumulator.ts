@@ -1,4 +1,7 @@
-import { ClientSample, Samples } from "@observertc/monitor-schemas";
+import { 
+    Samples_ClientSample as ClientSample, 
+    Samples 
+} from "@observertc/monitor-schemas";
 import { createLogger } from "./utils/logger";
 
 const logger = createLogger("Accumulator");
@@ -44,7 +47,7 @@ export class Accumulator {
     }
 
     // the first message constains the schema version
-    private _samples: Samples = {};
+    private _samples: Samples = new Samples({});
     private _buffer: Samples[] = [];
     private _empty = true;
     private _config: AccumulatorConfig;
@@ -93,7 +96,7 @@ export class Accumulator {
                 (maxSamples: ${this._config.maxSamples}, maxClientSample in one sample: ${this._config.maxClientSamples})`, removedSamples
             );
         }
-        this._samples = {};
+        this._samples = new Samples({});
         this._empty = true;
     }
 }

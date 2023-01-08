@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { ClientSample } from "@observertc/monitor-schemas";
+import { Samples_ClientSample as ClientSample } from "@observertc/monitor-schemas";
 import { StatsEntry } from "./utils/StatsVisitor";
 export type StatsCollectedListener = (statsEntries: StatsEntry[]) => void;
 export type SampleCreatedListener = (clientSample: ClientSample) => void;

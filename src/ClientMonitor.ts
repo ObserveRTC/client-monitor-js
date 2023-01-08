@@ -1,11 +1,118 @@
-import { OperationSystem, Browser, Platform, Engine, MediaDevice, ExtensionStat, CustomCallEvent } from "@observertc/monitor-schemas";
 import { AccumulatorConfig } from "./Accumulator";
+import { OperationSystem, Browser, Platform, Engine } from "./ClientDevices";
 import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";
 import { EventsRegister } from "./EventsRelayer";
 import { MetricsReader } from "./Metrics";
 import { SamplerConfig, TrackRelation } from "./Sampler";
 import { SenderConfig, SentSamplesCallback } from "./Sender";
+
+export type CustomCallEvent = {
+    /**
+     * the name of the event used as identifier. (e.g.: MEDIA_TRACK_MUTED, USER_REJOINED, etc..) 
+     *
+     */
+    name: string;
+
+    /**
+     * Additional attachment relevant for the event 
+     *
+     */
+    attachments?: string;
+
+    /**
+     * The identifier of the media track the event is related to 
+     *
+     */
+    mediaTrackId?: string;
+
+    /**
+     * the human readable message of the event 
+     *
+     */
+    message?: string;
+
+    /**
+     * The unique identifier of the peer connection 
+     *
+     */
+    peerConnectionId?: string;
+
+    /**
+     * The EPOCH timestamp the event is generated 
+     *
+     */
+    timestamp: number;
+
+    /**
+     * the value of the event 
+     *
+     */
+    value?: string;
+};
+
+export type CustomObserverEvent = {
+    /**
+     * the name of the event used as identifier. (e.g.: MEDIA_TRACK_MUTED, USER_REJOINED, etc..) 
+     *
+     */
+    name: string;
+
+    /**
+     * Additional attachment relevant for the event 
+     *
+     */
+    attachments?: string;
+
+    /**
+     * The identifier of the media track the event is related to 
+     *
+     */
+    mediaTrackId?: string;
+
+    /**
+     * the human readable message of the event 
+     *
+     */
+    message: string;
+
+    /**
+     * The EPOCH timestamp the event is generated 
+     *
+     */
+    timestamp: number;
+}
+
+/**
+* The WebRTC app provided custom stats payload
+*/
+export type ExtensionStat = {
+    /**
+    * The type of the extension stats the custom app provides
+    */
+    type: string;
+    /**
+    * The payload of the extension stats the custom app provides
+    */
+    payload: string;
+};
+/**
+* The WebRTC app provided List of the media devices the client has.
+*/
+export type MediaDevice = {
+    /**
+    * the provided id of the media input / output
+    */
+    id?: string;
+    /**
+    * The media kind of the media device
+    */
+    kind?: "videoinput" | "audioinput" | "audiooutput";
+    /**
+    * The name of the device
+    */
+    label?: string;
+};
 
 export type ClientMonitorConfig = {
     /**

@@ -1,27 +1,41 @@
 import { v4 as uuidv4 } from "uuid";
 import {
     W3CStats as W3C,
-    Browser,
-    Certificate,
-    ClientSample,
-    MediaCodecStats,
-    DataChannel,
-    Engine,
-    ExtensionStat,
-    IceLocalCandidate,
-    IceRemoteCandidate,
-    InboundAudioTrack,
-    InboundVideoTrack,
-    MediaDevice,
-    MediaSourceStat,
-    OperationSystem,
-    OutboundAudioTrack,
-    OutboundVideoTrack,
-    PeerConnectionTransport,
-    Platform,
-    IceCandidatePair,
-    CustomCallEvent,
-    CustomObserverEvent,
+    Samples,
+    Samples_ClientSample as ClientSample,
+    Samples_ClientSample_Browser as Browser,
+    Samples_ClientSample_MediaCodecStats as MediaCodecStats,
+    Samples_ClientSample_Certificate as Certificate,
+    Samples_ClientSample_DataChannel as DataChannel,
+    Samples_ClientSample_Engine as Engine,
+    Samples_ClientSample_ExtensionStat as ExtensionStat,
+    Samples_ClientSample_IceLocalCandidate as IceLocalCandidate,
+    Samples_ClientSample_IceRemoteCandidate as IceRemoteCandidate,
+    Samples_ClientSample_InboundAudioTrack as InboundAudioTrack,
+    Samples_ClientSample_InboundVideoTrack as InboundVideoTrack,
+    Samples_ClientSample_MediaDevice as MediaDevice,
+    Samples_ClientSample_MediaSourceStat as MediaSourceStat,
+    Samples_ClientSample_OperationSystem as OperationSystem,
+    Samples_ClientSample_OutboundAudioTrack as OutboundAudioTrack,
+    Samples_ClientSample_OutboundVideoTrack as OutboundVideoTrack,
+    Samples_ClientSample_PeerConnectionTransport as PeerConnectionTransport,
+    Samples_ClientSample_Platform as Platform,
+    Samples_ClientSample_IceCandidatePair as IceCandidatePair,
+    Samples_ClientSample_CustomCallEvent as CustomCallEvent,
+    Samples_ClientSample_CustomObserverEvent as CustomObserverEvent,
+    // ,
+    // InboundAudioTrack,
+    // InboundVideoTrack,
+    // MediaDevice,
+    // MediaSourceStat,
+    // OperationSystem,
+    // OutboundAudioTrack,
+    // OutboundVideoTrack,
+    // PeerConnectionTransport,
+    // Platform,
+    // IceCandidatePair,
+    // CustomCallEvent,
+    // CustomObserverEvent,
 } from "@observertc/monitor-schemas";
 import { NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
@@ -108,13 +122,13 @@ export class Sampler {
     private _platform?: Platform;
     private _browser?: Browser;
     private _os?: OperationSystem;
-    private _mediaConstraints?: string[];
-    private _userMediaErrors?: string[];
-    private _extensionStats?: ExtensionStat[];
-    private _customCallEvents?: CustomCallEvent[];
-    private _customObservedEvents?: CustomObserverEvent[];
-    private _mediaDevices?: MediaDevice[];
-    private _localSDP?: string[];
+    private _mediaConstraints: string[] = [];
+    private _userMediaErrors: string[] = [];
+    private _extensionStats: ExtensionStat[] = [];
+    private _customCallEvents: CustomCallEvent[] = [];
+    private _customObservedEvents: CustomObserverEvent[] = [];
+    private _mediaDevices: MediaDevice[] = [];
+    private _localSDP: string[] = [];
 
     private _statsReader?: StatsReader;
     // private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
@@ -159,11 +173,11 @@ export class Sampler {
         }
         if (this._config.roomId && this._config.roomId !== value) {
             const message = `Attempted to override an already set roomId. (actual roomId: ${this._config.roomId}, attempted new roomId: ${value})`;
-            this.addCustomObserverEvent({
+            this.addCustomObserverEvent(new CustomObserverEvent({
                 name: "DETECTED_SETUP_ERROR",
                 message,
                 timestamp: Date.now(),
-            });
+            }));
             logger.warn(message);
             return;
         }
@@ -178,11 +192,11 @@ export class Sampler {
         }
         if (this._config.callId && this._config.callId !== value) {
             const message = `Attempted to override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`;
-            this.addCustomObserverEvent({
+            this.addCustomObserverEvent(new CustomObserverEvent({
                 name: "DETECTED_SETUP_ERROR",
                 message,
                 timestamp: Date.now(),
-            });
+            }));
             logger.warn(message);
             return;
         }
@@ -197,11 +211,11 @@ export class Sampler {
         }
         if (this._config.clientId && this._config.clientId !== value) {
             const message = `Attempted to override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`;
-            this.addCustomObserverEvent({
+            this.addCustomObserverEvent(new CustomObserverEvent({
                 name: "DETECTED_SETUP_ERROR",
                 message,
                 timestamp: Date.now(),
-            });
+            }));
             logger.warn(message);
             return;
         }
@@ -261,7 +275,9 @@ export class Sampler {
 
     public addCustomObserverEvent(event: CustomObserverEvent) {
         if (!this._customObservedEvents) this._customObservedEvents = [];
-        this._customObservedEvents.push(event);
+        this._customObservedEvents.push(new CustomObserverEvent({
+            ...event
+        }));
     }
 
     public addLocalSDP(localSDP: string[]): void {
@@ -299,7 +315,7 @@ export class Sampler {
             this._config.clientId = uuidv4();
             logger.info(`ClientId was undefined at the first sample, it is set to ${this._config.clientId}`);
         }
-        const clientSample: ClientSample = {
+        const clientSample: ClientSample = new ClientSample({
             callId: this._config.callId,
             clientId: this._config.clientId,
             sampleSeq: this._sampleSeq,
@@ -319,21 +335,21 @@ export class Sampler {
             customCallEvents: this._customCallEvents,
             mediaDevices: this._mediaDevices,
             timestamp: Date.now(),
-        };
+        });
         ++this._sampleSeq;
         this._engine = undefined;
         this._platform = undefined;
         this._browser = undefined;
         this._os = undefined;
-        this._mediaConstraints = undefined;
-        this._userMediaErrors = undefined;
-        this._extensionStats = undefined;
-        this._customCallEvents = undefined;
-        this._mediaDevices = undefined;
-        this._localSDP = undefined;
+        // this._mediaConstraints = undefined;
+        // this._userMediaErrors = undefined;
+        // this._extensionStats = undefined;
+        // this._customCallEvents = undefined;
+        // this._mediaDevices = undefined;
+        // this._localSDP = undefined;
         if (!this._statsReader) {
             logger.warn(`No StatsProvider has been assigned to Sampler`);
-            this._sampled = clientSample.timestamp;
+            this._sampled = clientSample.timestamp ?? -1;
             return clientSample;
         } else if (this._config.useStatsSample) {
             const statsTimestamp = this._statsReader.statsTimestamp;
@@ -342,20 +358,20 @@ export class Sampler {
             }
         }
         
-        let inboundAudioTracks: InboundAudioTrack[] | undefined;
-        let inboundVideoTracks: InboundVideoTrack[] | undefined;
-        let outboundAudioTracks: OutboundAudioTrack[] | undefined;
-        let outboundVideoTracks: OutboundVideoTrack[] | undefined;
-        let pcTransports: PeerConnectionTransport[] | undefined;
-        let iceCandidatePairs: IceCandidatePair[] | undefined;
+        let inboundAudioTracks: InboundAudioTrack[] = [];
+        let inboundVideoTracks: InboundVideoTrack[] = [];
+        let outboundAudioTracks: OutboundAudioTrack[] = [];
+        let outboundVideoTracks: OutboundVideoTrack[] = [];
+        let pcTransports: PeerConnectionTransport[] = [];
+        let iceCandidatePairs: IceCandidatePair[] = [];
 
-        let mediaSources: MediaSourceStat[] | undefined;
-        let codecs: MediaCodecStats[] | undefined;
-        let certificates: Certificate[] | undefined;
-        let iceLocalCandidates: IceLocalCandidate[] | undefined;
-        let iceRemoteCandidates: IceRemoteCandidate[] | undefined;
-        let dataChannels: DataChannel[] | undefined;
-        let iceServers: string[] | undefined;
+        let mediaSources: MediaSourceStat[] = [];
+        let codecs: MediaCodecStats[] = [];
+        let certificates: Certificate[] = [];
+        let iceLocalCandidates: IceLocalCandidate[] = [];
+        let iceRemoteCandidates: IceRemoteCandidate[] = [];
+        let dataChannels: DataChannel[] = [];
+        let iceServers: string[] = [];
         for (const peerConnection of this._statsReader.peerConnections()) {
             for (const [inboundAudioTrack, inboundVideoTrack] of this._makeInboundTrack(peerConnection)) {
                 if (inboundAudioTrack) {
@@ -437,7 +453,7 @@ export class Sampler {
         clientSample.iceRemoteCandidates = iceRemoteCandidates;
         clientSample.dataChannels = dataChannels;
         clientSample.iceServers = iceServers;
-        this._sampled = clientSample.timestamp;
+        this._sampled = clientSample.timestamp ?? -1;
         logger.debug(`Assembled ClientSample`, clientSample);
         return clientSample;
     }
@@ -483,7 +499,7 @@ export class Sampler {
                 const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
                 const { qualityLimitationDurations, ...outboundStats }: W3C.RtcOutboundRTPStreamStats =
                     outboundRtp.stats;
-                const outboundVideoTrack: OutboundVideoTrack = {
+                const outboundVideoTrack: OutboundVideoTrack = new OutboundVideoTrack({
                     ...mediaSourceStats,
                     ...remoteInboundRtpStats,
                     ...outboundStats,
@@ -493,9 +509,9 @@ export class Sampler {
                     qualityLimitationDurationBandwidth: qualityLimitationDurations?.bandwidth,
                     qualityLimitationDurationOther: qualityLimitationDurations?.none,
                     // perDscpId,
-                    trackId,
+                    trackId: trackId ?? trackIdentifier,
                     sfuStreamId,
-                };
+                });
                 yield [undefined, outboundVideoTrack];
             }
         }
@@ -518,20 +534,22 @@ export class Sampler {
             const { sfuStreamId, sfuSinkId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
             const audioPlayoutStats = inboundRtp.getAudioPlayout() || {};
             if (inboundRtp.stats.kind === "audio") {
-                const inboundAudioTrack: InboundAudioTrack = {
+                const stats = inboundRtp.stats;
+                const config = {
                     ...audioPlayoutStats,
                     ...remoteOutboundRtpStats,
-                    ...inboundRtp.stats,
+                    ...stats,
                     trackId,
                     sfuStreamId,
                     sfuSinkId,
                     remoteClientId,
                     peerConnectionId: peerConnection.collectorId,
-                };
+                }
+                const inboundAudioTrack: InboundAudioTrack = new InboundAudioTrack(config);
                 yield [inboundAudioTrack, undefined];
             }
             if (inboundRtp.stats.kind === "video") {
-                const inboundVideoTrack: InboundVideoTrack = {
+                const inboundVideoTrack: InboundVideoTrack = new InboundVideoTrack({
                     ...remoteOutboundRtpStats,
                     ...inboundRtp.stats,
                     trackId,
@@ -539,7 +557,7 @@ export class Sampler {
                     sfuSinkId,
                     remoteClientId,
                     peerConnectionId: peerConnection.collectorId,
-                };
+                });
                 yield [undefined, inboundVideoTrack];
             }
         }
@@ -552,11 +570,11 @@ export class Sampler {
             }
             const candidatePairId = entry.id;
             const peerConnectionId = peerConnection.collectorId;
-            const sample: IceCandidatePair = {
+            const sample: IceCandidatePair = new IceCandidatePair({
                 candidatePairId,
                 peerConnectionId,
                 ...entry.stats,
-            };
+            });
             yield sample;
         }
     }
@@ -570,12 +588,12 @@ export class Sampler {
             }
             const peerConnectionId = peerConnection.collectorId;
             const transportStats = transport.stats;
-            const sample: PeerConnectionTransport = {
+            const sample: PeerConnectionTransport = new PeerConnectionTransport({
                 peerConnectionId,
                 transportId: transport.id,
                 label: peerConnection.collectorLabel,
                 ...transportStats,
-            };
+            });
             yield sample;
         }
     }
@@ -586,9 +604,9 @@ export class Sampler {
                 continue;
             }
             const stats = mediaSourceEntry.stats;
-            const sample: MediaSourceStat = {
+            const sample: MediaSourceStat = new MediaSourceStat({
                 ...(stats.kind === "audio" ? (stats as W3C.RtcAudioSourceStats) : (stats as W3C.RtcVideoSourceStats)),
-            };
+            });
             yield sample;
         }
     }
@@ -599,9 +617,9 @@ export class Sampler {
                 continue;
             }
             const stats = codec.stats;
-            const sampledCodec: MediaCodecStats = {
+            const sampledCodec: MediaCodecStats = new MediaCodecStats({
                 ...stats,
-            };
+            });
             yield sampledCodec;
         }
     }
@@ -612,9 +630,9 @@ export class Sampler {
                 continue;
             }
             const stats = certificate.stats;
-            const sampledCertificate: Certificate = {
+            const sampledCertificate: Certificate = new Certificate({
                 ...stats,
-            };
+            });
             yield sampledCertificate;
         }
     }
@@ -627,10 +645,10 @@ export class Sampler {
                 continue;
             }
             const stats = iceLocalCandidate.stats;
-            const sampledLocalCandidate: IceLocalCandidate = {
+            const sampledLocalCandidate: IceLocalCandidate = new IceLocalCandidate({
                 ...stats,
                 peerConnectionId: peerConnection.collectorId,
-            };
+            });
             yield sampledLocalCandidate;
         }
     }
@@ -643,10 +661,10 @@ export class Sampler {
                 continue;
             }
             const stats = iceRemoteCandidate.stats;
-            yield {
+            yield new IceRemoteCandidate({
                 ...stats,
                 peerConnectionId: peerConnection.collectorId,
-            };
+            });
         }
     }
 
@@ -656,10 +674,10 @@ export class Sampler {
                 continue;
             }
             const stats = dataChannel.stats;
-            yield {
+            yield new DataChannel({
                 ...stats,
                 peerConnectionId: peerConnection.collectorId ?? NULL_UUID,
-            };
+            });
         }
     }
 

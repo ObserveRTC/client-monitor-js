@@ -84,7 +84,7 @@ export function createCodecStats(data?: any) {
     return result;
 }
 
-export function createInboundRtpStats(data?: any) {
+export function createInboundRtpStats(data?: any): W3C.RtcInboundRtpStreamStats {
     const result: W3C.RtcInboundRtpStreamStats = {
         id: DEFAULT_INBOUND_ID,
         type: W3C.StatsType.inboundRtp,

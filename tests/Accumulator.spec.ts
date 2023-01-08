@@ -1,17 +1,18 @@
+import { Samples_ClientSample } from "@observertc/monitor-schemas";
 import { Accumulator } from "../src/Accumulator";
 
 describe("Accumulator", () => {
     it("When two ClientSamples are added Then they were accumulated", () => {
         const accumulator = Accumulator.create();
         let invoked = false;
-        accumulator.addClientSample({
+        accumulator.addClientSample(new Samples_ClientSample({
             clientId: "clientId1",
             timestamp: Date.now(),
-        });
-        accumulator.addClientSample({
+        }));
+        accumulator.addClientSample(new Samples_ClientSample({
             clientId: "clientId2",
             timestamp: Date.now(),
-        });
+        }));
 
         accumulator.drainTo(samples => {
             expect(samples!.clientSamples!.length).toBe(2);
@@ -25,14 +26,14 @@ describe("Accumulator", () => {
             maxClientSamples: 1
         });
         let invoked = 0;
-        accumulator.addClientSample({
+        accumulator.addClientSample(new Samples_ClientSample({
             clientId: "clientId1",
             timestamp: Date.now(),
-        });
-        accumulator.addClientSample({
+        }));
+        accumulator.addClientSample(new Samples_ClientSample({
             clientId: "clientId2",
             timestamp: Date.now(),
-        });
+        }));
 
         accumulator.drainTo(samples => {
             expect(samples!.clientSamples!.length).toBe(1);
@@ -59,10 +60,10 @@ describe("Accumulator", () => {
             forwardIfEmpty: false,
         });
         let invoked = false;
-        accumulator.addClientSample({
+        accumulator.addClientSample(new Samples_ClientSample({
             clientId: "clientId1",
             timestamp: Date.now(),
-        });
+        }));
         accumulator.drainTo(() => {
             // empty consumer
         });

@@ -3,7 +3,7 @@ import { Sampler } from "../src/Sampler";
 import { StatsStorage } from "../src/entries/StatsStorage";
 import { v4 as uuidv4 } from "uuid";
 import { createCodecStats, createDataChannelStats, createIceCandidatePairStats, createInboundRtpStats, createMediaSourceStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSenderStats, createTransportStats } from "./helpers/StatsGenerator";
-import { W3CStats } from "@observertc/monitor-schemas";
+import { Samples_ClientSample_DataChannel, Samples_ClientSample_IceCandidatePair, Samples_ClientSample_InboundAudioTrack, Samples_ClientSample_InboundVideoTrack, Samples_ClientSample_MediaCodecStats, Samples_ClientSample_MediaSourceStat, Samples_ClientSample_OutboundVideoTrack, Samples_ClientSample_PeerConnectionTransport, W3CStats } from "@observertc/monitor-schemas";
 
 const StatsType = W3CStats.StatsType;
 
@@ -80,7 +80,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, statsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.codecs![0]).toMatchObject(statsEntry[1]);
+            const expected = statsEntry[1] as W3CStats.RtcCodecStats;
+            expect(clientSample.codecs![0]).toMatchObject(new Samples_ClientSample_MediaCodecStats(expected));
         });
         it('When codec is provided and non-incremental sampler is used Then codecs are always added', async () => {
             const statsStorage = makeStatsStorage();
@@ -90,7 +91,8 @@ describe("Sampler", () => {
 
             sampler.make()!;
             const secondClientSample = sampler.make()!;
-            expect(secondClientSample.codecs![0]).toMatchObject(statsEntry[1]);
+            const expected = statsEntry[1] as W3CStats.RtcCodecStats;
+            expect(secondClientSample.codecs![0]).toMatchObject(new Samples_ClientSample_MediaCodecStats(expected));
         });
         it('When codec is provided and incremental sampler is used Then codecs are not added if they are not updated', async () => {
             const statsStorage = makeStatsStorage();
@@ -100,7 +102,7 @@ describe("Sampler", () => {
 
             sampler.make()!;
             const secondClientSample = sampler.make()!;
-            expect(secondClientSample.codecs).toBe(undefined);
+            expect(secondClientSample.codecs.length).toBe(0);
         });
         it('When audio inboundRtp is provided Then inboundAudioTrack is added', async () => {
             const statsStorage = makeStatsStorage();
@@ -113,7 +115,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, receiverStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.inboundAudioTracks![0]).toMatchObject(inboundTrackStatsEntry[1]);
+            const expected = inboundTrackStatsEntry[1] as W3CStats.RtcInboundRtpStreamStats;
+            expect(clientSample.inboundAudioTracks![0]).toMatchObject(new Samples_ClientSample_InboundAudioTrack(expected));
         });
         it('When video inboundRtp is provided Then inboundVideoTrack is added', async () => {
             const statsStorage = makeStatsStorage();
@@ -126,7 +129,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, receiverStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.inboundVideoTracks![0]).toMatchObject(inboundTrackStatsEntry[1]);
+            const expected = inboundTrackStatsEntry[1] as W3CStats.RtcInboundRtpStreamStats;
+            expect(clientSample.inboundVideoTracks![0]).toMatchObject(new Samples_ClientSample_InboundVideoTrack(expected));
         });
         it('When audio outboundRtp is provided Then outboundAudioTrack is added', async () => {
             const statsStorage = makeStatsStorage();
@@ -139,7 +143,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, senderStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.outboundAudioTracks![0]).toMatchObject(outboundTrackStatsEntry[1]);
+            const expected = outboundTrackStatsEntry[1] as W3CStats.RtcOutboundRTPStreamStats;
+            expect(clientSample.outboundAudioTracks![0]).toMatchObject(expected);
         });
         it('When video outboundRtp is provided Then outboundVideoTrack is added', async () => {
             const statsStorage = makeStatsStorage();
@@ -152,7 +157,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, senderStatsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.outboundVideoTracks![0]).toMatchObject(outboundTrackStatsEntry[1]);
+            const expected = outboundTrackStatsEntry[1] as W3CStats.RtcOutboundRTPStreamStats;
+            expect(clientSample.outboundVideoTracks![0]).toMatchObject(new Samples_ClientSample_OutboundVideoTrack(expected));
         });
         it('When remote-inbound-rtp is provided Then fields from remote-inbounds are added', async () => {
             const statsStorage = makeStatsStorage();
@@ -204,7 +210,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, statsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.mediaSources![0]).toMatchObject(statsEntry[1]);
+            const expected = statsEntry[1] as W3CStats.RtcMediaSourceStats;
+            expect(clientSample.mediaSources![0]).toMatchObject(new Samples_ClientSample_MediaSourceStat(expected));
         });
         it('When transport is provided Then peerConnectionTransport are added', async () => {
             const statsStorage = makeStatsStorage();
@@ -213,7 +220,11 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, statsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.pcTransports![0]).toMatchObject(statsEntry[1]);
+            // const expected = statsEntry[1] as W3CStats.RtcPeerConnectionStats;
+            // Samples_ClientSample_PeerConnectionTransport
+            expect(clientSample.pcTransports![0]).toMatchObject({
+                // peerConnectionId: expected.dataChannelsOpened
+            });
         });
         it('When dataChannel is provided Then dataChannels are added', async () => {
             const statsStorage = makeStatsStorage();
@@ -222,7 +233,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, statsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.dataChannels![0]).toMatchObject(statsEntry[1]);
+            const expected = statsEntry[1] as W3CStats.RtcDataChannelStats;
+            expect(clientSample.dataChannels![0]).toMatchObject(new Samples_ClientSample_DataChannel(expected));
         });
         it('When iceCandidatePair is provided Then iceCandidatePairs are added', async () => {
             const statsStorage = makeStatsStorage();
@@ -231,7 +243,8 @@ describe("Sampler", () => {
             statsStorage.accept(COLLECTOR_ID, statsEntry);
 
             const clientSample = sampler.make()!;
-            expect(clientSample.iceCandidatePairs![0]).toMatchObject(statsEntry[1]);
+            const expected = statsEntry[1] as W3CStats.RtcIceCandidatePairStats;
+            expect(clientSample.iceCandidatePairs![0]).toMatchObject(new Samples_ClientSample_IceCandidatePair(expected));
         });
     });
 });

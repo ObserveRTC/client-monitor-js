@@ -1,18 +1,19 @@
 import {
-    Browser,
-    CustomCallEvent,
-    Engine,
-    ExtensionStat,
-    MediaDevice,
-    OperationSystem,
-    Platform,
     Samples,
+    Samples_ClientSample_Browser,
+    Samples_ClientSample_CustomCallEvent,
+    Samples_ClientSample_Engine,
+    Samples_ClientSample_ExtensionStat,
+    Samples_ClientSample_OperationSystem,
+    Samples_ClientSample_Platform,
+    Samples_ClientSample_MediaDevice,
+    Samples_Controls,
     version as schemaVersion,
 } from "@observertc/monitor-schemas";
 import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
 import { Sender, SenderConfig, SentSamplesCallback } from "./Sender";
-import { ClientDevices } from "./ClientDevices";
+import { Browser, ClientDevices, Engine, OperationSystem, Platform } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
 import { AdapterConfig } from "./adapters/Adapter";
 import { Timer } from "./utils/Timer";
@@ -20,7 +21,7 @@ import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
 import { createLogger } from "./utils/logger";
 import { supplyDefaultConfig as supplySamplerDefaultConfig } from "./Sampler";
-import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
+import { ClientMonitor, ClientMonitorConfig, CustomCallEvent, ExtensionStat, MediaDevice } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
 import EventEmitter from "events";
@@ -188,7 +189,9 @@ export class ClientMonitorImpl implements ClientMonitor {
         if (!devices) return;
         this._mediaDevices.update(...devices);
         for (const device of this._mediaDevices.sample()) {
-            this._sampler.addMediaDevice(device);
+            this._sampler.addMediaDevice(new Samples_ClientSample_MediaDevice({
+                ...device
+            }));
         }
     }
 
@@ -213,11 +216,15 @@ export class ClientMonitorImpl implements ClientMonitor {
             logger.warn("Extension stats payload must be a valid json string");
             return;
         }
-        this._sampler.addExtensionStats(stats);
+        this._sampler.addExtensionStats(new Samples_ClientSample_ExtensionStat({
+            ...stats
+        }));
     }
 
     public addCustomCallEvent(event: CustomCallEvent) {
-        this._sampler.addCustomCallEvent(event);
+        this._sampler.addCustomCallEvent(new Samples_ClientSample_CustomCallEvent({
+            ...event
+        }));
     }
 
     public addLocalSDP(localSDP: string[]): void {
@@ -303,15 +310,15 @@ export class ClientMonitorImpl implements ClientMonitor {
                     queue.push(bufferedSamples);
                 });
                 if (queue.length < 1)
-                    queue.push({
-                        controls: {
+                    queue.push(new Samples({
+                        controls: new Samples_Controls({
                             close: true,
-                        },
-                    });
+                        })
+                    }));
                 else
-                    queue[queue.length - 1].controls = {
+                    queue[queue.length - 1].controls = new Samples_Controls({
                         close: true,
-                    };
+                    });
                 for (const samples of queue) {
                     this._sender.send(samples);
                 }
@@ -388,16 +395,24 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _collectClientDevices(): void {
         this._clientDevices.collect();
         if (this._clientDevices.isOsChanged) {
-            this._sampler.addOs(this._clientDevices.os);
+            this._sampler.addOs(new Samples_ClientSample_OperationSystem({
+                ...this._clientDevices.os
+            }));
         }
         if (this._clientDevices.isBrowserChanged) {
-            this._sampler.addBrowser(this._clientDevices.browser);
+            this._sampler.addBrowser(new Samples_ClientSample_Browser({
+                ...this._clientDevices.browser
+            }));
         }
         if (this._clientDevices.isPlatformChanged) {
-            this._sampler.addPlatform(this._clientDevices.platform);
+            this._sampler.addPlatform(new Samples_ClientSample_Platform({
+                ...this._clientDevices.platform
+            }));
         }
         if (this._clientDevices.isEngineChanged) {
-            this._sampler.addEngine(this._clientDevices.engine);
+            this._sampler.addEngine(new Samples_ClientSample_Engine({
+                ...this._clientDevices.engine
+            }));
         }
         this._clientDevices.pivot();
     }

@@ -1,4 +1,5 @@
-import { MediaDevice } from "@observertc/monitor-schemas";
+import { MediaDevice } from "../ClientMonitor";
+
 export type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
 
 type InnerMediaDevice = MediaDevice & {

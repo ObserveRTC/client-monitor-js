@@ -1,3 +1,4 @@
+import { Samples_ClientSample } from "@observertc/monitor-schemas";
 import { EventsRelayer } from "../src/EventsRelayer";
 
 describe("EventsRelayer", () => {
@@ -9,10 +10,10 @@ describe("EventsRelayer", () => {
         events.onSampleCreated(() => {
             done();
         });
-        events.emitSampleCreated({
+        events.emitSampleCreated(new Samples_ClientSample({
             clientId: "notImportant",
             timestamp: Date.now(),
-        });
+        }));
     });
 
     it('Not Relay SampleCreated if unsubscribed', done => {
@@ -26,10 +27,10 @@ describe("EventsRelayer", () => {
         events.onSampleCreated(listener);
         events.onSampleCreated(doneListener);
         events.offSampleCreated(listener);
-        events.emitSampleCreated({
+        events.emitSampleCreated(new Samples_ClientSample({
             clientId: "notImportant",
             timestamp: Date.now(),
-        });
+        }));
     });
 
     it('Relay StatsCollected if subscribed', done => {

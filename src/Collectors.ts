@@ -270,6 +270,7 @@ export class CollectorsImpl implements Collectors {
             return false;
         }
         this._statsCollectors.set(collectorId, statsCollector);
+        logger.debug("Added Collector", collectorId);
         return true;
     }
 
@@ -285,6 +286,7 @@ export class CollectorsImpl implements Collectors {
             logger.warn(`Collector with peer connection id ${collectorId} was not found`);
             return false;
         }
+        logger.debug("Removed Collector", collectorId);
         return true;
     }
 

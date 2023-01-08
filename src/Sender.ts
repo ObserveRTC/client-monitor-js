@@ -1,5 +1,5 @@
 import { Samples } from "@observertc/monitor-schemas";
-import { Codec, CodecConfig, createCodec } from "./codecs/Codec";
+import { Codec, CodecConfig, createSamplesCodec } from "./codecs/Codec";
 import { Transport } from "./transports/Transport";
 import { WebsocketTransport, WebsocketTransportConfig } from "./transports/WebsocketTransport";
 import { createLogger } from "./utils/logger";
@@ -59,7 +59,7 @@ export class Sender {
     private _transport: Transport;
     private constructor(config: SenderConfig) {
         this._config = config;
-        this._codec = createCodec<Samples>(this._config.format);
+        this._codec = createSamplesCodec(this._config.format);
         this._transport = createTransport({
             websocket: config.websocket,
         })

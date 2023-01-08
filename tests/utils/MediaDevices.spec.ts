@@ -1,4 +1,4 @@
-import { MediaDevice } from "@observertc/monitor-schemas";
+import { MediaDevice } from "../../src/ClientMonitor";
 import { MediaDevices } from "../../src/utils/MediaDevices";
 
 describe(`MediaDevices`, () => {

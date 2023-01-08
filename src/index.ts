@@ -5,6 +5,8 @@ export type { StatsReader } from "./entries/StatsStorage";
 export type {
     ClientMonitor,
     ClientMonitorConfig,
+    CustomCallEvent,
+    CustomObserverEvent,
 } from "./ClientMonitor";
 
 export type { SentSamplesCallback } from "./Sender";
@@ -31,8 +33,6 @@ export type {
     IceServerEntry,
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
-
-export type { CustomCallEvent } from "@observertc/monitor-schemas";
 
 import { LogLevelDesc } from "loglevel";
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
