@@ -34,7 +34,7 @@ jobs:
       - name: Make snapshot version
         if: steps.job_context.outputs.branch != 'master'
         run: |
-          npm version prerelease --preid=next
+          npm version prerelease --preid=next --git-tag-version false
 
       - uses: JS-DevTools/npm-publish@v1
         with:
