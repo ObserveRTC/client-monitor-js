@@ -34,9 +34,19 @@ jobs:
       - name: Make snapshot version
         if: steps.job_context.outputs.branch != 'master'
         run: |
-          npm version ${{ steps.job_context.outputs.version }}-SNAPSHOT.${{ github.sha }} --tag=develop --git-tag-version false
+          npm version ${{ steps.job_context.outputs.version }}-SNAPSHOT.${{ github.sha }} --git-tag-version false
 
-      - uses: JS-DevTools/npm-publish@v1
+      - name: Publish package to latest
+        if: steps.job_context.outputs.branch == 'master'
+        uses: JS-DevTools/npm-publish@v1
         with:
           access: public
           token: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish package to develop
+        if: steps.job_context.outputs.branch != 'master'
+        uses: JS-DevTools/npm-publish@v1
+        with:
+          access: public
+          token: ${{ secrets.NPM_TOKEN }}
+          tag: develop
