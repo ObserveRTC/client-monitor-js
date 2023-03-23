@@ -1,4 +1,4 @@
-import { hash } from "../../src/utils/hash";
+import { makeStamp as hash } from "../../src/utils/hash";
 describe("hash", () => {
     describe("executions on differnet type of inputs", () => {
         it("When undefined is hashed Then its not undefined", () => {
@@ -21,10 +21,10 @@ describe("hash", () => {
             const hashedObj = hash(source);
             expect(hashedObj).not.toBe(source);
         });
-        it("When string is hashed Then its not the same", () => {
+        it("When string is hashed Then its the same", () => {
             const source = "Simpsons";
             const hashedObj = hash(source);
-            expect(hashedObj).not.toBe(source);
+            expect(hashedObj).toBe(source);
         });
         it("When function is hashed Then its not the same", () => {
             const source = function (): string { return "something"; }

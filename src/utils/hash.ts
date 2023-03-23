@@ -1,47 +1,35 @@
-import { sha256 } from "js-sha256";
-
 /*eslint-disable @typescript-eslint/no-explicit-any */
-export function hash(obj: any): string {
-    const digester = sha256.create();
+export function makeStamp(obj: any): string {
+    // const digester = sha256.create();
     if (obj === undefined) {
-        digester.update("undefined");
-        return digester.hex();
+        // digester.update("undefined");
+        return '0';
     }
     if (obj === null) {
-        digester.update("undefined");
-        return digester.hex();
+        // digester.update("undefined");
+        return '1';
     }
     const type = typeof obj;
     if (type === "function") {
-        digester.update("function");
-        return digester.hex();
+        // digester.update("function");
+        return '2';
     }
+
     if (type === "object") {
+        const stringbuffer: string[] = [];
         for (const [key, value] of Object.entries(obj)) {
-            const valueHash = hash(value);
-            digester.update(key + valueHash);
+            stringbuffer.push(makeStamp(value));
         }
-        return digester.hex();
+        let result = stringbuffer.join('');
+        while (256 < result.length) {
+            const charcodes: number[] = [];
+            for (let i = 0; i < result.length; i += 2) {
+                const charCode = result.charCodeAt(i) ^ result.charCodeAt(i + 1);
+                charcodes.push(charCode);
+            }
+            result = String.fromCharCode(...charcodes);
+        }
+        return result;
     }
-    switch (type) {
-        case "bigint":
-            digester.update((obj as bigint).toString());
-            break;
-        case "boolean":
-            digester.update((obj as boolean).toString());
-            break;
-        case "number":
-            digester.update((obj as number).toString());
-            break;
-        case "string":
-            digester.update(obj as string);
-            break;
-        case "undefined":
-            digester.update("undefined");
-            break;
-        case "symbol":
-            digester.update((obj as symbol).toString());
-            break;
-    }
-    return digester.hex();
+    return `${obj}`;
 }

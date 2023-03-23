@@ -22,7 +22,7 @@ import {
     PeerConnectionEntry,
     AudioPlayoutEntry,
 } from "./StatsEntryInterfaces";
-import { hash as objHash } from "../utils/hash";
+import { makeStamp as objHash } from "../utils/hash";
 import { W3CStats as W3C } from "@observertc/monitor-schemas";
 
 /*eslint-disable @typescript-eslint/no-explicit-any */

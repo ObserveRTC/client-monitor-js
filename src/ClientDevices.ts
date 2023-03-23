@@ -1,7 +1,7 @@
 import * as Bowser from "bowser";
 import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas";
 import { createLogger } from "./utils/logger";
-import { hash } from "./utils/hash";
+import { makeStamp } from "./utils/hash";
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientDevices");
@@ -67,10 +67,10 @@ export class ClientDevices {
             }
         }
         this._actualHashes = {
-            os: hash(this._os),
-            browser: hash(this._browser),
-            platform: hash(this._platform),
-            engine: hash(this._engine),
+            os: makeStamp(this._os),
+            browser: makeStamp(this._browser),
+            platform: makeStamp(this._platform),
+            engine: makeStamp(this._engine),
         };
     }
 
