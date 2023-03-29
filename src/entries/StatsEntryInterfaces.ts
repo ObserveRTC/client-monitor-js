@@ -1,14 +1,14 @@
-import { W3CStats as W3C } from "@observertc/monitor-schemas";
+import { W3CStats as W3C } from '@observertc/sample-schemas-js'
 
 export interface StatsEntryAbs {
     /*eslint-disable @typescript-eslint/no-explicit-any */
-    appData: any;
-    id: string;
-    created: number;
-    updated: number;
-    touched: number;
+    appData: Record<string, unknown>;
+    statsId: string;
+    // created: number;
+    // updated: number;
+    // touched: number;
     getPeerConnection(): PeerConnectionEntry;
-    hashCode: string;
+    // hashCode: string;
 }
 
 export interface OutboundTrackEntry {
@@ -255,13 +255,14 @@ export interface PeerConnectionEntry {
     /**
      * The id of the peer connection
      */
-    readonly id: string | undefined;
-    readonly collectorId: string;
+    readonly id: string;
+    // readonly collectorId: string;
+    readonly statsId: string | undefined;
     readonly stats: W3C.RtcPeerConnectionStats | undefined;
-    readonly created: number;
-    readonly touched: number;
-    readonly updated: number;
-    readonly collectorLabel: string | undefined;
+    // readonly created: number;
+    // readonly touched: number;
+    // readonly updated: number;
+    readonly label: string | undefined;
     codecs(): IterableIterator<CodecEntry>;
     inboundRtps(): IterableIterator<InboundRtpEntry>;
     outboundRtps(): IterableIterator<OutboundRtpEntry>;

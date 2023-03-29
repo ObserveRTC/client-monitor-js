@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
 import {
     W3CStats as W3C,
     Browser,
@@ -22,61 +21,13 @@ import {
     IceCandidatePair,
     CustomCallEvent,
     CustomObserverEvent,
-} from "@observertc/monitor-schemas";
+} from '@observertc/sample-schemas-js'
 import { NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
-import { isValidUuid } from "./utils/validators";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
 import { createLogger } from "./utils/logger";
 
 const logger = createLogger("Sampler");
-
-export type SamplerConfig = {
-    /**
-     * The identifier of the room the clients are in.
-     *
-     * If server side componet is used to collect the samples, this parameter is the critical to provide to match clients being in the same room.
-     *
-     * DEFAULT: a generated unique value
-     */
-    roomId?: string;
-
-    /**
-     * The identifier of the client. If it is not provided, then it a UUID is generated. If it is provided it must be a valid UUID.
-     *
-     * DEFAULT: a generated unique value
-     */
-    clientId?: string;
-    /**
-     * the identifier of the call between clients in the same room. If not given then the server side assigns one. If it is given it must be a valid UUID.
-     *
-     * DEFAULT: undefined
-     */
-    callId?: string;
-    /**
-     * The userId of the client appeared to other users.
-     *
-     * DEFAULT: undefined
-     */
-    userId?: string;
-
-    /**
-     * Indicate if the sampler only sample stats updated since the last sampling.
-     *
-     * DEFAULT: true
-     */
-    incrementalSampling?: boolean;
-
-    /**
-     * Indicate if the sampler should use the timestamp provided by the rtcstats (the minimum of the peer connection stats will be used as the timestamp of the sample)
-     */
-    useStatsSample?: boolean;
-};
-
-type SamplerConstructorConfig = SamplerConfig & {
-    roomId?: string;
-    clientId?: string;
-};
 
 export type TrackRelation = {
     trackId: string;
@@ -85,24 +36,8 @@ export type TrackRelation = {
     remoteClientId?: string;
 };
 
-export const supplyDefaultConfig = () => {
-    const defaultConfig: SamplerConstructorConfig = {
-        roomId: uuidv4(),
-        clientId: uuidv4(),
-        incrementalSampling: true,
-        useStatsSample: true,
-    };
-    return defaultConfig;
-};
 
 export class Sampler {
-    public static create(config?: SamplerConfig): Sampler {
-        const appliedConfig = Object.assign(supplyDefaultConfig(), config);
-        const result = new Sampler(appliedConfig);
-        logger.debug(`Created`, appliedConfig);
-        return result;
-    }
-
     // all of the following fields until empty line must be reset after sampled
     private _engine?: Engine;
     private _platform?: Platform;
@@ -116,101 +51,16 @@ export class Sampler {
     private _mediaDevices?: MediaDevice[];
     private _localSDP?: string[];
 
-    private _statsReader?: StatsReader;
+    // private _statsReader?: StatsReader;
     // private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
     private _trackRelations: Map<string, TrackRelation> = new Map();
     private _sampled = -1;
     private _sampleSeq = 0;
-    private _marker?: string;
     private _timezoneOffset: number = new Date().getTimezoneOffset();
-    private _config: SamplerConstructorConfig;
     private _closed = false;
-    private constructor(config: SamplerConstructorConfig) {
-        if (config.callId && !isValidUuid(config.callId)) {
-            throw new Error(`Sampler.config.callId must be a valid UUID`);
-        }
-        if (config.clientId && !isValidUuid(config.clientId)) {
-            throw new Error(`Sampler.config.clientId must be a valid UUID`);
-        }
-
-        this._config = config;
-    }
-
-    public set statsProvider(value: StatsReader) {
-        this._statsReader = value;
-    }
-
-    public get clientId(): string | undefined {
-        return this._config.clientId;
-    }
-
-    public get callId(): string | undefined {
-        return this._config.callId;
-    }
-
-    public get roomId(): string | undefined {
-        return this._config.roomId;
-    }
-
-    public setRoomId(value: string): void {
-        if (!isValidUuid(value)) {
-            logger.warn(`The given callId ${value} is not a valid UUID`);
-            return;
-        }
-        if (this._config.roomId && this._config.roomId !== value) {
-            const message = `Attempted to override an already set roomId. (actual roomId: ${this._config.roomId}, attempted new roomId: ${value})`;
-            this.addCustomObserverEvent({
-                name: "DETECTED_SETUP_ERROR",
-                message,
-                timestamp: Date.now(),
-            });
-            logger.warn(message);
-            return;
-        }
-        this._config.roomId = value;
-        logger.debug(`RoomId is set to ${value}`);
-    }
-
-    public setCallId(value: string): void {
-        if (!isValidUuid(value)) {
-            logger.warn(`The given callId ${value} is not a valid UUID`);
-            return;
-        }
-        if (this._config.callId && this._config.callId !== value) {
-            const message = `Attempted to override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`;
-            this.addCustomObserverEvent({
-                name: "DETECTED_SETUP_ERROR",
-                message,
-                timestamp: Date.now(),
-            });
-            logger.warn(message);
-            return;
-        }
-        this._config.callId = value;
-        logger.debug(`CallId is set to ${value}`);
-    }
-
-    public setClientId(value: string): void {
-        if (!isValidUuid(value)) {
-            logger.warn(`The given callId ${value} is not a valid UUID`);
-            return;
-        }
-        if (this._config.clientId && this._config.clientId !== value) {
-            const message = `Attempted to override an already set callId. (actual callId: ${this._config.callId}, attempted new callId: ${value})`;
-            this.addCustomObserverEvent({
-                name: "DETECTED_SETUP_ERROR",
-                message,
-                timestamp: Date.now(),
-            });
-            logger.warn(message);
-            return;
-        }
-        this._config.clientId = value;
-        logger.debug(`ClientId is set to ${value}`);
-    }
-
-    public setUserId(value: string) {
-        this._config.userId = value;
+    public constructor(
+        private _statsReader: StatsReader,
+    ) {
     }
 
     public addTrackRelation(trackRelation: TrackRelation): void {
@@ -274,10 +124,6 @@ export class Sampler {
         this._mediaDevices.push(mediaDevice);
     }
 
-    public setMarker(marker: string): void {
-        this._marker = marker;
-    }
-
     public close(): void {
         if (this._closed) {
             logger.warn(`Attempted to close the Sampler twice`);
@@ -291,22 +137,15 @@ export class Sampler {
         if (this._closed) {
             throw new Error(`Cannot sample a closed Sampler`);
         }
-        if (!this._config.roomId) {
-            this._config.roomId = uuidv4();
-            logger.warn(`RoomId was undefined at the first sample, it is set to ${this._config.roomId}, but the server is unable to match samples without matching roomId`);
-        }
-        if (!this._config.clientId) {
-            this._config.clientId = uuidv4();
-            logger.info(`ClientId was undefined at the first sample, it is set to ${this._config.clientId}`);
-        }
         const clientSample: ClientSample = {
-            callId: this._config.callId,
-            clientId: this._config.clientId,
+            // Deprecated fields, no longer have relevance in the coming schema
+            callId: 'NULL',
+            clientId: 'NULL',
+            roomId: 'NULL',
+            userId: 'NULL',
+            marker: 'NULL',
             sampleSeq: this._sampleSeq,
-            roomId: this._config.roomId,
-            userId: this._config.userId,
             timeZoneOffsetInHours: this._timezoneOffset,
-            marker: this._marker,
 
             localSDPs: this._localSDP,
             engine: this._engine,
@@ -331,16 +170,7 @@ export class Sampler {
         this._customCallEvents = undefined;
         this._mediaDevices = undefined;
         this._localSDP = undefined;
-        if (!this._statsReader) {
-            logger.warn(`No StatsProvider has been assigned to Sampler`);
-            this._sampled = clientSample.timestamp;
-            return clientSample;
-        } else if (this._config.useStatsSample) {
-            const statsTimestamp = this._statsReader.statsTimestamp;
-            if (statsTimestamp) {
-                clientSample.timestamp = statsTimestamp;
-            }
-        }
+        this._sampled = Date.now();
         
         let inboundAudioTracks: InboundAudioTrack[] | undefined;
         let inboundVideoTracks: InboundVideoTrack[] | undefined;
@@ -464,30 +294,28 @@ export class Sampler {
                     ...mediaSourceStats,
                     ...remoteInboundRtpStats,
                     ...outboundRtp.stats,
-                    peerConnectionId: peerConnection.collectorId,
+                    peerConnectionId: peerConnection.id,
                     trackId: trackId ?? trackIdentifier,
                     sfuStreamId,
                 };
                 yield [outboundAudioTrack, undefined];
             }
             if (outboundRtp.stats.kind === "video") {
-                const { trackIdentifier, ...videoSourceStats }: any = mediaSource
+                const { _trackIdentifier, ...videoSourceStats }: any = mediaSource
                     ? (mediaSource.stats as W3C.RtcVideoSourceStats)
                     : {};
                 let mediaSourceStats = {};
                 if (videoSourceStats) {
-                    if (!this._config.incrementalSampling) mediaSourceStats = videoSourceStats;
-                    else if (mediaSource && this._sampled && this._sampled <= mediaSource.updated)
-                        mediaSourceStats = videoSourceStats;
+                    mediaSourceStats = videoSourceStats;
                 }
-                const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
+                const { sfuStreamId } = this._trackRelations.get(trackId || "notId") ?? {};
                 const { qualityLimitationDurations, ...outboundStats }: W3C.RtcOutboundRTPStreamStats =
                     outboundRtp.stats;
                 const outboundVideoTrack: OutboundVideoTrack = {
                     ...mediaSourceStats,
                     ...remoteInboundRtpStats,
                     ...outboundStats,
-                    peerConnectionId: peerConnection.collectorId,
+                    peerConnectionId: peerConnection.id,
                     qualityLimitationDurationNone: qualityLimitationDurations?.none,
                     qualityLimitationDurationCPU: qualityLimitationDurations?.cpu,
                     qualityLimitationDurationBandwidth: qualityLimitationDurations?.bandwidth,
@@ -506,9 +334,6 @@ export class Sampler {
     ): Generator<[InboundAudioTrack | undefined, InboundVideoTrack | undefined], void, undefined> {
         // remoteOutboundRtp.getTransport().
         for (const inboundRtp of peerConnection.inboundRtps()) {
-            if (this._config.incrementalSampling && this._sampled && inboundRtp.updated <= this._sampled) {
-                continue;
-            }
             const trackId = inboundRtp.getTrackId();
             if (!trackId) {
                 logger.debug(`TrackId ${trackId} was not provided`);
@@ -526,7 +351,7 @@ export class Sampler {
                     sfuStreamId,
                     sfuSinkId,
                     remoteClientId,
-                    peerConnectionId: peerConnection.collectorId,
+                    peerConnectionId: peerConnection.id,
                 };
                 yield [inboundAudioTrack, undefined];
             }
@@ -538,7 +363,7 @@ export class Sampler {
                     sfuStreamId,
                     sfuSinkId,
                     remoteClientId,
-                    peerConnectionId: peerConnection.collectorId,
+                    peerConnectionId: peerConnection.id,
                 };
                 yield [undefined, inboundVideoTrack];
             }
@@ -547,11 +372,8 @@ export class Sampler {
 
     private *_makeIceCandidatePair(peerConnection: PeerConnectionEntry): Generator<IceCandidatePair, void, undefined> {
         for (const entry of peerConnection.iceCandidatePairs()) {
-            if (this._config.incrementalSampling && this._sampled && entry.updated <= this._sampled) {
-                continue;
-            }
-            const candidatePairId = entry.id;
-            const peerConnectionId = peerConnection.collectorId;
+            const candidatePairId = entry.statsId;
+            const peerConnectionId = peerConnection.id;
             const sample: IceCandidatePair = {
                 candidatePairId,
                 peerConnectionId,
@@ -565,15 +387,12 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<PeerConnectionTransport, void, undefined> {
         for (const transport of peerConnection.transports()) {
-            if (this._config.incrementalSampling && this._sampled && transport.updated <= this._sampled) {
-                continue;
-            }
-            const peerConnectionId = peerConnection.collectorId;
+            const peerConnectionId = peerConnection.id;
             const transportStats = transport.stats;
             const sample: PeerConnectionTransport = {
                 peerConnectionId,
-                transportId: transport.id,
-                label: peerConnection.collectorLabel,
+                transportId: transport.statsId,
+                label: peerConnection.label,
                 ...transportStats,
             };
             yield sample;
@@ -582,9 +401,6 @@ export class Sampler {
 
     private *_makeMediaSource(peerConnection: PeerConnectionEntry): Generator<MediaSourceStat, void, undefined> {
         for (const mediaSourceEntry of peerConnection.mediaSources()) {
-            if (this._config.incrementalSampling && this._sampled && mediaSourceEntry.updated <= this._sampled) {
-                continue;
-            }
             const stats = mediaSourceEntry.stats;
             const sample: MediaSourceStat = {
                 ...(stats.kind === "audio" ? (stats as W3C.RtcAudioSourceStats) : (stats as W3C.RtcVideoSourceStats)),
@@ -595,9 +411,6 @@ export class Sampler {
 
     private *_makeCodec(peerConnection: PeerConnectionEntry): Generator<MediaCodecStats, void, undefined> {
         for (const codec of peerConnection.codecs()) {
-            if (this._config.incrementalSampling && this._sampled && codec.updated <= this._sampled) {
-                continue;
-            }
             const stats = codec.stats;
             const sampledCodec: MediaCodecStats = {
                 ...stats,
@@ -608,9 +421,6 @@ export class Sampler {
 
     private *_makeCertificate(peerConnection: PeerConnectionEntry): Generator<Certificate, void, undefined> {
         for (const certificate of peerConnection.certificates()) {
-            if (this._config.incrementalSampling && this._sampled && certificate.updated <= this._sampled) {
-                continue;
-            }
             const stats = certificate.stats;
             const sampledCertificate: Certificate = {
                 ...stats,
@@ -623,13 +433,10 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<IceLocalCandidate, void, undefined> {
         for (const iceLocalCandidate of peerConnection.localCandidates()) {
-            if (this._config.incrementalSampling && this._sampled && iceLocalCandidate.updated <= this._sampled) {
-                continue;
-            }
             const stats = iceLocalCandidate.stats;
             const sampledLocalCandidate: IceLocalCandidate = {
                 ...stats,
-                peerConnectionId: peerConnection.collectorId,
+                peerConnectionId: peerConnection.id,
             };
             yield sampledLocalCandidate;
         }
@@ -639,35 +446,26 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<IceRemoteCandidate, void, undefined> {
         for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
-            if (this._config.incrementalSampling && this._sampled && iceRemoteCandidate.updated <= this._sampled) {
-                continue;
-            }
             const stats = iceRemoteCandidate.stats;
             yield {
                 ...stats,
-                peerConnectionId: peerConnection.collectorId,
+                peerConnectionId: peerConnection.id,
             };
         }
     }
 
     private *_makeDataChannel(peerConnection: PeerConnectionEntry): Generator<DataChannel, void, undefined> {
         for (const dataChannel of peerConnection.dataChannels()) {
-            if (this._config.incrementalSampling && this._sampled && dataChannel.updated <= this._sampled) {
-                continue;
-            }
             const stats = dataChannel.stats;
             yield {
                 ...stats,
-                peerConnectionId: peerConnection.collectorId ?? NULL_UUID,
+                peerConnectionId: peerConnection.id ?? NULL_UUID,
             };
         }
     }
 
     private *_makeIceServer(peerConnection: PeerConnectionEntry): Generator<string, void, undefined> {
         for (const iceServer of peerConnection.iceServers()) {
-            if (this._config.incrementalSampling && this._sampled && iceServer.updated <= this._sampled) {
-                continue;
-            }
             const url = iceServer.stats.url;
             yield url;
         }

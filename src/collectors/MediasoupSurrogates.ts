@@ -1,9 +1,10 @@
-import { W3CStats } from "@observertc/monitor-schemas"
+import { W3CStats } from "@observertc/sample-schemas-js";
 
 export interface MediaTrackSurrogate {
     readonly id: string;
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export type MediasoupProducerObserverListener = (data: any) => void;
 export interface MediasoupProducerObserverSurrogate {
     once(event: string, listener: MediasoupProducerObserverListener): void;
@@ -19,6 +20,7 @@ export interface MediasoupProducerSurrogate {
     getStats(): Promise<any>;
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export type MediasoupConsumerObserverListener = (data: any) => void;
 export interface MediasoupConsumerObserverSurrogate {
     once(event: string, listener: MediasoupConsumerObserverListener): void;

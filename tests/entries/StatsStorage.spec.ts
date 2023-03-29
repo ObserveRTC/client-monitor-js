@@ -1,12 +1,18 @@
 import { StatsStorage } from "../../src/entries/StatsStorage";
-import { W3CStats as W3C } from "@observertc/monitor-schemas";
+import { W3CStats as W3C } from '@observertc/sample-schemas-js';
 import * as Generator from "../helpers/StatsGenerator";
 import { StatsEntry } from "../../src/utils/StatsVisitor";
+import { createClientMonitor } from "../helpers/ClientMonitorGenerator";
 describe("StatsStorage", () => {
     describe("Given a normally updated StatsStorage", () => {
         const collectorId = "peerConnectionStatsCollectorId";
         const collectorLabel = "collectorLabel";
-        const storage = new StatsStorage();
+        const clientMonitor = createClientMonitor({
+            config: {
+                
+            }
+        });
+        const storage = new StatsStorage(clientMonitor);
         const codecStats = Generator.createCodecStats();
         const inboundRtpStats = Generator.createInboundRtpStats();
         const outboundRtpStats = Generator.createOutboundRtpStats();
@@ -53,8 +59,8 @@ describe("StatsStorage", () => {
         }
         describe("When codecs() is iterated", () => {
             const codec = Array.from(storage.codecs())[0];
-            it ("id equals to the stats.id", () => {
-                expect(codec.id).toBe(codecStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(codec.statsId).toBe(codecStats.id);
             });
             it (".stats field is ok", () => {
                 expect(codec!.stats).toEqual(codecStats);
@@ -71,8 +77,8 @@ describe("StatsStorage", () => {
         describe("When inboundRtps() is iterated", () => {
             const inboundRtp = Array.from(storage.inboundRtps())[0];
             const expectedTrackId = Array.from(storage.receivers())[0].stats.trackIdentifier;
-            it ("id equals to the stats.id", () => {
-                expect(inboundRtp.id).toBe(inboundRtpStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(inboundRtp.statsId).toBe(inboundRtpStats.id);
             });
             it (".stats field is ok", () => {
                 expect(inboundRtp.stats).toEqual(inboundRtpStats);
@@ -105,8 +111,8 @@ describe("StatsStorage", () => {
         describe("When outboundRtps() is iterated", () => {
             const outboundRtp = Array.from(storage.outboundRtps())[0];
             const expectedTrackId = Array.from(storage.senders())[0].stats.trackIdentifier;
-            it ("id equals to the stats.id", () => {
-                expect(outboundRtp.id).toBe(outboundRtpStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(outboundRtp.statsId).toBe(outboundRtpStats.id);
             });
             it (".stats field is ok", () => {
                 expect(outboundRtp.stats).toEqual(outboundRtpStats);
@@ -142,8 +148,8 @@ describe("StatsStorage", () => {
         });
         describe("When remoteInboundRtps() is iterated", () => {
             const remoteInboundRtp = Array.from(storage.remoteInboundRtps())[0];
-            it ("id equals to the stats.id", () => {
-                expect(remoteInboundRtp.id).toBe(remoteInboundRtpStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(remoteInboundRtp.statsId).toBe(remoteInboundRtpStats.id);
             });
             it (".stats field is ok", () => {
                 expect(remoteInboundRtp.stats).toEqual(remoteInboundRtpStats);
@@ -167,8 +173,8 @@ describe("StatsStorage", () => {
         });
         describe("When remoteOutboundRtps() is iterated", () => {
             const remoteOutboundRtp = Array.from(storage.remoteOutboundRtps())[0];
-            it ("id equals to the stats.id", () => {
-                expect(remoteOutboundRtp.id).toBe(remoteOutboundRtpStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(remoteOutboundRtp.statsId).toBe(remoteOutboundRtpStats.id);
             });
             it (".stats field is ok", () => {
                 expect(remoteOutboundRtp.stats).toEqual(remoteOutboundRtpStats);
@@ -192,8 +198,8 @@ describe("StatsStorage", () => {
         });
         describe("When mediaSources() is iterated", () => {
             const mediaSource = Array.from(storage.mediaSources())[0];
-            it ("id equals to the stats.id", () => {
-                expect(mediaSource.id).toBe(mediaSourceStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(mediaSource.statsId).toBe(mediaSourceStats.id);
             });
             it (".stats field is ok", () => {
                 expect(mediaSource.stats).toEqual(mediaSourceStats);
@@ -205,8 +211,8 @@ describe("StatsStorage", () => {
         });
         describe("When contributingSources() is iterated", () => {
             const contributingSource = Array.from(storage.contributingSources())[0];
-            it ("id equals to the stats.id", () => {
-                expect(contributingSource.id).toBe(csrcStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(contributingSource.statsId).toBe(csrcStats.id);
             });
             it (".stats field is ok", () => {
                 expect(contributingSource.stats).toEqual(csrcStats);
@@ -218,8 +224,8 @@ describe("StatsStorage", () => {
         });
         describe("When dataChannels() is iterated", () => {
             const dataChannel = Array.from(storage.dataChannels())[0];
-            it ("id equals to the stats.id", () => {
-                expect(dataChannel.id).toBe(dataChannelStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(dataChannel.statsId).toBe(dataChannelStats.id);
             });
             it (".stats field is ok", () => {
                 expect(dataChannel.stats).toEqual(dataChannelStats);
@@ -231,8 +237,8 @@ describe("StatsStorage", () => {
         });
         describe("When transceivers() is iterated", () => {
             const transceiver = Array.from(storage.transceivers())[0];
-            it ("id equals to the stats.id", () => {
-                expect(transceiver.id).toBe(transceiverStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(transceiver.statsId).toBe(transceiverStats.id);
             });
             it (".stats field is ok", () => {
                 expect(transceiver.stats).toEqual(transceiverStats);
@@ -244,8 +250,8 @@ describe("StatsStorage", () => {
         });
         describe("When senders() is iterated", () => {
             const sender = Array.from(storage.senders())[0];
-            it ("id equals to the stats.id", () => {
-                expect(sender.id).toBe(senderStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(sender.statsId).toBe(senderStats.id);
             });
             it (".stats field is ok", () => {
                 expect(sender.stats).toEqual(senderStats);
@@ -257,8 +263,8 @@ describe("StatsStorage", () => {
         });
         describe("When receivers() is iterated", () => {
             const receiver = Array.from(storage.receivers())[0];
-            it ("id equals to the stats.id", () => {
-                expect(receiver.id).toBe(receiverStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(receiver.statsId).toBe(receiverStats.id);
             });
             it (".stats field is ok", () => {
                 expect(receiver.stats).toEqual(receiverStats);
@@ -270,8 +276,8 @@ describe("StatsStorage", () => {
         });
         describe("When transports() is iterated", () => {
             const transport = Array.from(storage.transports())[0];
-            it ("id equals to the stats.id", () => {
-                expect(transport.id).toBe(transportStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(transport.statsId).toBe(transportStats.id);
             });
             it (".stats field is ok", () => {
                 expect(transport.stats).toEqual(transportStats);
@@ -299,8 +305,8 @@ describe("StatsStorage", () => {
         });
         describe("When sctpTransports() is iterated", () => {
             const sctpTransport = Array.from(storage.sctpTransports())[0];
-            it ("id equals to the stats.id", () => {
-                expect(sctpTransport.id).toBe(sctpTransportStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(sctpTransport.statsId).toBe(sctpTransportStats.id);
             });
             it (".stats field is ok", () => {
                 expect(sctpTransport.stats).toEqual(sctpTransportStats);
@@ -316,8 +322,8 @@ describe("StatsStorage", () => {
         });
         describe("When iceCandidatePairs() is iterated", () => {
             const iceCandidatePair = Array.from(storage.iceCandidatePairs())[0];
-            it ("id equals to the stats.id", () => {
-                expect(iceCandidatePair.id).toBe(candidatePairStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(iceCandidatePair.statsId).toBe(candidatePairStats.id);
             });
             it (".stats field is ok", () => {
                 expect(iceCandidatePair.stats).toEqual(candidatePairStats);
@@ -337,8 +343,8 @@ describe("StatsStorage", () => {
         });
         describe("When localCandidates() is iterated", () => {
             const localCandidate = Array.from(storage.localCandidates())[0];
-            it ("id equals to the stats.id", () => {
-                expect(localCandidate.id).toBe(localCandidateStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(localCandidate.statsId).toBe(localCandidateStats.id);
             });
             it (".stats field is ok", () => {
                 expect(localCandidate.stats).toEqual(localCandidateStats);
@@ -354,8 +360,8 @@ describe("StatsStorage", () => {
         });
         describe("When remoteCandidates() is iterated", () => {
             const localCandidate = Array.from(storage.remoteCandidates())[0];
-            it ("id equals to the stats.id", () => {
-                expect(localCandidate.id).toBe(remoteCandidateStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(localCandidate.statsId).toBe(remoteCandidateStats.id);
             });
             it (".stats field is ok", () => {
                 expect(localCandidate.stats).toEqual(remoteCandidateStats);
@@ -371,8 +377,8 @@ describe("StatsStorage", () => {
         });
         describe("When certificates() is iterated", () => {
             const certificate = Array.from(storage.certificates())[0];
-            it ("id equals to the stats.id", () => {
-                expect(certificate.id).toBe(certificateStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(certificate.statsId).toBe(certificateStats.id);
             });
             it (".stats field is ok", () => {
                 expect(certificate.stats).toEqual(certificateStats);
@@ -384,8 +390,8 @@ describe("StatsStorage", () => {
         });
         describe("When iceServers() is iterated", () => {
             const iceServer = Array.from(storage.iceServers())[0];
-            it ("id equals to the stats.id", () => {
-                expect(iceServer.id).toBe(iceServerStats.id);
+            it ("id equals to the stats.statsId", () => {
+                expect(iceServer.statsId).toBe(iceServerStats.id);
             });
             it (".stats field is ok", () => {
                 expect(iceServer.stats).toEqual(iceServerStats);

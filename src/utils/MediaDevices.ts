@@ -1,4 +1,4 @@
-import { MediaDevice } from "@observertc/monitor-schemas";
+import { MediaDevice } from '@observertc/sample-schemas-js';
 export type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
 
 type InnerMediaDevice = MediaDevice & {

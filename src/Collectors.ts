@@ -66,6 +66,7 @@ export class CollectorsImpl implements Collectors {
         this._adapter = createAdapter(this._config.adapter);
     }
 
+    /*eslint-disable @typescript-eslint/no-explicit-any*/
     [Symbol.iterator](): Iterator<StatsCollector, any, undefined> {
         return this._statsCollectors.values();
     }

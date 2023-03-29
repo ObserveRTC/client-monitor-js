@@ -1,7 +1,7 @@
 import * as Bowser from "bowser";
-import { Browser, Engine, OperationSystem, Platform } from "@observertc/monitor-schemas";
 import { createLogger } from "./utils/logger";
-import { hash } from "./utils/hash";
+import { makeStamp } from "./utils/makeStamp";
+import { OperationSystem, Browser, Platform, Engine } from "@observertc/sample-schemas-js";
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientDevices");
@@ -42,7 +42,7 @@ export class ClientDevices {
     private _engine: Engine = UNKNOWN_ENGINE;
     private _warned = false;
 
-    private _actualHashes?: Hashes;
+    private _actualStamps?: Hashes;
     private _pivotHashes?: Hashes;
 
     public constructor() {
@@ -66,11 +66,11 @@ export class ClientDevices {
                 logger.warn(`Cannot collect media devices and navigator data, because an error occurred`, err);
             }
         }
-        this._actualHashes = {
-            os: hash(this._os),
-            browser: hash(this._browser),
-            platform: hash(this._platform),
-            engine: hash(this._engine),
+        this._actualStamps = {
+            os: makeStamp(this._os),
+            browser: makeStamp(this._browser),
+            platform: makeStamp(this._platform),
+            engine: makeStamp(this._engine),
         };
     }
 
@@ -91,19 +91,19 @@ export class ClientDevices {
     }
 
     public get isOsChanged(): boolean {
-        return this._pivotHashes?.os !== this._actualHashes?.os;
+        return this._pivotHashes?.os !== this._actualStamps?.os;
     }
 
     public get isBrowserChanged(): boolean {
-        return this._pivotHashes?.browser !== this._actualHashes?.browser;
+        return this._pivotHashes?.browser !== this._actualStamps?.browser;
     }
 
     public get isPlatformChanged(): boolean {
-        return this._pivotHashes?.platform !== this._actualHashes?.platform;
+        return this._pivotHashes?.platform !== this._actualStamps?.platform;
     }
 
     public get isEngineChanged(): boolean {
-        return this._pivotHashes?.engine !== this._actualHashes?.engine;
+        return this._pivotHashes?.engine !== this._actualStamps?.engine;
     }
 
     public get changed(): boolean {
@@ -112,7 +112,7 @@ export class ClientDevices {
 
     public pivot(): void {
         this._pivotHashes = {
-            ...this._actualHashes,
+            ...this._actualStamps,
         }
     }
 }

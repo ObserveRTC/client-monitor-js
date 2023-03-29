@@ -1,7 +1,7 @@
 import { StatsEntry } from "../utils/StatsVisitor";
 import { Chrome86Adapter } from "./Chrome86Adapter";
 import { DefaultAdapter } from "./DefaultAdapter";
-import { W3CStats } from "@observertc/monitor-schemas";
+import { W3CStats } from '@observertc/sample-schemas-js'
 import { Firefox94Adapter } from "./Firefox94Adapter";
 import { Safari14Adapter } from "./Safari14Adapter";
 import { createLogger } from "../utils/logger";

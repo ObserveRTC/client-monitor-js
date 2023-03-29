@@ -7,7 +7,6 @@ export type {
     ClientMonitorConfig,
 } from "./ClientMonitor";
 
-export type { SentSamplesCallback } from "./Sender";
 export type { MediaDevices } from "./utils/MediaDevices";
 export type { TrackRelation } from "./Sampler";
 export type {
@@ -32,9 +31,9 @@ export type {
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
 
-export type { CustomCallEvent } from "@observertc/monitor-schemas";
+export type { CustomCallEvent } from '@observertc/sample-schemas-js';
+export { CallEventType } from './utils/callEvents'
 
-import { LogLevelDesc } from "loglevel";
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";
 /**
@@ -46,13 +45,5 @@ export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor
     return ClientMonitorImpl.create(config);
 }
 
-import { setLevel as setLoggersLevel } from "./utils/logger";
-/**
- * Sets the level of logging of the module
- *
- * possible values are: "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"
- */
-export function setLogLevel(level: LogLevelDesc) {
-    setLoggersLevel(level);
-}
+export { setLogLevel } from "./utils/logger";
 

@@ -27,7 +27,7 @@ import {
 } from "./StatsEntryInterfaces";
 import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
 import { createLogger } from "../utils/logger";
-import { ScrappedStats } from "../collectors/StatsCollector";
+import { ClientMonitor } from "../ClientMonitor";
 
 const logger = createLogger("StatsStorage");
 
@@ -165,11 +165,6 @@ export interface StatsReader {
      * The corresponded stats (csrc stats) are deprecated and will be removed from browser
      */
     contributingSources(): IterableIterator<ContributingSourceEntry>;
-
-    /**
-     * The timestamp of the stats representing the collected rtc stats
-     */
-    readonly statsTimestamp: number | undefined;
 }
 
 export interface StatsWriter {
@@ -191,10 +186,15 @@ export class StatsStorage implements StatsReader, StatsWriter {
     private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
     private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
 
-    public accept(collectorId: string, statsEntry: StatsEntry): void {
-        const pcEntry = this._peerConnections.get(collectorId);
+    public constructor(
+        private readonly _monitor: ClientMonitor,
+    ) {
+    }
+
+    public accept(peerConnectionId: string, statsEntry: StatsEntry): void {
+        const pcEntry = this._peerConnections.get(peerConnectionId);
         if (!pcEntry) {
-            logger.warn(`PeerConnectionEntry is not registered for collectorId ${collectorId}`);
+            logger.warn(`PeerConnectionEntry is not registered for peerConnectionId ${peerConnectionId}`);
             return;
         }
         pcEntry.update(statsEntry);
@@ -202,20 +202,10 @@ export class StatsStorage implements StatsReader, StatsWriter {
         this._updateOutboundTrackEntries();
     }
 
-    public get statsTimestamp(): number | undefined {
-        let result: number | undefined;
-        for (const pc of Array.from(this._peerConnections.values())) {
-            if (pc.statsTimestamp === undefined) continue;
-            if (result === undefined || pc.statsTimestamp < result) {
-                result = pc.statsTimestamp;
-            }
-        }
-        return result;
-    }
 
-    public trim(expirationThresholdInMs: number) {
-        for (const pcEntry of this._peerConnections.values()) {
-            pcEntry.trim(expirationThresholdInMs);
+    public trim() {
+        for (const peerConnectionEntry of this._peerConnections.values()) {
+            peerConnectionEntry.trim();
         }
     }
 
@@ -228,20 +218,27 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
     public register(peerConnectionId: string, collectorLabel?: string): void {
         const pcEntry = PeerConnectionEntryImpl.create({
-            collectorId: peerConnectionId,
-            collectorLabel,
-        });
+                collectorId: peerConnectionId,
+                collectorLabel,
+            }, 
+        );
         this._peerConnections.set(peerConnectionId, pcEntry);
+        if (this._monitor.config.createCallEvents) {
+            this._monitor.addPeerConnectionOpenedCallEvent(peerConnectionId);
+        }
     }
 
-    public unregister(collectorId: string): void {
-        const pcEntry = this._peerConnections.get(collectorId);
+    public unregister(peerConnectionId: string): void {
+        const pcEntry = this._peerConnections.get(peerConnectionId);
         if (!pcEntry) {
-            logger.warn(`Peer Connection Entry does not exist for collectorId ${collectorId}`);
+            logger.warn(`Peer Connection Entry does not exist for peerConnectionId ${peerConnectionId}`);
             return;
         }
-        this._peerConnections.delete(collectorId);
+        this._peerConnections.delete(peerConnectionId);
         pcEntry.clear();
+        if (this._monitor.config.createCallEvents) {
+            this._monitor.addPeerConnectionClosedCallEvent(peerConnectionId);
+        }
     }
 
     public *peerConnections(): Generator<PeerConnectionEntryImpl, void, undefined> {
@@ -431,7 +428,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
                 }
                 this._inboundTrackEntries.set(inboundTrackEntry.trackId, inboundTrackEntry);
             }
-            inboundTrackEntry.inboundRtpEntries.set(inboundRtpEntry.id, inboundRtpEntry);
+            inboundTrackEntry.inboundRtpEntries.set(inboundRtpEntry.statsId, inboundRtpEntry);
         }
         if (0 < trackIdsToRemove.size) {
             Array.from(trackIdsToRemove).forEach(trackId => this._inboundTrackEntries.delete(trackId));
@@ -458,7 +455,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
                 }
                 this._outboundTrackEntries.set(outboundTrackEntry.trackId, outboundTrackEntry);
             }
-            outboundTrackEntry.outboundRtpEntries.set(outboundRtpEntry.id, outboundRtpEntry);
+            outboundTrackEntry.outboundRtpEntries.set(outboundRtpEntry.statsId, outboundRtpEntry);
         }
         if (0 < trackIdsToRemove.size) {
             Array.from(trackIdsToRemove).forEach(trackId => this._outboundTrackEntries.delete(trackId));

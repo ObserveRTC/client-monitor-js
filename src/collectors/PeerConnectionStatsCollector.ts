@@ -24,12 +24,10 @@ export abstract class PeerConnectionStatsCollector implements StatsCollector {
         this._clientMonitor = clientMonitor;
 
         const connectionStateChangeListener = () => {
-            this._clientMonitor.addCustomCallEvent({
-                name: "CONNECTION_STATE_CHANGED",
-                peerConnectionId: this.id,
-                value: peerConnection.connectionState,
-                timestamp: Date.now(),
-            });
+            this._clientMonitor.addIceConnectionStateChangedCallEvent(
+                this.id,
+                peerConnection.connectionState,
+            )
         }
         peerConnection.addEventListener("connectionstatechange", connectionStateChangeListener);
         this._disposer = () => {

@@ -11,9 +11,10 @@ import { MediasoupConsumerSurrogate,
     MediasoupDataConsumerSurrogate,
     MediasoupDataProducerSurrogate
 } from "./MediasoupSurrogates";
-import { W3CStats } from "@observertc/monitor-schemas"
-import { createEmptyIterable, createEmptyIterator, wrapValueWithIterable } from "../utils/common";
-import { RtcReceiverCompoundStats, RtcSenderCompoundStats } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
+import { W3CStats } from "@observertc/sample-schemas-js";
+import { createEmptyIterable } from "../utils/common";
+import { RtcSenderCompoundStats } from "@observertc/sample-schemas-js/lib/w3c/W3cStatsIdentifiers";
+import { CallEventType } from "../utils/callEvents";
 
 const logger = createLogger("MediasoupStatsCollector");
 
@@ -55,17 +56,17 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
     private _dataConsumers = new Map<string, MediasoupDataConsumerSurrogate>();
     private _disposeDeviceListener?: DisposedListener;
 
-    public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor, config?: MediasoupStatsCollectorConfig) {
+    public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor, config?: Partial<MediasoupStatsCollectorConfig>) {
         this._clientMonitor = clientMonitor;
         this._device = device;
         
         const isFirefox = (clientMonitor.browser.name ?? "unknown").toLowerCase() === "firefox";
-        this._config = config ?? {
+        this._config = Object.assign({
             forgeSenderStats: isFirefox,
             pollConsumers: isFirefox,
             pollProducers: isFirefox,
-            addInboundTrackIdentifier: isFirefox
-        };
+            addInboundTrackIdentifier: isFirefox,
+        }, config ?? {});
 
         const newTransportListener: MediasoupDeviceObserverListener = transport => {
             this.addTransport(transport);
@@ -74,10 +75,10 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             this._refresh();
         };
         
-        this._clientMonitor.events.onStatsCollected(statsCollectedListener);
+        this._clientMonitor.on('stats-collected', statsCollectedListener);
         this._disposeDeviceListener = () => {
             device.observer.removeListener("newtransport", newTransportListener);
-            this._clientMonitor.events.offStatsCollected(statsCollectedListener);
+            this._clientMonitor.off('stats-collected', statsCollectedListener);
             this._disposeDeviceListener = undefined;
         }
         this._device.observer.on("newtransport", newTransportListener);
@@ -193,12 +194,14 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         
         const connectionStateChangeListener: MediasoupTransportObserverListener = data => {
             const connectionState = data as W3CStats.RtcIceTransportState;
-            this._clientMonitor.addCustomCallEvent({
-                name: "CONNECTION_STATE_CHANGED",
-                peerConnectionId,
-                value: connectionState,
-                timestamp: Date.now(),
-            });
+            if (this._clientMonitor.config.createCallEvents) {
+                this._clientMonitor.addCustomCallEvent({
+                    name: CallEventType.ICE_CONNECTION_STATE_CHANGED,
+                    peerConnectionId,
+                    value: connectionState,
+                    timestamp: Date.now(),
+                });
+            }
         }
         transport.observer.on("connectionstatechange", connectionStateChangeListener);
 
@@ -220,26 +223,32 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             return;
         }
         const pausedListener = () => {
-            this._clientMonitor.addCustomCallEvent({
-                name: "PRODUCER_PAUSED",
-                mediaTrackId: producer.track.id,
-                timestamp: Date.now(),
-                attachments: JSON.stringify({
-                    producerId: producer.id,
-                })
-            });
+            if (this._clientMonitor.config.createCallEvents) {
+                this._clientMonitor.addCustomCallEvent({
+                    name: CallEventType.PRODUCER_PAUSED,
+                    peerConnectionId: parent.peerConnectionId,
+                    mediaTrackId: producer.track.id,
+                    timestamp: Date.now(),
+                    attachments: JSON.stringify({
+                        producerId: producer.id,
+                    })
+                });
+            }
         };
         producer.observer.on("pause", pausedListener);
 
         const resumedListener = () => {
-            this._clientMonitor.addCustomCallEvent({
-                name: "PRODUCER_RESUMED",
-                mediaTrackId: producer.track.id,
-                timestamp: Date.now(),
-                attachments: JSON.stringify({
-                    producerId: producer.id,
-                })
-            });
+            if (this._clientMonitor.config.createCallEvents) {
+                this._clientMonitor.addCustomCallEvent({
+                    name: CallEventType.PRODUCER_RESUMED,
+                    peerConnectionId: parent.peerConnectionId,
+                    mediaTrackId: producer.track.id,
+                    timestamp: Date.now(),
+                    attachments: JSON.stringify({
+                        producerId: producer.id,
+                    })
+                });
+            }
         };
         producer.observer.on("resume", resumedListener);
 
@@ -294,6 +303,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         this._statsProviders.set(statsProviderKey, statsProvider);
         this._producers.set(producer.id, producer);
 
+        if (this._clientMonitor.config.createCallEvents) {
+            this._clientMonitor.addMediaTrackAddedCallEvent(
+                parent.peerConnectionId,
+                producer.track.id,
+            );            
+        }
+
         producer.observer.once("close", () => {
             producer.observer.removeListener("pause", pausedListener);
             producer.observer.removeListener("resume", resumedListener);
@@ -301,6 +317,14 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         
             this._statsProviders.delete(statsProviderKey);
             this._producers.delete(producer.id);
+            
+            if (this._clientMonitor.config.createCallEvents) {
+                this._clientMonitor.addMediaTrackRemovedCallEvent(
+                    parent.peerConnectionId,
+                    producer.track.id,
+                );
+            }
+            
         });
     }
 
@@ -323,20 +347,27 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
 
         const pausedListener = () => {
+           if (this._clientMonitor.config.createCallEvents) {
             this._clientMonitor.addCustomCallEvent({
-                name: "CONSUMER_PAUSED",
+                name: CallEventType.CONSUMER_PAUSED,
+                peerConnectionId: parent.peerConnectionId,
                 mediaTrackId: consumer.track.id,
                 timestamp: Date.now(),
             });
+           }
         };
         consumer.observer.on("pause", pausedListener);
 
         const resumedListener = () => {
-            this._clientMonitor.addCustomCallEvent({
-                name: "CONSUMER_RESUMED",
-                mediaTrackId: consumer.track.id,
-                timestamp: Date.now(),
-            });
+            if (this._clientMonitor.config.createCallEvents) {
+                this._clientMonitor.addCustomCallEvent({
+                    name: CallEventType.CONSUMER_RESUMED,
+                    peerConnectionId: parent.peerConnectionId,
+                    mediaTrackId: consumer.track.id,
+                    timestamp: Date.now(),
+                });
+            }
+            
         };
         consumer.observer.on("resume", resumedListener);
 
@@ -380,6 +411,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         }
         this._statsProviders.set(statsProviderKey, statsProvider);
         this._consumers.set(consumer.id, consumer);
+        
+        if (this._clientMonitor.config.createCallEvents) {
+            this._clientMonitor.addMediaTrackAddedCallEvent(
+                parent.peerConnectionId,
+                consumer.track.id,
+            );
+        }
 
         consumer.observer.once("close", () => {
             consumer.observer.removeListener("pause", pausedListener);
@@ -388,6 +426,13 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             
             this._statsProviders.delete(statsProviderKey);
             this._consumers.delete(consumer.id);
+
+            if (this._clientMonitor.config.createCallEvents) {
+                this._clientMonitor.addMediaTrackRemovedCallEvent(
+                    parent.peerConnectionId,
+                    consumer.track.id,
+                );
+            }
         });
     }
 

@@ -1,3 +1,40 @@
+## 2.0.0
+
+### Conceptual changes
+
+ * The ClientMonitor is no longer responsible for WebSocket connections and signaling. If the application wants to transmit the samples, it has to do it by itself.
+ * The ClientMonitor has become responsible for the following event emissions:
+	- PEER_CONNECTION_OPENED, PEER_CONNECTION_CLOSED
+	- MEDIA_TRACK_ADDED, MEDIA_TRACK_REMOVED
+	- ICE_CONNECTION_STATE_CHANGED
+ * Specific collectors can add additional call events. For example, mediasoup adds PRODUCER_PAUSED, PRODUCER_RESUMED, CONSUMER_PAUSED, CONSUMER_RESUMED events.
+
+### Major Code changes
+
+ * Removed Sender component and corresponding configuration from ClientMonitor.
+ * Removed Transport component, as sending and transporting no longer fall under the responsibility of the ClientMonitor.
+ * Storage StatsEntries `id` is renamed to `statsId`.
+ * PeerConnectionEntry `collectorId` is renamed to `id`, and `collectorLabel` to `label`.
+ * Removed `setUserId`, `setCallId`, `setClientId`, `setRoomId`, and `marker` from ClientMonitor, as this information should be used for context creation on the server side, which falls under the responsibility of signaling.
+ * Removed `events` field from ClientMonitor, as events have become part of the ClientMonitor itself, and ClientMonitor now provides `on`, `off`, `once` interfaces for events.
+
+### Functionality changes
+
+ * Stats are removed based on visited ids in getStats. If a stat is no longer present in the getStats extracted result, it is removed from the Storage.
+
+### Configuration changes
+
+ * Sampler configuration is reduced.
+ * Sender configuration is removed.
+ * `statsExpirationTimeInMs` is removed.
+ * `createCallEvents` is added.
+
+
+
+
+## 1.3.2
+ * Change hash function to makeStamp and stop using sha256 as it turned out to be performance intensive
+
 ## 1.3.1
  * Change visibility of MediasoupStatsCollector `addTransport` method to be public
  * make imported schema version to be 2.2.0 instead of the last snapshot
