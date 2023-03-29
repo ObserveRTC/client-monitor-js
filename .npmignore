@@ -1,0 +1,14 @@
+package-lock.json
+node_modules/
+dist/
+lib/
+keys/
+draft.md
+*.md
+
+docs/
+figures/
+tests/
+.vscode/
+.github/
+yarn.lock

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "prepare": "npm run build",
+    "prepublish": "pkgfiles",
     "prepublishOnly": "npm run lint",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.js src/*",
@@ -43,7 +44,8 @@
     "ts-jest": "^27.1.5",
     "typedoc": "^0.22.18",
     "typescript": "^4.8.3",
-    "utf-8-validate": "^5.0.8"
+    "utf-8-validate": "^5.0.8",
+    "pkgfiles": "2.3.0"
   },
   "repository": {
     "type": "git",
