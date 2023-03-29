@@ -29,12 +29,13 @@ jobs:
         run: | 
           echo "##[set-output name=branch;]$(echo ${GITHUB_REF##*/})"
           echo "##[set-output name=version;]$(cat ./package.json | grep version | head -1 | awk -F: '{ print $2 }' | sed 's/[",]//g' | tr -d '[[:space:]]')"
+          echo "##[set-output name=short_sha;]$(git rev-parse --short HEAD)"
         id: job_context
 
       - name: Make snapshot version
         if: steps.job_context.outputs.branch != 'master'
         run: |
-          npm version prerelease --preid=rc --git-tag-version false
+          npm version prerelease --preid=${{ steps.job_context.outputs.short_sha }} --git-tag-version false
         working-directory: ${{env.working-directory}}
 
       - name: Publish package to latest
