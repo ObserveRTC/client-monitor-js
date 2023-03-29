@@ -21,7 +21,7 @@ describe("hash", () => {
             const hashedObj = makeStamp(source);
             expect(hashedObj).not.toBe(source);
         });
-        it("When string is hashed Then its not the same", () => {
+        it("When string is hashed Then its the same", () => {
             const source = "Simpsons";
             const hashedObj = makeStamp(source);
             expect(hashedObj).toBe(source);
