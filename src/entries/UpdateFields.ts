@@ -34,7 +34,6 @@ export function calculateOutboundRtpUpdates(
 export function calculateRemoteInboundRtpUpdates(
 	prevStats: W3C.RtcRemoteInboundRtpStreamStats, 
 	actualStats: W3C.RtcRemoteInboundRtpStreamStats,
-	elapsedTimeInSec: number,
 ): RemoteInboundRtpUpdates {
 	const receivedPackets = (actualStats.packetsReceived ?? 0) - (prevStats.packetsReceived ?? 0);
 	const lostPackets = (actualStats.packetsLost ?? 0) - (prevStats.packetsLost ?? 0);

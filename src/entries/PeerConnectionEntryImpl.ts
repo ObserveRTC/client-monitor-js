@@ -657,6 +657,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const outboundRtps = this._pc._outboundRtps;
                 const newEntry: RemoteInboundRtpEntry = {
                     appData: {},
+                    updates: calculateRemoteInboundRtpUpdates(
+                        stats,
+                        stats,
+                    ),
                     statsId: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -695,6 +699,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     outboundRtpPair.remoteInboundRtpId = newEntry.stats.id;
                 }
             } else {
+                entry.updates = calculateRemoteInboundRtpUpdates(
+                    entry.stats,
+                    stats,
+                )
                 entry.stats = stats;
             }
         }
@@ -707,11 +715,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const inboundRtps = this._pc._inboundRtps;
                 const newEntry: RemoteOutboundRtpEntry = {
                     appData: {},
-                    updates: calculateRemoteInboundRtpUpdates(
-                        stats,
-                        stats,
-                        this.elapsedInSec
-                    ),
                     statsId: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -749,11 +752,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     inboundRtpPair.remoteOutboundRtpId = newEntry.stats.id;
                 }
             } else {
-                entry.updates = calculateRemoteInboundRtpUpdates(
-                    entry.stats,
-                    stats,
-                    this.elapsedInSec
-                )
                 entry.stats = stats;
             }
         }

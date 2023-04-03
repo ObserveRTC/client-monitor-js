@@ -125,6 +125,8 @@ export interface RemoteInboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntr
     stats: W3C.RtcRemoteInboundRtpStreamStats;
     getSsrc(): number | undefined;
     getOutboundRtp(): OutboundRtpEntry | undefined;
+
+    updates: RemoteInboundRtpUpdates;
 }
 
 /**
@@ -135,8 +137,6 @@ export interface RemoteOutboundRtpEntry extends SenderRtpStreamEntry, StatsEntry
     stats: W3C.RtcRemoteOutboundRTPStreamStats;
     getSsrc(): number | undefined;
     getInboundRtp(): InboundRtpEntry | undefined;
-
-    updates: RemoteInboundRtpUpdates;
 }
 
 /**
