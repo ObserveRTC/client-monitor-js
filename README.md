@@ -37,7 +37,7 @@ const config = {
 const monitor = createClientMonitor(config);
 const statsCollector = monitor.collectors.collectFromRTCPeerConnection(peerConnection);
 
-monitor.events.onStatsCollected(() => {
+monitor.on('stats-collected', () => {
     const storage = monitor.storage;
     for (const inboundRtp of storage.inboundRtps()) {
         const trackId = inboundRtp.getTrackId();
@@ -53,6 +53,7 @@ The above example do as follows:
  2. setup a stats collector from a peer connection
  3. register an event called after stats are collected
  4. print out the inbound rtps and then close the stats collector we registered in step 3.
+
 
 ## Integrations
 
@@ -547,34 +548,32 @@ for (const peerConnection of storage.peerConnections()) {
 }
 ```
 
-## Connect to Observer
+## Sending Samples to a Server
 
-The client-monitor can be connected to an [Observer](https://github.com/ObserveRTC/observer).
+The monitor create samples periodically if it is configured (see below), or if the application calls the `sample()` method.
+Transporting the sample is done by the application. See an example below
 
 ```javascript
-import { ClientMontior } from "@observertc/client-monitor-js";
+import { createCllientMonitor } from "@observertc/client-monitor-js";
+
+const webSocket = new WebSocket('https://my-monitor-server-domain');
+
 // see full config in Configuration section
 const config = {
     collectingPeriodInMs: 5000,
     samplingPeriodInMs: 10000,
     sendingPeriodInMs: 15000,
-    sampler: {
-        roomId: "testRoom",
-    },
-    sender: {
-        websocket: {
-            urls: ["ws://localhost:7080/samples/myServiceId/myMediaUnitId"]
-        }
-    }
 };
-const monitor = ClientMontior.create(config);
-monitor.addStatsCollector({
-    id: "collectorId",
-    getStats: () => peerConnection.getStats(),
+const monitor = createCllientMonitor(config);
+monitor.on('send', samples => {
+    // samples to send
+    webSocket.send(JSON.stringify(samples));
 });
 ```
 
-The stats are collected in every 5s, but samples are only made in every 10s. Samples are sent to the observer in every 15s.
+In the example above the stats are collected in every 5s, 
+samples are created in every 10s, 
+and an array of samples are emitted to send in every 15s.
 
 
 ## Configurations
@@ -603,19 +602,16 @@ const config = {
     sendingPeriodInMs: 10000,
 
     /**
-     * By setting it stats items and entries are deleted if they are not updated.
-     * 
-     * DEFAULT: undefined
+     * By enabling this option, the monitor automatically generates events
+     * when a peer connection added to the collector undergoes a change in connection state or when a track on it is added or removed.
+     *
+     * If this option is set to true, the samples created by the monitor will include the generated events. However, if
+     * no sample is created, events will accumulate indefinitely within the monitor. It is recommended to set this option to true
+     * if you want to create a sample with events.
+     *
+     * DEFAULT: false
      */
-    statsExpirationTimeInMs: 60000,
-
-    /**
-     * By setting this flag to true the samples are buffered even if no sender is available.
-     * This is useful if the sender is set later than the monitor is created, so no samples will be lost.
-     * 
-     * DEFAULT: true
-     */
-    bufferingSamples: true;
+    createCallEvents: false,
 
     /**
      * Collector Component related configurations
@@ -643,90 +639,6 @@ const config = {
              */
             browserVersion: "97.1111.111",
         },
-    },
-
-    /**
-     * Sampling Component Related configurations
-     * 
-     */
-    sampler: {
-        /**
-         * The identifier of the room the clients are in.
-         * 
-         * If server side componet is used to collect the samples, this parameter is the critical to provide to match clients being in the same room.
-         * 
-         * DEFAULT: a generated unique value
-         * 
-         * NOTE: if this value has not been set clients which are in the same room will not be matched at the monitor
-         */
-        roomId: "testRoom",
-
-        /**
-         * The identifier of the client. If it is not provided, then it a UUID is generated. If it is provided it must be a valid UUID.
-         * 
-         * DEFAULT: a generated unique value
-         */
-        clientId: "clientId",
-
-        /**
-         * the identifier of the call between clients in the same room. If not given then the server side assigns one. If it is given it must be a valid UUID.
-         * 
-         * DEFAULT: undefined
-         */
-        callId: "callId",
-        /**
-         * The userId of the client appeared to other users.
-         * 
-         * DEFAULT: undefined
-         */
-        userId: "testUser",
-
-        /**
-         * Indicate if the sampler only sample stats updated since the last sampling.
-         * 
-         * DEFAULT: true
-         */
-        incrementalSampling: true,
-
-        /**
-        * Indicate if the sampler should use the timestamp provided by the rtcstats (the minimum of the peer connection stats will be used as the timestamp of the sample)
-        * 
-        * DEFAULT: true
-        */
-        useStatsSample: true,
-    },
-    /**
-     * Configure the sender component.
-     */
-    sender: {
-        /**
-         * Configure the format used to transport samples or receieve 
-         * feedback from the server.
-         * 
-         * Possible values: json, protobuf
-         * 
-         * DEFAULT: json
-         * 
-         */
-        format: "json",
-         /**
-         * Websocket configuration to transport the samples
-         */
-        websocket: {
-            /**
-             * Target urls in a priority order. If the Websocket has not succeeded for the first,
-             * it tries with the second. If no more url left the connection is failed
-             * 
-             */
-            urls: ["ws://localhost:7080/samples/myServiceId/myMediaUnitId"],
-            /**
-             * The maximum number of retries to connect to a server before,
-             * tha connection failed is stated.
-             * 
-             * DEFAULT: 3
-             */
-            maxRetries: 1,
-        }
     },
 
     /**

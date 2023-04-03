@@ -51,6 +51,15 @@ interface ReceivedRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 
 /**
+ * 
+ */
+export interface InboundRtpUpdates {
+    readonly receivingBitrate: number,
+    readonly lostPackets: number,
+    readonly receivedPackets: number,
+}
+
+/**
  * Wraps the [RTCInboundRtpStreamStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcinboundrtpstreamstats) and provide methods
  * to navigate to its relations
  */
@@ -70,6 +79,19 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      */
     getRemoteOutboundRtp(): RemoteOutboundRtpEntry | undefined;
     getAudioPlayout(): AudioPlayoutEntry | undefined;
+
+    /**
+     * Tracks the differences between the last collected stats and the current collected stats
+     */
+    updates: InboundRtpUpdates,
+}
+
+/**
+ * 
+ */
+export interface OutboundRtpUpdates {
+    readonly sendingBitrate: number,
+    readonly sentPackets: number,
 }
 
 /**
@@ -86,6 +108,13 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     getMediaSource(): MediaSourceEntry | undefined;
     getSender(): SenderEntry | undefined;
     getRemoteInboundRtp(): RemoteInboundRtpEntry | undefined;
+
+    updates: OutboundRtpUpdates;
+}
+
+export interface RemoteInboundRtpUpdates {
+    readonly receivedPackets: number,
+    readonly lostPackets: number,
 }
 
 /**
@@ -106,6 +135,8 @@ export interface RemoteOutboundRtpEntry extends SenderRtpStreamEntry, StatsEntry
     stats: W3C.RtcRemoteOutboundRTPStreamStats;
     getSsrc(): number | undefined;
     getInboundRtp(): InboundRtpEntry | undefined;
+
+    updates: RemoteInboundRtpUpdates;
 }
 
 /**
@@ -247,6 +278,17 @@ export interface AudioPlayoutEntry extends StatsEntryAbs {
     stats: W3C.RTCAudioPlayoutStats;
 }
 
+export interface PeerConnectionUpdates {
+    readonly totalPacketsSent: number;
+    readonly totalPacketsReceived: number;
+    readonly totalPacketsLost: number;
+    readonly avgRttInS: number,
+    readonly sendingAuidoBitrate: number,
+    readonly sendingVideoBitrate: number,
+    readonly receivingAudioBitrate: number,
+    readonly receivingVideoBitrate: number,
+}
+
 /**
  * Wraps the [RTCPeerConnectionStats](https://www.w3.org/TR/webrtc-stats/#pcstats-dict*) and provide methods
  * to navigate to its relations
@@ -282,4 +324,6 @@ export interface PeerConnectionEntry {
     certificates(): IterableIterator<CertificateEntry>;
     iceServers(): IterableIterator<IceServerEntry>;
     trackIds(): IterableIterator<string>;
+
+    updates: PeerConnectionUpdates;
 }

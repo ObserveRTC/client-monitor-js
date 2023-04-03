@@ -41,7 +41,7 @@ const supplyDefaultConfig = () => {
 logger.debug("Version of the loaded schema:", schemaVersion);
 
 export class ClientMonitorImpl implements ClientMonitor {
-    public static create(config?: ClientMonitorConfig): ClientMonitor {
+    public static create(config?: Partial<ClientMonitorConfig>): ClientMonitor {
         if (config?.maxListeners !== undefined) {
             EventEmitter.setMaxListeners(config.maxListeners);
         }
@@ -208,13 +208,16 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public async collect(): Promise<void> {
         const started = Date.now();
+        
+        this._statsStorage.start();
+
         await this._collectors.collect().catch((err) => {
             logger.warn(`Error occurred while collecting`, err);
         });
         const elapsedInMs = Date.now() - started;
 
         // trim stats does not exists anymore
-        this._statsStorage.trim();
+        this._statsStorage.commit();
 
         this._metrics.setCollectingTimeInMs(elapsedInMs);
         this._emit('stats-collected', {

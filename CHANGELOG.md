@@ -8,6 +8,8 @@
 	- MEDIA_TRACK_ADDED, MEDIA_TRACK_REMOVED
 	- ICE_CONNECTION_STATE_CHANGED
  * Specific collectors can add additional call events. For example, mediasoup adds PRODUCER_PAUSED, PRODUCER_RESUMED, CONSUMER_PAUSED, CONSUMER_RESUMED events.
+ * ClientMonitor calculate derived metrics such as sending, and receiving bitrates, total sent and received packets.
+ 
 
 ### Major Code changes
 

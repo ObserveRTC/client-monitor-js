@@ -202,10 +202,15 @@ export class StatsStorage implements StatsReader, StatsWriter {
         this._updateOutboundTrackEntries();
     }
 
-
-    public trim() {
+    public start(): void {
         for (const peerConnectionEntry of this._peerConnections.values()) {
-            peerConnectionEntry.trim();
+            peerConnectionEntry.start();
+        }
+    }
+
+    public commit() {
+        for (const peerConnectionEntry of this._peerConnections.values()) {
+            peerConnectionEntry.commit();
         }
     }
 

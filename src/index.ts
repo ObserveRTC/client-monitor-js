@@ -31,8 +31,25 @@ export type {
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
 
-export type { CustomCallEvent } from '@observertc/sample-schemas-js';
+export type { 
+    Samples,
+	ClientSample,
+	SfuSample,
+	ExtensionStat,
+	PeerConnectionTransport,
+	IceCandidatePair,
+	MediaSourceStat,
+	MediaCodecStats,
+	InboundAudioTrack,
+	InboundVideoTrack,
+	OutboundAudioTrack,
+	OutboundVideoTrack,
+	IceLocalCandidate,
+	IceRemoteCandidate,
+    CustomCallEvent,
+} from '@observertc/sample-schemas-js';
 export { CallEventType } from './utils/callEvents'
+
 
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";

@@ -21,8 +21,10 @@ import {
     StatsEntryAbs,
     PeerConnectionEntry,
     AudioPlayoutEntry,
+    PeerConnectionUpdates,
 } from "./StatsEntryInterfaces";
 import { W3CStats as W3C } from '@observertc/sample-schemas-js'
+import { calculateInboundRtpUpdates, calculateOutboundRtpUpdates, calculateRemoteInboundRtpUpdates } from "./UpdateFields";
 
 function createVisitedStatIds() {
     return {
@@ -69,6 +71,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     }
 
     public readonly created: number;
+    private _lastCommit: number;
     private _config: PeerConnectionEntryConfig;
     private _visitor: InstanceType<(typeof PeerConnectionEntryImpl)['Visitor']>;
 
@@ -98,13 +101,25 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     private _receivers: Map<string, ReceiverEntry> = new Map();
     private _sctpTransports: Map<string, SctpTransportEntry> = new Map();
     private _iceServers: Map<string, IceServerEntry> = new Map();
+    private _updates: PeerConnectionUpdates;
+
     private constructor(
         config: PeerConnectionEntryConfig,
     ) {
         this._config = config;
         const now = Date.now();
-        this.created = now;
+        this.created = this._lastCommit = now;
         this._visitor = new PeerConnectionEntryImpl.Visitor(this);
+        this._updates = {
+            avgRttInS: 0,
+            sendingAuidoBitrate: 0,
+            sendingVideoBitrate: 0,
+            receivingAudioBitrate: 0,
+            receivingVideoBitrate: 0,
+            totalPacketsLost: 0,
+            totalPacketsReceived: 0,
+            totalPacketsSent: 0,
+        }
     }
 
     public get id(): string {
@@ -113,6 +128,9 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
     public get label(): string | undefined {
         return this._config.collectorLabel;
+    }
+        public get updates() {
+        return this._updates;
     }
 
     public *trackIds(): Generator<string, void, undefined> {
@@ -229,7 +247,23 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
     }
 
-    public trim(): void {
+    /**
+     * Called before a collection for stats starts. 
+     * It calculates the elapsed time, and reset necessary objects
+     * 
+     */
+    public start(): void {
+        const now = Date.now();
+        this._visitor.elapsedInMs = now - this._lastCommit;
+        this._visitor.elapsedInSec = this._visitor.elapsedInSec / 1000.0;
+    }
+
+    /**
+     * Called after a visit has been completed.
+     * 
+     * It trims the stats objects, and update the time elapsed since last collection
+     */
+    public commit(): void {
         const {
             codecs,
             inboundRtps,
@@ -270,10 +304,69 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     collection.delete(key);
                 }
             }
+            visitedIds.clear();
+        }
+        this._update();
+        // this._visitor = new PeerConnectionEntryImpl.Visitor(this);
+    }
+
+    private _update() {
+        let totalPacketsLost = 0;
+        let totalPacketsReceived = 0;
+        let totalPacketsSent = 0;
+        let sendingAuidoBitrate = 0;
+        let sendingVideoBitrate = 0;
+        let receivingAudioBitrate = 0;
+        let receivingVideoBitrate = 0;
+        const roundTripTimesInS = [];
+        for (const inboundRtpEntry of this.inboundRtps()) {
+            const updates = inboundRtpEntry.updates;
+            if (inboundRtpEntry.stats.kind === 'audio') {
+                receivingAudioBitrate += updates.receivingBitrate;
+            } else if (inboundRtpEntry.stats.kind === 'video') {
+                receivingVideoBitrate += updates.receivingBitrate;
+            }
+            totalPacketsLost += updates.lostPackets;
+            totalPacketsReceived += updates.receivedPackets;
+        }
+        for (const outboundRtpEntry of this.outboundRtps()) {
+            const updates = outboundRtpEntry.updates;
+            if (outboundRtpEntry.stats.kind === 'audio') {
+                sendingAuidoBitrate += outboundRtpEntry.updates.sendingBitrate;
+            } else if (outboundRtpEntry.stats.kind === 'video') {
+                sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
+            }
+            totalPacketsSent += updates.sentPackets;
         }
         
-        this._visitor = new PeerConnectionEntryImpl.Visitor(this);
+        for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
+            const { roundTripTime } = remoteInboundRtpEntry.stats;
+            if (roundTripTime) {
+                roundTripTimesInS.push(roundTripTime)
+            }
+        }
+
+        for (const iceCandidatePair of this.iceCandidatePairs()) {
+            const { currentRoundTripTime } = iceCandidatePair.stats;
+            if (currentRoundTripTime) {
+                roundTripTimesInS.push(currentRoundTripTime)
+            }
+        }
+        const avgRttInS = Math.round((roundTripTimesInS.length < 1 ? -1 : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length) * 1000);
+       
+        this._updates = {
+            ...this._updates,
+            sendingAuidoBitrate,
+            sendingVideoBitrate,
+            receivingAudioBitrate,
+            receivingVideoBitrate,
+            avgRttInS,
+            totalPacketsLost,
+            totalPacketsReceived,
+            totalPacketsSent,
+        }
     }
+
     
 
     private _getEntryMaps(): Map<string, StatsEntryAbs>[] {
@@ -323,10 +416,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     }
 
     private static Visitor = class extends StatsVisitor {
-        public touched = false;
-        public readonly created: number = Date.now();
         private _pc: PeerConnectionEntryImpl;
         public readonly visitedStatIds = createVisitedStatIds();
+        public elapsedInMs = -1;
+        public elapsedInSec = -1;
 
         constructor(outer: PeerConnectionEntryImpl) {
             super();
@@ -334,7 +427,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         }
         visit(statsEntry: StatsEntry): void {
             super.visit(statsEntry);
-            this.touched = true;
         }
 
         visitCodec(stats: W3C.RtcCodecStats): void {
@@ -380,6 +472,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
 
+
         visitInboundRtp(stats: W3C.RtcInboundRtpStreamStats): void {
             const pc = this._pc;
             const entries = pc._inboundRtps;
@@ -390,6 +483,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const audioPlayouts = this._pc._audioPlayouts;
                 const newEntry: InboundRtpEntry = {
                     appData: {},
+                    updates: calculateInboundRtpUpdates(
+                        stats,
+                        stats,
+                        this.elapsedInSec
+                    ),
                     statsId: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -456,7 +554,13 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     inboundRtpPair.inboundRtpId = newEntry.stats.id;
                 }
             } else {
+                entry.updates = calculateInboundRtpUpdates(
+                    entry.stats,
+                    stats,
+                    this.elapsedInSec,
+                );
                 entry.stats = stats;
+                
             }
         }
         visitOutboundRtp(stats: W3C.RtcOutboundRTPStreamStats): void {
@@ -468,6 +572,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const remoteInboundRtps = this._pc._remoteInboundRtps;
                 const newEntry: OutboundRtpEntry = {
                     appData: {},
+                    updates: calculateOutboundRtpUpdates(
+                        stats,
+                        stats,
+                        this.elapsedInSec
+                    ),
                     statsId: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -521,6 +630,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 entries.set(stats.id, newEntry);
                 entry = newEntry;
             } else {
+                entry.updates = calculateOutboundRtpUpdates(
+                    entry.stats,
+                    stats,
+                    this.elapsedInSec
+                );
                 entry.stats = stats;
             }
             const ssrc = entry.getSsrc();
@@ -593,6 +707,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const inboundRtps = this._pc._inboundRtps;
                 const newEntry: RemoteOutboundRtpEntry = {
                     appData: {},
+                    updates: calculateRemoteInboundRtpUpdates(
+                        stats,
+                        stats,
+                        this.elapsedInSec
+                    ),
                     statsId: stats.id,
                     getPeerConnection: () => {
                         return pc;
@@ -630,6 +749,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     inboundRtpPair.remoteOutboundRtpId = newEntry.stats.id;
                 }
             } else {
+                entry.updates = calculateRemoteInboundRtpUpdates(
+                    entry.stats,
+                    stats,
+                    this.elapsedInSec
+                )
                 entry.stats = stats;
             }
         }
