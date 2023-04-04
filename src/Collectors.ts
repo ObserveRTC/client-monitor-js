@@ -92,6 +92,8 @@ export class CollectorsImpl implements Collectors {
     }
 
     public addStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined{
+        logger.trace(`addStatsProvider(): statsProvider`, statsProvider);
+
         const peerConnectionId = statsProvider.peerConnectionId;
         if (!this._statsWriter) {
             logger.warn(`Added statsProvider with id ${statsProvider.peerConnectionId} cannot be added to the storage, because it is not assigned to the Collectors resource`);
@@ -114,6 +116,8 @@ export class CollectorsImpl implements Collectors {
     }
 
     public addRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined {
+        logger.trace(`addRTCPeerConnection(): statsProvider`, peerConnection);
+
         if (!this._clientMonitor) {
             logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
             return;
@@ -141,6 +145,8 @@ export class CollectorsImpl implements Collectors {
     }
 
     public addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined {
+        logger.trace(`addMediasoupDevice(): mediasoupDevice: `, mediasoupDevice);
+
         if (!this._clientMonitor) {
             logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
             return;

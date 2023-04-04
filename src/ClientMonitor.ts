@@ -4,9 +4,14 @@ import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";
 import { MetricsReader } from "./Metrics";
 import { TrackRelation } from "./Sampler";
+import { LogLevel } from "./utils/logger";
 import { StatsEntry } from "./utils/StatsVisitor";
 
 export type ClientMonitorConfig = {
+    /**
+     * Set the loglevel for the client-monitor module
+     */
+    logLevel?: LogLevel,
     /**
      * Sets the maximum number of listeners for event emitters.
      */

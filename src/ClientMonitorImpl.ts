@@ -5,7 +5,7 @@ import { AdapterConfig } from "./adapters/Adapter";
 import { Timer } from "./utils/Timer";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
-import { createLogger } from "./utils/logger";
+import { createLogger, setLogLevel } from "./utils/logger";
 import { ClientMonitor, ClientMonitorConfig, ClientMonitorEvents } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
@@ -30,6 +30,7 @@ type ConstructorConfig = ClientMonitorConfig;
 
 const supplyDefaultConfig = () => {
     const defaultConfig: ConstructorConfig = {
+        logLevel: 'warn',
         // samplingPeriodInMs: 5000,
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
@@ -46,6 +47,9 @@ export class ClientMonitorImpl implements ClientMonitor {
             EventEmitter.setMaxListeners(config.maxListeners);
         }
         const appliedConfig = config ? Object.assign(supplyDefaultConfig(), config) : supplyDefaultConfig();
+        if (appliedConfig.logLevel) {
+            setLogLevel(appliedConfig.logLevel);
+        }
         const result = new ClientMonitorImpl(appliedConfig);
         logger.debug("Created", appliedConfig);
         return result;

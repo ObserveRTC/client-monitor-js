@@ -42,6 +42,11 @@ function createVisitedStatIds() {
         remoteCandidates: new Set<string>(),
         certificates: new Set<string>(),
         audioPlayouts: new Set<string>(),
+        transceivers: new Set<string>(),
+        senders: new Set<string>(),
+        receivers: new Set<string>(),
+        sctpTransports: new Set<string>(),
+        iceServers: new Set<string>(),
     }
 }
 
@@ -279,6 +284,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             remoteCandidates,
             certificates,
             audioPlayouts,
+            transceivers,
+            senders,
+            receivers,
+            sctpTransports,
+            iceServers
         } = this._visitor.visitedStatIds;
     
         const properties = [
@@ -296,6 +306,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             { collection: this._remoteCandidates, visitedIds: remoteCandidates },
             { collection: this._certificates, visitedIds: certificates },
             { collection: this._audioPlayouts, visitedIds: audioPlayouts },
+            { collection: this._transceivers, visitedIds: transceivers },
+            { collection: this._senders, visitedIds: senders },
+            { collection: this._receivers, visitedIds: receivers },
+            { collection: this._sctpTransports, visitedIds: sctpTransports },
+            { collection: this._iceServers, visitedIds: iceServers },
         ];
     
         for (const { collection, visitedIds } of properties) {
@@ -430,8 +445,9 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         }
 
         visitCodec(stats: W3C.RtcCodecStats): void {
-            const pc = this._pc;
+            this.visitedStatIds.codecs.add(stats.id);
             
+            const pc = this._pc;
             const entries = pc._codecs;
             const entry = entries.get(stats.id);
             if (entry) {
@@ -454,6 +470,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         }
 
         visitMediaSource(stats: W3C.RtcMediaSourceCompoundStats): void {
+            this.visitedStatIds.mediaSources.add(stats.id);
+            
             const pc = this._pc;
             const entries = pc._mediaSources;
             const entry = entries.get(stats.id);
@@ -474,6 +492,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
 
         visitInboundRtp(stats: W3C.RtcInboundRtpStreamStats): void {
+            this.visitedStatIds.inboundRtps.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._inboundRtps;
             const entry = entries.get(stats.id);
@@ -564,6 +584,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
         visitOutboundRtp(stats: W3C.RtcOutboundRTPStreamStats): void {
+            this.visitedStatIds.outboundRtps.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._outboundRtps;
             let entry = entries.get(stats.id);
@@ -649,6 +671,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
         visitRemoteInboundRtp(stats: W3C.RtcRemoteInboundRtpStreamStats): void {
+            this.visitedStatIds.remoteInboundRtps.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._remoteInboundRtps;
             const entry = entries.get(stats.id);
@@ -707,6 +731,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
         visitRemoteOutboundRtp(stats: W3C.RtcRemoteOutboundRTPStreamStats): void {
+            this.visitedStatIds.remoteOutboundRtps.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._remoteOutboundRtps;
             const entry = entries.get(stats.id);
@@ -756,6 +782,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
         visitContributingSource(stats: W3C.RtcRtpContributingSourceStats): void {
+            this.visitedStatIds.contributingSources.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._contributingSources;
             const entry = entries.get(stats.id);
@@ -783,6 +811,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         }
 
         visitDataChannel(stats: W3C.RtcDataChannelStats): void {
+            this.visitedStatIds.dataChannels.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._dataChannels;
             const entry = entries.get(stats.id);
@@ -801,6 +831,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitTransceiver(stats: W3C.RtcRtpTransceiverStats): void {
+            this.visitedStatIds.transceivers.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._transceivers;
             const entry = entries.get(stats.id);
@@ -827,6 +859,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitSender(stats: W3C.RtcSenderCompoundStats): void {
+            this.visitedStatIds.senders.add(stats.id);
+            
             const pc = this._pc;
             const entries = pc._senders;
             const entry = entries.get(stats.id);
@@ -850,6 +884,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitReceiver(stats: W3C.RtcReceiverCompoundStats): void {
+            this.visitedStatIds.receivers.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._receivers;
             const entry = entries.get(stats.id);
@@ -868,6 +904,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitTransport(stats: W3C.RtcTransportStats): void {
+            this.visitedStatIds.transports.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._transports;
             const entry = entries.get(stats.id);
@@ -906,6 +944,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitSctpTransport(stats: W3C.RtcSctpTransportStats): void {
+            this.visitedStatIds.sctpTransports.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._sctpTransports;
             const entry = entries.get(stats.id);
@@ -929,6 +969,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitIceCandidatePair(stats: W3C.RtcIceCandidatePairStats): void {
+            this.visitedStatIds.iceCandidatePairs.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._iceCandidatePairs;
             const entry = entries.get(stats.id);
@@ -962,6 +1004,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitLocalCandidate(stats: W3C.RtcLocalCandidateStats): void {
+            this.visitedStatIds.localCandidates.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._localCandidates;
             const entry = entries.get(stats.id);
@@ -985,6 +1029,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitRemoteCandidate(stats: W3C.RtcRemoteCandidateStats): void {
+            this.visitedStatIds.remoteCandidates.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._remoteCandidates;
             const entry = entries.get(stats.id);
@@ -1008,6 +1054,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitCertificate(stats: W3C.RtcCertificateStats): void {
+            this.visitedStatIds.certificates.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._certificates;
             const entry = entries.get(stats.id);
@@ -1026,6 +1074,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             entries.set(stats.id, newEntry);
         }
         visitIceServer(stats: W3C.RtcIceServerStats): void {
+            this.visitedStatIds.iceServers.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._iceServers;
             let entry = entries.get(stats.id);
@@ -1044,6 +1094,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
         visitAudioPlayout(stats: W3C.RTCAudioPlayoutStats): void {
+            this.visitedStatIds.audioPlayouts.add(stats.id);
+
             const pc = this._pc;
             const entries = pc._audioPlayouts;
             let entry = entries.get(stats.id);
