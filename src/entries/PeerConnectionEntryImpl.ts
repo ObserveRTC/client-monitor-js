@@ -260,7 +260,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     public start(): void {
         const now = Date.now();
         this._visitor.elapsedInMs = now - this._lastCommit;
-        this._visitor.elapsedInSec = this._visitor.elapsedInSec / 1000.0;
+        this._visitor.elapsedInSec = this._visitor.elapsedInMs / 1000.0;
     }
 
     /**
@@ -322,7 +322,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             visitedIds.clear();
         }
         this._update();
-        // this._visitor = new PeerConnectionEntryImpl.Visitor(this);
+
+        this._lastCommit = Date.now();
     }
 
     private _update() {
