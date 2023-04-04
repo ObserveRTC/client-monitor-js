@@ -5,6 +5,7 @@ export type { StatsReader } from "./entries/StatsStorage";
 export type {
     ClientMonitor,
     ClientMonitorConfig,
+    ClientMonitorEvents,
 } from "./ClientMonitor";
 
 export type { MediaDevices } from "./utils/MediaDevices";

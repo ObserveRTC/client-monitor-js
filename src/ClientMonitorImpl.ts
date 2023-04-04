@@ -75,6 +75,10 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._createTimer();
     }
 
+    public get closed() {
+        return this._closed;
+    }
+
     public get os(): OperationSystem {
         return this._clientDevices.os;
     }

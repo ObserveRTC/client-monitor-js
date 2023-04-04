@@ -136,6 +136,11 @@ export interface ClientMonitor {
     readonly collectors: Collectors;
 
     /**
+     * Flag indicating whether the monitor is closed or not
+     */
+    readonly closed: boolean;
+
+    /**
      * Subscribe to events emitted by the monitor.
      * @param event 
      * @param listener 
