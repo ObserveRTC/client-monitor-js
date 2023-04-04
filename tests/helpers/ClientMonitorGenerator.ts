@@ -7,6 +7,9 @@ import { TrackRelation } from "../../src/Sampler";
 
 export function createClientMonitor(data: any): ClientMonitor {
     const result = new class implements ClientMonitor {
+        get closed(): boolean {
+            return data.closed === true;
+        }
         get config(): ClientMonitorConfig {
             return data.config;
         }
