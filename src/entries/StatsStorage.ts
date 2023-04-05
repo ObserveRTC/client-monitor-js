@@ -31,10 +31,27 @@ import { ClientMonitor } from "../ClientMonitor";
 
 const logger = createLogger("StatsStorage");
 
+export type StatsReaderUpdates = {
+    sendingAuidoBitrate: number,
+    sendingVideoBitrate: number,
+    receivingAudioBitrate: number,
+    receivingVideoBitrate: number,
+    totalInboundPacketsLost: number,
+    totalInboundPacketsReceived: number,
+    totalOutboundPacketsSent: number,
+    totalOutbounPacketsReceived: number,
+    totalOutboundPacketsLost: number,
+}
+
 /**
  * Interface to read the collected stats.
  */
 export interface StatsReader {
+
+    /**
+     * The calculated differences and updates since the last polling
+     */
+    readonly updates: StatsReaderUpdates;
 
     /**
      * Gets stats related to a track, for which the media direction is inbound
@@ -47,13 +64,6 @@ export interface StatsReader {
      * @param trackId the id of the track
      */
     getOutboundTrack(trackId: string): OutboundTrackEntry | undefined;
-
-    // /**
-    //  * Gets the PeerConnection related stats
-    //  * @param peerConnectionId the id of the peer connection added to the stats collector
-    //  */
-    // getPeerConnectionStats(peerConnectionId: string): PeerConnectionEntry | undefined;
-    
 
     /**
      * Gives an iterator to read the collected peer connection stats and navigate to its relations.
@@ -185,10 +195,26 @@ export class StatsStorage implements StatsReader, StatsWriter {
     private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
     private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
     private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
+    private _updates: StatsReaderUpdates = {
+        sendingAuidoBitrate: 0,
+        sendingVideoBitrate: 0,
+        receivingAudioBitrate: 0,
+        receivingVideoBitrate: 0,
+        totalInboundPacketsLost: 0,
+        totalInboundPacketsReceived: 0,
+        totalOutboundPacketsSent: 0,
+        totalOutbounPacketsReceived: 0,
+        totalOutboundPacketsLost: 0,
+    }
 
     public constructor(
         private readonly _monitor: ClientMonitor,
     ) {
+
+    }
+
+    public get updates(): StatsReaderUpdates {
+        return this._updates;
     }
 
     public accept(peerConnectionId: string, statsEntry: StatsEntry): void {
@@ -209,8 +235,43 @@ export class StatsStorage implements StatsReader, StatsWriter {
     }
 
     public commit() {
+        let sendingAuidoBitrate = 0;
+        let sendingVideoBitrate = 0;
+        let receivingAudioBitrate = 0;
+        let receivingVideoBitrate = 0;
+        let totalInboundPacketsLost = 0;
+        let totalInboundPacketsReceived = 0;
+        let totalOutboundPacketsSent = 0;
+        let totalOutbounPacketsReceived = 0;
+        let totalOutboundPacketsLost = 0;
+
         for (const peerConnectionEntry of this._peerConnections.values()) {
+
             peerConnectionEntry.commit();
+
+            const pcUpdates = peerConnectionEntry.updates;
+
+            sendingAuidoBitrate += pcUpdates.sendingAuidoBitrate;
+            sendingVideoBitrate += pcUpdates.sendingVideoBitrate;
+            receivingAudioBitrate += pcUpdates.receivingAudioBitrate;
+            receivingVideoBitrate += pcUpdates.receivingVideoBitrate;
+            totalInboundPacketsLost += pcUpdates.totalInboundPacketsLost;
+            totalInboundPacketsReceived += pcUpdates.totalInboundPacketsReceived;
+            totalOutboundPacketsSent += pcUpdates.totalOutboundPacketsSent;
+            totalOutbounPacketsReceived += pcUpdates.totalOutbounPacketsReceived;
+            totalOutboundPacketsLost += pcUpdates.totalOutboundPacketsLost;
+        }
+
+        this._updates = {
+            sendingAuidoBitrate,
+            sendingVideoBitrate,
+            receivingAudioBitrate,
+            receivingVideoBitrate,
+            totalInboundPacketsLost,
+            totalInboundPacketsReceived,
+            totalOutboundPacketsSent,
+            totalOutbounPacketsReceived,
+            totalOutboundPacketsLost,
         }
     }
 
