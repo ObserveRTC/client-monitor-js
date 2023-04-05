@@ -121,9 +121,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             sendingVideoBitrate: 0,
             receivingAudioBitrate: 0,
             receivingVideoBitrate: 0,
-            totalPacketsLost: 0,
-            totalPacketsReceived: 0,
-            totalPacketsSent: 0,
+            totalInboundPacketsLost: 0,
+            totalInboundPacketsReceived: 0,
+            totalOutbounPacketsReceived: 0,
+            totalOutboundPacketsLost: 0,
+            totalOutboundPacketsSent: 0,
         }
     }
 
@@ -327,9 +329,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     }
 
     private _update() {
-        let totalPacketsLost = 0;
-        let totalPacketsReceived = 0;
-        let totalPacketsSent = 0;
+        let totalInboundPacketsLost = 0;
+        let totalInboundPacketsReceived = 0;
+        let totalOutboundPacketsLost = 0;
+        let totalOutbounPacketsReceived = 0;
+        let totalOutboundPacketsSent = 0;
         let sendingAuidoBitrate = 0;
         let sendingVideoBitrate = 0;
         let receivingAudioBitrate = 0;
@@ -342,9 +346,15 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             } else if (inboundRtpEntry.stats.kind === 'video') {
                 receivingVideoBitrate += updates.receivingBitrate;
             }
-            totalPacketsLost += updates.lostPackets;
-            totalPacketsReceived += updates.receivedPackets;
+            totalInboundPacketsLost += updates.lostPackets;
+            totalInboundPacketsReceived += updates.receivedPackets;
         }
+
+        for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
+            totalOutboundPacketsLost += remoteInboundRtpEntry.stats.packetsLost ?? 0;
+            totalOutbounPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
+        }
+
         for (const outboundRtpEntry of this.outboundRtps()) {
             const updates = outboundRtpEntry.updates;
             if (outboundRtpEntry.stats.kind === 'audio') {
@@ -352,7 +362,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             } else if (outboundRtpEntry.stats.kind === 'video') {
                 sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
             }
-            totalPacketsSent += updates.sentPackets;
+            totalOutboundPacketsSent += updates.sentPackets;
         }
         
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
@@ -377,9 +387,11 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             receivingAudioBitrate,
             receivingVideoBitrate,
             avgRttInS,
-            totalPacketsLost,
-            totalPacketsReceived,
-            totalPacketsSent,
+            totalInboundPacketsLost,
+            totalInboundPacketsReceived,
+            totalOutboundPacketsSent,
+            totalOutbounPacketsReceived,
+            totalOutboundPacketsLost,
         }
     }
 

@@ -279,9 +279,11 @@ export interface AudioPlayoutEntry extends StatsEntryAbs {
 }
 
 export interface PeerConnectionUpdates {
-    readonly totalPacketsSent: number;
-    readonly totalPacketsReceived: number;
-    readonly totalPacketsLost: number;
+    readonly totalInboundPacketsLost: number;
+    readonly totalInboundPacketsReceived: number;
+    readonly totalOutboundPacketsLost: number;
+    readonly totalOutbounPacketsReceived: number;
+    readonly totalOutboundPacketsSent: number;
     readonly avgRttInS: number,
     readonly sendingAuidoBitrate: number,
     readonly sendingVideoBitrate: number,
