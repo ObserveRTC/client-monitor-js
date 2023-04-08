@@ -313,18 +313,19 @@ export interface PeerConnectionEntry {
     remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry>;
     remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry>;
     mediaSources(): IterableIterator<MediaSourceEntry>;
-    contributingSources(): IterableIterator<ContributingSourceEntry>;
     dataChannels(): IterableIterator<DataChannelEntry>;
-    transceivers(): IterableIterator<TransceiverEntry>;
-    senders(): IterableIterator<SenderEntry>;
-    receivers(): IterableIterator<ReceiverEntry>;
     transports(): IterableIterator<TransportEntry>;
-    sctpTransports(): IterableIterator<SctpTransportEntry>;
     iceCandidatePairs(): IterableIterator<IceCandidatePairEntry>;
     localCandidates(): IterableIterator<LocalCandidateEntry>;
     remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
+    audioPlayouts(): IterableIterator<AudioPlayoutEntry>;
+    transceivers(): IterableIterator<TransceiverEntry>;
+    senders(): IterableIterator<SenderEntry>;
+    receivers(): IterableIterator<ReceiverEntry>;
+    sctpTransports(): IterableIterator<SctpTransportEntry>;
     certificates(): IterableIterator<CertificateEntry>;
     iceServers(): IterableIterator<IceServerEntry>;
+    contributingSources(): IterableIterator<ContributingSourceEntry>;
     trackIds(): IterableIterator<string>;
 
     updates: PeerConnectionUpdates;
