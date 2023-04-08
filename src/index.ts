@@ -32,6 +32,8 @@ export type {
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
 
+export { W3CStats } from '@observertc/sample-schemas-js';
+
 export type { 
     Samples,
 	ClientSample,
