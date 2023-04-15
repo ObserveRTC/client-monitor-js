@@ -15,23 +15,12 @@ export interface Logger {
 
 export interface WrappedLogger extends Logger {
     init(): void;
-    level: LogLevel,
+    level: LogLevel | undefined,
 	logger: Logger;
 }
 
 export type LoggerFactory = () => Logger;
 
-const COLORS = {
-    black: "\x1b[30m",
-    red: "\x1b[31m",
-    green: "\x1b[32m",
-    yellow: "\x1b[33m",
-    blue: "\x1b[34m",
-    magenta: "\x1b[35m",
-    cyan: "\x1b[36m",
-    white: "\x1b[37m",
-    default: "\x1b[39m",
-};
 
 let defaultLevel: LogLevel = "error";
 
@@ -72,7 +61,7 @@ function createDefaultLoggerFactory(): LoggerFactory {
     }
 }
 
-const wrapLogger = (logger: Logger, logLevel: LogLevel) => {
+const wrapLogger = (logger: Logger, moduleName: string, logLevel?: LogLevel) => {
 
     let isTrace = false;
     let isDebug = false
@@ -85,11 +74,11 @@ const wrapLogger = (logger: Logger, logLevel: LogLevel) => {
     
     const result = new class implements WrappedLogger {
         public init() {
-            isTrace = ["trace"].includes(_level);
-            isDebug = ["trace", "debug"].includes(_level);
-            isInfo = ["trace", "debug", "info"].includes(_level);
-            isWarning = ["trace", "debug", "info", "warn"].includes(_level);
-            isError = ["trace", "debug", "info", "warn", "error"].includes(_level);
+            isTrace = ["trace"].includes(_level ?? defaultLevel);
+            isDebug = ["trace", "debug"].includes(_level ?? defaultLevel);
+            isInfo = ["trace", "debug", "info"].includes(_level ?? defaultLevel);
+            isWarning = ["trace", "debug", "info", "warn"].includes(_level ?? defaultLevel);
+            isError = ["trace", "debug", "info", "warn", "error"].includes(_level ?? defaultLevel);
         }
 		public get logger() {
 			return _logger;
@@ -97,45 +86,40 @@ const wrapLogger = (logger: Logger, logLevel: LogLevel) => {
 		public set logger(value: Logger) {
 			_logger = value;
 		}
-        public get level() {
+        public get level(): LogLevel | undefined {
             return _level;
         }
-        public set level(value: LogLevel) {
+        public set level(value: LogLevel | undefined) {
             _level = value;
         }
         /* eslint-disable @typescript-eslint/no-explicit-any */
         trace(...args: any[]): void {
-            const tracePrefix = `${COLORS.magenta}[TRACE]${COLORS.default} ${(new Date()).toISOString()}`;
             if (isTrace) {
-                logger.trace(tracePrefix, ...args);
+                logger.trace(moduleName, ...args);
             }
         }
         /* eslint-disable @typescript-eslint/no-explicit-any */
         debug(...args: any[]): void {
-            const debugPrefix = `${COLORS.cyan}[DEBUG]${COLORS.default} ${(new Date()).toISOString()}`;
             if (isDebug) {
-                logger.debug(debugPrefix, ...args);
+                logger.debug(moduleName, ...args);
             }
         }
         /* eslint-disable @typescript-eslint/no-explicit-any */
         info(...args: any[]): void {
-            const infoPrefix = `${COLORS.green}[INFO]${COLORS.default} ${(new Date()).toISOString()}`;
             if (isInfo) {
-                logger.info(infoPrefix, ...args);
+                logger.info(moduleName, ...args);
             }
         }
         /* eslint-disable @typescript-eslint/no-explicit-any */
         warn(...args: any[]): void {
-            const warnPrefix = `${COLORS.yellow}[WARN]${COLORS.default} ${(new Date()).toISOString()}`;
             if (isWarning) {
-                logger.warn(warnPrefix, ...args);
+                logger.warn(moduleName, ...args);
             }
         }
         /* eslint-disable @typescript-eslint/no-explicit-any */
         error(...args: any[]): void {
-            const errorPrefix = `${COLORS.red}[ERROR]${COLORS.default} ${(new Date()).toISOString()}`;
             if (isError) {
-                logger.error(errorPrefix, ...args);
+                logger.error(moduleName, ...args);
             }
             
         }
@@ -151,7 +135,7 @@ export const createLogger = (moduleName: string, logLevel?: LogLevel) => {
 	let wrappedLogger = loggers.get(moduleName);
 	if (!wrappedLogger) {
         const logger = actualLoggerFactory();
-		wrappedLogger = wrapLogger(logger, logLevel ?? defaultLevel);
+		wrappedLogger = wrapLogger(logger, moduleName, logLevel ?? defaultLevel);
 		loggers.set(moduleName, wrappedLogger);
 	} else {
 		wrappedLogger.level = logLevel ?? defaultLevel;
@@ -162,8 +146,8 @@ export const createLogger = (moduleName: string, logLevel?: LogLevel) => {
 
 export const setLogLevel = (level: LogLevel) => {
     defaultLevel = level;
-    for (const [moduleName, logger] of Array.from(loggers.entries())) {
-        loggers.set(moduleName, createLogger(moduleName, logger.level));
+    for (const [moduleName] of Array.from(loggers.entries())) {
+        loggers.set(moduleName, createLogger(moduleName, level));
     }
 };
 

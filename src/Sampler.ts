@@ -401,6 +401,11 @@ export class Sampler {
 
     private *_makeMediaSource(peerConnection: PeerConnectionEntry): Generator<MediaSourceStat, void, undefined> {
         for (const mediaSourceEntry of peerConnection.mediaSources()) {
+            if (mediaSourceEntry.sampled) {
+                continue;
+            }
+            mediaSourceEntry.sampled = true;
+
             const stats = mediaSourceEntry.stats;
             const sample: MediaSourceStat = {
                 ...(stats.kind === "audio" ? (stats as W3C.RtcAudioSourceStats) : (stats as W3C.RtcVideoSourceStats)),
@@ -411,6 +416,11 @@ export class Sampler {
 
     private *_makeCodec(peerConnection: PeerConnectionEntry): Generator<MediaCodecStats, void, undefined> {
         for (const codec of peerConnection.codecs()) {
+            if (codec.sampled) {
+                continue;
+            }
+            codec.sampled = true;
+
             const stats = codec.stats;
             const sampledCodec: MediaCodecStats = {
                 ...stats,
@@ -421,6 +431,11 @@ export class Sampler {
 
     private *_makeCertificate(peerConnection: PeerConnectionEntry): Generator<Certificate, void, undefined> {
         for (const certificate of peerConnection.certificates()) {
+            if (certificate.sampled) {
+                continue;
+            }
+            certificate.sampled = true;
+
             const stats = certificate.stats;
             const sampledCertificate: Certificate = {
                 ...stats,
@@ -433,6 +448,11 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<IceLocalCandidate, void, undefined> {
         for (const iceLocalCandidate of peerConnection.localCandidates()) {
+            if (iceLocalCandidate.sampled) {
+                continue;
+            }
+            iceLocalCandidate.sampled = true;
+
             const stats = iceLocalCandidate.stats;
             const sampledLocalCandidate: IceLocalCandidate = {
                 ...stats,
@@ -446,6 +466,11 @@ export class Sampler {
         peerConnection: PeerConnectionEntry
     ): Generator<IceRemoteCandidate, void, undefined> {
         for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
+            if (iceRemoteCandidate.sampled) {
+                continue;
+            }
+            iceRemoteCandidate.sampled = true;
+
             const stats = iceRemoteCandidate.stats;
             yield {
                 ...stats,
@@ -466,6 +491,11 @@ export class Sampler {
 
     private *_makeIceServer(peerConnection: PeerConnectionEntry): Generator<string, void, undefined> {
         for (const iceServer of peerConnection.iceServers()) {
+            if (iceServer.sampled) {
+                continue;
+            }
+            iceServer.sampled = true;
+
             const url = iceServer.stats.url;
             yield url;
         }

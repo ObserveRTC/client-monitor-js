@@ -2,7 +2,7 @@
 
 ### Conceptual changes
 
- * The ClientMonitor is no longer responsible for WebSocket connections and signaling. If the application wants to transmit the samples, it has to do it by itself.
+ * The ClientMonitor is no longer responsible for WebSocket connections, signaling, and transports.
  * The ClientMonitor has become responsible for the following event emissions:
 	- PEER_CONNECTION_OPENED, PEER_CONNECTION_CLOSED
 	- MEDIA_TRACK_ADDED, MEDIA_TRACK_REMOVED

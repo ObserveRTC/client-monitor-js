@@ -4,6 +4,7 @@ export interface StatsEntryAbs {
     /*eslint-disable @typescript-eslint/no-explicit-any */
     appData: Record<string, unknown>;
     statsId: string;
+    visited: boolean,
     // created: number;
     // updated: number;
     // touched: number;
@@ -29,6 +30,7 @@ export interface InboundTrackEntry {
  */
 export interface CodecEntry extends StatsEntryAbs {
     stats: W3C.RtcCodecStats;
+    sampled: boolean;
     /**
      * Navigate to the related TransportEntry the codec is used
      */
@@ -145,6 +147,7 @@ export interface RemoteOutboundRtpEntry extends SenderRtpStreamEntry, StatsEntry
  */
 export interface MediaSourceEntry extends StatsEntryAbs {
     stats: W3C.RtcMediaSourceCompoundStats;
+    sampled: boolean;
 }
 
 /**
@@ -155,6 +158,8 @@ export interface MediaSourceEntry extends StatsEntryAbs {
  */
 export interface ContributingSourceEntry extends StatsEntryAbs {
     stats: W3C.RtcRtpContributingSourceStats;
+    sampled: boolean;
+
     getInboundRtp(): InboundRtpEntry | undefined;
 }
 
@@ -174,6 +179,8 @@ export interface DataChannelEntry extends StatsEntryAbs {
  */
 export interface TransceiverEntry extends StatsEntryAbs {
     stats: W3C.RtcRtpTransceiverStats;
+    sampled: boolean;
+
     getSender(): SenderEntry | undefined;
     getReceiver(): ReceiverEntry | undefined;
 }
@@ -187,6 +194,8 @@ export interface TransceiverEntry extends StatsEntryAbs {
  */
 export interface SenderEntry extends StatsEntryAbs {
     stats: W3C.RtcSenderCompoundStats;
+    sampled: boolean;
+    
     getMediaSource(): MediaSourceEntry | undefined;
 }
 
@@ -199,6 +208,8 @@ export interface SenderEntry extends StatsEntryAbs {
  */
 export interface ReceiverEntry extends StatsEntryAbs {
     stats: W3C.RtcReceiverCompoundStats;
+    sampled: boolean;
+
 }
 
 /**
@@ -243,6 +254,8 @@ export interface IceCandidatePairEntry extends StatsEntryAbs {
  */
 export interface LocalCandidateEntry extends StatsEntryAbs {
     stats: W3C.RtcLocalCandidateStats;
+    sampled: boolean;
+
     getTransport(): TransportEntry | undefined;
 }
 
@@ -252,6 +265,8 @@ export interface LocalCandidateEntry extends StatsEntryAbs {
  */
 export interface RemoteCandidateEntry extends StatsEntryAbs {
     stats: W3C.RtcRemoteCandidateStats;
+    sampled: boolean;
+
     getTransport(): TransportEntry | undefined;
 }
 
@@ -262,6 +277,8 @@ export interface RemoteCandidateEntry extends StatsEntryAbs {
  */
 export interface CertificateEntry extends StatsEntryAbs {
     stats: W3C.RtcCertificateStats;
+    sampled: boolean;
+
 }
 
 /**
@@ -272,6 +289,8 @@ export interface CertificateEntry extends StatsEntryAbs {
  */
 export interface IceServerEntry extends StatsEntryAbs {
     stats: W3C.RtcIceServerStats;
+    sampled: boolean;
+    
 }
 
 export interface AudioPlayoutEntry extends StatsEntryAbs {

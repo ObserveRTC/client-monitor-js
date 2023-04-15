@@ -28,7 +28,7 @@ const UNKNOWN_ENGINE: Engine = {
     version: undefined,
 };
 
-type Hashes = {
+type Stamps = {
     browser?: string,
     platform?: string,
     engine?: string,
@@ -42,8 +42,8 @@ export class ClientDevices {
     private _engine: Engine = UNKNOWN_ENGINE;
     private _warned = false;
 
-    private _actualStamps?: Hashes;
-    private _pivotHashes?: Hashes;
+    private _actualStamps?: Stamps;
+    private _pivotStamps?: Stamps;
 
     public constructor() {
        this.collect();
@@ -91,19 +91,19 @@ export class ClientDevices {
     }
 
     public get isOsChanged(): boolean {
-        return this._pivotHashes?.os !== this._actualStamps?.os;
+        return this._pivotStamps?.os !== this._actualStamps?.os;
     }
 
     public get isBrowserChanged(): boolean {
-        return this._pivotHashes?.browser !== this._actualStamps?.browser;
+        return this._pivotStamps?.browser !== this._actualStamps?.browser;
     }
 
     public get isPlatformChanged(): boolean {
-        return this._pivotHashes?.platform !== this._actualStamps?.platform;
+        return this._pivotStamps?.platform !== this._actualStamps?.platform;
     }
 
     public get isEngineChanged(): boolean {
-        return this._pivotHashes?.engine !== this._actualStamps?.engine;
+        return this._pivotStamps?.engine !== this._actualStamps?.engine;
     }
 
     public get changed(): boolean {
@@ -111,7 +111,7 @@ export class ClientDevices {
     }
 
     public pivot(): void {
-        this._pivotHashes = {
+        this._pivotStamps = {
             ...this._actualStamps,
         }
     }
