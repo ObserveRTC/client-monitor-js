@@ -4,3 +4,11 @@ dist/
 lib/
 keys/
 draft.md
+*.md
+
+docs/
+figures/
+tests/
+.vscode/
+.github/
+yarn.lock

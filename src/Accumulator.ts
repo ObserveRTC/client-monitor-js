@@ -1,4 +1,4 @@
-import { ClientSample, Samples } from "@observertc/monitor-schemas";
+import { ClientSample, Samples } from '@observertc/sample-schemas-js';
 import { createLogger } from "./utils/logger";
 
 const logger = createLogger("Accumulator");

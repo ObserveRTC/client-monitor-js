@@ -1,14 +1,69 @@
-import { Browser, CustomCallEvent, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, W3CStats as W3C } from "@observertc/monitor-schemas"
-import { ClientMonitor } from "../../src/ClientMonitor";
+import { Browser, CustomCallEvent, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, W3CStats as W3C } from '@observertc/sample-schemas-js'
+import { ClientMonitor, ClientMonitorConfig, ClientMonitorEvents } from "../../src/ClientMonitor";
 import { Collectors } from "../../src/Collectors";
 import { StatsReader } from "../../src/entries/StatsStorage";
-import { EventsRegister } from "../../src/EventsRelayer";
 import { MetricsReader } from "../../src/Metrics";
 import { TrackRelation } from "../../src/Sampler";
-import { SenderConfig, SentSamplesCallback } from "../../src/Sender";
 
 export function createClientMonitor(data: any): ClientMonitor {
     const result = new class implements ClientMonitor {
+        get closed(): boolean {
+            return data.closed === true;
+        }
+        get config(): ClientMonitorConfig {
+            return data.config;
+        }
+        on<K extends 'stats-collected' | 'sample-created' | 'send'>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+            if (!data.on) {
+                throw new Error("Method not implemented.");
+            }
+            data.on(event, listener);
+            return result as this;
+        }
+        once<K extends 'stats-collected' | 'sample-created' | 'send'>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+            if (!data.once) {
+                throw new Error("Method not implemented.");
+            }
+            data.once(event, listener);
+            return result as this;
+        }
+        off<K extends 'stats-collected' | 'sample-created' | 'send'>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+            if (!data.off) {
+                throw new Error("Method not implemented.");
+            }
+            data.off(event, listener);
+            return result as this;
+        }
+        addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+            if (!data.addMediaTrackAddedCallEvent) {
+                throw new Error("Method not implemented.");
+            }
+            data.addMediaTrackAddedCallEvent(peerConnectionId, mediaTrackId, timestamp);
+        }
+        addMediaTrackRemovedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+            if (!data.addMediaTrackRemovedCallEvent) {
+                throw new Error("Method not implemented.");
+            }
+            data.addMediaTrackAddedCallEvent(peerConnectionId, mediaTrackId, timestamp);
+        }
+        addPeerConnectionOpenedCallEvent(peerConnectionId: string, timestamp?: number): void {
+            if (!data.addPeerConnectionOpenedCallEvent) {
+                throw new Error("Method not implemented.");
+            }
+            data.addPeerConnectionOpenedCallEvent(peerConnectionId, timestamp);
+        }
+        addPeerConnectionClosedCallEvent(peerConnectionId: string, timestamp?: number): void {
+            if (!data.addPeerConnectionOpenedCallEvent) {
+                throw new Error("Method not implemented.");
+            }
+            data.addPeerConnectionClosedCallEvent(peerConnectionId, timestamp);
+        }
+        addIceConnectionStateChangedCallEvent(peerConnectionId: string, connectionState: RTCPeerConnectionState, timestamp?: number): void {
+            if (!data.addIceConnectionStateChangedCallEvent) {
+                throw new Error("Method not implemented.");
+            }
+            data.addIceConnectionStateChangedCallEvent(peerConnectionId, connectionState, timestamp);
+        }
         get os(): OperationSystem {
             return data.os;
         }
@@ -35,9 +90,6 @@ export function createClientMonitor(data: any): ClientMonitor {
         }
         get storage(): StatsReader {
             return data.storage;
-        }
-        get events(): EventsRegister {
-            return data.events;
         }
         get collectors(): Collectors {
             return data.collectors;
@@ -138,12 +190,6 @@ export function createClientMonitor(data: any): ClientMonitor {
             }
             data.setSendingPeriod(sendingPeriodInMs);
         }
-        connect(config: SenderConfig): void {
-            if (!data.config) {
-                throw new Error("Method not implemented.");
-            }
-            data.connect(config);
-        }
         async collect(): Promise<void> {
             if (!data.collect) {
                 throw new Error("Method not implemented.");
@@ -156,11 +202,11 @@ export function createClientMonitor(data: any): ClientMonitor {
             }
             data.sample();
         }
-        send(callback?: SentSamplesCallback): void {
+        send(): void {
             if (!data.send) {
                 throw new Error("Method not implemented.");
             }
-            data.send(callback);
+            data.send();
         }
         close(): void {
             if (!data.close) {

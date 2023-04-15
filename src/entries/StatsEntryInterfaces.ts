@@ -1,14 +1,15 @@
-import { W3CStats as W3C } from "@observertc/monitor-schemas";
+import { W3CStats as W3C } from '@observertc/sample-schemas-js'
 
 export interface StatsEntryAbs {
     /*eslint-disable @typescript-eslint/no-explicit-any */
-    appData: any;
-    id: string;
-    created: number;
-    updated: number;
-    touched: number;
+    appData: Record<string, unknown>;
+    statsId: string;
+    visited: boolean,
+    // created: number;
+    // updated: number;
+    // touched: number;
     getPeerConnection(): PeerConnectionEntry;
-    hashCode: string;
+    // hashCode: string;
 }
 
 export interface OutboundTrackEntry {
@@ -29,6 +30,7 @@ export interface InboundTrackEntry {
  */
 export interface CodecEntry extends StatsEntryAbs {
     stats: W3C.RtcCodecStats;
+    sampled: boolean;
     /**
      * Navigate to the related TransportEntry the codec is used
      */
@@ -51,6 +53,15 @@ interface ReceivedRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 
 /**
+ * 
+ */
+export interface InboundRtpUpdates {
+    readonly receivingBitrate: number,
+    readonly lostPackets: number,
+    readonly receivedPackets: number,
+}
+
+/**
  * Wraps the [RTCInboundRtpStreamStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcinboundrtpstreamstats) and provide methods
  * to navigate to its relations
  */
@@ -70,6 +81,19 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      */
     getRemoteOutboundRtp(): RemoteOutboundRtpEntry | undefined;
     getAudioPlayout(): AudioPlayoutEntry | undefined;
+
+    /**
+     * Tracks the differences between the last collected stats and the current collected stats
+     */
+    updates: InboundRtpUpdates,
+}
+
+/**
+ * 
+ */
+export interface OutboundRtpUpdates {
+    readonly sendingBitrate: number,
+    readonly sentPackets: number,
 }
 
 /**
@@ -86,6 +110,13 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     getMediaSource(): MediaSourceEntry | undefined;
     getSender(): SenderEntry | undefined;
     getRemoteInboundRtp(): RemoteInboundRtpEntry | undefined;
+
+    updates: OutboundRtpUpdates;
+}
+
+export interface RemoteInboundRtpUpdates {
+    readonly receivedPackets: number,
+    readonly lostPackets: number,
 }
 
 /**
@@ -96,6 +127,8 @@ export interface RemoteInboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntr
     stats: W3C.RtcRemoteInboundRtpStreamStats;
     getSsrc(): number | undefined;
     getOutboundRtp(): OutboundRtpEntry | undefined;
+
+    updates: RemoteInboundRtpUpdates;
 }
 
 /**
@@ -114,6 +147,7 @@ export interface RemoteOutboundRtpEntry extends SenderRtpStreamEntry, StatsEntry
  */
 export interface MediaSourceEntry extends StatsEntryAbs {
     stats: W3C.RtcMediaSourceCompoundStats;
+    sampled: boolean;
 }
 
 /**
@@ -124,6 +158,8 @@ export interface MediaSourceEntry extends StatsEntryAbs {
  */
 export interface ContributingSourceEntry extends StatsEntryAbs {
     stats: W3C.RtcRtpContributingSourceStats;
+    sampled: boolean;
+
     getInboundRtp(): InboundRtpEntry | undefined;
 }
 
@@ -143,6 +179,8 @@ export interface DataChannelEntry extends StatsEntryAbs {
  */
 export interface TransceiverEntry extends StatsEntryAbs {
     stats: W3C.RtcRtpTransceiverStats;
+    sampled: boolean;
+
     getSender(): SenderEntry | undefined;
     getReceiver(): ReceiverEntry | undefined;
 }
@@ -156,6 +194,8 @@ export interface TransceiverEntry extends StatsEntryAbs {
  */
 export interface SenderEntry extends StatsEntryAbs {
     stats: W3C.RtcSenderCompoundStats;
+    sampled: boolean;
+    
     getMediaSource(): MediaSourceEntry | undefined;
 }
 
@@ -168,6 +208,8 @@ export interface SenderEntry extends StatsEntryAbs {
  */
 export interface ReceiverEntry extends StatsEntryAbs {
     stats: W3C.RtcReceiverCompoundStats;
+    sampled: boolean;
+
 }
 
 /**
@@ -212,6 +254,8 @@ export interface IceCandidatePairEntry extends StatsEntryAbs {
  */
 export interface LocalCandidateEntry extends StatsEntryAbs {
     stats: W3C.RtcLocalCandidateStats;
+    sampled: boolean;
+
     getTransport(): TransportEntry | undefined;
 }
 
@@ -221,6 +265,8 @@ export interface LocalCandidateEntry extends StatsEntryAbs {
  */
 export interface RemoteCandidateEntry extends StatsEntryAbs {
     stats: W3C.RtcRemoteCandidateStats;
+    sampled: boolean;
+
     getTransport(): TransportEntry | undefined;
 }
 
@@ -231,6 +277,8 @@ export interface RemoteCandidateEntry extends StatsEntryAbs {
  */
 export interface CertificateEntry extends StatsEntryAbs {
     stats: W3C.RtcCertificateStats;
+    sampled: boolean;
+
 }
 
 /**
@@ -241,10 +289,25 @@ export interface CertificateEntry extends StatsEntryAbs {
  */
 export interface IceServerEntry extends StatsEntryAbs {
     stats: W3C.RtcIceServerStats;
+    sampled: boolean;
+    
 }
 
 export interface AudioPlayoutEntry extends StatsEntryAbs {
     stats: W3C.RTCAudioPlayoutStats;
+}
+
+export interface PeerConnectionUpdates {
+    readonly totalInboundPacketsLost: number;
+    readonly totalInboundPacketsReceived: number;
+    readonly totalOutboundPacketsLost: number;
+    readonly totalOutbounPacketsReceived: number;
+    readonly totalOutboundPacketsSent: number;
+    readonly avgRttInS: number,
+    readonly sendingAuidoBitrate: number,
+    readonly sendingVideoBitrate: number,
+    readonly receivingAudioBitrate: number,
+    readonly receivingVideoBitrate: number,
 }
 
 /**
@@ -255,30 +318,34 @@ export interface PeerConnectionEntry {
     /**
      * The id of the peer connection
      */
-    readonly id: string | undefined;
-    readonly collectorId: string;
+    readonly id: string;
+    // readonly collectorId: string;
+    readonly statsId: string | undefined;
     readonly stats: W3C.RtcPeerConnectionStats | undefined;
-    readonly created: number;
-    readonly touched: number;
-    readonly updated: number;
-    readonly collectorLabel: string | undefined;
+    // readonly created: number;
+    // readonly touched: number;
+    // readonly updated: number;
+    readonly label: string | undefined;
     codecs(): IterableIterator<CodecEntry>;
     inboundRtps(): IterableIterator<InboundRtpEntry>;
     outboundRtps(): IterableIterator<OutboundRtpEntry>;
     remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry>;
     remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry>;
     mediaSources(): IterableIterator<MediaSourceEntry>;
-    contributingSources(): IterableIterator<ContributingSourceEntry>;
     dataChannels(): IterableIterator<DataChannelEntry>;
-    transceivers(): IterableIterator<TransceiverEntry>;
-    senders(): IterableIterator<SenderEntry>;
-    receivers(): IterableIterator<ReceiverEntry>;
     transports(): IterableIterator<TransportEntry>;
-    sctpTransports(): IterableIterator<SctpTransportEntry>;
     iceCandidatePairs(): IterableIterator<IceCandidatePairEntry>;
     localCandidates(): IterableIterator<LocalCandidateEntry>;
     remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
+    audioPlayouts(): IterableIterator<AudioPlayoutEntry>;
+    transceivers(): IterableIterator<TransceiverEntry>;
+    senders(): IterableIterator<SenderEntry>;
+    receivers(): IterableIterator<ReceiverEntry>;
+    sctpTransports(): IterableIterator<SctpTransportEntry>;
     certificates(): IterableIterator<CertificateEntry>;
     iceServers(): IterableIterator<IceServerEntry>;
+    contributingSources(): IterableIterator<ContributingSourceEntry>;
     trackIds(): IterableIterator<string>;
+
+    updates: PeerConnectionUpdates;
 }

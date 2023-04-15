@@ -1,4 +1,4 @@
-import { W3CStats as W3C } from "@observertc/monitor-schemas";
+import { W3CStats as W3C } from '@observertc/sample-schemas-js'
 import { createLogger } from "./logger";
 
 const logger = createLogger(`StatsVisitor`);
@@ -31,36 +31,20 @@ export type StatsValue =
     | W3C.RtcIceServerStats;
 
 export type StatsEntry = [W3C.StatsType, StatsValue];
+// export type StatsEntry = 
+//     | [W3C.StatsType.codec, W3C.RtcCodecStats]
+//     | [W3C.StatsType.inboundRtp, W3C.RtcInboundRtpStreamStats]
+
+
 export type Timestamps = {
     maxTimestamp?: number,
     minTimestamp?: number,
 }
 
 export abstract class StatsVisitor {
-    private _minTimestamp?: number;
-    private _maxTimestamp?: number;
-
-    public get minTimestamp(): number | undefined {
-        return this._minTimestamp;
-    }
-
-    public get maxTimestamp(): number | undefined {
-        return this._maxTimestamp;
-    }
-
-    public resetTimestamps() {
-        this._maxTimestamp = undefined;
-        this._minTimestamp = undefined;
-    }
 
     public visit(statsEntry: StatsEntry): void {
         const [statsType, statsValue] = statsEntry;
-        if (this._minTimestamp === undefined || statsValue.timestamp < this._minTimestamp) {
-            this._minTimestamp = statsValue.timestamp;
-        }
-        if (this._maxTimestamp === undefined || this._maxTimestamp < statsValue.timestamp) {
-            this._maxTimestamp = statsValue.timestamp;
-        }
         try {
             switch (statsType) {
                 case W3C.StatsType.codec:

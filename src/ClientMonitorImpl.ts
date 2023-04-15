@@ -1,96 +1,86 @@
-import {
-    Browser,
-    CustomCallEvent,
-    Engine,
-    ExtensionStat,
-    MediaDevice,
-    OperationSystem,
-    Platform,
-    Samples,
-    version as schemaVersion,
-} from "@observertc/monitor-schemas";
-import { EventsRegister, EventsRelayer } from "./EventsRelayer";
 import { Sampler, TrackRelation } from "./Sampler";
-import { Sender, SenderConfig, SentSamplesCallback } from "./Sender";
 import { ClientDevices } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
 import { AdapterConfig } from "./adapters/Adapter";
 import { Timer } from "./utils/Timer";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
-import { createLogger } from "./utils/logger";
-import { supplyDefaultConfig as supplySamplerDefaultConfig } from "./Sampler";
-import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
+import { createLogger, setLogLevel } from "./utils/logger";
+import { ClientMonitor, ClientMonitorConfig, ClientMonitorEvents } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
 import EventEmitter from "events";
 import { Collectors, CollectorsConfig, CollectorsImpl } from "./Collectors";
+import { 
+    OperationSystem, 
+    Browser, 
+    Platform, 
+    Engine, 
+    MediaDevice, 
+    ExtensionStat, 
+    Samples,
+    version as schemaVersion,
+    CustomCallEvent,
+} from "@observertc/sample-schemas-js";
+import { CallEventType } from "./utils/callEvents";
 
-// import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientMonitor");
 
 type ConstructorConfig = ClientMonitorConfig;
 
 const supplyDefaultConfig = () => {
     const defaultConfig: ConstructorConfig = {
+        logLevel: 'warn',
         // samplingPeriodInMs: 5000,
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
-        sampler: supplySamplerDefaultConfig(),
+        createCallEvents: false,
     };
     return defaultConfig;
 };
 
 logger.debug("Version of the loaded schema:", schemaVersion);
 
-const TIMER_INVOKED_SEND_SENDER_NOT_EXISTS = "timerInvokedSendSenderNotExists";
-
 export class ClientMonitorImpl implements ClientMonitor {
-    public static create(config?: ClientMonitorConfig): ClientMonitor {
+    public static create(config?: Partial<ClientMonitorConfig>): ClientMonitor {
         if (config?.maxListeners !== undefined) {
             EventEmitter.setMaxListeners(config.maxListeners);
         }
         const appliedConfig = config ? Object.assign(supplyDefaultConfig(), config) : supplyDefaultConfig();
+        if (appliedConfig.logLevel) {
+            setLogLevel(appliedConfig.logLevel);
+        }
         const result = new ClientMonitorImpl(appliedConfig);
         logger.debug("Created", appliedConfig);
         return result;
     }
 
     private _closed = false;
-    private _flags = new Set<string>();
-    private _config: ConstructorConfig;
     private _mediaDevices: MediaDevices;
     private _clientDevices: ClientDevices;
     private _collectors: CollectorsImpl;
     private _sampler: Sampler;
-    private _sender?: Sender;
     private _timer?: Timer;
-    private _eventer: EventsRelayer;
     private _statsStorage: StatsStorage;
     private _accumulator: Accumulator;
     private _metrics: Metrics;
+    private _emitter = new EventEmitter();
 
-    private constructor(config: ConstructorConfig) {
-        this._config = config;
+    private constructor(
+        public readonly config: ConstructorConfig
+    ) {
         this._clientDevices = new ClientDevices();
         this._mediaDevices = new MediaDevices();
-        this._statsStorage = new StatsStorage();
+        this._statsStorage = new StatsStorage(this);
         this._metrics = new Metrics();
         this._accumulator = Accumulator.create(config.accumulator);
-        this._eventer = EventsRelayer.create();
         this._collectors = this._makeCollector();
         this._sampler = this._makeSampler();
-        this._createSender();
         this._createTimer();
     }
 
-    public get clientId(): string | undefined{
-        /* eslint-disable @typescript-eslint/no-non-null-assertion */
-        return this._sampler.clientId;
-    }
-
-    public get callId(): string | undefined {
-        return this._sampler.callId;
+    public get closed() {
+        return this._closed;
     }
 
     public get os(): OperationSystem {
@@ -125,55 +115,12 @@ export class ClientMonitorImpl implements ClientMonitor {
         return this._mediaDevices.values("videoinput");
     }
 
-    public get events(): EventsRegister {
-        return this._eventer;
-    }
-
     public get storage(): StatsReader {
         return this._statsStorage;
     }
 
     public get collectors(): Collectors {
         return this._collectors;
-    }
-
-    setRoomId(value: string): void {
-        this._sampler.setRoomId(value);
-    }
-
-    setClientId(value: string): void {
-        if (!validators.isValidUuid(value)) {
-            logger.warn(`ClientId (${value}) must be a valid UUID`);
-            return;
-        }
-        this._sampler.setCallId(value);
-    }
-
-    public setCallId(value: string) {
-        if (!validators.isValidUuid(value)) {
-            logger.warn(`CallId (${value}) must be a valid UUID`);
-            return;
-        }
-        this._sampler.setCallId(value);
-    }
-
-    public connect(senderConfig: SenderConfig) {
-        if (this._sender) {
-            logger.warn(`Sender is already established`);
-            return;
-        }
-        this._config.sender = senderConfig;
-        this._createSender();
-    }
-
-    public disconnect(): void {
-        if (!this._sender) {
-            return;
-        }
-        if (!this._sender.closed) {
-            this._sender.close();
-        }
-        this._sender = undefined;
     }
 
     public addTrackRelation(trackRelation: TrackRelation): void {
@@ -192,11 +139,6 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
-    public setUserId(value?: string | null): void {
-        if (value === undefined || value === null) return;
-        this._sampler.setUserId(value);
-    }
-
     public addMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
         const message = JSON.stringify(constrains);
         this._sampler.addMediaConstraints(message);
@@ -206,6 +148,54 @@ export class ClientMonitorImpl implements ClientMonitor {
     public addUserMediaError(err: any): void {
         const message = JSON.stringify(err);
         this._sampler.addUserMediaError(message);
+    }
+
+    public addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+        const callEvent: CustomCallEvent = {
+            name: CallEventType.MEDIA_TRACK_ADDED,
+            peerConnectionId,
+            mediaTrackId,
+            timestamp: timestamp ?? Date.now(),
+        }
+        this.addCustomCallEvent(callEvent)
+    }
+
+    public addMediaTrackRemovedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+        const callEvent: CustomCallEvent = {
+            name: CallEventType.MEDIA_TRACK_REMOVED,
+            peerConnectionId,
+            mediaTrackId,
+            timestamp: timestamp ?? Date.now(),
+        }
+        this.addCustomCallEvent(callEvent)
+    }
+
+    public addPeerConnectionOpenedCallEvent(peerConnectionId: string, timestamp?: number): void {
+        const callEvent: CustomCallEvent = {
+            name: CallEventType.PEER_CONNECTION_OPENED,
+            peerConnectionId,
+            timestamp: timestamp ?? Date.now(),
+        }
+        this.addCustomCallEvent(callEvent)
+    }
+
+    public addPeerConnectionClosedCallEvent(peerConnectionId: string, timestamp?: number): void {
+        const callEvent: CustomCallEvent = {
+            name: CallEventType.PEER_CONNECTION_CLOSED,
+            peerConnectionId,
+            timestamp: timestamp ?? Date.now(),
+        }
+        this.addCustomCallEvent(callEvent)
+    }
+    
+    public addIceConnectionStateChangedCallEvent(peerConnectionId: string, connectionState: RTCPeerConnectionState, timestamp?: number): void {
+        const callEvent: CustomCallEvent = {
+            name: CallEventType.ICE_CONNECTION_STATE_CHANGED,
+            peerConnectionId,
+            value: connectionState,
+            timestamp: timestamp ?? Date.now(),
+        }
+        this.addCustomCallEvent(callEvent)
     }
 
     public addExtensionStats(stats: ExtensionStat): void {
@@ -224,24 +214,24 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.addLocalSDP(localSDP);
     }
 
-    public setMarker(marker: string): void {
-        this._sampler.setMarker(marker);
-    }
-
     public async collect(): Promise<void> {
         const started = Date.now();
+        
+        this._statsStorage.start();
+
         await this._collectors.collect().catch((err) => {
             logger.warn(`Error occurred while collecting`, err);
         });
         const elapsedInMs = Date.now() - started;
 
-        this._metrics.setCollectingTimeInMs(elapsedInMs);
-        this._eventer.emitStatsCollected(this._collectors.lastStats());
+        // trim stats does not exists anymore
+        this._statsStorage.commit();
 
-        if (this._config.statsExpirationTimeInMs) {
-            const expirationThresholdInMs = Date.now() - this._config.statsExpirationTimeInMs;
-            this._statsStorage.trim(expirationThresholdInMs);
-        }
+        this._metrics.setCollectingTimeInMs(elapsedInMs);
+        this._emit('stats-collected', {
+            stats: this._collectors.lastStats()
+        });
+        
         this._metrics.setLastCollected(started + elapsedInMs);
     }
 
@@ -251,7 +241,9 @@ export class ClientMonitorImpl implements ClientMonitor {
             const clientSample = this._sampler.make();
             if (!clientSample) return;
             this._accumulator.addClientSample(clientSample);
-            this._eventer.emitSampleCreated(clientSample);
+            this._emit('sample-created', {
+                clientSample
+            });
 
             const now = Date.now();
             this._metrics.setLastSampled(now);
@@ -260,28 +252,15 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
-    public send(callback?: SentSamplesCallback): void {
-        if (!this._sender) {
-            if (this._flags.has(TIMER_INVOKED_SEND_SENDER_NOT_EXISTS)) {
-                return;
-            }
-            this._flags.add(TIMER_INVOKED_SEND_SENDER_NOT_EXISTS);
-            logger.warn(`No Sender is available to send data`);
-            return;
-        }
-        const queue: Samples[] = [];
+    public send(): void {
+        const samples: Samples[] = [];
         this._accumulator.drainTo((bufferedSamples) => {
             if (!bufferedSamples) return;
-            queue.push(bufferedSamples);
+            samples.push(bufferedSamples);
         });
-        for (const samples of queue) {
-            try {
-                this._sender.send(samples, callback);
-            } catch (error) {
-                logger.warn(`An error occurred while sending`, error);
-            }
-        }
-        this._eventer.emitSampleSent();
+        this._emit('send', {
+            samples
+        })
 
         const now = Date.now();
         this._metrics.setLastSent(now);
@@ -296,29 +275,9 @@ export class ClientMonitorImpl implements ClientMonitor {
             if (this._timer) {
                 this._timer.clear();
             }
-            if (this._sender) {
-                const queue: Samples[] = [];
-                this._accumulator.drainTo((bufferedSamples) => {
-                    if (!bufferedSamples) return;
-                    queue.push(bufferedSamples);
-                });
-                if (queue.length < 1)
-                    queue.push({
-                        controls: {
-                            close: true,
-                        },
-                    });
-                else
-                    queue[queue.length - 1].controls = {
-                        close: true,
-                    };
-                for (const samples of queue) {
-                    this._sender.send(samples);
-                }
-            }
+            this.send();
             this._collectors.close();
             this._sampler.close();
-            this._sender?.close();
             this._statsStorage.clear();
         } finally {
             this._closed = true;
@@ -332,7 +291,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         if (!this._timer) {
-            this._timer = new Timer(this._config.tickingTimeInMs);
+            this._timer = new Timer(this.config.tickingTimeInMs);
         }
         if (this._timer.hasListener("collect")) {
             this._timer.clear("collect");
@@ -351,7 +310,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         if (!this._timer) {
-            this._timer = new Timer(this._config.tickingTimeInMs);
+            this._timer = new Timer(this.config.tickingTimeInMs);
         }
         if (this._timer.hasListener("sample")) {
             this._timer.clear("sample");
@@ -371,7 +330,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             return;
         }
         if (!this._timer) {
-            this._timer = new Timer(this._config.tickingTimeInMs);
+            this._timer = new Timer(this.config.tickingTimeInMs);
         }
         if (this._timer.hasListener("send")) {
             this._timer.clear("send");
@@ -383,6 +342,25 @@ export class ClientMonitorImpl implements ClientMonitor {
             initialDelayInMs: sendingPeriodInMs,
             context: "Sending Samples",
         });
+    }
+
+    public on<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+        this._emitter.addListener(event, listener);
+        return this;
+    }
+
+    public once<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+        this._emitter.once(event, listener);
+        return this;
+    }
+
+    public off<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+        this._emitter.removeListener(event, listener);
+        return this;
+    }
+
+    public _emit<K extends keyof ClientMonitorEvents>(event: K, data: ClientMonitorEvents[K]): boolean {
+        return this._emitter.emit(event, data);
     }
 
     private _collectClientDevices(): void {
@@ -403,7 +381,7 @@ export class ClientMonitorImpl implements ClientMonitor {
     }
 
     private _makeCollector(): CollectorsImpl {
-        const collectorsConfig = this._config.collectors;
+        const collectorsConfig = this.config.collectors;
         const createdAdapterConfig: AdapterConfig = {
             browserType: this._clientDevices.browser?.name,
             browserVersion: this._clientDevices.browser?.version,
@@ -419,32 +397,10 @@ export class ClientMonitorImpl implements ClientMonitor {
     }
 
     private _makeSampler(): Sampler {
-        const samplerConfig = this._config.sampler;
-        const result = Sampler.create(samplerConfig);
-        result.statsProvider = this._statsStorage;
+        const result = new Sampler(
+            this._statsStorage,
+        )
         return result;
-    }
-
-    private _createSender(): void {
-        if (this._sender) {
-            logger.warn(`Attempted to replace an already established Sender component`);
-            return;
-        }
-        const senderConfig = this._config.sender;
-        if (!senderConfig) {
-            return;
-        }
-        this._sender = Sender.create(senderConfig)
-            .onClosed(() => {
-                this._sender = undefined;
-            })
-            .onTransportReady(() => {
-                this._eventer.emitConnected();
-            })
-            .onError(() => {
-                this._eventer.emitDisconnected();
-                this._sender = undefined;
-            });
     }
 
     private _createTimer(): Timer | undefined {
@@ -452,7 +408,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             logger.warn(`Attempted to create timer twice`);
             return;
         }
-        const { collectingPeriodInMs, samplingPeriodInMs, sendingPeriodInMs } = this._config;
+        const { collectingPeriodInMs, samplingPeriodInMs, sendingPeriodInMs } = this.config;
         if (collectingPeriodInMs && 0 < collectingPeriodInMs) {
             this.setCollectingPeriod(collectingPeriodInMs);
         }

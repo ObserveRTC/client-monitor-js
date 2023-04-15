@@ -1,6 +1,6 @@
 {
   "name": "@observertc/client-monitor-js",
-  "version": "1.3.2",
+  "version": "2.0.0",
   "description": "ObserveRTC Client Integration Javascript Library",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "prepare": "npm run build",
+    "prepublish": "pkgfiles",
     "prepublishOnly": "npm run lint",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.js src/*",
@@ -25,14 +26,12 @@
   "author": "Balazs Kreith, Pallab Gain",
   "license": "Apache-2.0",
   "dependencies": {
-    "@observertc/monitor-schemas": "2.2.0",
+    "@observertc/sample-schemas-js": "^2.2.1-2c2113b.0",
     "@types/events": "^3.0.0",
-    "@types/protobufjs": "^6.0.0",
     "@types/uuid": "^8.3.4",
     "bowser": "^2.11.0",
     "js-base64": "^3.7.2",
     "loglevel": "^1.8.0",
-    "protobufjs": "^6.11.3",
     "uuid": "^8.3.2"
   },
   "devDependencies": {
@@ -45,7 +44,8 @@
     "ts-jest": "^27.1.5",
     "typedoc": "^0.22.18",
     "typescript": "^4.8.3",
-    "utf-8-validate": "^5.0.8"
+    "utf-8-validate": "^5.0.8",
+    "pkgfiles": "2.3.0"
   },
   "repository": {
     "type": "git",

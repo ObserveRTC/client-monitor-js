@@ -18,6 +18,7 @@ export function makeStamp(obj: any): string {
     if (type === "object") {
         const stringbuffer: string[] = [];
         for (const [key, value] of Object.entries(obj)) {
+            stringbuffer.push(makeStamp(key));
             stringbuffer.push(makeStamp(value));
         }
         let result = stringbuffer.join('');

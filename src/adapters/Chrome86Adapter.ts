@@ -52,7 +52,7 @@ export class Chrome86Adapter implements Adapter {
                 if (rtcStatValue.ip && !rtcStatValue.address) {
                     rtcStatValue.address = rtcStatValue.ip;
                 }
-            }
+            } 
             yield castStats(rawType, rtcStatValue);
         }
         for (const trackStats of senders.values()) {

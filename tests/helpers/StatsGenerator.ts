@@ -1,5 +1,5 @@
-import { W3CStats as W3C } from "@observertc/monitor-schemas"
-import { RtcCodecType, RtcDataChannelState, RtcDtlsTransportState, RtcIceCandidateType, RtcMediaKind, RtcStatsIceCandidatePairState } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
+import { W3CStats as W3C } from '@observertc/sample-schemas-js'
+import { RtcCodecType, RtcMediaKind, RtcDataChannelState, RtcDtlsTransportState, RtcStatsIceCandidatePairState, RtcIceCandidateType } from '@observertc/sample-schemas-js/lib/w3c/W3cStatsIdentifiers';
 import { v4 as uuidv4 } from "uuid";
 const DEFAULT_START_TIMESTAMP = Date.now() - 50000;
 const DEFAULT_END_TIMESTAMP = Date.now();

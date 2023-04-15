@@ -10,7 +10,7 @@ export function makePrefixedObj(obj: any, prefix?: string, camelCase?: boolean):
 }
 
 /*eslint-disable @typescript-eslint/no-explicit-any */
-const EMPTY_ITERATOR: Iterable<any> = new class implements Iterable<any> {
+export const EMPTY_ITERATOR: Iterable<any> = new class implements Iterable<any> {
     /*eslint-disable @typescript-eslint/no-explicit-any */
     [Symbol.iterator](): Iterator<any, any, undefined> {
         return {

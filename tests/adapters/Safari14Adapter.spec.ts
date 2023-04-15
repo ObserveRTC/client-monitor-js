@@ -1,5 +1,4 @@
-import {  W3CStats as W3C } from "@observertc/monitor-schemas";
-import { RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats } from "@observertc/monitor-schemas/lib/w3c/W3cStatsIdentifiers";
+import {  W3CStats as W3C } from '@observertc/sample-schemas-js';
 import { Safari14Adapter } from "../../src/adapters/Safari14Adapter";
 import { StatsEntry } from "../../src/utils/StatsVisitor";
 import { createBaseAdapterTests } from "../helpers/createBaseAdapterTests";
