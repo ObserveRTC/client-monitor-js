@@ -1,4 +1,4 @@
-import {  W3CStats as W3C } from '@observertc/sample-schemas-js';
+import * as W3C from '../../src/schema/W3cStatsIdentifiers';
 import { Safari14Adapter } from "../../src/adapters/Safari14Adapter";
 import { StatsEntry } from "../../src/utils/StatsVisitor";
 import { createBaseAdapterTests } from "../helpers/createBaseAdapterTests";

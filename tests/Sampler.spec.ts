@@ -2,7 +2,7 @@ import { StatsEntry } from "../src/utils/StatsVisitor";
 import { Sampler } from "../src/Sampler";
 import { StatsStorage } from "../src/entries/StatsStorage";
 import { createCodecStats, createDataChannelStats, createIceCandidatePairStats, createInboundRtpStats, createMediaSourceStats, createOutboundRtpStats, createPeerConnectionStats, createReceiverStats, createRemoteInboundRtpStats, createRemoteOutboundRtpStats, createSenderStats, createTransportStats } from "./helpers/StatsGenerator";
-import { W3CStats } from '@observertc/sample-schemas-js';
+import * as W3CStats from '../src/schema/W3cStatsIdentifiers';
 import { createClientMonitor } from "./helpers/ClientMonitorGenerator";
 
 const StatsType = W3CStats.StatsType;

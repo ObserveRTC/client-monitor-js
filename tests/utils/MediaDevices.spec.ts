@@ -1,4 +1,4 @@
-import { MediaDevice } from "@observertc/sample-schemas-js";
+import { MediaDevice } from '../../src/schema/Samples';
 import { MediaDevices } from "../../src/utils/MediaDevices";
 
 describe(`MediaDevices`, () => {

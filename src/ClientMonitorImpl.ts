@@ -19,9 +19,9 @@ import {
     MediaDevice, 
     ExtensionStat, 
     Samples,
-    version as schemaVersion,
+    schemaVersion,
     CustomCallEvent,
-} from "@observertc/sample-schemas-js";
+} from './schema/Samples';
 import { CallEventType } from "./utils/callEvents";
 
 const logger = createLogger("ClientMonitor");

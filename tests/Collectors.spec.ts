@@ -1,4 +1,4 @@
-import { W3CStats as W3C } from '@observertc/sample-schemas-js';
+import * as W3C from '../src/schema/W3cStatsIdentifiers';
 import { StatsEntry } from "../src/utils/StatsVisitor";
 import { CollectorsImpl } from "../src/Collectors";
 import { StatsWriter } from "../src/entries/StatsStorage";

@@ -23,7 +23,7 @@ import {
     AudioPlayoutEntry,
     PeerConnectionUpdates,
 } from "./StatsEntryInterfaces";
-import { W3CStats as W3C } from '@observertc/sample-schemas-js'
+import * as W3C from '../schema/W3cStatsIdentifiers'
 import { calculateInboundRtpUpdates, calculateOutboundRtpUpdates, calculateRemoteInboundRtpUpdates } from "./UpdateFields";
 
 type InboundRtpPair = {

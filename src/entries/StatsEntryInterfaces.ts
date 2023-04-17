@@ -1,4 +1,4 @@
-import { W3CStats as W3C } from '@observertc/sample-schemas-js'
+import * as W3C from '../schema/W3cStatsIdentifiers'
 
 export interface StatsEntryAbs {
     /*eslint-disable @typescript-eslint/no-explicit-any */

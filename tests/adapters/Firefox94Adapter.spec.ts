@@ -1,9 +1,14 @@
-import {  W3CStats as W3C } from '@observertc/sample-schemas-js';
-import { RtcInboundRtpStreamStats, RtcOutboundRTPStreamStats, RtcRemoteInboundRtpStreamStats, RtcRemoteOutboundRTPStreamStats } from '@observertc/sample-schemas-js/lib/w3c/W3cStatsIdentifiers';
+import * as W3C from '../../src/schema/W3cStatsIdentifiers';
 import { Firefox94Adapter } from "../../src/adapters/Firefox94Adapter";
 import { StatsEntry } from "../../src/utils/StatsVisitor";
 import { createBaseAdapterTests } from "../helpers/createBaseAdapterTests";
 import * as Generator from "../helpers/StatsGenerator";
+import { 
+    RtcInboundRtpStreamStats, 
+    RtcOutboundRTPStreamStats, 
+    RtcRemoteInboundRtpStreamStats, 
+    RtcRemoteOutboundRTPStreamStats 
+} from '../../src/schema/W3cStatsIdentifiers';;
 
 
 

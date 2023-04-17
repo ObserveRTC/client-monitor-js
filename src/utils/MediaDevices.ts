@@ -1,4 +1,4 @@
-import { MediaDevice } from '@observertc/sample-schemas-js';
+import { MediaDevice } from '../schema/Samples';
 export type MediaDeviceKind = "videoinput" | "audioinput" | "audiooutput";
 
 type InnerMediaDevice = MediaDevice & {
