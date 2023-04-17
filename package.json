@@ -1,6 +1,6 @@
 {
   "name": "@observertc/client-monitor-js",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "ObserveRTC Client Integration Javascript Library",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -26,7 +26,7 @@
   "author": "Balazs Kreith, Pallab Gain",
   "license": "Apache-2.0",
   "dependencies": {
-    "@observertc/sample-schemas-js": "^2.2.1-2c2113b.0",
+    "@observertc/sample-schemas-js": "2.2.0",
     "@types/events": "^3.0.0",
     "@types/uuid": "^8.3.4",
     "bowser": "^2.11.0",

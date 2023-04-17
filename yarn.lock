@@ -589,10 +589,10 @@
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
 
-"@observertc/sample-schemas-js@^2.2.1-2c2113b.0":
-  version "2.2.1-rc.0"
-  resolved "https://registry.yarnpkg.com/@observertc/sample-schemas-js/-/sample-schemas-js-2.2.1-rc.0.tgz#db4555cc795616b0649c7d3bf516ca4f85981e37"
-  integrity sha512-pg+YeLi5rXx9ggXNbZe5QJ1vrpUdMxbw+Xfd0xG/B7Cf3sXcWQzDrIsts7on2jHcIY+rODV8WFaIMfmCHdIBVQ==
+"@observertc/sample-schemas-js@^2.2.0":
+  version "2.2.0"
+  resolved "https://registry.yarnpkg.com/@observertc/sample-schemas-js/-/sample-schemas-js-2.2.0.tgz#73724bbfe68b7e63c44f8450ab52a20c1866f171"
+  integrity sha512-0KQozUSSj9LgpxmLP2pzpKwLHcn6DAU6BR3+Tb3AXOfbgO27Kt4ZDlsMRGgRLE/k0+OafVcLp3bRfyU5UG7h7w==
 
 "@sinonjs/commons@^1.7.0":
   version "1.8.6"
