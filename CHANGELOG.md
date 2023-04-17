@@ -1,3 +1,7 @@
+## 2.1.0
+ * Remove dependency @observertc/samples-schema
+ * Add Samples and W3cStats to the source under the `./src/schema` library
+
 ## 2.0.0
 
 ### Conceptual changes

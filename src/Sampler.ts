@@ -1,5 +1,4 @@
 import {
-    W3CStats as W3C,
     Browser,
     Certificate,
     ClientSample,
@@ -21,7 +20,8 @@ import {
     IceCandidatePair,
     CustomCallEvent,
     CustomObserverEvent,
-} from '@observertc/sample-schemas-js'
+} from './schema/Samples'
+import * as W3C from './schema/W3cStatsIdentifiers';
 import { NULL_UUID } from "./utils/common";
 import { StatsReader } from "./entries/StatsStorage";
 import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";

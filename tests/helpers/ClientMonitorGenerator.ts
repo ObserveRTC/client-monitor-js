@@ -1,4 +1,5 @@
-import { Browser, CustomCallEvent, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform, W3CStats as W3C } from '@observertc/sample-schemas-js'
+import { Browser, CustomCallEvent, Engine, ExtensionStat, MediaDevice, OperationSystem, Platform } from '../../src/schema/Samples';
+// import * as W3CStats from '../../src/schema/W3cStatsIdentifiers';
 import { ClientMonitor, ClientMonitorConfig, ClientMonitorEvents } from "../../src/ClientMonitor";
 import { Collectors } from "../../src/Collectors";
 import { StatsReader } from "../../src/entries/StatsStorage";

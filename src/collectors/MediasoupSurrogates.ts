@@ -1,4 +1,4 @@
-import { W3CStats } from "@observertc/sample-schemas-js";
+import * as W3CStats from '../schema/W3cStatsIdentifiers';
 
 export interface MediaTrackSurrogate {
     readonly id: string;

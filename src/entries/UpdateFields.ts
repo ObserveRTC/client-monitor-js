@@ -1,5 +1,5 @@
 import { InboundRtpUpdates, OutboundRtpUpdates, RemoteInboundRtpUpdates } from "./StatsEntryInterfaces";
-import { W3CStats as W3C } from '@observertc/sample-schemas-js'
+import * as W3C from '../schema/W3cStatsIdentifiers'
 
 export function calculateInboundRtpUpdates(
 	prevStats: W3C.RtcInboundRtpStreamStats, 

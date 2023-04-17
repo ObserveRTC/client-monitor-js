@@ -11,9 +11,8 @@ import { MediasoupConsumerSurrogate,
     MediasoupDataConsumerSurrogate,
     MediasoupDataProducerSurrogate
 } from "./MediasoupSurrogates";
-import { W3CStats } from "@observertc/sample-schemas-js";
+import  * as W3CStats from '../schema/W3cStatsIdentifiers';
 import { createEmptyIterable } from "../utils/common";
-import { RtcSenderCompoundStats } from "@observertc/sample-schemas-js/lib/w3c/W3cStatsIdentifiers";
 import { CallEventType } from "../utils/callEvents";
 
 const logger = createLogger("MediasoupStatsCollector");
@@ -276,7 +275,7 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                     // if we don't have to add the forged sender stats, then we can rest (in piece)
                     return rtcStats;
                 }
-                const senderStats: RtcSenderCompoundStats = {
+                const senderStats: W3CStats.RtcSenderCompoundStats = {
                     id: `client-monitor-forged-sender-stats-${producer.id}`,
                     type: "sender",
                     trackIdentifier: producer.track.id,

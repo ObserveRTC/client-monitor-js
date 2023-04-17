@@ -1,7 +1,7 @@
 import * as Bowser from "bowser";
 import { createLogger } from "./utils/logger";
 import { makeStamp } from "./utils/makeStamp";
-import { OperationSystem, Browser, Platform, Engine } from "@observertc/sample-schemas-js";
+import { OperationSystem, Browser, Platform, Engine } from './schema/Samples';
 
 // import * as proto from "./ProtobufSamples"
 const logger = createLogger("ClientDevices");

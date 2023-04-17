@@ -32,7 +32,7 @@ export type {
     PeerConnectionEntry,
 } from "./entries/StatsEntryInterfaces";
 
-export { W3CStats } from '@observertc/sample-schemas-js';
+export * as W3CStats from './schema/W3cStatsIdentifiers';
 
 export type { 
     Samples,
@@ -50,7 +50,7 @@ export type {
 	IceLocalCandidate,
 	IceRemoteCandidate,
     CustomCallEvent,
-} from '@observertc/sample-schemas-js';
+} from './schema/Samples';
 export { CallEventType } from './utils/callEvents'
 
 

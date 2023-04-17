@@ -1,5 +1,5 @@
 import { StatsStorage } from "../../src/entries/StatsStorage";
-import { W3CStats as W3C } from '@observertc/sample-schemas-js';
+import * as W3C from '../../src/schema/W3cStatsIdentifiers';
 import * as Generator from "../helpers/StatsGenerator";
 import { StatsEntry } from "../../src/utils/StatsVisitor";
 import { createClientMonitor } from "../helpers/ClientMonitorGenerator";

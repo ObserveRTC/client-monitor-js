@@ -1,4 +1,4 @@
-import { OperationSystem, Browser, Platform, Engine, MediaDevice, CustomCallEvent, ExtensionStat, ClientSample, Samples } from "@observertc/sample-schemas-js";
+import { OperationSystem, Browser, Platform, Engine, MediaDevice, CustomCallEvent, ExtensionStat, ClientSample, Samples } from './schema/Samples';
 import { AccumulatorConfig } from "./Accumulator";
 import { Collectors, CollectorsConfig } from "./Collectors";
 import { StatsReader } from "./entries/StatsStorage";

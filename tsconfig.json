@@ -4,7 +4,7 @@
 	{
 		"lib": [ "es2018", "dom" ],
 		"target": "es2018",
-		"module": "es6",
+		"module": "commonjs",
 		"moduleResolution": "node",
 		"esModuleInterop": true,
 		"isolatedModules": true,
@@ -13,5 +13,6 @@
 		"declaration": true,
 		"declarationMap": true
 	},
-	"include": [ "src" ],
+	"include": [ "src" ]
 }
+

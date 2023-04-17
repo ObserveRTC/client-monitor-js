@@ -1,4 +1,4 @@
-import { W3CStats as W3C } from '@observertc/sample-schemas-js'
+import * as W3C from '../schema/W3cStatsIdentifiers'
 import { createLogger } from "./logger";
 
 const logger = createLogger(`StatsVisitor`);
