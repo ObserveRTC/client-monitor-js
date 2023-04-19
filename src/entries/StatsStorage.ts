@@ -175,6 +175,12 @@ export interface StatsReader {
      * The corresponded stats (csrc stats) are deprecated and will be removed from browser
      */
     contributingSources(): IterableIterator<ContributingSourceEntry>;
+
+    /**
+     * 
+     * @param trackId The getTrack function is a versatile method that retrieves the track information for a given track ID. This function can return track details for both inbound and outbound tracks.
+     */
+    getTrackEntry(trackId: string): (InboundTrackEntry & { direction: 'inbound'}) | (OutboundTrackEntry & { direction: 'outbound' }) | undefined;
 }
 
 export interface StatsWriter {
@@ -471,6 +477,25 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
     public getOutboundTrack(trackId: string): OutboundTrackEntry | undefined {
         return this._outboundTrackEntries.get(trackId);
+    }
+
+    public getTrackEntry(trackId: string): ReturnType<StatsReader['getTrackEntry']> {
+        const outbTrack = this.getOutboundTrack(trackId);
+        if (outbTrack) {
+            return {
+                direction: 'outbound',
+                ...outbTrack
+            }
+        }
+
+        const inbTrack = this.getInboundTrack(trackId);
+        if (inbTrack) {
+            return {
+                direction: 'inbound',
+                ...inbTrack
+            }
+        }
+        return undefined;
     }
 
 
