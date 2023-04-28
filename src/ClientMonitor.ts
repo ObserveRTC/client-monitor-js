@@ -298,6 +298,12 @@ export interface ClientMonitor {
     setSendingPeriod(sendingPeriodInMs: number): void;
 
     /**
+     * Assigns the marker field to to each sample created.
+     * @param value 
+     */
+    setMarker(value?: string): void;
+    
+    /**
      * Collect all stats simultenously and update the #this.stats storage.
      */
     collect(): Promise<void>;

@@ -123,6 +123,10 @@ export class ClientMonitorImpl implements ClientMonitor {
         return this._collectors;
     }
 
+    public setMarker(value?: string) {
+        this._sampler.setMarker(value);
+    }
+
     public addTrackRelation(trackRelation: TrackRelation): void {
         this._sampler.addTrackRelation(trackRelation);
     }

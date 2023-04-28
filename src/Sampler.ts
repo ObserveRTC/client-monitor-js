@@ -50,11 +50,11 @@ export class Sampler {
     private _customObservedEvents?: CustomObserverEvent[];
     private _mediaDevices?: MediaDevice[];
     private _localSDP?: string[];
+    private _marker?: string;
 
     // private _statsReader?: StatsReader;
     // private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
     private _trackRelations: Map<string, TrackRelation> = new Map();
-    private _sampled = -1;
     private _sampleSeq = 0;
     private _timezoneOffset: number = new Date().getTimezoneOffset();
     private _closed = false;
@@ -124,6 +124,10 @@ export class Sampler {
         this._mediaDevices.push(mediaDevice);
     }
 
+    public setMarker(value?: string) {
+        this._marker = value;
+    }
+
     public close(): void {
         if (this._closed) {
             logger.warn(`Attempted to close the Sampler twice`);
@@ -143,7 +147,8 @@ export class Sampler {
             clientId: 'NULL',
             roomId: 'NULL',
             userId: 'NULL',
-            marker: 'NULL',
+
+            marker: this._marker,
             sampleSeq: this._sampleSeq,
             timeZoneOffsetInHours: this._timezoneOffset,
 
@@ -170,7 +175,6 @@ export class Sampler {
         this._customCallEvents = undefined;
         this._mediaDevices = undefined;
         this._localSDP = undefined;
-        this._sampled = Date.now();
         
         let inboundAudioTracks: InboundAudioTrack[] | undefined;
         let inboundVideoTracks: InboundVideoTrack[] | undefined;
@@ -267,7 +271,6 @@ export class Sampler {
         clientSample.iceRemoteCandidates = iceRemoteCandidates;
         clientSample.dataChannels = dataChannels;
         clientSample.iceServers = iceServers;
-        this._sampled = clientSample.timestamp;
         logger.debug(`Assembled ClientSample`, clientSample);
         return clientSample;
     }
