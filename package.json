@@ -1,6 +1,6 @@
 {
   "name": "@observertc/client-monitor-js",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "ObserveRTC Client Integration Javascript Library",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

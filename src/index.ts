@@ -30,6 +30,8 @@ export type {
     CertificateEntry,
     IceServerEntry,
     PeerConnectionEntry,
+    OutboundTrackEntry,
+    InboundTrackEntry,
 } from "./entries/StatsEntryInterfaces";
 
 export * as W3CStats from './schema/W3cStatsIdentifiers';
