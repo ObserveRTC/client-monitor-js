@@ -203,6 +203,13 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         return this._iceServers.values();
     }
 
+    public getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined {
+        for (const transport of this.transports()) {
+            const result = transport.getSelectedIceCandidatePair();
+            if (result) return result;
+        }
+    }
+
     public audioPlayouts(): IterableIterator<AudioPlayoutEntry> {
         return this._audioPlayouts.values();
     }

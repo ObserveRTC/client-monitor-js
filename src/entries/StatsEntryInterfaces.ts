@@ -326,6 +326,7 @@ export interface PeerConnectionEntry {
     // readonly touched: number;
     // readonly updated: number;
     readonly label: string | undefined;
+    getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     codecs(): IterableIterator<CodecEntry>;
     inboundRtps(): IterableIterator<InboundRtpEntry>;
     outboundRtps(): IterableIterator<OutboundRtpEntry>;

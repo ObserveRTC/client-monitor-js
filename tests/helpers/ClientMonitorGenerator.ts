@@ -5,6 +5,7 @@ import { Collectors } from "../../src/Collectors";
 import { StatsReader } from "../../src/entries/StatsStorage";
 import { MetricsReader } from "../../src/Metrics";
 import { TrackRelation } from "../../src/Sampler";
+import { EvaluatorProcess } from '../../src/Evaluators';
 
 export function createClientMonitor(data: any): ClientMonitor {
     const result = new class implements ClientMonitor {
@@ -14,26 +15,38 @@ export function createClientMonitor(data: any): ClientMonitor {
         get config(): ClientMonitorConfig {
             return data.config;
         }
-        on<K extends 'stats-collected' | 'sample-created' | 'send'>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+        on<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
             if (!data.on) {
                 throw new Error("Method not implemented.");
             }
             data.on(event, listener);
             return result as this;
         }
-        once<K extends 'stats-collected' | 'sample-created' | 'send'>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+        once<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
             if (!data.once) {
                 throw new Error("Method not implemented.");
             }
             data.once(event, listener);
             return result as this;
         }
-        off<K extends 'stats-collected' | 'sample-created' | 'send'>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
+        off<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
             if (!data.off) {
                 throw new Error("Method not implemented.");
             }
             data.off(event, listener);
             return result as this;
+        }
+        addEvaluator(process: EvaluatorProcess): void {
+            if (!data.addEvaluator) {
+                throw new Error("Method not implemented.");
+            }
+            data.addEvaluator(process);
+        }
+        removeEvaluator(process: EvaluatorProcess): boolean {
+            if (!data.removeEvaluator) {
+                throw new Error("Method not implemented.");
+            }
+            return data.removeEvaluator(process);
         }
         addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
             if (!data.addMediaTrackAddedCallEvent) {

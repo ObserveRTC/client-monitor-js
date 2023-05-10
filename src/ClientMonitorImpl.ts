@@ -23,6 +23,8 @@ import {
     CustomCallEvent,
 } from './schema/Samples';
 import { CallEventType } from "./utils/callEvents";
+import { EvaluatorProcess, Evaluators } from "./Evaluators";
+import { createCongestionDetector } from "./detectors/CongestionDetector";
 
 const logger = createLogger("ClientMonitor");
 
@@ -35,6 +37,14 @@ const supplyDefaultConfig = () => {
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
         createCallEvents: false,
+        congestionDetector: {
+            minDurationThresholdInMs: 2000,
+            minRTTDeviationThresholdInMs: 50,
+            minMeasurementsLengthInMs: 10000,
+            deviationFoldThreshold: 3.0,
+            measurementsWindowInMs: 30000,
+            fractionLossThreshold: 0.2,
+        }
     };
     return defaultConfig;
 };
@@ -65,6 +75,8 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _accumulator: Accumulator;
     private _metrics: Metrics;
     private _emitter = new EventEmitter();
+    private _evaluators = new Evaluators();
+    private _detectors = new Map<string, EvaluatorProcess>();
 
     private constructor(
         public readonly config: ConstructorConfig
@@ -133,6 +145,14 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public removeTrackRelation(trackId: string): void {
         this._sampler.removeTrackRelation(trackId);
+    }
+
+    public addEvaluator(process: EvaluatorProcess): void {
+        this._evaluators.add(process);
+    }
+
+    public removeEvaluator(process: EvaluatorProcess): boolean {
+        return this._evaluators.remove(process);
     }
 
     public setMediaDevices(...devices: MediaDevice[]): void {
@@ -237,6 +257,11 @@ export class ClientMonitorImpl implements ClientMonitor {
         });
         
         this._metrics.setLastCollected(started + elapsedInMs);
+
+        // evaluate
+        await this._evaluators.use({
+            storage: this._statsStorage,
+        });
     }
 
     public sample(): void {
@@ -347,19 +372,34 @@ export class ClientMonitorImpl implements ClientMonitor {
             context: "Sending Samples",
         });
     }
-
+    
     public on<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.addListener(event, listener);
+        if (this._emitter.listenerCount(event) === 1) {
+            this._subscribeDetector(event);
+        }
         return this;
     }
 
     public once<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.once(event, listener);
+        if (this._emitter.listenerCount(event) === 1) {
+            if (this._subscribeDetector(event)) {
+                this._emitter.once(event, () => {
+                    if (this._emitter.listenerCount(event) === 0) {
+                        this._unsubscribeDetector(event);
+                    }
+                });
+            }
+        }
         return this;
     }
 
     public off<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.removeListener(event, listener);
+        if (this._emitter.listenerCount(event) === 0) {
+            this._unsubscribeDetector(event);
+        }
         return this;
     }
 
@@ -422,5 +462,28 @@ export class ClientMonitorImpl implements ClientMonitor {
         if (sendingPeriodInMs && 0 < sendingPeriodInMs) {
             this.setSendingPeriod(sendingPeriodInMs);
         }
+    }
+
+    private _subscribeDetector<K extends keyof ClientMonitorEvents>(event: K): boolean {
+        let detector: EvaluatorProcess | undefined;
+        switch (event) {
+            case 'congestion-detected':
+                detector = createCongestionDetector(this._emitter, this.config.congestionDetector);
+                break;
+            default:
+                return false;
+        }
+        this._detectors.set(event, detector);
+        this._evaluators.add(detector);
+        return true;
+    }
+
+    private _unsubscribeDetector(event: string): boolean {
+        const detector = this._detectors.get(event);
+        if (!detector) {
+            return false;
+        }
+        this._detectors.delete(event);
+        return this._evaluators.remove(detector);
     }
 }

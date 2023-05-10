@@ -6,6 +6,8 @@ import { MetricsReader } from "./Metrics";
 import { TrackRelation } from "./Sampler";
 import { LogLevel } from "./utils/logger";
 import { StatsEntry } from "./utils/StatsVisitor";
+import { EvaluatorProcess } from './Evaluators';
+import { CongestionDetectorConfig } from './detectors/CongestionDetector';
 
 export type ClientMonitorConfig = {
     /**
@@ -65,6 +67,10 @@ export type ClientMonitorConfig = {
      */
     accumulator?: AccumulatorConfig;
 
+    /**
+     * Configuration for the CongestionDetector function.
+     */
+    congestionDetector: CongestionDetectorConfig,
 };
 
 export interface ClientMonitorEvents {
@@ -76,7 +82,12 @@ export interface ClientMonitorEvents {
     },
     'send': {
         samples: Samples[]
-    }
+    },
+    'congestion-detected': {
+        peerConnectionIds: string[],
+        trackIds: string[],
+    },
+    
 }
 
 
@@ -179,6 +190,25 @@ export interface ClientMonitor {
      * @param trackId
      */
     removeTrackRelation(trackId: string): void;
+
+    /**
+     * Adds a new EvaluatorProcess to the list of processes.
+     * 
+     * @param process - The EvaluatorProcess instance to be added.
+     * 
+     * @returns void
+     */
+    addEvaluator(process: EvaluatorProcess): void;
+    
+    /**
+     * Removes an existing EvaluatorProcess from the list of processes.
+     * 
+     * @param process - The EvaluatorProcess instance to be removed.
+     * 
+     * @returns boolean - Returns true if the process was successfully removed,
+     *                    or false if the process was not found.
+     */
+    removeEvaluator(process: EvaluatorProcess): boolean;
 
     /**
      * Adds the local part of the Session Description Protocol (SDP).
