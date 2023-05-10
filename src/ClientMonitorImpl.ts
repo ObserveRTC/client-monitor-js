@@ -24,11 +24,13 @@ import {
 } from './schema/Samples';
 import { CallEventType } from "./utils/callEvents";
 import { EvaluatorProcess, Evaluators } from "./Evaluators";
-import { createCongestionDetector } from "./detectors/CongestionDetector";
+import { CongestionDetectorConfig, createCongestionDetector } from "./detectors/CongestionDetector";
 
 const logger = createLogger("ClientMonitor");
 
-type ConstructorConfig = ClientMonitorConfig;
+type ConstructorConfig = ClientMonitorConfig & {
+    congestionDetector: CongestionDetectorConfig,
+};
 
 const supplyDefaultConfig = () => {
     const defaultConfig: ConstructorConfig = {
@@ -37,6 +39,7 @@ const supplyDefaultConfig = () => {
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
         createCallEvents: false,
+
         congestionDetector: {
             minDurationThresholdInMs: 2000,
             minRTTDeviationThresholdInMs: 50,

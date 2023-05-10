@@ -61,7 +61,6 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 			totalOutboundPacketsLost,
 		} = peerConnection.updates;
 		
-		state.visited = true;
 		if (state.congested !== undefined && (now - state.congested) < config.minDurationThresholdInMs) {
 			return true;
 		}
@@ -77,7 +76,6 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		}
 		const maxFL = Math.max(inbFL, outbFL);
 		if (config.fractionLossThreshold !== undefined && config.fractionLossThreshold < maxFL) {
-			state.congested = now;
 			return true;
 		}
 
@@ -113,11 +111,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		if (config.minRTTDeviationThresholdInMs < deviation) {
 			return false;
 		}
-		if (config.deviationFoldThreshold * stdDev < deviation) {
-			state.congested = now;
-			return true;
-		}
-		return false;
+		return config.deviationFoldThreshold * stdDev < deviation;
 	}
 
 	const process: EvaluatorProcess = async (context) => {
@@ -133,12 +127,30 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 				visited: false,
 			}).get(peerConnection.id)!;
 			
-			if (!isCongested(now, state, peerConnection)) {
+			state.visited = true;
+			
+			const wasCongested = state.congested !== undefined;
+			const congested = isCongested(now, state, peerConnection);
+			
+			if (!congested) {
+				if (wasCongested) {
+					state.congested = undefined;
+				}
 				continue;
 			}
-
+			if (!wasCongested) {
+				state.congested = now;
+			}
 			peerConnectionIds.push(peerConnection.id);
 			trackIds.push(...Array.from(peerConnection.trackIds()));
+		}
+
+		for (const [pcId, state] of Array.from(peerConnectionStates)) {
+			if (state.visited) {
+				state.visited = false;
+			} else {
+				peerConnectionStates.delete(pcId);
+			}
 		}
 
 		if (0 < peerConnectionIds.length) {

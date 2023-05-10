@@ -70,7 +70,7 @@ export type ClientMonitorConfig = {
     /**
      * Configuration for the CongestionDetector function.
      */
-    congestionDetector: CongestionDetectorConfig,
+    congestionDetector?: CongestionDetectorConfig,
 };
 
 export interface ClientMonitorEvents {

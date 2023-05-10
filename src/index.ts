@@ -55,6 +55,8 @@ export type {
 } from './schema/Samples';
 export { CallEventType } from './utils/callEvents'
 
+export type { EvaluatorProcess } from './Evaluators';
+export type { CongestionDetectorConfig } from './detectors/CongestionDetector';
 
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";
