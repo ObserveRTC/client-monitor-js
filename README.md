@@ -41,8 +41,9 @@ monitor.on('stats-collected', () => {
         const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
         console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
     }
-    statsCollector.close();
-})
+});
+// if you want to stop collecting from the peerConnection, then:
+statsCollector.close();
 ```
 
 The above example do as follows:
