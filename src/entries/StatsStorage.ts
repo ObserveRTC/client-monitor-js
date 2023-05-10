@@ -41,6 +41,8 @@ export type StatsReaderUpdates = {
     totalOutboundPacketsSent: number,
     totalOutbounPacketsReceived: number,
     totalOutboundPacketsLost: number,
+    maxAvailableIncomingBitrate: number,
+    maxAvailableOutgoingBitrate: number,
 }
 
 /**
@@ -211,6 +213,8 @@ export class StatsStorage implements StatsReader, StatsWriter {
         totalOutboundPacketsSent: 0,
         totalOutbounPacketsReceived: 0,
         totalOutboundPacketsLost: 0,
+        maxAvailableIncomingBitrate: -1,
+        maxAvailableOutgoingBitrate: -1,
     }
 
     public constructor(
@@ -250,11 +254,16 @@ export class StatsStorage implements StatsReader, StatsWriter {
         let totalOutboundPacketsSent = 0;
         let totalOutbounPacketsReceived = 0;
         let totalOutboundPacketsLost = 0;
-
+        let maxAvailableIncomingBitrate = -1;
+        let maxAvailableOutgoingBitrate = -1;
         for (const peerConnectionEntry of this._peerConnections.values()) {
 
             peerConnectionEntry.commit();
-
+            for (const transport of peerConnectionEntry.transports()) {
+                maxAvailableIncomingBitrate = Math.max(maxAvailableIncomingBitrate, (transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? -1));
+                maxAvailableOutgoingBitrate = Math.max(maxAvailableOutgoingBitrate, (transport.getSelectedIceCandidatePair()?.stats.availableOutgoingBitrate ?? -1));
+            }
+            
             const pcUpdates = peerConnectionEntry.updates;
 
             sendingAuidoBitrate += pcUpdates.sendingAuidoBitrate;
@@ -278,6 +287,8 @@ export class StatsStorage implements StatsReader, StatsWriter {
             totalOutboundPacketsSent,
             totalOutbounPacketsReceived,
             totalOutboundPacketsLost,
+            maxAvailableIncomingBitrate,
+            maxAvailableOutgoingBitrate,
         }
     }
 
