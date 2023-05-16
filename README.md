@@ -87,7 +87,71 @@ const myTransport = // your transport created before the device is added to the 
 mediasoupStatsCollector.addTransport(myTransport)
 ```
 
+## Detectors
 
+The Detectors module for client-monitor-js provides a collection of detector functions that can be used to monitor and detect various issues and events in a real-time communication system. 
+
+### Audio Desynchronization Detector
+
+```javascript
+import { createClientMonitor } from 'client-monitor-js';
+
+// Create a ClientMonitor instance
+const monitor = createClientMonitor({
+    collectingPeriodInMs: 2000,
+});
+
+monitor.on('audio-desync-detected', ({ trackIds }) => {
+    console.warn(`Audio Desync detected on tracks`, trackIds);
+});
+```
+
+The example demonstrates how to use the Audio Desynchronization Detector in the client-monitor-js library. It creates a ClientMonitor instance with the default configuration and listens for the audio-desync-detected event. When the event is triggered, a warning message is logged, indicating the tracks that are experiencing audio desynchronization.
+
+To customize the configuration of the Audio Desynchronization Detector, refer to the [Configuratio](#configuration) section for further instructions.
+
+
+## CPU Issue Detector
+
+```javascript
+import { createClientMonitor } from 'client-monitor-js';
+
+// Create a ClientMonitor instance
+const monitor = createClientMonitor({
+    collectingPeriodInMs: 2000,
+});
+
+monitor.on('cpu-issue-detected', ({ inboundTrackIds, outboundTrackIds }) => {
+    console.warn('CPU issue detected:');
+    console.warn('Inbound Track IDs:', inboundTrackIds);
+    console.warn('Outbound Track IDs:', outboundTrackIds);
+});
+
+```
+
+The above example demonstrates how to use the CPU Issue Detector in the client-monitor-js library. It creates a ClientMonitor instance with the default configuration and listens for the cpu-issue event. When the event is triggered, a warning message is logged, displaying the inbound and outbound track IDs that are experiencing CPU-related issues.
+
+You can adjust the [Configuratio](#configuration)  of the CPU Issue 
+
+## Congestion Detector
+
+```javascript
+import { createClientMonitor } from 'client-monitor-js';
+
+// Create a ClientMonitor instance
+const monitor = createClientMonitor({
+    collectingPeriodInMs: 2000,
+});
+
+monitor.on('congestion-detected', ({ trackIds }) => {
+    console.warn('Congestion detected on tracks:', trackIds);
+});
+
+```
+
+The example above demonstrates the usage of the Congestion Detector in the client-monitor-js library. It creates a ClientMonitor instance with the default configuration and listens for the congestion-detected event. When congestion is detected on any tracks, a warning message is logged, indicating the track IDs affected by congestion.
+
+To configure the Congestion Detector according to your specific requirements, please refer to the [Configuratio](#configuration)  section for further guidance.
 
 ## Configurations
 
@@ -181,6 +245,90 @@ const config = {
          */
         forwardIfEmpty: false
     }
+
+     /**
+     * Configuration for the CpuIssueDetector function.
+     * 
+     * Default configuration below
+     */
+    cpuIssueDetector: {
+        /**
+         * Specifies whether the dropped frames detector is enabled or not.
+         */
+        enabled: true,
+        /**
+         * The fractional threshold used to determine if the incoming frames
+         * dropped fraction is considered significant or not.
+         * It represents the maximum allowed ratio of dropped frames to received frames.
+         * For example, a value of 0.1 means that if the dropped frames fraction
+         * exceeds 0.1, it will be considered a significant issue.
+         */
+        incomingFramesDroppedFractionalThreshold: 0.1,
+    },
+    /**
+     * Configuration for the AudioDesyncDetector function.
+     * 
+     * Default configuration below
+     */
+    audioDesyncDetector: {
+        /**
+         * Specifies whether the audio desynchronization detector is enabled or not.
+         */
+        enabled: true,
+        /**
+         * The fractional threshold used to determine if the audio desynchronization
+         * correction is considered significant or not.
+         * It represents the minimum required ratio of corrected samples to total samples.
+         * For example, a value of 0.1 means that if the corrected samples ratio
+         * exceeds 0.1, it will be considered a significant audio desynchronization issue.
+         */
+        fractionalCorrectionThreshold: 0.1,
+    },
+    /**
+     * Configuration for the CongestionDetector function.
+     * 
+     * Default configuration below
+     */
+    congestionDetector: {
+        /**
+         * Specifies whether the congestion detector is enabled or not.
+         */
+        enabled: true,
+        /**
+         * The minimum deviation threshold for Round-Trip Time (RTT) in milliseconds.
+         * A higher value indicates a higher threshold for detecting congestion based on RTT deviation.
+         */
+        minRTTDeviationThresholdInMs: 50,
+
+        /**
+         * The minimum duration threshold in milliseconds.
+         * If congestion is detected, this is the minimum duration before a reevaluation takes place.
+         */
+        minDurationThresholdInMs: 2000,
+
+        /**
+         * The deviation fold threshold. 
+         * This value is used as a multiplier with the standard deviation to compare against the deviation in RTT.
+         */
+        deviationFoldThreshold: 3.0,
+
+        /**
+         * The fraction loss threshold for packet loss.
+         * If the fraction of packets lost is greater than this threshold, it is considered as congestion.
+         */
+        fractionLossThreshold: 0.2,
+
+        /**
+         * The window for measuring the RTT in milliseconds.
+         */
+        measurementsWindowInMs: 30000,
+
+        /**
+         * The minimum length of measurements in milliseconds. 
+         * This determines the minimum duration for which measurements should be taken before considering them for congestion detection.
+         */
+        minMeasurementsLengthInMs: 10000;
+    },
 };
 ```
 
