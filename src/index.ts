@@ -70,4 +70,3 @@ export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor
 }
 
 export { setLogLevel } from "./utils/logger";
-
