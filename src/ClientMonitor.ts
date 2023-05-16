@@ -8,6 +8,8 @@ import { LogLevel } from "./utils/logger";
 import { StatsEntry } from "./utils/StatsVisitor";
 import { EvaluatorProcess } from './Evaluators';
 import { CongestionDetectorConfig } from './detectors/CongestionDetector';
+import { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
+import { CpuIssueDetectorConfig } from './detectors/CpuIssueDetector';
 
 export type ClientMonitorConfig = {
     /**
@@ -66,7 +68,14 @@ export type ClientMonitorConfig = {
      * the accumulator sets the buffer between sampling and sending.
      */
     accumulator?: AccumulatorConfig;
-
+    /**
+     * Configuration for the CpuIssueDetector function.
+     */
+    cpuIssueDetector?: CpuIssueDetectorConfig;
+    /**
+     * Configuration for the AudioDesyncDetector function.
+     */
+    audioDesyncDetector?: AudioDesyncDetectorConfig;
     /**
      * Configuration for the CongestionDetector function.
      */
@@ -86,8 +95,16 @@ export interface ClientMonitorEvents {
     'congestion-detected': {
         peerConnectionIds: string[],
         trackIds: string[],
+        highestSeenSendingBitrate: number,
+        highestSeenReceivingBitrate: number,
     },
-    
+    'cpu-issue-detected': {
+        inboundTrackIds: string[],
+        outboundTrackIds: string[],
+    },
+    'audio-desync-detected': {
+        trackIds: string[],
+    }
 }
 
 

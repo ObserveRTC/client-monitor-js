@@ -6,14 +6,25 @@ export function calculateInboundRtpUpdates(
 	actualStats: W3C.RtcInboundRtpStreamStats,
 	elapsedTimeInSec: number,
 ): InboundRtpUpdates {
+	
+	const bufferDelay = (actualStats.jitterBufferDelay ?? 0) - (prevStats.jitterBufferDelay ?? 0);
 	const receivedPackets = (actualStats.packetsReceived ?? 0) - (prevStats.packetsReceived ?? 0);
 	const receivingBitrate = (((actualStats.bytesReceived ?? 0) - (prevStats.bytesReceived ?? 0)) * 8) / elapsedTimeInSec;
 	const lostPackets = (actualStats.packetsLost ?? 0) - (prevStats.packetsLost ?? 0);
+	const receivedFrames = (actualStats.framesReceived ?? 0) - (prevStats.framesReceived ?? 0);
+	const decodedFrames = (actualStats.framesDecoded ?? 0) - (prevStats.framesDecoded ?? 0);
+	const droppedFrames = (actualStats.framesDropped ?? 0) - (prevStats.framesDropped ?? 0);
+	const receivedSamples = (actualStats.totalSamplesReceived ?? 0) - (prevStats.totalSamplesReceived ?? 0);
 
 	return {
+		bufferDelay,
 		receivingBitrate,
 		receivedPackets,
 		lostPackets,
+		receivedFrames,
+		decodedFrames,
+		droppedFrames,
+		receivedSamples,
 	}
 }
 

@@ -25,10 +25,14 @@ import {
 import { CallEventType } from "./utils/callEvents";
 import { EvaluatorProcess, Evaluators } from "./Evaluators";
 import { CongestionDetectorConfig, createCongestionDetector } from "./detectors/CongestionDetector";
+import { AudioDesyncDetectorConfig, createAudioDesyncDetector } from "./detectors/AudioDesyncDetector";
+import { CpuIssueDetectorConfig, createCpuIssueDetector } from "./detectors/CpuIssueDetector";
 
 const logger = createLogger("ClientMonitor");
 
 type ConstructorConfig = ClientMonitorConfig & {
+    cpuIssueDetector: CpuIssueDetectorConfig,
+    audioDesyncDetector: AudioDesyncDetectorConfig,
     congestionDetector: CongestionDetectorConfig,
 };
 
@@ -39,8 +43,16 @@ const supplyDefaultConfig = () => {
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
         createCallEvents: false,
-
+        cpuIssueDetector: {
+            enabled: true,
+            incomingFramesDroppedFractionalThreshold: 0.5,
+        },
+        audioDesyncDetector: {
+            enabled: false,
+            fractionalCorrectionThreshold: 0.2,
+        },
         congestionDetector: {
+            enabled: true,
             minDurationThresholdInMs: 2000,
             minRTTDeviationThresholdInMs: 50,
             minMeasurementsLengthInMs: 10000,
@@ -78,7 +90,7 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _accumulator: Accumulator;
     private _metrics: Metrics;
     private _emitter = new EventEmitter();
-    private _evaluators = new Evaluators();
+    private _evaluators: Evaluators;
     private _detectors = new Map<string, EvaluatorProcess>();
 
     private constructor(
@@ -91,6 +103,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._accumulator = Accumulator.create(config.accumulator);
         this._collectors = this._makeCollector();
         this._sampler = this._makeSampler();
+        this._evaluators = this._makeEvaluators();
         this._createTimer();
     }
 
@@ -378,31 +391,16 @@ export class ClientMonitorImpl implements ClientMonitor {
     
     public on<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.addListener(event, listener);
-        if (this._emitter.listenerCount(event) === 1) {
-            this._subscribeDetector(event);
-        }
         return this;
     }
 
     public once<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.once(event, listener);
-        if (this._emitter.listenerCount(event) === 1) {
-            if (this._subscribeDetector(event)) {
-                this._emitter.once(event, () => {
-                    if (this._emitter.listenerCount(event) === 0) {
-                        this._unsubscribeDetector(event);
-                    }
-                });
-            }
-        }
         return this;
     }
 
     public off<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.removeListener(event, listener);
-        if (this._emitter.listenerCount(event) === 0) {
-            this._unsubscribeDetector(event);
-        }
         return this;
     }
 
@@ -450,6 +448,23 @@ export class ClientMonitorImpl implements ClientMonitor {
         return result;
     }
 
+    private _makeEvaluators(): Evaluators {
+        const result = new Evaluators();
+        result.add(createAudioDesyncDetector(
+            this._emitter, 
+            this.config.audioDesyncDetector
+        ));
+        result.add(createCongestionDetector(
+            this._emitter, 
+            this.config.congestionDetector
+        ));
+        result.add(createCpuIssueDetector(
+            this._emitter, 
+            this.config.cpuIssueDetector
+        ));
+        return result;
+    }
+
     private _createTimer(): Timer | undefined {
         if (this._timer) {
             logger.warn(`Attempted to create timer twice`);
@@ -465,28 +480,5 @@ export class ClientMonitorImpl implements ClientMonitor {
         if (sendingPeriodInMs && 0 < sendingPeriodInMs) {
             this.setSendingPeriod(sendingPeriodInMs);
         }
-    }
-
-    private _subscribeDetector<K extends keyof ClientMonitorEvents>(event: K): boolean {
-        let detector: EvaluatorProcess | undefined;
-        switch (event) {
-            case 'congestion-detected':
-                detector = createCongestionDetector(this._emitter, this.config.congestionDetector);
-                break;
-            default:
-                return false;
-        }
-        this._detectors.set(event, detector);
-        this._evaluators.add(detector);
-        return true;
-    }
-
-    private _unsubscribeDetector(event: string): boolean {
-        const detector = this._detectors.get(event);
-        if (!detector) {
-            return false;
-        }
-        this._detectors.delete(event);
-        return this._evaluators.remove(detector);
     }
 }

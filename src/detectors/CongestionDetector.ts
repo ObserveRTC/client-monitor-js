@@ -7,6 +7,10 @@ import { EvaluatorProcess } from "../Evaluators";
  * Configuration object for the CongestionDetector function.
  */
 export type CongestionDetectorConfig = {
+	/**
+	 * Specifies whether the congestion detector is enabled or not.
+	 */
+	enabled: boolean;
     /**
      * The minimum deviation threshold for Round-Trip Time (RTT) in milliseconds.
      * A higher value indicates a higher threshold for detecting congestion based on RTT deviation.
@@ -44,6 +48,11 @@ export type CongestionDetectorConfig = {
 }
 
 export function createCongestionDetector(emitter: EventEmitter, config: CongestionDetectorConfig): EvaluatorProcess {
+	if (!config.enabled) {
+		return async () => {
+
+		};
+	}
 	type PeerConnectionState = {
 		measurements: { added: number, RttInMs: number }[],
 		sum: number,
@@ -51,6 +60,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		congested?: number,
 		visited: boolean,
 	}
+	
 	const peerConnectionStates = new Map<string, PeerConnectionState>();
 	const isCongested = (now: number, state: PeerConnectionState, peerConnection: PeerConnectionEntry): boolean => {
 		const {
@@ -79,7 +89,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 			return true;
 		}
 
-		if (avgRttInS < 0) {
+		if (avgRttInS < 0 || config.measurementsWindowInMs < 1) {
 			return false;
 		}
 		const value = avgRttInS * 1000;
@@ -113,6 +123,8 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		}
 		return config.deviationFoldThreshold * stdDev < deviation;
 	}
+	let highestSeenSendingBitrate = 0
+	let highestSeenReceivingBitrate = 0
 
 	const process: EvaluatorProcess = async (context) => {
 		const { storage } = context;
@@ -133,6 +145,8 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 			const congested = isCongested(now, state, peerConnection);
 			
 			if (!congested) {
+				highestSeenSendingBitrate = Math.max(highestSeenSendingBitrate, storage.updates.sendingAuidoBitrate + storage.updates.sendingVideoBitrate);
+				highestSeenReceivingBitrate = Math.max(highestSeenReceivingBitrate, storage.updates.receivingAudioBitrate + storage.updates.receivingVideoBitrate);
 				if (wasCongested) {
 					state.congested = undefined;
 				}
@@ -157,8 +171,12 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 			const event: ClientMonitorEvents['congestion-detected'] = {
 				peerConnectionIds,
 				trackIds,
+				highestSeenSendingBitrate,
+				highestSeenReceivingBitrate,
 			};
 			emitter.emit('congestion-detected', event);
+			highestSeenSendingBitrate = 0;
+			highestSeenReceivingBitrate = 0;
 		}
 	};
 	return process;

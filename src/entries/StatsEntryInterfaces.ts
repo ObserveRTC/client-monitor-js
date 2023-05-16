@@ -56,9 +56,14 @@ interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
  * 
  */
 export interface InboundRtpUpdates {
+    readonly bufferDelay: number,
     readonly receivingBitrate: number,
     readonly lostPackets: number,
     readonly receivedPackets: number,
+    readonly receivedFrames: number,
+    readonly decodedFrames: number,
+    readonly droppedFrames: number,
+    readonly receivedSamples: number,
 }
 
 /**
@@ -67,6 +72,11 @@ export interface InboundRtpUpdates {
  */
 export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     stats: W3C.RtcInboundRtpStreamStats;
+    /**
+     * Tracks the differences between the last collected stats and the current collected stats
+     */
+    updates: InboundRtpUpdates,
+
     /**
      * Navigate to the related ReceiverEntry
      */
@@ -81,11 +91,8 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      */
     getRemoteOutboundRtp(): RemoteOutboundRtpEntry | undefined;
     getAudioPlayout(): AudioPlayoutEntry | undefined;
-
-    /**
-     * Tracks the differences between the last collected stats and the current collected stats
-     */
-    updates: InboundRtpUpdates,
+    
+    
 }
 
 /**

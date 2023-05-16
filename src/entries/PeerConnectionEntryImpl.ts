@@ -537,6 +537,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     stats,
                     this.elapsedInSec,
                 );
+                
                 entry.stats = stats;
                 entry.visited = true;
                 

@@ -41,8 +41,8 @@ export type StatsReaderUpdates = {
     totalOutboundPacketsSent: number,
     totalOutbounPacketsReceived: number,
     totalOutboundPacketsLost: number,
-    maxAvailableIncomingBitrate: number,
-    maxAvailableOutgoingBitrate: number,
+    totalAvailableIncomingBitrate: number,
+    totalAvailableOutgoingBitrate: number,
 }
 
 /**
@@ -213,8 +213,8 @@ export class StatsStorage implements StatsReader, StatsWriter {
         totalOutboundPacketsSent: 0,
         totalOutbounPacketsReceived: 0,
         totalOutboundPacketsLost: 0,
-        maxAvailableIncomingBitrate: -1,
-        maxAvailableOutgoingBitrate: -1,
+        totalAvailableIncomingBitrate: 0,
+        totalAvailableOutgoingBitrate: 0,
     }
 
     public constructor(
@@ -254,14 +254,14 @@ export class StatsStorage implements StatsReader, StatsWriter {
         let totalOutboundPacketsSent = 0;
         let totalOutbounPacketsReceived = 0;
         let totalOutboundPacketsLost = 0;
-        let maxAvailableIncomingBitrate = -1;
-        let maxAvailableOutgoingBitrate = -1;
+        let totalAvailableIncomingBitrate = 0;
+        let totalAvailableOutgoingBitrate = 0;
         for (const peerConnectionEntry of this._peerConnections.values()) {
 
             peerConnectionEntry.commit();
             for (const transport of peerConnectionEntry.transports()) {
-                maxAvailableIncomingBitrate = Math.max(maxAvailableIncomingBitrate, (transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? -1));
-                maxAvailableOutgoingBitrate = Math.max(maxAvailableOutgoingBitrate, (transport.getSelectedIceCandidatePair()?.stats.availableOutgoingBitrate ?? -1));
+                totalAvailableIncomingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0;
+                totalAvailableOutgoingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0
             }
             
             const pcUpdates = peerConnectionEntry.updates;
@@ -287,8 +287,8 @@ export class StatsStorage implements StatsReader, StatsWriter {
             totalOutboundPacketsSent,
             totalOutbounPacketsReceived,
             totalOutboundPacketsLost,
-            maxAvailableIncomingBitrate,
-            maxAvailableOutgoingBitrate,
+            totalAvailableIncomingBitrate,
+            totalAvailableOutgoingBitrate,
         }
     }
 
