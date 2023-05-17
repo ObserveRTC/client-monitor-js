@@ -56,7 +56,7 @@ interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
  * 
  */
 export interface InboundRtpUpdates {
-    readonly bufferDelay: number,
+    readonly avgJitterBufferDelayInMs: number,
     readonly receivingBitrate: number,
     readonly lostPackets: number,
     readonly receivedPackets: number,
@@ -64,6 +64,7 @@ export interface InboundRtpUpdates {
     readonly decodedFrames: number,
     readonly droppedFrames: number,
     readonly receivedSamples: number,
+    readonly silentConcealedSamples: number,
 }
 
 /**
@@ -76,6 +77,15 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      * Tracks the differences between the last collected stats and the current collected stats
      */
     updates: InboundRtpUpdates,
+
+    /**
+     * Calculated Mean Opinion Score for the inbound audio or video stream.
+     * 
+     * In case of video, the expectedFrameRate of this entry is used to calculate the MOS.
+     */
+    meanOpinionScore: number,
+
+    expectedFrameRate?: number,
 
     /**
      * Navigate to the related ReceiverEntry

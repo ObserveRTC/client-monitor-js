@@ -24,7 +24,8 @@ import {
     PeerConnectionUpdates,
 } from "./StatsEntryInterfaces";
 import * as W3C from '../schema/W3cStatsIdentifiers'
-import { calculateInboundRtpUpdates, calculateOutboundRtpUpdates, calculateRemoteInboundRtpUpdates } from "./UpdateFields";
+import { calculateAudioMOS, calculateInboundRtpUpdates, calculateOutboundRtpUpdates, calculateRemoteInboundRtpUpdates, calculateVideoMOS } from "./UpdateFields";
+import { clamp } from "../utils/common";
 
 type InboundRtpPair = {
     inboundRtpId?: string;
@@ -83,6 +84,9 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     private _sctpTransports: Map<string, SctpTransportEntry> = new Map();
     private _iceServers: Map<string, IceServerEntry> = new Map();
     private _updates: PeerConnectionUpdates;
+
+    // helper fields
+    private _lastAvgRttInS = -1;
 
     private constructor(
         config: PeerConnectionEntryConfig,
@@ -314,6 +318,13 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
 
+        for (const remoteOutboundRtp of this.remoteOutboundRtps()) {
+            const { roundTripTime } = remoteOutboundRtp.stats;
+            if (roundTripTime) {
+                roundTripTimesInS.push(roundTripTime)
+            }
+        }
+
         for (const iceCandidatePair of this.iceCandidatePairs()) {
             const { currentRoundTripTime } = iceCandidatePair.stats;
             if (currentRoundTripTime) {
@@ -321,8 +332,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             }
         }
 
-        const avgRttInS = (roundTripTimesInS.length < 1 ? -1 : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
-       
+        const avgRttInS = (roundTripTimesInS.length < 1 ? this._lastAvgRttInS : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
+        // if there is no remote inbound or remote outbound and RTT was not calculated for the ICE, then we can use the last calculated RTT..
+        this._lastAvgRttInS = avgRttInS;
+
         this._updates = {
             ...this._updates,
             sendingAuidoBitrate,
@@ -461,6 +474,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const newEntry: InboundRtpEntry = {
                     appData: {},
                     visited: true,
+                    meanOpinionScore: -1,
+                    expectedFrameRate: stats.kind === 'video' ? 30 : undefined,
                     updates: calculateInboundRtpUpdates(
                         stats,
                         stats,
@@ -518,9 +533,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     },
                 };
                 entries.set(stats.id, newEntry);
-                // if (this._createCallEvents) {
-                //     this._monitor.addMedia
-                // }
                 const ssrc = newEntry.getSsrc();
                 if (ssrc) {
                     const ssrcsToInboundRtpPair = this._pc._ssrcsToInboundRtpPair;
@@ -537,7 +549,28 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     stats,
                     this.elapsedInSec,
                 );
-                
+                if (entry.stats.kind === 'audio') {
+                    entry.meanOpinionScore = calculateAudioMOS(
+                        entry.updates.receivingBitrate,
+                        entry.updates.lostPackets,
+                        entry.updates.avgJitterBufferDelayInMs,
+                        pc.updates.avgRttInS * 1000,
+                        0 < entry.updates.silentConcealedSamples,
+                        0 < (stats.fecPacketsReceived ?? 0)
+                    )
+                } else {
+                    const codec = (entry.getCodec()?.stats.mimeType ?? 'video/vp8');
+                    entry.meanOpinionScore = calculateVideoMOS(
+                        entry.updates.receivingBitrate,
+                        entry.stats.frameWidth ?? 640,
+                        entry.stats.frameHeight ?? 480,
+                        entry.updates.avgJitterBufferDelayInMs,
+                        pc.updates.avgRttInS * 1000,
+                        codec.substr(clamp(codec.length - 1, 0, 6)).toLowerCase(),
+                        entry.stats.framesPerSecond ?? 30,
+                        entry.expectedFrameRate ?? 30,
+                    )
+                }
                 entry.stats = stats;
                 entry.visited = true;
                 
