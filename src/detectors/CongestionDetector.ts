@@ -118,13 +118,15 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		const variance = (state.sumSquares / state.measurements.length) - (mean * mean);
 		const stdDev = Math.sqrt(variance);
 		const deviation = Math.abs(value - mean);
-		if (config.minRTTDeviationThresholdInMs < deviation) {
+		if (deviation < config.minRTTDeviationThresholdInMs) {
 			return false;
 		}
 		return config.deviationFoldThreshold * stdDev < deviation;
 	}
 	let highestSeenSendingBitrate = 0
 	let highestSeenReceivingBitrate = 0
+	let highestSeenAvailableOutgoingBitrate = 0;
+	let highestSeenAvailableIncomingBitrate = 0;
 
 	const process: EvaluatorProcess = async (context) => {
 		const { storage } = context;
@@ -143,23 +145,43 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 			
 			const wasCongested = state.congested !== undefined;
 			const congested = isCongested(now, state, peerConnection);
-			
-			if (!congested) {
-				highestSeenSendingBitrate = Math.max(highestSeenSendingBitrate, storage.updates.sendingAuidoBitrate + storage.updates.sendingVideoBitrate);
-				highestSeenReceivingBitrate = Math.max(highestSeenReceivingBitrate, storage.updates.receivingAudioBitrate + storage.updates.receivingVideoBitrate);
-				if (wasCongested) {
-					state.congested = undefined;
-				}
+			if (wasCongested && congested) {
+				// no change
 				continue;
 			}
-			if (!wasCongested) {
+			if (!wasCongested && congested) {
+				// it become congested now
 				state.congested = now;
+				peerConnectionIds.push(peerConnection.id);
+				trackIds.push(...Array.from(peerConnection.trackIds()));
+				continue;
 			}
-			peerConnectionIds.push(peerConnection.id);
-			trackIds.push(...Array.from(peerConnection.trackIds()));
+			if (wasCongested && !congested) {
+				state.congested = undefined;
+				continue;
+			}
+
+			// it was not congested, and has not become congested
+			highestSeenSendingBitrate = Math.max(
+				highestSeenSendingBitrate, 
+				storage.updates.sendingAuidoBitrate + storage.updates.sendingVideoBitrate
+			);
+			highestSeenReceivingBitrate = Math.max(
+				highestSeenReceivingBitrate, 
+				storage.updates.receivingAudioBitrate + storage.updates.receivingVideoBitrate
+			);
+			highestSeenAvailableOutgoingBitrate = Math.max(
+				highestSeenAvailableOutgoingBitrate, 
+				storage.updates.totalAvailableOutgoingBitrate
+			);
+			highestSeenAvailableIncomingBitrate = Math.max(
+				highestSeenAvailableIncomingBitrate, 
+				storage.updates.totalAvailableIncomingBitrate
+			);
 		}
 
 		for (const [pcId, state] of Array.from(peerConnectionStates)) {
+			// console.warn("pc", pcId, state);
 			if (state.visited) {
 				state.visited = false;
 			} else {
@@ -173,10 +195,14 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 				trackIds,
 				highestSeenSendingBitrate,
 				highestSeenReceivingBitrate,
+				highestSeenAvailableOutgoingBitrate,
+				highestSeenAvailableIncomingBitrate,
 			};
 			emitter.emit('congestion-detected', event);
 			highestSeenSendingBitrate = 0;
 			highestSeenReceivingBitrate = 0;
+			highestSeenAvailableOutgoingBitrate = 0;
+			highestSeenAvailableIncomingBitrate = 0;
 		}
 	};
 	return process;

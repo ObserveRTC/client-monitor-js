@@ -97,6 +97,8 @@ export interface ClientMonitorEvents {
         trackIds: string[],
         highestSeenSendingBitrate: number,
         highestSeenReceivingBitrate: number,
+        highestSeenAvailableOutgoingBitrate: number,
+        highestSeenAvailableIncomingBitrate: number,
     },
     'cpu-issue-detected': {
         inboundTrackIds: string[],
@@ -106,7 +108,6 @@ export interface ClientMonitorEvents {
         trackIds: string[],
     }
 }
-
 
 
 /**

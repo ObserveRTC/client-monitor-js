@@ -57,6 +57,8 @@ export { CallEventType } from './utils/callEvents'
 
 export type { EvaluatorProcess } from './Evaluators';
 export type { CongestionDetectorConfig } from './detectors/CongestionDetector';
+export type { CpuIssueDetectorConfig } from './detectors/CpuIssueDetector';
+export type { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";

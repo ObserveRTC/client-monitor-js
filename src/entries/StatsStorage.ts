@@ -261,7 +261,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
             peerConnectionEntry.commit();
             for (const transport of peerConnectionEntry.transports()) {
                 totalAvailableIncomingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0;
-                totalAvailableOutgoingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0
+                totalAvailableOutgoingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableOutgoingBitrate ?? 0
             }
             
             const pcUpdates = peerConnectionEntry.updates;
