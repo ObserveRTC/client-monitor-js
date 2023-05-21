@@ -21,7 +21,13 @@ export type CongestionDetectorConfig = {
      * The minimum duration threshold in milliseconds.
      * If congestion is detected, this is the minimum duration before a reevaluation takes place.
      */
-    minDurationThresholdInMs: number;
+	minDurationThresholdInMs: number;
+	
+	/**
+	 * The minimum number of consecutive ticks required to consider a connection as congested. 
+	 * A tick represents a deviation above the deviation fold threshold.
+ 	*/
+	minConsecutiveTickThreshold: number;
 
     /**
      * The deviation fold threshold. 
@@ -59,6 +65,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		sumSquares: number,
 		congested?: number,
 		visited: boolean,
+		ticks: number,
 	}
 	
 	const peerConnectionStates = new Map<string, PeerConnectionState>();
@@ -121,7 +128,12 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 		if (deviation < config.minRTTDeviationThresholdInMs) {
 			return false;
 		}
-		return config.deviationFoldThreshold * stdDev < deviation;
+		if (config.deviationFoldThreshold * stdDev < deviation) {
+			++state.ticks;
+		} else {
+			state.ticks = 0;
+		}
+		return Math.max(0, config.minConsecutiveTickThreshold) < state.ticks;
 	}
 	let highestSeenSendingBitrate = 0
 	let highestSeenReceivingBitrate = 0
@@ -139,6 +151,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 				sum: 0,
 				sumSquares: 0,
 				visited: false,
+				ticks: 0,
 			}).get(peerConnection.id)!;
 			
 			state.visited = true;

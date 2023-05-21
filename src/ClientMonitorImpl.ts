@@ -59,6 +59,7 @@ const supplyDefaultConfig = () => {
             deviationFoldThreshold: 3.0,
             measurementsWindowInMs: 30000,
             fractionLossThreshold: 0.2,
+            minConsecutiveTickThreshold: 2,
         }
     };
     return defaultConfig;
@@ -91,7 +92,6 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _metrics: Metrics;
     private _emitter = new EventEmitter();
     private _evaluators: Evaluators;
-    private _detectors = new Map<string, EvaluatorProcess>();
 
     private constructor(
         public readonly config: ConstructorConfig
@@ -276,6 +276,7 @@ export class ClientMonitorImpl implements ClientMonitor {
 
         // evaluate
         await this._evaluators.use({
+            collectingTimeInMs: elapsedInMs,
             storage: this._statsStorage,
         });
     }

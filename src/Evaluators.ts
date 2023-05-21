@@ -8,6 +8,7 @@ export type EvaluatorsConfig = {
 };
 
 export type EvaluatorContext = {
+    collectingTimeInMs: number,
     storage: StatsReader,
 };
 
