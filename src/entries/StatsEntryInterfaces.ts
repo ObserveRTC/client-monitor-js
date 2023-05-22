@@ -321,7 +321,7 @@ export interface PeerConnectionUpdates {
     readonly totalOutbounPacketsReceived: number;
     readonly totalOutboundPacketsSent: number;
     readonly avgRttInS: number,
-    readonly sendingAuidoBitrate: number,
+    readonly sendingAudioBitrate: number,
     readonly sendingVideoBitrate: number,
     readonly receivingAudioBitrate: number,
     readonly receivingVideoBitrate: number,

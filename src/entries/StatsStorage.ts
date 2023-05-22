@@ -32,7 +32,7 @@ import { ClientMonitor } from "../ClientMonitor";
 const logger = createLogger("StatsStorage");
 
 export type StatsReaderUpdates = {
-    sendingAuidoBitrate: number,
+    sendingAudioBitrate: number,
     sendingVideoBitrate: number,
     receivingAudioBitrate: number,
     receivingVideoBitrate: number,
@@ -236,7 +236,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
     private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
     private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
     private _updates: StatsReaderUpdates = {
-        sendingAuidoBitrate: 0,
+        sendingAudioBitrate: 0,
         sendingVideoBitrate: 0,
         receivingAudioBitrate: 0,
         receivingVideoBitrate: 0,
@@ -296,7 +296,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
     }
 
     public commit() {
-        let sendingAuidoBitrate = 0;
+        let sendingAudioBitrate = 0;
         let sendingVideoBitrate = 0;
         let receivingAudioBitrate = 0;
         let receivingVideoBitrate = 0;
@@ -317,7 +317,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
             
             const pcUpdates = peerConnectionEntry.updates;
 
-            sendingAuidoBitrate += pcUpdates.sendingAuidoBitrate;
+            sendingAudioBitrate += pcUpdates.sendingAudioBitrate;
             sendingVideoBitrate += pcUpdates.sendingVideoBitrate;
             receivingAudioBitrate += pcUpdates.receivingAudioBitrate;
             receivingVideoBitrate += pcUpdates.receivingVideoBitrate;
@@ -329,7 +329,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
         }
 
         this._updates = {
-            sendingAuidoBitrate,
+            sendingAudioBitrate,
             sendingVideoBitrate,
             receivingAudioBitrate,
             receivingVideoBitrate,
@@ -348,7 +348,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
     private _traceStats() {
         this._traces.highestSeenSendingBitrate = Math.max(
             this._traces.highestSeenSendingBitrate, 
-            this._updates.sendingAuidoBitrate + this._updates.sendingVideoBitrate
+            this._updates.sendingAudioBitrate + this._updates.sendingVideoBitrate
         );
         this._traces.highestSeenReceivingBitrate = Math.max(
             this._traces.highestSeenReceivingBitrate, 

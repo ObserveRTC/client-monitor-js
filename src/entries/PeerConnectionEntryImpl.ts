@@ -97,7 +97,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         this._visitor = new PeerConnectionEntryImpl.Visitor(this);
         this._updates = {
             avgRttInS: 0,
-            sendingAuidoBitrate: 0,
+            sendingAudioBitrate: 0,
             sendingVideoBitrate: 0,
             receivingAudioBitrate: 0,
             receivingVideoBitrate: 0,
@@ -280,7 +280,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         let totalOutboundPacketsLost = 0;
         let totalOutbounPacketsReceived = 0;
         let totalOutboundPacketsSent = 0;
-        let sendingAuidoBitrate = 0;
+        let sendingAudioBitrate = 0;
         let sendingVideoBitrate = 0;
         let receivingAudioBitrate = 0;
         let receivingVideoBitrate = 0;
@@ -304,7 +304,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         for (const outboundRtpEntry of this.outboundRtps()) {
             const updates = outboundRtpEntry.updates;
             if (outboundRtpEntry.stats.kind === 'audio') {
-                sendingAuidoBitrate += outboundRtpEntry.updates.sendingBitrate;
+                sendingAudioBitrate += outboundRtpEntry.updates.sendingBitrate;
             } else if (outboundRtpEntry.stats.kind === 'video') {
                 sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
             }
@@ -338,7 +338,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
         this._updates = {
             ...this._updates,
-            sendingAuidoBitrate,
+            sendingAudioBitrate,
             sendingVideoBitrate,
             receivingAudioBitrate,
             receivingVideoBitrate,

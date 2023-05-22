@@ -177,7 +177,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 			// it was not congested, and has not become congested
 			highestSeenSendingBitrate = Math.max(
 				highestSeenSendingBitrate, 
-				storage.updates.sendingAuidoBitrate + storage.updates.sendingVideoBitrate
+				storage.updates.sendingAudioBitrate + storage.updates.sendingVideoBitrate
 			);
 			highestSeenReceivingBitrate = Math.max(
 				highestSeenReceivingBitrate, 
