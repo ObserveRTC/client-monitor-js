@@ -68,7 +68,8 @@ export function calculateInboundRtpUpdates(
 	const droppedFrames = (actualStats.framesDropped ?? 0) - (prevStats.framesDropped ?? 0);
 	const receivedSamples = (actualStats.totalSamplesReceived ?? 0) - (prevStats.totalSamplesReceived ?? 0);
 	const silentConcealedSamples = (actualStats.silentConcealedSamples ?? 0) - (prevStats.silentConcealedSamples ?? 0);
-	
+	const fractionLoss = lostPackets / (lostPackets + receivedPackets);
+
 	return {
 		avgJitterBufferDelayInMs,
 		receivingBitrate,
@@ -78,7 +79,8 @@ export function calculateInboundRtpUpdates(
 		decodedFrames,
 		droppedFrames,
 		receivedSamples,
-		silentConcealedSamples
+		silentConcealedSamples,
+		fractionLoss
 	}
 }
 

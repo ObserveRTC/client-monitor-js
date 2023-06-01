@@ -65,6 +65,7 @@ export interface InboundRtpUpdates {
     readonly droppedFrames: number,
     readonly receivedSamples: number,
     readonly silentConcealedSamples: number,
+    readonly fractionLoss: number,
 }
 
 /**
