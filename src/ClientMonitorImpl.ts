@@ -54,7 +54,7 @@ const supplyDefaultConfig = () => {
         congestionDetector: {
             enabled: true,
             minDurationThresholdInMs: 2000,
-            minRTTDeviationThresholdInMs: 50,
+            minRTTDeviationThresholdInMs: 200,
             minMeasurementsLengthInMs: 10000,
             deviationFoldThreshold: 3.0,
             measurementsWindowInMs: 30000,
