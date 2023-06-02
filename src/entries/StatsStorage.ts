@@ -375,7 +375,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
         const pcEntry = PeerConnectionEntryImpl.create({
                 collectorId: peerConnectionId,
                 collectorLabel,
-                outbScoresLength: this._monitor.config.storage.outboundRtpScoresLength ?? 10,
+                outbScoresLength: this._monitor.config.storage?.outboundRtpScoresLength ?? 10,
             }, 
         );
         this._peerConnections.set(peerConnectionId, pcEntry);

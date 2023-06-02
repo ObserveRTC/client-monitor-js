@@ -50,7 +50,7 @@ export type ClientMonitorConfig = {
     /**
      * settings related to the client monitor storage
      */
-    storage: {
+    storage?: {
         /**
          * a final score calculated for outbound rtps are weighted aggregation for several previously calculated score values.
          * This settings determines the length of the window to calculate the score. 
