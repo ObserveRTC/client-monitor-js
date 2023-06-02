@@ -48,6 +48,19 @@ export type ClientMonitorConfig = {
     tickingTimeInMs?: number;
 
     /**
+     * settings related to the client monitor storage
+     */
+    storage: {
+        /**
+         * a final score calculated for outbound rtps are weighted aggregation for several previously calculated score values.
+         * This settings determines the length of the window to calculate the score. 
+         * to put into a context the latest measurements approx. count 20% of the total score if the length is 10.
+         * the formula is 2 / n, so if the length is 20, than the latest value is 10%
+         */
+        outboundRtpScoresLength?: number,
+    },
+
+    /**
      * Flag indicating if the monitor creates call events.
      * If true, events happening on the collected media source create call events such as MEDIA_TRACK_ADDED or MEDIA_TRACK_REMOVED.
      * Similarly, if a peer connection is added, corresponding call events are generated.

@@ -40,9 +40,12 @@ type OutboundRtpPair = {
 type PeerConnectionEntryConfig = {
     collectorId: string;
     collectorLabel?: string;
+    outbScoresLength?: number;
 };
 
-
+interface InnerOutboundRtpEntry extends OutboundRtpEntry {
+    updateScore(): void;
+}
 
 export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     public static create(
@@ -63,7 +66,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
     private _codecs: Map<string, CodecEntry> = new Map();
     private _inboundRtps: Map<string, InboundRtpEntry> = new Map();
-    private _outboundRtps: Map<string, OutboundRtpEntry> = new Map();
+    private _outboundRtps: Map<string, InnerOutboundRtpEntry> = new Map();
     private _remoteInboundRtps: Map<string, RemoteInboundRtpEntry> = new Map();
     private _remoteOutboundRtps: Map<string, RemoteOutboundRtpEntry> = new Map();
     private _mediaSources: Map<string, MediaSourceEntry> = new Map();
@@ -581,10 +584,12 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             const entries = pc._outboundRtps;
             let entry = entries.get(stats.id);
             if (!entry) {
+                const scores: number[] = [];
                 const ssrcsToOutboundRtpPairs = this._pc._ssrcsToOutboundRtpPair;
                 const remoteInboundRtps = this._pc._remoteInboundRtps;
-                const newEntry: OutboundRtpEntry = {
+                const newEntry: InnerOutboundRtpEntry = {
                     appData: {},
+                    score: -1,
                     updates: calculateOutboundRtpUpdates(
                         stats,
                         stats,
@@ -640,6 +645,31 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         if (!outboundRtpPair || !outboundRtpPair.remoteInboundRtpId) return undefined;
                         return remoteInboundRtps.get(outboundRtpPair.remoteInboundRtpId);
                     },
+                    updateScore: () => {
+                        const remoteInb = newEntry.getRemoteInboundRtp();
+                        if (!remoteInb) return;
+                        // Packet Jitter measured in seconds
+                        // if it is indeed in seconds, then let's normalize it on 1s <- awfully high jitter
+                        const jitterFactor = 1.0 - Math.min(1.0, (remoteInb.stats.jitter ?? 0));
+                        const sentPackets = Math.max(1, (entry?.updates.sentPackets ?? 0));
+                        const lostPackets = remoteInb.updates.lostPackets;
+                        const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
+                        const weightedProduct = (jitterFactor * 0.2 + deliveryFactor * 0.8) ** 2;
+                        const actualScore = Math.round(5 * weightedProduct);
+                        scores.push(actualScore);
+                        if ((pc._config.outbScoresLength ?? 10) < scores.length) {
+                            scores.shift();
+                        }
+                        let counter = 0;
+                        let weight = 0;
+                        let totalScore = 0;
+                        for (const score of scores) {
+                            ++weight;
+                            counter += weight;
+                            totalScore += weight * score;
+                        }
+                        newEntry.score = totalScore / counter;
+                    }
                 };
                 entries.set(stats.id, newEntry);
                 entry = newEntry;
@@ -649,6 +679,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     stats,
                     this.elapsedInSec
                 );
+                entry.updateScore();
                 entry.stats = stats;
                 entry.visited = true;
             }

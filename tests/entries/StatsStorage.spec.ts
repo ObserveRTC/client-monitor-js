@@ -9,7 +9,9 @@ describe("StatsStorage", () => {
         const collectorLabel = "collectorLabel";
         const clientMonitor = createClientMonitor({
             config: {
-                
+                storage: {
+                    outboundRtpScoresLength: 10,
+                }
             }
         });
         const storage = new StatsStorage(clientMonitor);
