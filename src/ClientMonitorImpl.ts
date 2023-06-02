@@ -60,6 +60,9 @@ const supplyDefaultConfig = () => {
             measurementsWindowInMs: 30000,
             fractionLossThreshold: 0.2,
             minConsecutiveTickThreshold: 2,
+        },
+        storage: {
+            outboundRtpScoresLength: 10,
         }
     };
     return defaultConfig;
