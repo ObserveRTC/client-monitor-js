@@ -13,9 +13,6 @@ const COLLECTOR_LABEL = "collectorLabel";
 const clientMonitor = createClientMonitor({
     config: {
         createCallEvents: true,
-        storage: {
-            
-        }
     },
     addPeerConnectionOpenedCallEvent: () => {}
 })
