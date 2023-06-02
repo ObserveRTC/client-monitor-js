@@ -10,6 +10,8 @@ import { EvaluatorProcess } from './Evaluators';
 import { CongestionDetectorConfig } from './detectors/CongestionDetector';
 import { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 import { CpuIssueDetectorConfig } from './detectors/CpuIssueDetector';
+import { LowStabilityScoreDetectorConfig } from './detectors/LowStabilityScoreDetector';
+import { LowMosDetectorConfig } from './detectors/LowMoSDetector';
 
 export type ClientMonitorConfig = {
     /**
@@ -93,7 +95,36 @@ export type ClientMonitorConfig = {
      * Configuration for the CongestionDetector function.
      */
     congestionDetector?: CongestionDetectorConfig,
+    /**
+     * Configuration for the Low Stability Score detector.
+     */
+    lowStabilityScoreDetector?: LowStabilityScoreDetectorConfig;
+
+    /**
+     * Configuration for the Low Mean Opinion Score detector.
+     */
+    lowMosDetector?: LowMosDetectorConfig;
 };
+
+export type AlertState = 'on' | 'off';
+
+export type ClientMonitorAlerts = {
+    'stability-score-alert': {
+        state: AlertState,
+        trackIds: string[],
+    },
+    'mean-opinion-score-alert': {
+        state: AlertState,
+        trackIds: string[],
+    },
+    'audio-desync-alert': {
+        state: AlertState,
+        trackIds: string[],
+    },
+    'cpu-performance-alert': {
+        state: AlertState,
+    }
+}
 
 export interface ClientMonitorEvents {
     'stats-collected': {
@@ -119,7 +150,8 @@ export interface ClientMonitorEvents {
     },
     'audio-desync-detected': {
         trackIds: string[],
-    }
+    },
+    'alerts-changed': Record<keyof ClientMonitorAlerts, AlertState>,
 }
 
 
@@ -127,6 +159,10 @@ export interface ClientMonitorEvents {
  * Client Integration of ObserveRTC to monitor WebRTC clients.
  */
 export interface ClientMonitor {
+    /**
+     * The alerts attached to the Monitor
+     */
+    readonly alerts: ClientMonitorAlerts;
     /**
      * The assigned configuration for the ClientMonitor upon creation.
      */

@@ -9,6 +9,9 @@ import { EvaluatorProcess } from '../../src/Evaluators';
 
 export function createClientMonitor(data: any): ClientMonitor {
     const result = new class implements ClientMonitor {
+        get alerts() {
+            return data.alerts;
+        };
         get closed(): boolean {
             return data.closed === true;
         }

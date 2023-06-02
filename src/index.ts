@@ -6,6 +6,7 @@ export type {
     ClientMonitor,
     ClientMonitorConfig,
     ClientMonitorEvents,
+    ClientMonitorAlerts,
 } from "./ClientMonitor";
 
 export type { MediaDevices } from "./utils/MediaDevices";
@@ -59,6 +60,8 @@ export type { EvaluatorProcess } from './Evaluators';
 export type { CongestionDetectorConfig } from './detectors/CongestionDetector';
 export type { CpuIssueDetectorConfig } from './detectors/CpuIssueDetector';
 export type { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
+export type { LowMosDetectorConfig } from './detectors/LowMoSDetector';
+export type { LowStabilityScoreDetectorConfig } from './detectors/LowStabilityScoreDetector';
 
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { ClientMonitorImpl } from "./ClientMonitorImpl";

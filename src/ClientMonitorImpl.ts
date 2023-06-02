@@ -6,7 +6,7 @@ import { Timer } from "./utils/Timer";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
 import { createLogger, setLogLevel } from "./utils/logger";
-import { ClientMonitor, ClientMonitorConfig, ClientMonitorEvents } from "./ClientMonitor";
+import { ClientMonitor, ClientMonitorAlerts, ClientMonitorConfig, ClientMonitorEvents } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
 import EventEmitter from "events";
@@ -27,6 +27,8 @@ import { EvaluatorProcess, Evaluators } from "./Evaluators";
 import { CongestionDetectorConfig, createCongestionDetector } from "./detectors/CongestionDetector";
 import { AudioDesyncDetectorConfig, createAudioDesyncDetector } from "./detectors/AudioDesyncDetector";
 import { CpuIssueDetectorConfig, createCpuIssueDetector } from "./detectors/CpuIssueDetector";
+import { createLowStabilityScoreDetector, LowStabilityScoreDetectorConfig } from "./detectors/LowStabilityScoreDetector";
+import { createLowMosDetector, LowMosDetectorConfig } from "./detectors/LowMoSDetector";
 
 const logger = createLogger("ClientMonitor");
 
@@ -34,6 +36,8 @@ type ConstructorConfig = ClientMonitorConfig & {
     cpuIssueDetector: CpuIssueDetectorConfig,
     audioDesyncDetector: AudioDesyncDetectorConfig,
     congestionDetector: CongestionDetectorConfig,
+    lowStabilityScoreDetector: LowStabilityScoreDetectorConfig,
+    lowMosDetector: LowMosDetectorConfig,
 };
 
 const supplyDefaultConfig = () => {
@@ -45,11 +49,13 @@ const supplyDefaultConfig = () => {
         createCallEvents: false,
         cpuIssueDetector: {
             enabled: true,
-            incomingFramesDroppedFractionalThreshold: 0.5,
+            droppedIncomingFramesFractionAlertOn: 0.5,
+            droppedIncomingFramesFractionAlertOff: 0.7,
         },
         audioDesyncDetector: {
             enabled: false,
-            fractionalCorrectionThreshold: 0.2,
+            fractionalCorrectionAlertOnThreshold: 0.2,
+            fractionalCorrectionAlertOffThreshold: 0.1,
         },
         congestionDetector: {
             enabled: true,
@@ -60,6 +66,16 @@ const supplyDefaultConfig = () => {
             measurementsWindowInMs: 30000,
             fractionLossThreshold: 0.2,
             minConsecutiveTickThreshold: 2,
+        },
+        lowStabilityScoreDetector: {
+            enabled: true,
+            alertOffThreshold: 0.9,
+            alertOnThreshold: 0.8,
+        },
+        lowMosDetector: {
+            enabled: true,
+            alertOffThreshold: 4.0,
+            alertOnThreshold: 3.0,
         },
         storage: {
             outboundRtpStabilityScoresLength: 10,
@@ -82,6 +98,24 @@ export class ClientMonitorImpl implements ClientMonitor {
         const result = new ClientMonitorImpl(appliedConfig);
         logger.debug("Created", appliedConfig);
         return result;
+    }
+    // init alerts
+    public readonly alerts: ClientMonitorAlerts = {
+        'audio-desync-alert': {
+            state: 'off',
+            trackIds: [],
+        },
+        'cpu-performance-alert': {
+            state: 'off',
+        },
+        'mean-opinion-score-alert': {
+            state: 'off',
+            trackIds: [],
+        },
+        'stability-score-alert': {
+            state: 'off',
+            trackIds: [],
+        }
     }
 
     private _closed = false;
@@ -278,10 +312,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._metrics.setLastCollected(started + elapsedInMs);
 
         // evaluate
-        await this._evaluators.use({
-            collectingTimeInMs: elapsedInMs,
-            storage: this._statsStorage,
-        });
+        await this._evaluate(elapsedInMs);
     }
 
     public sample(): void {
@@ -452,10 +483,36 @@ export class ClientMonitorImpl implements ClientMonitor {
         return result;
     }
 
+    private async _evaluate(collectingTimeInMs: number) {
+        const alertStates: ClientMonitorEvents['alerts-changed'] = {
+            'audio-desync-alert': this.alerts["audio-desync-alert"].state,
+            'cpu-performance-alert': this.alerts["cpu-performance-alert"].state,
+            'mean-opinion-score-alert': this.alerts["mean-opinion-score-alert"].state,
+            'stability-score-alert': this.alerts["stability-score-alert"].state,
+        }
+        
+        await this._evaluators.use({
+            collectingTimeInMs,
+            storage: this._statsStorage,
+        });
+
+        let alertChanged = false;
+        for (const [alertKey, alert] of Object.entries(this.alerts)) {
+            const key = alertKey as keyof ClientMonitorAlerts;
+            const prevState = alertStates[key];
+            if (prevState !== alert.state) {
+                alertChanged = true;
+            }
+        }
+        if (alertChanged) {
+            this._emit('alerts-changed', alertStates)
+        }
+    }
+
     private _makeEvaluators(): Evaluators {
         const result = new Evaluators();
         result.add(createAudioDesyncDetector(
-            this._emitter, 
+            this.alerts['audio-desync-alert'],
             this.config.audioDesyncDetector
         ));
         result.add(createCongestionDetector(
@@ -463,8 +520,16 @@ export class ClientMonitorImpl implements ClientMonitor {
             this.config.congestionDetector
         ));
         result.add(createCpuIssueDetector(
-            this._emitter, 
+            this.alerts['cpu-performance-alert'], 
             this.config.cpuIssueDetector
+        ));
+        result.add(createLowStabilityScoreDetector(
+            this.alerts['stability-score-alert'], 
+            this.config.lowStabilityScoreDetector
+        ));
+        result.add(createLowMosDetector(
+            this.alerts['mean-opinion-score-alert'], 
+            this.config.lowMosDetector
         ));
         return result;
     }

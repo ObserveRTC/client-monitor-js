@@ -1,4 +1,5 @@
-import { ClientMonitorAlerts } from "../ClientMonitor";
+import { EventEmitter } from "events";
+import { ClientMonitorAlerts, ClientMonitorEvents } from "../ClientMonitor";
 import { EvaluatorProcess } from "../Evaluators";
 
 /**
