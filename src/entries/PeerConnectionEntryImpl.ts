@@ -44,7 +44,7 @@ type PeerConnectionEntryConfig = {
 };
 
 interface InnerOutboundRtpEntry extends OutboundRtpEntry {
-    updateScore(): void;
+    updateStabilityScore(currentRtt: number): void;
 }
 
 export class PeerConnectionEntryImpl implements PeerConnectionEntry {
@@ -304,16 +304,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             totalOutbounPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
         }
 
-        for (const outboundRtpEntry of this.outboundRtps()) {
-            const updates = outboundRtpEntry.updates;
-            if (outboundRtpEntry.stats.kind === 'audio') {
-                sendingAudioBitrate += outboundRtpEntry.updates.sendingBitrate;
-            } else if (outboundRtpEntry.stats.kind === 'video') {
-                sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
-            }
-            totalOutboundPacketsSent += updates.sentPackets;
-        }
-        
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             const { roundTripTime } = remoteInboundRtpEntry.stats;
             if (roundTripTime) {
@@ -334,8 +324,19 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
-
         const avgRttInS = (roundTripTimesInS.length < 1 ? this._lastAvgRttInS : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
+        
+        for (const outboundRtpEntry of this.outboundRtps()) {
+            const updates = outboundRtpEntry.updates;
+            if (outboundRtpEntry.stats.kind === 'audio') {
+                sendingAudioBitrate += outboundRtpEntry.updates.sendingBitrate;
+            } else if (outboundRtpEntry.stats.kind === 'video') {
+                sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
+            }
+            totalOutboundPacketsSent += updates.sentPackets;
+            (outboundRtpEntry as InnerOutboundRtpEntry).updateStabilityScore(avgRttInS);
+        }
+
         // if there is no remote inbound or remote outbound and RTT was not calculated for the ICE, then we can use the last calculated RTT..
         this._lastAvgRttInS = avgRttInS;
 
@@ -645,18 +646,17 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         if (!outboundRtpPair || !outboundRtpPair.remoteInboundRtpId) return undefined;
                         return remoteInboundRtps.get(outboundRtpPair.remoteInboundRtpId);
                     },
-                    updateScore: () => {
+                    updateStabilityScore: (currentRttInS: number) => {
                         const remoteInb = newEntry.getRemoteInboundRtp();
                         if (!remoteInb) return;
                         // Packet Jitter measured in seconds
-                        // if it is indeed in seconds, then let's normalize it on 100ms <- awfully high jitter
-                        const jitterFactor = (0.1 - Math.min(0.1, (remoteInb.stats.jitter ?? 0))) / 0.1;
+                        // let's say we normalize it to a deviation of 100ms in a linear scale
+                        const latencyFactor = 1.0 - Math.min(0.1, Math.abs(currentRttInS - pc._lastAvgRttInS)) / 0.1
                         const sentPackets = Math.max(1, (entry?.updates.sentPackets ?? 0));
                         const lostPackets = remoteInb.updates.lostPackets;
                         const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
-                        
                         // let's push the actual stability score
-                        stabilityScores.push((jitterFactor * 0.33 + deliveryFactor * 0.67) ** 2);
+                        stabilityScores.push((latencyFactor * 0.33 + deliveryFactor * 0.67) ** 2);
                         if ((pc._config.outbStabilityScoresLength ?? 10) < stabilityScores.length) {
                             stabilityScores.shift();
                         }
@@ -664,7 +664,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         let weight = 0;
                         let totalScore = 0;
                         for (const score of stabilityScores) {
-                            ++weight;
+                            weight += 1;
                             counter += weight;
                             totalScore += weight * score;
                         }
@@ -679,7 +679,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     stats,
                     this.elapsedInSec
                 );
-                entry.updateScore();
                 entry.stats = stats;
                 entry.visited = true;
             }
