@@ -62,7 +62,7 @@ const supplyDefaultConfig = () => {
             minConsecutiveTickThreshold: 2,
         },
         storage: {
-            outboundRtpScoresLength: 10,
+            outboundRtpStabilityScoresLength: 10,
         }
     };
     return defaultConfig;

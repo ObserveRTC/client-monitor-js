@@ -40,7 +40,7 @@ type OutboundRtpPair = {
 type PeerConnectionEntryConfig = {
     collectorId: string;
     collectorLabel?: string;
-    outbScoresLength?: number;
+    outbStabilityScoresLength?: number;
 };
 
 interface InnerOutboundRtpEntry extends OutboundRtpEntry {
@@ -584,12 +584,12 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             const entries = pc._outboundRtps;
             let entry = entries.get(stats.id);
             if (!entry) {
-                const scores: number[] = [];
+                const stabilityScores: number[] = [];
                 const ssrcsToOutboundRtpPairs = this._pc._ssrcsToOutboundRtpPair;
                 const remoteInboundRtps = this._pc._remoteInboundRtps;
                 const newEntry: InnerOutboundRtpEntry = {
                     appData: {},
-                    score: -1,
+                    stabilityScore: -1,
                     updates: calculateOutboundRtpUpdates(
                         stats,
                         stats,
@@ -654,21 +654,21 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         const sentPackets = Math.max(1, (entry?.updates.sentPackets ?? 0));
                         const lostPackets = remoteInb.updates.lostPackets;
                         const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
-                        const weightedProduct = (jitterFactor * 0.2 + deliveryFactor * 0.8) ** 2;
-                        const actualScore = Math.round(5 * weightedProduct);
-                        scores.push(actualScore);
-                        if ((pc._config.outbScoresLength ?? 10) < scores.length) {
-                            scores.shift();
+                        
+                        // let's push the actual stability score
+                        stabilityScores.push((jitterFactor * 0.33 + deliveryFactor * 0.67) ** 2);
+                        if ((pc._config.outbStabilityScoresLength ?? 10) < stabilityScores.length) {
+                            stabilityScores.shift();
                         }
                         let counter = 0;
                         let weight = 0;
                         let totalScore = 0;
-                        for (const score of scores) {
+                        for (const score of stabilityScores) {
                             ++weight;
                             counter += weight;
                             totalScore += weight * score;
                         }
-                        newEntry.score = totalScore / counter;
+                        newEntry.stabilityScore = totalScore / counter;
                     }
                 };
                 entries.set(stats.id, newEntry);

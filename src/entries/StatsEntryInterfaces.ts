@@ -120,7 +120,7 @@ export interface OutboundRtpUpdates {
  */
 export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     stats: W3C.RtcOutboundRTPStreamStats;
-    score: number;
+    stabilityScore: number;
     /**
      * Gets the SSRC of the Rtp session
      */

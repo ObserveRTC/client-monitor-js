@@ -52,12 +52,12 @@ export type ClientMonitorConfig = {
      */
     storage?: {
         /**
-         * a final score calculated for outbound rtps are weighted aggregation for several previously calculated score values.
+         * stability score calculated for outbound rtps are weighted aggregation for several previously calculated stability score values.
          * This settings determines the length of the window to calculate the score. 
          * to put into a context the latest measurements approx. count 20% of the total score if the length is 10.
          * the formula is 2 / n, so if the length is 20, than the latest value is 10%
          */
-        outboundRtpScoresLength?: number,
+        outboundRtpStabilityScoresLength?: number,
     },
 
     /**
