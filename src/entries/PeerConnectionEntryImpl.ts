@@ -649,8 +649,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         const remoteInb = newEntry.getRemoteInboundRtp();
                         if (!remoteInb) return;
                         // Packet Jitter measured in seconds
-                        // if it is indeed in seconds, then let's normalize it on 1s <- awfully high jitter
-                        const jitterFactor = 1.0 - Math.min(1.0, (remoteInb.stats.jitter ?? 0));
+                        // if it is indeed in seconds, then let's normalize it on 100ms <- awfully high jitter
+                        const jitterFactor = (0.1 - Math.min(0.1, (remoteInb.stats.jitter ?? 0))) / 0.1;
                         const sentPackets = Math.max(1, (entry?.updates.sentPackets ?? 0));
                         const lostPackets = remoteInb.updates.lostPackets;
                         const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
