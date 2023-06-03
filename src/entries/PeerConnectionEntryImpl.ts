@@ -585,6 +585,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             const entries = pc._outboundRtps;
             let entry = entries.get(stats.id);
             if (!entry) {
+                const outbStabilityScoresLength = pc._config.outbStabilityScoresLength ?? 10;
                 const stabilityScores: number[] = [];
                 const ssrcsToOutboundRtpPairs = this._pc._ssrcsToOutboundRtpPair;
                 const remoteInboundRtps = this._pc._remoteInboundRtps;
@@ -657,8 +658,10 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
                         // let's push the actual stability score
                         stabilityScores.push((latencyFactor * 0.33 + deliveryFactor * 0.67) ** 2);
-                        if ((pc._config.outbStabilityScoresLength ?? 10) < stabilityScores.length) {
+                        if (outbStabilityScoresLength < stabilityScores.length) {
                             stabilityScores.shift();
+                        } else if (stabilityScores.length < outbStabilityScoresLength / 2) {
+                            return;
                         }
                         let counter = 0;
                         let weight = 0;

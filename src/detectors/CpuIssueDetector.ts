@@ -63,9 +63,7 @@ export function createCpuIssueDetector(
 			}
 			issueDetected = true;
 		}
-		if (issueDetected) {
-			alert.state = issueDetected ? 'on' : 'off';
-		}
+		alert.state = issueDetected ? 'on' : 'off';
 	};
 	return process;
 }

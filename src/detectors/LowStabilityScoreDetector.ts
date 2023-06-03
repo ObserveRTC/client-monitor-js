@@ -47,11 +47,8 @@ export function createLowStabilityScoreDetector(
 				trackIds.add(trackId);
 			}
 		}
-
-		if (0 < trackIds.size) {
-			alert.trackIds = Array.from(trackIds);
-			alert.state = 0 < trackIds.size ? 'on' : 'off';
-		}
+		alert.trackIds = Array.from(trackIds);
+		alert.state = 0 < trackIds.size ? 'on' : 'off';
 	};
 	return process;
 }

@@ -503,6 +503,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             if (prevState !== alert.state) {
                 alertChanged = true;
             }
+            alertStates[key] = alert.state;
         }
         if (alertChanged) {
             this._emit('alerts-changed', alertStates)

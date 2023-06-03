@@ -36,28 +36,26 @@ export type LowMosDetectorConfig = {
 	}
   
 	const process: EvaluatorProcess = async (context) => {
-	  const { storage } = context;
-	  const trackIds = new Set<string>();
+		const { storage } = context;
+		const trackIds = new Set<string>();
   
-	  for (const inboundRtp of storage.inboundRtps()) {
-		const trackId = inboundRtp.getTrackId();
-		if (!trackId || inboundRtp.meanOpinionScore < 0.1) {
-		  continue;
-		}
-  
-		if (alert.trackIds.includes(trackId)) {
-			if (inboundRtp.meanOpinionScore < config.alertOffThreshold) {
+		for (const inboundRtp of storage.inboundRtps()) {
+			const trackId = inboundRtp.getTrackId();
+			if (!trackId || inboundRtp.meanOpinionScore < 0.1) {
+			continue;
+			}
+	
+			if (alert.trackIds.includes(trackId)) {
+				if (inboundRtp.meanOpinionScore < config.alertOffThreshold) {
+					trackIds.add(trackId);
+				}
+			} else if (inboundRtp.meanOpinionScore < config.alertOnThreshold) {
 				trackIds.add(trackId);
 			}
-		} else if (inboundRtp.meanOpinionScore < config.alertOnThreshold) {
-			trackIds.add(trackId);
 		}
-	  }
 
-		if (trackIds.size > 0) {
-			alert.trackIds = Array.from(trackIds);
-			alert.state = trackIds.size > 0 ? 'on' : 'off';
-		}
+	  alert.trackIds = Array.from(trackIds);
+	  alert.state = trackIds.size > 0 ? 'on' : 'off';
 	};
   
 	return process;
