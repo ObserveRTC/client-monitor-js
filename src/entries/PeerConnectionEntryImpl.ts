@@ -24,7 +24,8 @@ import {
     PeerConnectionUpdates,
 } from "./StatsEntryInterfaces";
 import * as W3C from '../schema/W3cStatsIdentifiers'
-import { calculateInboundRtpUpdates, calculateOutboundRtpUpdates, calculateRemoteInboundRtpUpdates } from "./UpdateFields";
+import { calculateAudioMOS, calculateInboundRtpUpdates, calculateOutboundRtpUpdates, calculateRemoteInboundRtpUpdates, calculateVideoMOS } from "./UpdateFields";
+import { clamp } from "../utils/common";
 
 type InboundRtpPair = {
     inboundRtpId?: string;
@@ -39,9 +40,12 @@ type OutboundRtpPair = {
 type PeerConnectionEntryConfig = {
     collectorId: string;
     collectorLabel?: string;
+    outbStabilityScoresLength?: number;
 };
 
-
+interface InnerOutboundRtpEntry extends OutboundRtpEntry {
+    updateStabilityScore(currentRtt: number): void;
+}
 
 export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     public static create(
@@ -62,7 +66,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
 
     private _codecs: Map<string, CodecEntry> = new Map();
     private _inboundRtps: Map<string, InboundRtpEntry> = new Map();
-    private _outboundRtps: Map<string, OutboundRtpEntry> = new Map();
+    private _outboundRtps: Map<string, InnerOutboundRtpEntry> = new Map();
     private _remoteInboundRtps: Map<string, RemoteInboundRtpEntry> = new Map();
     private _remoteOutboundRtps: Map<string, RemoteOutboundRtpEntry> = new Map();
     private _mediaSources: Map<string, MediaSourceEntry> = new Map();
@@ -84,6 +88,9 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
     private _iceServers: Map<string, IceServerEntry> = new Map();
     private _updates: PeerConnectionUpdates;
 
+    // helper fields
+    private _lastAvgRttInS = -1;
+
     private constructor(
         config: PeerConnectionEntryConfig,
     ) {
@@ -93,7 +100,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         this._visitor = new PeerConnectionEntryImpl.Visitor(this);
         this._updates = {
             avgRttInS: 0,
-            sendingAuidoBitrate: 0,
+            sendingAudioBitrate: 0,
             sendingVideoBitrate: 0,
             receivingAudioBitrate: 0,
             receivingVideoBitrate: 0,
@@ -203,6 +210,13 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         return this._iceServers.values();
     }
 
+    public getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined {
+        for (const transport of this.transports()) {
+            const result = transport.getSelectedIceCandidatePair();
+            if (result) return result;
+        }
+    }
+
     public audioPlayouts(): IterableIterator<AudioPlayoutEntry> {
         return this._audioPlayouts.values();
     }
@@ -269,7 +283,7 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
         let totalOutboundPacketsLost = 0;
         let totalOutbounPacketsReceived = 0;
         let totalOutboundPacketsSent = 0;
-        let sendingAuidoBitrate = 0;
+        let sendingAudioBitrate = 0;
         let sendingVideoBitrate = 0;
         let receivingAudioBitrate = 0;
         let receivingVideoBitrate = 0;
@@ -290,18 +304,15 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             totalOutbounPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
         }
 
-        for (const outboundRtpEntry of this.outboundRtps()) {
-            const updates = outboundRtpEntry.updates;
-            if (outboundRtpEntry.stats.kind === 'audio') {
-                sendingAuidoBitrate += outboundRtpEntry.updates.sendingBitrate;
-            } else if (outboundRtpEntry.stats.kind === 'video') {
-                sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
-            }
-            totalOutboundPacketsSent += updates.sentPackets;
-        }
-        
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             const { roundTripTime } = remoteInboundRtpEntry.stats;
+            if (roundTripTime) {
+                roundTripTimesInS.push(roundTripTime)
+            }
+        }
+
+        for (const remoteOutboundRtp of this.remoteOutboundRtps()) {
+            const { roundTripTime } = remoteOutboundRtp.stats;
             if (roundTripTime) {
                 roundTripTimesInS.push(roundTripTime)
             }
@@ -313,12 +324,25 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
+        const avgRttInS = (roundTripTimesInS.length < 1 ? this._lastAvgRttInS : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
+        
+        for (const outboundRtpEntry of this.outboundRtps()) {
+            const updates = outboundRtpEntry.updates;
+            if (outboundRtpEntry.stats.kind === 'audio') {
+                sendingAudioBitrate += outboundRtpEntry.updates.sendingBitrate;
+            } else if (outboundRtpEntry.stats.kind === 'video') {
+                sendingVideoBitrate += outboundRtpEntry.updates.sendingBitrate;
+            }
+            totalOutboundPacketsSent += updates.sentPackets;
+            (outboundRtpEntry as InnerOutboundRtpEntry).updateStabilityScore(avgRttInS);
+        }
 
-        const avgRttInS = (roundTripTimesInS.length < 1 ? -1 : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
-       
+        // if there is no remote inbound or remote outbound and RTT was not calculated for the ICE, then we can use the last calculated RTT..
+        this._lastAvgRttInS = avgRttInS;
+
         this._updates = {
             ...this._updates,
-            sendingAuidoBitrate,
+            sendingAudioBitrate,
             sendingVideoBitrate,
             receivingAudioBitrate,
             receivingVideoBitrate,
@@ -454,6 +478,8 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                 const newEntry: InboundRtpEntry = {
                     appData: {},
                     visited: true,
+                    meanOpinionScore: -1,
+                    expectedFrameRate: stats.kind === 'video' ? 30 : undefined,
                     updates: calculateInboundRtpUpdates(
                         stats,
                         stats,
@@ -511,9 +537,6 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     },
                 };
                 entries.set(stats.id, newEntry);
-                // if (this._createCallEvents) {
-                //     this._monitor.addMedia
-                // }
                 const ssrc = newEntry.getSsrc();
                 if (ssrc) {
                     const ssrcsToInboundRtpPair = this._pc._ssrcsToInboundRtpPair;
@@ -530,6 +553,28 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                     stats,
                     this.elapsedInSec,
                 );
+                if (entry.stats.kind === 'audio') {
+                    entry.meanOpinionScore = calculateAudioMOS(
+                        entry.updates.receivingBitrate,
+                        entry.updates.lostPackets,
+                        entry.updates.avgJitterBufferDelayInMs,
+                        pc.updates.avgRttInS * 1000,
+                        0 < entry.updates.silentConcealedSamples,
+                        0 < (stats.fecPacketsReceived ?? 0)
+                    )
+                } else {
+                    const codec = (entry.getCodec()?.stats.mimeType ?? 'video/vp8');
+                    entry.meanOpinionScore = calculateVideoMOS(
+                        entry.updates.receivingBitrate,
+                        entry.stats.frameWidth ?? 640,
+                        entry.stats.frameHeight ?? 480,
+                        entry.updates.avgJitterBufferDelayInMs,
+                        pc.updates.avgRttInS * 1000,
+                        codec.substr(clamp(codec.length - 1, 0, 6)).toLowerCase(),
+                        entry.stats.framesPerSecond ?? 30,
+                        entry.expectedFrameRate ?? 30,
+                    )
+                }
                 entry.stats = stats;
                 entry.visited = true;
                 
@@ -540,10 +585,13 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
             const entries = pc._outboundRtps;
             let entry = entries.get(stats.id);
             if (!entry) {
+                const outbStabilityScoresLength = pc._config.outbStabilityScoresLength ?? 10;
+                const stabilityScores: number[] = [];
                 const ssrcsToOutboundRtpPairs = this._pc._ssrcsToOutboundRtpPair;
                 const remoteInboundRtps = this._pc._remoteInboundRtps;
-                const newEntry: OutboundRtpEntry = {
+                const newEntry: InnerOutboundRtpEntry = {
                     appData: {},
+                    stabilityScore: -1,
                     updates: calculateOutboundRtpUpdates(
                         stats,
                         stats,
@@ -599,6 +647,32 @@ export class PeerConnectionEntryImpl implements PeerConnectionEntry {
                         if (!outboundRtpPair || !outboundRtpPair.remoteInboundRtpId) return undefined;
                         return remoteInboundRtps.get(outboundRtpPair.remoteInboundRtpId);
                     },
+                    updateStabilityScore: (currentRttInS: number) => {
+                        const remoteInb = newEntry.getRemoteInboundRtp();
+                        if (!remoteInb) return;
+                        // Packet Jitter measured in seconds
+                        // let's say we normalize it to a deviation of 100ms in a linear scale
+                        const latencyFactor = 1.0 - Math.min(0.1, Math.abs(currentRttInS - pc._lastAvgRttInS)) / 0.1
+                        const sentPackets = Math.max(1, (entry?.updates.sentPackets ?? 0));
+                        const lostPackets = remoteInb.updates.lostPackets;
+                        const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
+                        // let's push the actual stability score
+                        stabilityScores.push((latencyFactor * 0.33 + deliveryFactor * 0.67) ** 2);
+                        if (outbStabilityScoresLength < stabilityScores.length) {
+                            stabilityScores.shift();
+                        } else if (stabilityScores.length < outbStabilityScoresLength / 2) {
+                            return;
+                        }
+                        let counter = 0;
+                        let weight = 0;
+                        let totalScore = 0;
+                        for (const score of stabilityScores) {
+                            weight += 1;
+                            counter += weight;
+                            totalScore += weight * score;
+                        }
+                        newEntry.stabilityScore = totalScore / counter;
+                    }
                 };
                 entries.set(stats.id, newEntry);
                 entry = newEntry;

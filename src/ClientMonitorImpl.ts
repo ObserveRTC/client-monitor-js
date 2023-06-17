@@ -6,7 +6,7 @@ import { Timer } from "./utils/Timer";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
 import { createLogger, setLogLevel } from "./utils/logger";
-import { ClientMonitor, ClientMonitorConfig, ClientMonitorEvents } from "./ClientMonitor";
+import { ClientMonitor, ClientMonitorAlerts, ClientMonitorConfig, ClientMonitorEvents } from "./ClientMonitor";
 import { Metrics, MetricsReader } from "./Metrics";
 import * as validators from "./utils/validators";
 import EventEmitter from "events";
@@ -23,10 +23,22 @@ import {
     CustomCallEvent,
 } from './schema/Samples';
 import { CallEventType } from "./utils/callEvents";
+import { EvaluatorProcess, Evaluators } from "./Evaluators";
+import { CongestionDetectorConfig, createCongestionDetector } from "./detectors/CongestionDetector";
+import { AudioDesyncDetectorConfig, createAudioDesyncDetector } from "./detectors/AudioDesyncDetector";
+import { CpuIssueDetectorConfig, createCpuIssueDetector } from "./detectors/CpuIssueDetector";
+import { createLowStabilityScoreDetector, LowStabilityScoreDetectorConfig } from "./detectors/LowStabilityScoreDetector";
+import { createLowMosDetector, LowMosDetectorConfig } from "./detectors/LowMoSDetector";
 
 const logger = createLogger("ClientMonitor");
 
-type ConstructorConfig = ClientMonitorConfig;
+type ConstructorConfig = ClientMonitorConfig & {
+    cpuIssueDetector: CpuIssueDetectorConfig,
+    audioDesyncDetector: AudioDesyncDetectorConfig,
+    congestionDetector: CongestionDetectorConfig,
+    lowStabilityScoreDetector: LowStabilityScoreDetectorConfig,
+    lowMosDetector: LowMosDetectorConfig,
+};
 
 const supplyDefaultConfig = () => {
     const defaultConfig: ConstructorConfig = {
@@ -35,6 +47,39 @@ const supplyDefaultConfig = () => {
         // sendingPeriodInMs: 10000,
         tickingTimeInMs: 1000,
         createCallEvents: false,
+        cpuIssueDetector: {
+            enabled: true,
+            droppedIncomingFramesFractionAlertOn: 0.5,
+            droppedIncomingFramesFractionAlertOff: 0.7,
+        },
+        audioDesyncDetector: {
+            enabled: false,
+            fractionalCorrectionAlertOnThreshold: 0.2,
+            fractionalCorrectionAlertOffThreshold: 0.1,
+        },
+        congestionDetector: {
+            enabled: true,
+            minDurationThresholdInMs: 2000,
+            minRTTDeviationThresholdInMs: 200,
+            minMeasurementsLengthInMs: 10000,
+            deviationFoldThreshold: 3.0,
+            measurementsWindowInMs: 30000,
+            fractionLossThreshold: 0.2,
+            minConsecutiveTickThreshold: 2,
+        },
+        lowStabilityScoreDetector: {
+            enabled: true,
+            alertOffThreshold: 0.9,
+            alertOnThreshold: 0.8,
+        },
+        lowMosDetector: {
+            enabled: true,
+            alertOffThreshold: 4.0,
+            alertOnThreshold: 3.0,
+        },
+        storage: {
+            outboundRtpStabilityScoresLength: 10,
+        }
     };
     return defaultConfig;
 };
@@ -54,6 +99,24 @@ export class ClientMonitorImpl implements ClientMonitor {
         logger.debug("Created", appliedConfig);
         return result;
     }
+    // init alerts
+    public readonly alerts: ClientMonitorAlerts = {
+        'audio-desync-alert': {
+            state: 'off',
+            trackIds: [],
+        },
+        'cpu-performance-alert': {
+            state: 'off',
+        },
+        'mean-opinion-score-alert': {
+            state: 'off',
+            trackIds: [],
+        },
+        'stability-score-alert': {
+            state: 'off',
+            trackIds: [],
+        }
+    }
 
     private _closed = false;
     private _mediaDevices: MediaDevices;
@@ -65,6 +128,7 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _accumulator: Accumulator;
     private _metrics: Metrics;
     private _emitter = new EventEmitter();
+    private _evaluators: Evaluators;
 
     private constructor(
         public readonly config: ConstructorConfig
@@ -76,6 +140,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._accumulator = Accumulator.create(config.accumulator);
         this._collectors = this._makeCollector();
         this._sampler = this._makeSampler();
+        this._evaluators = this._makeEvaluators();
         this._createTimer();
     }
 
@@ -133,6 +198,14 @@ export class ClientMonitorImpl implements ClientMonitor {
 
     public removeTrackRelation(trackId: string): void {
         this._sampler.removeTrackRelation(trackId);
+    }
+
+    public addEvaluator(process: EvaluatorProcess): void {
+        this._evaluators.add(process);
+    }
+
+    public removeEvaluator(process: EvaluatorProcess): boolean {
+        return this._evaluators.remove(process);
     }
 
     public setMediaDevices(...devices: MediaDevice[]): void {
@@ -237,6 +310,9 @@ export class ClientMonitorImpl implements ClientMonitor {
         });
         
         this._metrics.setLastCollected(started + elapsedInMs);
+
+        // evaluate
+        await this._evaluate(elapsedInMs);
     }
 
     public sample(): void {
@@ -347,7 +423,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             context: "Sending Samples",
         });
     }
-
+    
     public on<K extends keyof ClientMonitorEvents>(event: K, listener: (data: ClientMonitorEvents[K]) => void): this {
         this._emitter.addListener(event, listener);
         return this;
@@ -404,6 +480,58 @@ export class ClientMonitorImpl implements ClientMonitor {
         const result = new Sampler(
             this._statsStorage,
         )
+        return result;
+    }
+
+    private async _evaluate(collectingTimeInMs: number) {
+        const alertStates: ClientMonitorEvents['alerts-changed'] = {
+            'audio-desync-alert': this.alerts["audio-desync-alert"].state,
+            'cpu-performance-alert': this.alerts["cpu-performance-alert"].state,
+            'mean-opinion-score-alert': this.alerts["mean-opinion-score-alert"].state,
+            'stability-score-alert': this.alerts["stability-score-alert"].state,
+        }
+        
+        await this._evaluators.use({
+            collectingTimeInMs,
+            storage: this._statsStorage,
+        });
+
+        let alertChanged = false;
+        for (const [alertKey, alert] of Object.entries(this.alerts)) {
+            const key = alertKey as keyof ClientMonitorAlerts;
+            const prevState = alertStates[key];
+            if (prevState !== alert.state) {
+                alertChanged = true;
+            }
+            alertStates[key] = alert.state;
+        }
+        if (alertChanged) {
+            this._emit('alerts-changed', alertStates)
+        }
+    }
+
+    private _makeEvaluators(): Evaluators {
+        const result = new Evaluators();
+        result.add(createAudioDesyncDetector(
+            this.alerts['audio-desync-alert'],
+            this.config.audioDesyncDetector
+        ));
+        result.add(createCongestionDetector(
+            this._emitter, 
+            this.config.congestionDetector
+        ));
+        result.add(createCpuIssueDetector(
+            this.alerts['cpu-performance-alert'], 
+            this.config.cpuIssueDetector
+        ));
+        result.add(createLowStabilityScoreDetector(
+            this.alerts['stability-score-alert'], 
+            this.config.lowStabilityScoreDetector
+        ));
+        result.add(createLowMosDetector(
+            this.alerts['mean-opinion-score-alert'], 
+            this.config.lowMosDetector
+        ));
         return result;
     }
 

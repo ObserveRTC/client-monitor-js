@@ -32,7 +32,7 @@ import { ClientMonitor } from "../ClientMonitor";
 const logger = createLogger("StatsStorage");
 
 export type StatsReaderUpdates = {
-    sendingAuidoBitrate: number,
+    sendingAudioBitrate: number,
     sendingVideoBitrate: number,
     receivingAudioBitrate: number,
     receivingVideoBitrate: number,
@@ -41,10 +41,27 @@ export type StatsReaderUpdates = {
     totalOutboundPacketsSent: number,
     totalOutbounPacketsReceived: number,
     totalOutboundPacketsLost: number,
+    totalAvailableIncomingBitrate: number,
+    totalAvailableOutgoingBitrate: number,
+}
+
+export type StatsReaderTraces = {
+    highestSeenSendingBitrate: number,
+	highestSeenReceivingBitrate: number,
+	highestSeenAvailableOutgoingBitrate: number,
+	highestSeenAvailableIncomingBitrate: number,
 }
 
 /**
- * Interface to read the collected stats.
+ * The `StatsReader` interface provides methods to access collected statistics of a WebRTC connection.
+ * These statistics cover various aspects such as peer connections, codecs, RTPs, media sources, 
+ * transports, and many more. The stats can be read via iterators, providing easy navigation through
+ * all the collected data.
+ * 
+ * Additionally, `StatsReader` provides methods to retrieve inbound and outbound track details.
+ *
+ * The interface also maintains traces of the highest seen bitrates for sending, receiving, available outgoing 
+ * and incoming data. These can be reset using the `resetTraces` method.
  */
 export interface StatsReader {
 
@@ -52,6 +69,16 @@ export interface StatsReader {
      * The calculated differences and updates since the last polling
      */
     readonly updates: StatsReaderUpdates;
+
+    /**
+     * `traces` is a read-only property of the `StatsReader` interface, 
+     * holding an object of type `StatsReaderTraces`. This object provides information 
+     * about the highest seen bitrates for various types of data transfer in a WebRTC connection. 
+     * 
+     * These metrics can provide useful insights into the connection's capabilities 
+     * and can be used for performance tuning or diagnostics.
+     */
+    readonly traces: StatsReaderTraces;
 
     /**
      * Gets stats related to a track, for which the media direction is inbound
@@ -181,6 +208,12 @@ export interface StatsReader {
      * @param trackId The getTrack function is a versatile method that retrieves the track information for a given track ID. This function can return track details for both inbound and outbound tracks.
      */
     getTrackEntry(trackId: string): (InboundTrackEntry & { direction: 'inbound'}) | (OutboundTrackEntry & { direction: 'outbound' }) | undefined;
+
+     /**
+     * Resets the traces of the highest seen bitrates. After invoking this method,
+     * all values in the traces object will be set to zero.
+     */
+    resetTraces(): void;
 }
 
 export interface StatsWriter {
@@ -198,11 +231,12 @@ interface InnerOutboundTrackEntry extends OutboundTrackEntry {
 }
 
 export class StatsStorage implements StatsReader, StatsWriter {
+    
     private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
     private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
     private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
     private _updates: StatsReaderUpdates = {
-        sendingAuidoBitrate: 0,
+        sendingAudioBitrate: 0,
         sendingVideoBitrate: 0,
         receivingAudioBitrate: 0,
         receivingVideoBitrate: 0,
@@ -211,7 +245,15 @@ export class StatsStorage implements StatsReader, StatsWriter {
         totalOutboundPacketsSent: 0,
         totalOutbounPacketsReceived: 0,
         totalOutboundPacketsLost: 0,
+        totalAvailableIncomingBitrate: 0,
+        totalAvailableOutgoingBitrate: 0,
     }
+    private _traces: StatsReaderTraces = {
+        highestSeenAvailableIncomingBitrate: 0,
+        highestSeenAvailableOutgoingBitrate: 0,
+        highestSeenReceivingBitrate: 0,
+        highestSeenSendingBitrate: 0,
+    };
 
     public constructor(
         private readonly _monitor: ClientMonitor,
@@ -221,6 +263,10 @@ export class StatsStorage implements StatsReader, StatsWriter {
 
     public get updates(): StatsReaderUpdates {
         return this._updates;
+    }
+
+    public get traces(): StatsReaderTraces {
+        return this._traces;
     }
 
     public accept(peerConnectionId: string, statsEntry: StatsEntry): void {
@@ -234,6 +280,15 @@ export class StatsStorage implements StatsReader, StatsWriter {
         this._updateOutboundTrackEntries();
     }
 
+    public resetTraces(): void {
+        this._traces = {
+            highestSeenAvailableIncomingBitrate: 0,
+            highestSeenAvailableOutgoingBitrate: 0,
+            highestSeenReceivingBitrate: 0,
+            highestSeenSendingBitrate: 0,
+        }
+    }
+
     public start(): void {
         for (const peerConnectionEntry of this._peerConnections.values()) {
             peerConnectionEntry.start();
@@ -241,7 +296,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
     }
 
     public commit() {
-        let sendingAuidoBitrate = 0;
+        let sendingAudioBitrate = 0;
         let sendingVideoBitrate = 0;
         let receivingAudioBitrate = 0;
         let receivingVideoBitrate = 0;
@@ -250,14 +305,19 @@ export class StatsStorage implements StatsReader, StatsWriter {
         let totalOutboundPacketsSent = 0;
         let totalOutbounPacketsReceived = 0;
         let totalOutboundPacketsLost = 0;
-
+        let totalAvailableIncomingBitrate = 0;
+        let totalAvailableOutgoingBitrate = 0;
         for (const peerConnectionEntry of this._peerConnections.values()) {
 
             peerConnectionEntry.commit();
-
+            for (const transport of peerConnectionEntry.transports()) {
+                totalAvailableIncomingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0;
+                totalAvailableOutgoingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableOutgoingBitrate ?? 0
+            }
+            
             const pcUpdates = peerConnectionEntry.updates;
 
-            sendingAuidoBitrate += pcUpdates.sendingAuidoBitrate;
+            sendingAudioBitrate += pcUpdates.sendingAudioBitrate;
             sendingVideoBitrate += pcUpdates.sendingVideoBitrate;
             receivingAudioBitrate += pcUpdates.receivingAudioBitrate;
             receivingVideoBitrate += pcUpdates.receivingVideoBitrate;
@@ -269,7 +329,7 @@ export class StatsStorage implements StatsReader, StatsWriter {
         }
 
         this._updates = {
-            sendingAuidoBitrate,
+            sendingAudioBitrate,
             sendingVideoBitrate,
             receivingAudioBitrate,
             receivingVideoBitrate,
@@ -278,7 +338,30 @@ export class StatsStorage implements StatsReader, StatsWriter {
             totalOutboundPacketsSent,
             totalOutbounPacketsReceived,
             totalOutboundPacketsLost,
+            totalAvailableIncomingBitrate,
+            totalAvailableOutgoingBitrate,
         }
+
+        this._traceStats();
+    }
+
+    private _traceStats() {
+        this._traces.highestSeenSendingBitrate = Math.max(
+            this._traces.highestSeenSendingBitrate, 
+            this._updates.sendingAudioBitrate + this._updates.sendingVideoBitrate
+        );
+        this._traces.highestSeenReceivingBitrate = Math.max(
+            this._traces.highestSeenReceivingBitrate, 
+            this._updates.receivingAudioBitrate + this._updates.receivingVideoBitrate
+        );
+        this._traces.highestSeenAvailableOutgoingBitrate = Math.max(
+            this._traces.highestSeenAvailableOutgoingBitrate, 
+            this._updates.totalAvailableOutgoingBitrate
+        );
+        this._traces.highestSeenAvailableIncomingBitrate = Math.max(
+            this._traces.highestSeenAvailableIncomingBitrate, 
+            this._updates.totalAvailableIncomingBitrate
+        );
     }
 
     public clear() {
@@ -287,11 +370,11 @@ export class StatsStorage implements StatsReader, StatsWriter {
         }
     }
 
-
     public register(peerConnectionId: string, collectorLabel?: string): void {
         const pcEntry = PeerConnectionEntryImpl.create({
                 collectorId: peerConnectionId,
                 collectorLabel,
+                outbStabilityScoresLength: this._monitor.config.storage?.outboundRtpStabilityScoresLength ?? 10,
             }, 
         );
         this._peerConnections.set(peerConnectionId, pcEntry);

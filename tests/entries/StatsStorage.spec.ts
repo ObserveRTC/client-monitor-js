@@ -9,7 +9,6 @@ describe("StatsStorage", () => {
         const collectorLabel = "collectorLabel";
         const clientMonitor = createClientMonitor({
             config: {
-                
             }
         });
         const storage = new StatsStorage(clientMonitor);

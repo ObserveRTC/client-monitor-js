@@ -56,9 +56,16 @@ interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
  * 
  */
 export interface InboundRtpUpdates {
+    readonly avgJitterBufferDelayInMs: number,
     readonly receivingBitrate: number,
     readonly lostPackets: number,
     readonly receivedPackets: number,
+    readonly receivedFrames: number,
+    readonly decodedFrames: number,
+    readonly droppedFrames: number,
+    readonly receivedSamples: number,
+    readonly silentConcealedSamples: number,
+    readonly fractionLoss: number,
 }
 
 /**
@@ -67,6 +74,20 @@ export interface InboundRtpUpdates {
  */
 export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     stats: W3C.RtcInboundRtpStreamStats;
+    /**
+     * Tracks the differences between the last collected stats and the current collected stats
+     */
+    updates: InboundRtpUpdates,
+
+    /**
+     * Calculated Mean Opinion Score for the inbound audio or video stream.
+     * 
+     * In case of video, the expectedFrameRate of this entry is used to calculate the MOS.
+     */
+    meanOpinionScore: number,
+
+    expectedFrameRate?: number,
+
     /**
      * Navigate to the related ReceiverEntry
      */
@@ -81,11 +102,8 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
      */
     getRemoteOutboundRtp(): RemoteOutboundRtpEntry | undefined;
     getAudioPlayout(): AudioPlayoutEntry | undefined;
-
-    /**
-     * Tracks the differences between the last collected stats and the current collected stats
-     */
-    updates: InboundRtpUpdates,
+    
+    
 }
 
 /**
@@ -102,6 +120,7 @@ export interface OutboundRtpUpdates {
  */
 export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     stats: W3C.RtcOutboundRTPStreamStats;
+    stabilityScore: number;
     /**
      * Gets the SSRC of the Rtp session
      */
@@ -304,7 +323,7 @@ export interface PeerConnectionUpdates {
     readonly totalOutbounPacketsReceived: number;
     readonly totalOutboundPacketsSent: number;
     readonly avgRttInS: number,
-    readonly sendingAuidoBitrate: number,
+    readonly sendingAudioBitrate: number,
     readonly sendingVideoBitrate: number,
     readonly receivingAudioBitrate: number,
     readonly receivingVideoBitrate: number,
@@ -326,6 +345,7 @@ export interface PeerConnectionEntry {
     // readonly touched: number;
     // readonly updated: number;
     readonly label: string | undefined;
+    getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     codecs(): IterableIterator<CodecEntry>;
     inboundRtps(): IterableIterator<InboundRtpEntry>;
     outboundRtps(): IterableIterator<OutboundRtpEntry>;

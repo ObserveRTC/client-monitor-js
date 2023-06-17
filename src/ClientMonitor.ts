@@ -6,6 +6,12 @@ import { MetricsReader } from "./Metrics";
 import { TrackRelation } from "./Sampler";
 import { LogLevel } from "./utils/logger";
 import { StatsEntry } from "./utils/StatsVisitor";
+import { EvaluatorProcess } from './Evaluators';
+import { CongestionDetectorConfig } from './detectors/CongestionDetector';
+import { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
+import { CpuIssueDetectorConfig } from './detectors/CpuIssueDetector';
+import { LowStabilityScoreDetectorConfig } from './detectors/LowStabilityScoreDetector';
+import { LowMosDetectorConfig } from './detectors/LowMoSDetector';
 
 export type ClientMonitorConfig = {
     /**
@@ -44,6 +50,19 @@ export type ClientMonitorConfig = {
     tickingTimeInMs?: number;
 
     /**
+     * settings related to the client monitor storage
+     */
+    storage?: {
+        /**
+         * stability score calculated for outbound rtps are weighted aggregation for several previously calculated stability score values.
+         * This settings determines the length of the window to calculate the score. 
+         * to put into a context the latest measurements approx. count 20% of the total score if the length is 10.
+         * the formula is 2 / n, so if the length is 20, than the latest value is 10%
+         */
+        outboundRtpStabilityScoresLength?: number,
+    },
+
+    /**
      * Flag indicating if the monitor creates call events.
      * If true, events happening on the collected media source create call events such as MEDIA_TRACK_ADDED or MEDIA_TRACK_REMOVED.
      * Similarly, if a peer connection is added, corresponding call events are generated.
@@ -64,8 +83,48 @@ export type ClientMonitorConfig = {
      * the accumulator sets the buffer between sampling and sending.
      */
     accumulator?: AccumulatorConfig;
+    /**
+     * Configuration for the CpuIssueDetector function.
+     */
+    cpuIssueDetector?: CpuIssueDetectorConfig;
+    /**
+     * Configuration for the AudioDesyncDetector function.
+     */
+    audioDesyncDetector?: AudioDesyncDetectorConfig;
+    /**
+     * Configuration for the CongestionDetector function.
+     */
+    congestionDetector?: CongestionDetectorConfig,
+    /**
+     * Configuration for the Low Stability Score detector.
+     */
+    lowStabilityScoreDetector?: LowStabilityScoreDetectorConfig;
 
+    /**
+     * Configuration for the Low Mean Opinion Score detector.
+     */
+    lowMosDetector?: LowMosDetectorConfig;
 };
+
+export type AlertState = 'on' | 'off';
+
+export type ClientMonitorAlerts = {
+    'stability-score-alert': {
+        state: AlertState,
+        trackIds: string[],
+    },
+    'mean-opinion-score-alert': {
+        state: AlertState,
+        trackIds: string[],
+    },
+    'audio-desync-alert': {
+        state: AlertState,
+        trackIds: string[],
+    },
+    'cpu-performance-alert': {
+        state: AlertState,
+    }
+}
 
 export interface ClientMonitorEvents {
     'stats-collected': {
@@ -76,15 +135,34 @@ export interface ClientMonitorEvents {
     },
     'send': {
         samples: Samples[]
-    }
+    },
+    'congestion-detected': {
+        peerConnectionIds: string[],
+        trackIds: string[],
+        highestSeenSendingBitrate: number,
+        highestSeenReceivingBitrate: number,
+        highestSeenAvailableOutgoingBitrate: number,
+        highestSeenAvailableIncomingBitrate: number,
+    },
+    'cpu-issue-detected': {
+        inboundTrackIds: string[],
+        outboundTrackIds: string[],
+    },
+    'audio-desync-detected': {
+        trackIds: string[],
+    },
+    'alerts-changed': Record<keyof ClientMonitorAlerts, AlertState>,
 }
-
 
 
 /**
  * Client Integration of ObserveRTC to monitor WebRTC clients.
  */
 export interface ClientMonitor {
+    /**
+     * The alerts attached to the Monitor
+     */
+    readonly alerts: ClientMonitorAlerts;
     /**
      * The assigned configuration for the ClientMonitor upon creation.
      */
@@ -179,6 +257,25 @@ export interface ClientMonitor {
      * @param trackId
      */
     removeTrackRelation(trackId: string): void;
+
+    /**
+     * Adds a new EvaluatorProcess to the list of processes.
+     * 
+     * @param process - The EvaluatorProcess instance to be added.
+     * 
+     * @returns void
+     */
+    addEvaluator(process: EvaluatorProcess): void;
+    
+    /**
+     * Removes an existing EvaluatorProcess from the list of processes.
+     * 
+     * @param process - The EvaluatorProcess instance to be removed.
+     * 
+     * @returns boolean - Returns true if the process was successfully removed,
+     *                    or false if the process was not found.
+     */
+    removeEvaluator(process: EvaluatorProcess): boolean;
 
     /**
      * Adds the local part of the Session Description Protocol (SDP).
