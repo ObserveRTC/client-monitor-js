@@ -8,6 +8,8 @@ Table of Contents:
  * [Quick Start](#quick-start)
  * [Integrations](#integrations)
     - [Mediasoup](#mediasoup)
+ * [Alerts and Detectors](#alerts)
+ * [Calculated updates](#calculated-updates)
  * [Configurations](#configurations)
  * [NPM package](#npm-package)
  * [API docs](#api-docs)
@@ -87,31 +89,11 @@ const myTransport = // your transport created before the device is added to the 
 mediasoupStatsCollector.addTransport(myTransport)
 ```
 
-## Detectors
+## Calculated Updates
 
-The Detectors module for client-monitor-js provides a collection of detector functions that can be used to monitor and detect various issues and events in a real-time communication system. 
+The Calculated Updates lets you observer metrics derived from the polled webrtc stats  captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can give you.
 
-### Audio Desynchronization Detector
-
-```javascript
-import { createClientMonitor } from 'client-monitor-js';
-
-// Create a ClientMonitor instance
-const monitor = createClientMonitor({
-    collectingPeriodInMs: 2000,
-});
-
-monitor.on('audio-desync-detected', ({ trackIds }) => {
-    console.warn(`Audio Desync detected on tracks`, trackIds);
-});
-```
-
-The example demonstrates how to use the Audio Desynchronization Detector in the client-monitor-js library. It creates a ClientMonitor instance with the default configuration and listens for the audio-desync-detected event. When the event is triggered, a warning message is logged, indicating the tracks that are experiencing audio desynchronization.
-
-To customize the configuration of the Audio Desynchronization Detector, refer to the [Configuratio](#configuration) section for further instructions.
-
-
-## CPU Issue Detector
+### Storage Updates
 
 ```javascript
 import { createClientMonitor } from 'client-monitor-js';
@@ -121,19 +103,18 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-monitor.on('cpu-issue-detected', ({ inboundTrackIds, outboundTrackIds }) => {
-    console.warn('CPU issue detected:');
-    console.warn('Inbound Track IDs:', inboundTrackIds);
-    console.warn('Outbound Track IDs:', outboundTrackIds);
-});
+const storage = monitor.storage;
+monitor.on('stats-collected', () => {
+    const updates = storage.updates;
+    console.log('average RTT in seconds', updates.avgRttInS);
+    console.log('Sending audio bitrate', updates.sendingAudioBitrate);
+    console.log('Sending video bitrate', updates.sendingVideoBitrate);
+    console.log('Receiving audio bitrate', updates.receivingAudioBitrate);
+    console.log('Receiving video bitrate', updates.receivingVideoBitrate);
 
 ```
 
-The above example demonstrates how to use the CPU Issue Detector in the client-monitor-js library. It creates a ClientMonitor instance with the default configuration and listens for the cpu-issue event. When the event is triggered, a warning message is logged, displaying the inbound and outbound track IDs that are experiencing CPU-related issues.
-
-You can adjust the [Configuratio](#configuration)  of the CPU Issue 
-
-## Congestion Detector
+### PeerConnection Updates
 
 ```javascript
 import { createClientMonitor } from 'client-monitor-js';
@@ -143,15 +124,135 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-monitor.on('congestion-detected', ({ trackIds }) => {
-    console.warn('Congestion detected on tracks:', trackIds);
+const storage = monitor.storage;
+monitor.on('stats-collected', () => {
+    for (const peerConnection of storage.peerConnections()) {
+        const updates = peerConnection.updates;
+        console.log('average RTT in seconds', updates.avgRttInS);
+        console.log('Sending audio bitrate on PC', updates.sendingAudioBitrate);
+        console.log('Sending video bitrate on PC', updates.sendingVideoBitrate);
+        console.log('Receiving audio bitrate on PC', updates.receivingAudioBitrate);
+        console.log('Receiving video bitrate on PC', updates.receivingVideoBitrate);
+    }
 });
 
 ```
 
-The example above demonstrates the usage of the Congestion Detector in the client-monitor-js library. It creates a ClientMonitor instance with the default configuration and listens for the congestion-detected event. When congestion is detected on any tracks, a warning message is logged, indicating the track IDs affected by congestion.
+### Inbound RTP stats updates
 
-To configure the Congestion Detector according to your specific requirements, please refer to the [Configuratio](#configuration)  section for further guidance.
+```javascript
+import { createClientMonitor } from 'client-monitor-js';
+
+// Create a ClientMonitor instance
+const monitor = createClientMonitor({
+    collectingPeriodInMs: 2000,
+});
+
+const storage = monitor.storage;
+monitor.on('stats-collected', () => {
+    for (const inboundRtp of storage.inboundRtps()) {
+
+        console.log('mean opinion score for inbound-rtp', inboundRtp.meanOpinionScore);
+
+        const updates = inboundRtp.updates;
+        console.log('receiving bitrate', updates.receivingBitrate);
+        console.log('lost packets since last stats-collected', updates.lostPackets);
+        console.log('received packets since last stats-collected', updates.receivedPackets);
+        console.log('decoded frames since last stats-collected', updates.decodedFrames);
+
+        console.log('full list of calculations changed since last stats-collected ', updates);
+    }
+});
+
+```
+
+### Outbound RTP stats updates
+
+```javascript
+import { createClientMonitor } from 'client-monitor-js';
+
+// Create a ClientMonitor instance
+const monitor = createClientMonitor({
+    collectingPeriodInMs: 2000,
+});
+
+const storage = monitor.storage;
+monitor.on('stats-collected', () => {
+    for (const outboundRtp of storage.outboundRtps()) {
+
+        console.log('stability score outbound-rtp', outboundRtp.stabilityScore);
+
+        const updates = outboundRtp.updates;
+        console.log('sending bitrate', updates.sendingBitrate);
+        console.log('sent packets since last stats-collected', updates.sentPackets);
+        
+        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
+        console.log('Received packets on remote inbound-rtp belongs to this outbound-rtp', remoteInboundRtp?.updates.receivedPackets);
+    }
+});
+
+```
+
+
+
+## Alerts and Detectors
+
+Alerts and detectors provide events of tracking and responding to anomalies or performance issues based on the polled stats. Detectors are components that continuously monitor for specific conditions in the polled stats, and set an alert if certain thresholds are hit. You can subscribe to alerts of an instantiated client-monitor-js and configure detectors via initial configurations.
+
+
+To configure the Congestion Detector according to your specific requirements, please refer to the [Configuration](#configuration)  section for further guidance.
+
+
+List of built-in alerts:
+ * `stability-score-alert`: triggered whenever an outbound network is considered to be instable based on the calculated stability score
+ * `mean-opinion-score-alert`: triggered when a calculated MoS score for an inbound-rtp is lower than the configured threshold
+ * `audio-desync-alert`: triggered when for an audio track several acceleration and deceleration is detected in a short amount of time indicating that the controlling system tries compensate discrepancies. 
+ * `cpu-performance-alert`: triggered whenever a browser detects quality limitation becasue of CPU, or the number of decoded frames per sec hit a certain threshold
+
+```javascript
+import { createClientMonitor } from 'client-monitor-js';
+
+// Create a ClientMonitor instance
+const monitor = createClientMonitor({
+    collectingPeriodInMs: 2000,
+});
+
+monitor.on('alerts-changed', (alerts) => {
+
+    const stabilityAlert = alerts['stability-score-alert'];
+    if (stabilityAlert === 'on') {
+        console.log('Network condition for sending media is instable');
+    } else if (stabilityAlert === 'off') {
+        console.log('Network condition for sending media is considered to be stable again');
+    }
+
+    const meanOpionionScoreAlert = alerts['mean-opinion-score-alert'];
+    if (meanOpionionScoreAlert === 'on') {
+        console.log('Mean opinion score for received media is considered to be low');
+    } else if (meanOpionionScoreAlert === 'off') {
+        console.log('Mean opinion score for received media is normalized');
+    }
+
+    const audioDesyncAlert = alerts['audio-desync-alert'];
+    if (audioDesyncAlert === 'on') {
+        console.log('Audio is desynced from video');
+    } else if (meanOpionionScoreAlert === 'off') {
+        console.log('Audio is synced back');
+    }
+});
+```
+
+
+### Outbound Stability Detector
+
+Outbound Stability Detector is based on a score calculated for each outbound tracks 
+giving a normalized value between `0.0..1.0` indicate how reliable the network 
+for transmitting media. The score consideres RTT fluctuations, and packet losses in it's calculation
+
+### Mean Opinion Score Detector
+
+For each inbound-rtp a MoS is calculated, which is a value between `0.0..5.0` indicate the quality of the rendered media.
+
 
 ## Configurations
 
@@ -219,43 +320,15 @@ const config = {
     },
 
     /**
-     * Configuration for the samples accumulator to balance the transfer the size of the Samples 
-     * prepared to be sent to the server
-     * 
-     */
-    accumulator: {
-        /**
-         * Sets the maximum number of client sample allowed to be in one Sample
-         * 
-         * DEFAULT: 100
-         */
-        maxClientSamples: 100,
-
-        /**
-         * Sets the maximum number of Samples the accumulator can hold
-         * 
-         * DEFAULT: 10
-         */
-        maxSamples: 10,
-
-        /**
-         * Forward a Sample to the server even if it is empty
-         * 
-         * DEFAULT: false
-         */
-        forwardIfEmpty: false
-    }
-
-     /**
      * Configuration for the CpuIssueDetector function.
      * 
      * Default configuration below
      */
     cpuIssueDetector: {
         /**
-         * Specifies whether the dropped frames detector is enabled or not.
+         * Specifies whether the CPU issue detector is enabled or not.
          */
-        enabled: true,
+        enabled: true;
         /**
          * The fractional threshold used to determine if the incoming frames
          * dropped fraction is considered significant or not.
@@ -263,7 +336,15 @@ const config = {
          * For example, a value of 0.1 means that if the dropped frames fraction
          * exceeds 0.1, it will be considered a significant issue.
          */
-        incomingFramesDroppedFractionalThreshold: 0.1,
+        droppedIncomingFramesFractionAlertOn: 0.5;
+        /**
+         * The fractional threshold used to determine if the incoming frames
+         * dropped fraction is considered negligible and the alert should be turned off.
+         * It represents the maximum allowed ratio of dropped frames to received frames.
+         * For example, a value of 0.05 means that if the dropped frames fraction
+         * falls below 0.05, the CPU issue alert will be turned off.
+         */
+        droppedIncomingFramesFractionAlertOff: 0.8;
     },
     /**
      * Configuration for the AudioDesyncDetector function.
@@ -274,7 +355,7 @@ const config = {
         /**
          * Specifies whether the audio desynchronization detector is enabled or not.
          */
-        enabled: true,
+        enabled: true;
         /**
          * The fractional threshold used to determine if the audio desynchronization
          * correction is considered significant or not.
@@ -282,53 +363,46 @@ const config = {
          * For example, a value of 0.1 means that if the corrected samples ratio
          * exceeds 0.1, it will be considered a significant audio desynchronization issue.
          */
-        fractionalCorrectionThreshold: 0.1,
+        fractionalCorrectionAlertOnThreshold: 0.1;
+        /**
+         * The fractional threshold used to determine if the audio desynchronization
+         * correction is considered negligible and the alert should be turned off.
+         * It represents the maximum allowed ratio of corrected samples to total samples.
+         * For example, a value of 0.05 means that if the corrected samples ratio
+         * falls below 0.05, the audio desynchronization alert will be turned off.
+         */
+        fractionalCorrectionAlertOffThreshold: 0.2;
     },
-    /**
-     * Configuration for the CongestionDetector function.
-     * 
-     * Default configuration below
-     */
-    congestionDetector: {
+    lowStabilityScoreDetector: {
         /**
-         * Specifies whether the congestion detector is enabled or not.
+         * Boolean indicating whether the detector is enabled or not
          */
-        enabled: true,
+        enabled: true;
         /**
-         * The minimum deviation threshold for Round-Trip Time (RTT) in milliseconds.
-         * A higher value indicates a higher threshold for detecting congestion based on RTT deviation.
+         * The threshold at which an alert is turned on
          */
-        minRTTDeviationThresholdInMs: 50,
-
+        alertOnThreshold: 0.8;
         /**
-         * The minimum duration threshold in milliseconds.
-         * If congestion is detected, this is the minimum duration before a reevaluation takes place.
+         * The threshold at which an alert is turned off
          */
-        minDurationThresholdInMs: 2000,
-
-        /**
-         * The deviation fold threshold. 
-         * This value is used as a multiplier with the standard deviation to compare against the deviation in RTT.
-         */
-        deviationFoldThreshold: 3.0,
-
-        /**
-         * The fraction loss threshold for packet loss.
-         * If the fraction of packets lost is greater than this threshold, it is considered as congestion.
-         */
-        fractionLossThreshold: 0.2,
-
-        /**
-         * The window for measuring the RTT in milliseconds.
-         */
-        measurementsWindowInMs: 30000,
-
-        /**
-         * The minimum length of measurements in milliseconds. 
-         * This determines the minimum duration for which measurements should be taken before considering them for congestion detection.
-         */
-        minMeasurementsLengthInMs: 10000;
+        alertOffThreshold: 0.9;
     },
+    lowMosDetector: {
+        /**
+         * Specifies whether the Low Mean Opinion Score detector is enabled or not.
+         */
+        enabled: true;
+        /**
+         * The threshold value for triggering a Low Mean Opinion Score alert.
+         * If the mean opinion score (MOS) falls below this value, an alert will be triggered.
+         */
+        alertOnThreshold: 3.0;
+        /**
+         * The threshold value for turning off the Low Mean Opinion Score alert.
+         * If the mean opinion score (MOS) rises above this value, the alert will be turned off.
+         */
+        alertOffThreshold: 4.0;
+    }
 };
 ```
 

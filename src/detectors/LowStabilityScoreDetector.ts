@@ -2,22 +2,25 @@ import { ClientMonitorAlerts } from "../ClientMonitor";
 import { EvaluatorProcess } from "../Evaluators";
 
 /**
- * Configuration object for the AudioDesyncDetector function.
+ * Type definition for the configuration object of LowStabilityScoreDetector.
  */
 export type LowStabilityScoreDetectorConfig = {
-	/**
-	 * Specifies whether the audio desynchronization detector is enabled or not.
-	 */
+	// Boolean indicating whether the detector is enabled or not
 	enabled: boolean;
+	// The threshold at which an alert is turned on
 	alertOnThreshold: number;
+	// The threshold at which an alert is turned off
 	alertOffThreshold: number;
 };
 
 /**
- * Creates an audio desynchronization detector process.
- * @param emitter The event emitter used to emit audio desynchronization events.
- * @param config The configuration for the audio desynchronization detector.
- * @returns The evaluator process function.
+ * This function creates a detector for low stability scores based on the given alert and config.
+ *
+ * @param {object} alert - The alert object for stability score.
+ * @param {object} config - The configuration for the detector.
+ *
+ * @return {function} An asynchronous EvaluatorProcess function that, when executed,
+ * checks the stability scores and updates the alert's state and trackIds as per the given thresholds.
  */
 export function createLowStabilityScoreDetector(
 	alert: ClientMonitorAlerts['stability-score-alert'],
@@ -31,19 +34,19 @@ export function createLowStabilityScoreDetector(
 	const process: EvaluatorProcess = async (context) => {
 		const { storage } = context;
 		const trackIds = new Set<string>();
-		for (const inboundRtp of storage.outboundRtps()) {
-			const trackId = inboundRtp.getTrackId();
+		for (const outboundRtp of storage.outboundRtps()) {
+			const trackId = outboundRtp.getTrackId();
 			if (!trackId) {
 				continue;
 			}
-			if (inboundRtp.stabilityScore < 0.1) {
+			if (outboundRtp.stabilityScore < 0.1) {
 				continue;
 			}
 			if (alert.trackIds.includes(trackId)) {
-				if (inboundRtp.stabilityScore < config.alertOffThreshold) {
+				if (outboundRtp.stabilityScore < config.alertOffThreshold) {
 					trackIds.add(trackId);
 				}
-			} else if (inboundRtp.stabilityScore < config.alertOnThreshold) {
+			} else if (outboundRtp.stabilityScore < config.alertOnThreshold) {
 				trackIds.add(trackId);
 			}
 		}
