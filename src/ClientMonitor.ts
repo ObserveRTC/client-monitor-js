@@ -127,6 +127,7 @@ export type ClientMonitorAlerts = {
 }
 
 export interface ClientMonitorEvents {
+    'close': undefined,
     'stats-collected': {
         stats: StatsEntry[]
     },

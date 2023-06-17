@@ -361,6 +361,7 @@ export class ClientMonitorImpl implements ClientMonitor {
             this._statsStorage.clear();
         } finally {
             this._closed = true;
+            this._emit('close', undefined);
             logger.info(`Closed`);
         }
     }
