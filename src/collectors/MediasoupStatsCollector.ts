@@ -455,6 +455,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
         try {
             const removedTrackIds = new Set<string>(this._trackIds);
             for (const producer of Array.from(this._producers.values())) {
+                if (producer?.track?.id === undefined) {
+                    continue;
+                }
                 const bound = removedTrackIds.delete(producer.track.id);
                 if (!bound) {
                     this._addTrack(
@@ -464,6 +467,9 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 }
             }
             for (const consumer of Array.from(this._consumers.values())) {
+                if (consumer?.track?.id === undefined) {
+                    continue;
+                }
                 const bound = removedTrackIds.delete(consumer.track.id);
                 if (!bound) {
                     this._addTrack(
