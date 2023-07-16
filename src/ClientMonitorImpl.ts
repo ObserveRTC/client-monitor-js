@@ -227,22 +227,34 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.addUserMediaError(message);
     }
 
-    public addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+    public addMediaTrackAddedCallEvent(
+        peerConnectionId: string, 
+        mediaTrackId: string, 
+        timestamp?: number,
+        attachments?: string,
+    ): void {
         const callEvent: CustomCallEvent = {
             name: CallEventType.MEDIA_TRACK_ADDED,
             peerConnectionId,
             mediaTrackId,
             timestamp: timestamp ?? Date.now(),
+            attachments,
         }
         this.addCustomCallEvent(callEvent)
     }
 
-    public addMediaTrackRemovedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+    public addMediaTrackRemovedCallEvent(
+        peerConnectionId: string, 
+        mediaTrackId: string, 
+        timestamp?: number,
+        attachments?: string,
+    ): void {
         const callEvent: CustomCallEvent = {
             name: CallEventType.MEDIA_TRACK_REMOVED,
             peerConnectionId,
             mediaTrackId,
             timestamp: timestamp ?? Date.now(),
+            attachments,
         }
         this.addCustomCallEvent(callEvent)
     }

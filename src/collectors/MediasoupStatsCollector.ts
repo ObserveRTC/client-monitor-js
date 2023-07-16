@@ -306,6 +306,11 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             this._clientMonitor.addMediaTrackAddedCallEvent(
                 parent.peerConnectionId,
                 producer.track.id,
+                Date.now(),
+                JSON.stringify({
+                    kind: producer.kind,
+                    direction: 'outbound',
+                }),
             );            
         }
 
@@ -321,6 +326,11 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 this._clientMonitor.addMediaTrackRemovedCallEvent(
                     parent.peerConnectionId,
                     producer.track.id,
+                    Date.now(),
+                    JSON.stringify({
+                        kind: producer.kind,
+                        direction: 'outbound',
+                    }),
                 );
             }
             
@@ -415,6 +425,11 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
             this._clientMonitor.addMediaTrackAddedCallEvent(
                 parent.peerConnectionId,
                 consumer.track.id,
+                Date.now(),
+                JSON.stringify({
+                    kind: consumer.kind,
+                    direction: 'inbound',
+                }),
             );
         }
 
@@ -430,6 +445,11 @@ export abstract class MediasoupStatsCollector implements StatsCollector {
                 this._clientMonitor.addMediaTrackRemovedCallEvent(
                     parent.peerConnectionId,
                     consumer.track.id,
+                    Date.now(),
+                    JSON.stringify({
+                        kind: consumer.kind,
+                        direction: 'inbound',
+                    }),
                 );
             }
         });

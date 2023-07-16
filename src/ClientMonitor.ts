@@ -308,17 +308,29 @@ export interface ClientMonitor {
      * Adds a MEDIA_TRACK_ADDED type call event
      * @param peerConnectionId - The identifier of the peer connection to which the track is added
      * @param mediaTrackId - The ID of the added track
-     * @param timestamp - The timestamp when the event occurred (optional)
+     * @param kind - The kind of the added track (audio or video)  
+     * @param attachments - The attachments of the added track (optional) 
      */
-    addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void;
+    addMediaTrackAddedCallEvent(
+        peerConnectionId: string, 
+        mediaTrackId: string,  
+        timestamp?: number,
+        attachments?: string,
+    ): void;
 
     /**
      * Adds a MEDIA_TRACK_REMOVED type call event
      * @param peerConnectionId - The identifier of the peer connection from which the track is removed
      * @param mediaTrackId - The ID of the removed track
-     * @param timestamp - The timestamp when the event occurred (optional)
+     * @param kind - The kind of the added track (audio or video)   
+     * @param attachments - The attachments of the added track (optional) 
      */
-    addMediaTrackRemovedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void;
+    addMediaTrackRemovedCallEvent(
+        peerConnectionId: string, 
+        mediaTrackId: string,  
+        timestamp?: number,
+        attachments?: string,
+    ): void;
 
     /**
      * Adds a PEER_CONNECTION_OPENED type call event

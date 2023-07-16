@@ -11,7 +11,7 @@ export function createClientMonitor(data: any): ClientMonitor {
     const result = new class implements ClientMonitor {
         get alerts() {
             return data.alerts;
-        };
+        }
         get closed(): boolean {
             return data.closed === true;
         }
@@ -51,17 +51,17 @@ export function createClientMonitor(data: any): ClientMonitor {
             }
             return data.removeEvaluator(process);
         }
-        addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+        addMediaTrackAddedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number, attachments?: string): void {
             if (!data.addMediaTrackAddedCallEvent) {
                 throw new Error("Method not implemented.");
             }
-            data.addMediaTrackAddedCallEvent(peerConnectionId, mediaTrackId, timestamp);
+            data.addMediaTrackAddedCallEvent(peerConnectionId, mediaTrackId, timestamp, attachments);
         }
-        addMediaTrackRemovedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number): void {
+        addMediaTrackRemovedCallEvent(peerConnectionId: string, mediaTrackId: string, timestamp?: number, attachments?: string): void {
             if (!data.addMediaTrackRemovedCallEvent) {
                 throw new Error("Method not implemented.");
             }
-            data.addMediaTrackAddedCallEvent(peerConnectionId, mediaTrackId, timestamp);
+            data.addMediaTrackAddedCallEvent(peerConnectionId, mediaTrackId, timestamp, attachments);
         }
         addPeerConnectionOpenedCallEvent(peerConnectionId: string, timestamp?: number): void {
             if (!data.addPeerConnectionOpenedCallEvent) {
