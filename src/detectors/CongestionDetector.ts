@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { ClientMonitorEvents } from "../ClientMonitor";
 import { PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
-import { EvaluatorProcess } from "../Evaluators";
+import { StatsEvaluatorProcess } from "../StatsEvaluators";
 
 /**
  * Configuration object for the CongestionDetector function.
@@ -53,7 +53,7 @@ export type CongestionDetectorConfig = {
     minMeasurementsLengthInMs: number;
 }
 
-export function createCongestionDetector(emitter: EventEmitter, config: CongestionDetectorConfig): EvaluatorProcess {
+export function createCongestionDetector(emitter: EventEmitter, config: CongestionDetectorConfig): StatsEvaluatorProcess {
 	if (!config.enabled) {
 		return async () => {
 
@@ -140,7 +140,7 @@ export function createCongestionDetector(emitter: EventEmitter, config: Congesti
 	let highestSeenAvailableOutgoingBitrate = 0;
 	let highestSeenAvailableIncomingBitrate = 0;
 
-	const process: EvaluatorProcess = async (context) => {
+	const process: StatsEvaluatorProcess = async (context) => {
 		const { storage } = context;
 		const now = Date.now();
 		const peerConnectionIds: string[] = [];

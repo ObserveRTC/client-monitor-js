@@ -1,7 +1,6 @@
 export type { StatsCollector, StatsProvider } from "./collectors/StatsCollector";
 export type { MediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
 export type { PeerConnectionStatsCollector } from "./collectors/PeerConnectionStatsCollector";
-export type { StatsReader } from "./entries/StatsStorage";
 export type {
     ClientMonitor,
     ClientMonitorConfig,
@@ -9,9 +8,13 @@ export type {
     ClientMonitorAlerts,
 } from "./ClientMonitor";
 
-export type { MediaDevices } from "./utils/MediaDevices";
-export type { TrackRelation } from "./Sampler";
 export type {
+    StatsStorage,
+    StatsStorageEvents,
+} from './entries/StatsStorage'
+
+export type {
+    TrackStats,
     CodecEntry,
     InboundRtpEntry,
     OutboundRtpEntry,
@@ -30,9 +33,8 @@ export type {
     RemoteCandidateEntry,
     CertificateEntry,
     IceServerEntry,
+    PeerConnectionEntryEvents,
     PeerConnectionEntry,
-    OutboundTrackEntry,
-    InboundTrackEntry,
 } from "./entries/StatsEntryInterfaces";
 
 export * as W3CStats from './schema/W3cStatsIdentifiers';
@@ -56,7 +58,7 @@ export type {
 } from './schema/Samples';
 export { CallEventType } from './utils/callEvents'
 
-export type { EvaluatorProcess } from './Evaluators';
+export type { StatsEvaluatorProcess as EvaluatorProcess } from './StatsEvaluators';
 export type { CongestionDetectorConfig } from './detectors/CongestionDetector';
 export type { CpuIssueDetectorConfig } from './detectors/CpuIssueDetector';
 export type { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';

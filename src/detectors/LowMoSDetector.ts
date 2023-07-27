@@ -1,5 +1,5 @@
 import { ClientMonitorAlerts } from "../ClientMonitor";
-import { EvaluatorProcess } from "../Evaluators";
+import { StatsEvaluatorProcess } from "../StatsEvaluators";
 
 /**
  * Configuration object for the Low Mean Opinion Score detector function.
@@ -30,12 +30,12 @@ export type LowMosDetectorConfig = {
   export function createLowMosDetector(
 	alert: ClientMonitorAlerts['mean-opinion-score-alert'],
 	config: LowMosDetectorConfig
-  ): EvaluatorProcess {
+  ): StatsEvaluatorProcess {
 	if (!config.enabled) {
 	  return async () => {};
 	}
   
-	const process: EvaluatorProcess = async (context) => {
+	const process: StatsEvaluatorProcess = async (context) => {
 		const { storage } = context;
 		const trackIds = new Set<string>();
   

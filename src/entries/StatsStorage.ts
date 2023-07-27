@@ -1,4 +1,3 @@
-import { StatsEntry } from "../utils/StatsVisitor";
 import {
     ContributingSourceEntry,
     CodecEntry,
@@ -18,621 +17,509 @@ import {
     CertificateEntry,
     IceServerEntry,
     MediaSourceEntry,
-    PeerConnectionEntry,
     AudioPlayoutEntry,
-    OutboundTrackEntry,
-    InboundTrackEntry,
-    // InboundTrackEntry,
-    // OutboundTrackEntry,
+    PeerConnectionEntry,
+    TrackStats,
 } from "./StatsEntryInterfaces";
-import { PeerConnectionEntryImpl } from "./PeerConnectionEntryImpl";
+import { PeerConnectionEntryManifest } from "./PeerConnectionEntryManifest";
 import { createLogger } from "../utils/logger";
-import { ClientMonitor } from "../ClientMonitor";
+import { TypedEventEmitter } from "../utils/TypedEmitter";
+import { InboundTrackStats, createInboundTrackStats } from "./InboundTrackStats";
+import { OutboundTrackStats, createOutboundTrackStats } from "./OutboundTrackStats";
+import { StatsMap } from "../utils/Stats";
+import { createProcessor } from "../utils/Processor";
 
 const logger = createLogger("StatsStorage");
 
-export type StatsReaderUpdates = {
-    sendingAudioBitrate: number,
-    sendingVideoBitrate: number,
-    receivingAudioBitrate: number,
-    receivingVideoBitrate: number,
-    totalInboundPacketsLost: number,
-    totalInboundPacketsReceived: number,
-    totalOutboundPacketsSent: number,
-    totalOutbounPacketsReceived: number,
-    totalOutboundPacketsLost: number,
-    totalAvailableIncomingBitrate: number,
-    totalAvailableOutgoingBitrate: number,
+export type StatsStorageEvents = {
+    'peer-connection-added': PeerConnectionEntryManifest,
+    'peer-connection-removed': PeerConnectionEntryManifest,
 }
 
-export type StatsReaderTraces = {
-    highestSeenSendingBitrate: number,
-	highestSeenReceivingBitrate: number,
-	highestSeenAvailableOutgoingBitrate: number,
-	highestSeenAvailableIncomingBitrate: number,
-}
 
-/**
- * The `StatsReader` interface provides methods to access collected statistics of a WebRTC connection.
- * These statistics cover various aspects such as peer connections, codecs, RTPs, media sources, 
- * transports, and many more. The stats can be read via iterators, providing easy navigation through
- * all the collected data.
- * 
- * Additionally, `StatsReader` provides methods to retrieve inbound and outbound track details.
- *
- * The interface also maintains traces of the highest seen bitrates for sending, receiving, available outgoing 
- * and incoming data. These can be reset using the `resetTraces` method.
- */
-export interface StatsReader {
 
-    /**
-     * The calculated differences and updates since the last polling
-     */
-    readonly updates: StatsReaderUpdates;
+export class StatsStorage {
+    
+    public sendingAudioBitrate?: number;
+    public sendingVideoBitrate?: number;
+    public receivingAudioBitrate?: number;
+    public receivingVideoBitrate?: number;
+    public totalInboundPacketsLost?: number;
+    public totalInboundPacketsReceived?: number;
+    public totalOutboundPacketsSent?: number;
+    public totalOutbounPacketsReceived?: number;
+    public totalOutboundPacketsLost?: number;
+    public totalAvailableIncomingBitrate?: number;
+    public totalAvailableOutgoingBitrate?: number;
 
-    /**
-     * `traces` is a read-only property of the `StatsReader` interface, 
-     * holding an object of type `StatsReaderTraces`. This object provides information 
-     * about the highest seen bitrates for various types of data transfer in a WebRTC connection. 
-     * 
-     * These metrics can provide useful insights into the connection's capabilities 
-     * and can be used for performance tuning or diagnostics.
-     */
-    readonly traces: StatsReaderTraces;
+    public highestSeenSendingBitrate?: number;
+	public highestSeenReceivingBitrate?: number;
+	public highestSeenAvailableOutgoingBitrate?: number;
+	public highestSeenAvailableIncomingBitrate?: number;
+    
+    public readonly processor = createProcessor<StatsStorage>();
 
-    /**
-     * Gets stats related to a track, for which the media direction is inbound
-     * @param trackId the id of the track
-     */
-    getInboundTrack(trackId: string): InboundTrackEntry | undefined;
+    private readonly _tracks = new Map<string, TrackStats>();
+    private readonly _emitter = new TypedEventEmitter<StatsStorageEvents>();
+    private readonly _peerConnections = new Map<string, PeerConnectionEntryManifest>();
 
-    /**
-     * Gets stats related to a track, for which the media direction is outbound
-     * @param trackId the id of the track
-     */
-    getOutboundTrack(trackId: string): OutboundTrackEntry | undefined;
+    public get events(): TypedEventEmitter<StatsStorageEvents> {
+        return this._emitter;
+    }
 
-    /**
-     * Gives an iterator to read the collected peer connection stats and navigate to its relations.
-     */
-    peerConnections(): IterableIterator<PeerConnectionEntry>;
+    public async update(peerConnectionStats: { peerConnectionId: string, statsMap: StatsMap }[]): Promise<void> {
+        for (const { peerConnectionId, statsMap } of peerConnectionStats) {
+            const pcEntry = this._peerConnections.get(peerConnectionId);
+            if (!pcEntry) {
+                logger.warn(`update(): PeerConnectionEntry is not registered for peerConnectionId ${peerConnectionId}`);
+                return;
+            }
+            pcEntry.update(statsMap);
+        }
+        await new Promise<void>((resolve, reject) => {
+            this.processor.process(this, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+        this._updateTracks();
+        this._updateMetrics();
+    }
 
-    /**
-     * Gives an iterator to read the collected codecs and navigate to its relations.
-     */
-    codecs(): IterableIterator<CodecEntry>;
+    public clear(): void {
+        Array.from(this._peerConnections.values()).forEach(pcEntry => pcEntry.close());
+        this._peerConnections.clear();
+        this._tracks.clear();
+    }
 
-    /**
-     * Gives an iterator to read the collected inbound-rtp stats and navigate to its relations.
-     */
-    inboundRtps(): IterableIterator<InboundRtpEntry>;
 
-    /**
-     * Gives an iterator to read the collected outbound-rtp stats and navigate to its relations.
-     */
-    outboundRtps(): IterableIterator<OutboundRtpEntry>;
+    public addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void {
+        const pcEntry = new PeerConnectionEntryManifest(
+                peerConnectionId,
+                peerConnectionLabel,
+        );
+        this._peerConnections.set(peerConnectionId, pcEntry);
+        pcEntry.events.once('close', () => {
+            this._peerConnections.delete(peerConnectionId);
+            this._emitter.emit('peer-connection-removed', pcEntry);
+        });
+    }
 
-    /**
-     * Gives an iterator to read the collected remote-inbound-rtp stats and navigate to its relations.
-     */
-    remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry>;
+    public removePeerConnection(peerConnectionId: string): boolean {
+       const peerConnectionManifest = this._peerConnections.get(peerConnectionId);
+       if (!peerConnectionManifest) {
+           return false;
+       }
+       peerConnectionManifest.close();
+       return true;
+    }
 
-    /**
-     * Gives an iterator to read the collected remote-outbound-rtp stats and navigate to its relations.
-     */
-    remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry>;
+    public getPeerConnection(peerConnectionId: string): PeerConnectionEntry | undefined {
+        return this._peerConnections.get(peerConnectionId);
+    }
 
-    /**
-     * Gives an iterator to read the collected media source stats and navigate to its relations.
-     */
-    mediaSources(): IterableIterator<MediaSourceEntry>;
+    public getTrack(trackId: string): TrackStats | undefined {
+        return this._tracks.get(trackId);
+    }
 
-    /**
-     * Gives an iterator to read the collected data channel stats and navigate to its relations.
-     */
-    dataChannels(): IterableIterator<DataChannelEntry>;
 
-    /**
-     * Gives an iterator to read the collected transport stats and navigate to its relations.
-     */
-    transports(): IterableIterator<TransportEntry>;
+    public peerConnections(): IterableIterator<PeerConnectionEntry> {
+        return this._peerConnections.values();
+    }
 
-    /**
-     * Gives an iterator to read the collected ICE candidate pair stats and navigate to its relations.
-     */
-    iceCandidatePairs(): IterableIterator<IceCandidatePairEntry>;
-
-    /**
-     * Gives an iterator to read the collected local ICE candidate stats and navigate to its relations.
-     */
-    localCandidates(): IterableIterator<LocalCandidateEntry>;
-
-    /**
-     * Gives an iterator to read the collected remote ICE candidate stats and navigate to its relations.
-     */
-    remoteCandidates(): IterableIterator<RemoteCandidateEntry>;
-
-    /**
-     * Gives an iterator to read the collected Audio Playout stats and navigate to its relations.
-     */
-    audioPlayouts(): IterableIterator<AudioPlayoutEntry>;
-
-    /**
-     * Gives an iterator to read the collected transceiver stats and navigate to its relations.
-     */
-    transceivers(): IterableIterator<TransceiverEntry>;
-
-    /**
-     * Gives an iterator to read the collected media source stats and navigate to its relations.
-     *
-     * The corresponded stats (sender stats) are deprecated and will be removed from browser
-     */
-    senders(): IterableIterator<SenderEntry>;
+    public tracks(): IterableIterator<TrackStats> {
+        return this._tracks.values();
+    }
 
     /**
      * Gives an iterator to read the collected receiver stats and navigate to its relations.
      *
      * The corresponded stats (receiver stats) are deprecated and will be removed from browser
      */
-    receivers(): IterableIterator<ReceiverEntry>;
+    public receivers(): IterableIterator<ReceiverEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.receivers()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
 
     /**
-     * Gives an iterator to read the SCTP transport stats and navigate to its relations.
-     *
-     * The corresponded stats (sctp-transport stats) are deprecated and will be removed from browser
+     * Gives an iterator to read the collected media source stats and navigate to its relations.
      */
-    sctpTransports(): IterableIterator<SctpTransportEntry>;
+    public mediaSources(): IterableIterator<MediaSourceEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.mediaSources()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
 
     /**
-     * Gives an iterator to read the collected certificate stats and navigate to its relations.
-     *
+     * Gives an iterator to read the collected outbound-rtp stats and navigate to its relations.
      */
-    certificates(): IterableIterator<CertificateEntry>;
+    public outboundRtps(): IterableIterator<OutboundRtpEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.outboundRtps()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
 
     /**
-     * Gives an iterator to read the collected ICE server stats and navigate to its relations.
-     *
-     * The corresponded stats (ice-server stats) are deprecated and will be removed from browser
+     * Gives an iterator to read the collected remote-inbound-rtp stats and navigate to its relations.
      */
-    iceServers(): IterableIterator<IceServerEntry>;
+    public remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.remoteInboundRtps()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected remote-outbound-rtp stats and navigate to its relations.
+     */
+    public remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.remoteOutboundRtps()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
 
     /**
      * Gives an iterator to read the collected contributing sources and navigate to its relations.
      *
      * The corresponded stats (csrc stats) are deprecated and will be removed from browser
      */
-    contributingSources(): IterableIterator<ContributingSourceEntry>;
+    public contributingSources(): IterableIterator<ContributingSourceEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.contributingSources()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
 
     /**
-     * 
-     * @param trackId The getTrack function is a versatile method that retrieves the track information for a given track ID. This function can return track details for both inbound and outbound tracks.
+     * Gives an iterator to read the collected data channel stats and navigate to its relations.
      */
-    getTrackEntry(trackId: string): (InboundTrackEntry & { direction: 'inbound'}) | (OutboundTrackEntry & { direction: 'outbound' }) | undefined;
+    public dataChannels(): IterableIterator<DataChannelEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.dataChannels()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
 
-     /**
-     * Resets the traces of the highest seen bitrates. After invoking this method,
-     * all values in the traces object will be set to zero.
+    /**
+     * Gives an iterator to read the collected Audio Playout stats and navigate to its relations.
      */
-    resetTraces(): void;
-}
-
-export interface StatsWriter {
-    register(collectorId: string, label?: string): void;
-    unregister(collectorId: string): void;
-    accept(collectorId: string, statsEntry: StatsEntry): void;
-}
-
-interface InnerInboundTrackEntry extends InboundTrackEntry {
-    inboundRtpEntries: Map<string, InboundRtpEntry>;
-}
-
-interface InnerOutboundTrackEntry extends OutboundTrackEntry {
-    outboundRtpEntries: Map<string, OutboundRtpEntry>;
-}
-
-export class StatsStorage implements StatsReader, StatsWriter {
-    
-    private _peerConnections: Map<string, PeerConnectionEntryImpl> = new Map();
-    private _inboundTrackEntries: Map<string, InnerInboundTrackEntry> = new Map();
-    private _outboundTrackEntries: Map<string, InnerOutboundTrackEntry> = new Map();
-    private _updates: StatsReaderUpdates = {
-        sendingAudioBitrate: 0,
-        sendingVideoBitrate: 0,
-        receivingAudioBitrate: 0,
-        receivingVideoBitrate: 0,
-        totalInboundPacketsLost: 0,
-        totalInboundPacketsReceived: 0,
-        totalOutboundPacketsSent: 0,
-        totalOutbounPacketsReceived: 0,
-        totalOutboundPacketsLost: 0,
-        totalAvailableIncomingBitrate: 0,
-        totalAvailableOutgoingBitrate: 0,
-    }
-    private _traces: StatsReaderTraces = {
-        highestSeenAvailableIncomingBitrate: 0,
-        highestSeenAvailableOutgoingBitrate: 0,
-        highestSeenReceivingBitrate: 0,
-        highestSeenSendingBitrate: 0,
-    };
-
-    public constructor(
-        private readonly _monitor: ClientMonitor,
-    ) {
-
-    }
-
-    public get updates(): StatsReaderUpdates {
-        return this._updates;
-    }
-
-    public get traces(): StatsReaderTraces {
-        return this._traces;
-    }
-
-    public accept(peerConnectionId: string, statsEntry: StatsEntry): void {
-        const pcEntry = this._peerConnections.get(peerConnectionId);
-        if (!pcEntry) {
-            logger.warn(`PeerConnectionEntry is not registered for peerConnectionId ${peerConnectionId}`);
-            return;
+    public audioPlayouts(): IterableIterator<AudioPlayoutEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.audioPlayouts()) {
+                    yield entry;
+                }
+            }
         }
-        pcEntry.update(statsEntry);
-        this._updateInboundTrackEntries();
-        this._updateOutboundTrackEntries();
+        return iterator();
     }
 
-    public resetTraces(): void {
-        this._traces = {
-            highestSeenAvailableIncomingBitrate: 0,
-            highestSeenAvailableOutgoingBitrate: 0,
-            highestSeenReceivingBitrate: 0,
-            highestSeenSendingBitrate: 0,
+    /**
+     * Gives an iterator to read the collected transceiver stats and navigate to its relations.
+     */
+    public transceivers(): IterableIterator<TransceiverEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.transceivers()) {
+                    yield entry;
+                }
+            }
         }
+        return iterator();
     }
 
-    public start(): void {
+    /**
+     * Gives an iterator to read the collected media source stats and navigate to its relations.
+     *
+     * The corresponded stats (sender stats) are deprecated and will be removed from browser
+     */
+    public senders(): IterableIterator<SenderEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.senders()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected transport stats and navigate to its relations.
+     */
+    public transports(): IterableIterator<TransportEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.transports()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the SCTP transport stats and navigate to its relations.
+     *
+     * The corresponded stats (sctp-transport stats) are deprecated and will be removed from browser
+     */
+    public sctpTransports(): IterableIterator<SctpTransportEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.sctpTransports()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected ICE candidate pair stats and navigate to its relations.
+     */
+    public iceCandidatePairs(): IterableIterator<IceCandidatePairEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.iceCandidatePairs()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected local ICE candidate stats and navigate to its relations.
+     */
+    public localCandidates(): IterableIterator<LocalCandidateEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.localCandidates()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected remote ICE candidate stats and navigate to its relations.
+     */
+    public remoteCandidates(): IterableIterator<RemoteCandidateEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.remoteCandidates()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected certificate stats and navigate to its relations.
+     *
+     */
+    public certificates(): IterableIterator<CertificateEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.certificates()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected ICE server stats and navigate to its relations.
+     *
+     * The corresponded stats (ice-server stats) are deprecated and will be removed from browser
+     */
+    public iceServers(): IterableIterator<IceServerEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.iceServers()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected codecs and navigate to its relations.
+     */
+    public codecs(): IterableIterator<CodecEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.codecs()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    /**
+     * Gives an iterator to read the collected inbound-rtp stats and navigate to its relations.
+     */
+    public inboundRtps(): IterableIterator<InboundRtpEntry> {
+        const peerConnections = this._peerConnections;
+        function *iterator() {
+            for (const pcEntry of peerConnections.values()) {
+                for (const entry of pcEntry.inboundRtps()) {
+                    yield entry;
+                }
+            }
+        }
+        return iterator();
+    }
+
+    private _updateMetrics() {
+        this.sendingAudioBitrate = 0;
+        this.sendingVideoBitrate = 0;
+        this.receivingAudioBitrate = 0;
+        this.receivingVideoBitrate = 0;
+        this.totalInboundPacketsLost = 0;
+        this.totalInboundPacketsReceived = 0;
+        this.totalOutboundPacketsSent = 0;
+        this.totalOutbounPacketsReceived = 0;
+        this.totalOutboundPacketsLost = 0;
+        this.totalAvailableIncomingBitrate = 0;
+        this.totalAvailableOutgoingBitrate = 0;
         for (const peerConnectionEntry of this._peerConnections.values()) {
-            peerConnectionEntry.start();
-        }
-    }
 
-    public commit() {
-        let sendingAudioBitrate = 0;
-        let sendingVideoBitrate = 0;
-        let receivingAudioBitrate = 0;
-        let receivingVideoBitrate = 0;
-        let totalInboundPacketsLost = 0;
-        let totalInboundPacketsReceived = 0;
-        let totalOutboundPacketsSent = 0;
-        let totalOutbounPacketsReceived = 0;
-        let totalOutboundPacketsLost = 0;
-        let totalAvailableIncomingBitrate = 0;
-        let totalAvailableOutgoingBitrate = 0;
-        for (const peerConnectionEntry of this._peerConnections.values()) {
-
-            peerConnectionEntry.commit();
             for (const transport of peerConnectionEntry.transports()) {
-                totalAvailableIncomingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0;
-                totalAvailableOutgoingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableOutgoingBitrate ?? 0
+                this.totalAvailableIncomingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableIncomingBitrate ?? 0;
+                this.totalAvailableOutgoingBitrate += transport.getSelectedIceCandidatePair()?.stats.availableOutgoingBitrate ?? 0
             }
             
-            const pcUpdates = peerConnectionEntry.updates;
-
-            sendingAudioBitrate += pcUpdates.sendingAudioBitrate;
-            sendingVideoBitrate += pcUpdates.sendingVideoBitrate;
-            receivingAudioBitrate += pcUpdates.receivingAudioBitrate;
-            receivingVideoBitrate += pcUpdates.receivingVideoBitrate;
-            totalInboundPacketsLost += pcUpdates.totalInboundPacketsLost;
-            totalInboundPacketsReceived += pcUpdates.totalInboundPacketsReceived;
-            totalOutboundPacketsSent += pcUpdates.totalOutboundPacketsSent;
-            totalOutbounPacketsReceived += pcUpdates.totalOutbounPacketsReceived;
-            totalOutboundPacketsLost += pcUpdates.totalOutboundPacketsLost;
+            this.sendingAudioBitrate += peerConnectionEntry.sendingAudioBitrate ?? 0;
+            this.sendingVideoBitrate += peerConnectionEntry.sendingVideoBitrate ?? 0;
+            this.receivingAudioBitrate += peerConnectionEntry.receivingAudioBitrate ?? 0;
+            this.receivingVideoBitrate += peerConnectionEntry.receivingVideoBitrate ?? 0;
+            this.totalInboundPacketsLost += peerConnectionEntry.totalInboundPacketsLost ?? 0;
+            this.totalInboundPacketsReceived += peerConnectionEntry.totalInboundPacketsReceived ?? 0;
+            this.totalOutboundPacketsSent += peerConnectionEntry.totalOutboundPacketsSent ?? 0;
+            this.totalOutbounPacketsReceived += peerConnectionEntry.totalOutbounPacketsReceived ?? 0;
+            this.totalOutboundPacketsLost += peerConnectionEntry.totalOutboundPacketsLost ?? 0;
         }
 
-        this._updates = {
-            sendingAudioBitrate,
-            sendingVideoBitrate,
-            receivingAudioBitrate,
-            receivingVideoBitrate,
-            totalInboundPacketsLost,
-            totalInboundPacketsReceived,
-            totalOutboundPacketsSent,
-            totalOutbounPacketsReceived,
-            totalOutboundPacketsLost,
-            totalAvailableIncomingBitrate,
-            totalAvailableOutgoingBitrate,
-        }
-
-        this._traceStats();
-    }
-
-    private _traceStats() {
-        this._traces.highestSeenSendingBitrate = Math.max(
-            this._traces.highestSeenSendingBitrate, 
-            this._updates.sendingAudioBitrate + this._updates.sendingVideoBitrate
+        this.highestSeenSendingBitrate = Math.max(
+            this.highestSeenSendingBitrate ?? 0, 
+            this.sendingAudioBitrate + this.sendingVideoBitrate
         );
-        this._traces.highestSeenReceivingBitrate = Math.max(
-            this._traces.highestSeenReceivingBitrate, 
-            this._updates.receivingAudioBitrate + this._updates.receivingVideoBitrate
+        this.highestSeenReceivingBitrate = Math.max(
+            this.highestSeenReceivingBitrate ?? 0, 
+            this.receivingAudioBitrate + this.receivingVideoBitrate
         );
-        this._traces.highestSeenAvailableOutgoingBitrate = Math.max(
-            this._traces.highestSeenAvailableOutgoingBitrate, 
-            this._updates.totalAvailableOutgoingBitrate
+        this.highestSeenAvailableOutgoingBitrate = Math.max(
+            this.highestSeenAvailableOutgoingBitrate ?? 0, 
+            this.totalAvailableOutgoingBitrate
         );
-        this._traces.highestSeenAvailableIncomingBitrate = Math.max(
-            this._traces.highestSeenAvailableIncomingBitrate, 
-            this._updates.totalAvailableIncomingBitrate
+        this.highestSeenAvailableIncomingBitrate = Math.max(
+            this.highestSeenAvailableIncomingBitrate ?? 0, 
+            this.totalAvailableIncomingBitrate
         );
     }
 
-    public clear() {
-        for (const collectorId of Array.from(this._peerConnections.keys())) {
-            this.unregister(collectorId);
-        }
-    }
+    private _updateTracks() {
+        for (const inboundRtp of this.inboundRtps()) {
+            const trackId = inboundRtp.getTrackId();
+            if (!trackId) continue;
 
-    public register(peerConnectionId: string, collectorLabel?: string): void {
-        const pcEntry = PeerConnectionEntryImpl.create({
-                collectorId: peerConnectionId,
-                collectorLabel,
-                outbStabilityScoresLength: this._monitor.config.storage?.outboundRtpStabilityScoresLength ?? 10,
-            }, 
-        );
-        this._peerConnections.set(peerConnectionId, pcEntry);
-        if (this._monitor.config.createCallEvents) {
-            this._monitor.addPeerConnectionOpenedCallEvent(peerConnectionId);
-        }
-    }
-
-    public unregister(peerConnectionId: string): void {
-        const pcEntry = this._peerConnections.get(peerConnectionId);
-        if (!pcEntry) {
-            logger.warn(`Peer Connection Entry does not exist for peerConnectionId ${peerConnectionId}`);
-            return;
-        }
-        this._peerConnections.delete(peerConnectionId);
-        pcEntry.clear();
-        if (this._monitor.config.createCallEvents) {
-            this._monitor.addPeerConnectionClosedCallEvent(peerConnectionId);
-        }
-    }
-
-    public *peerConnections(): Generator<PeerConnectionEntryImpl, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            yield pcEntry;
-        }
-    }
-
-    public *receivers(): Generator<ReceiverEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.receivers()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *mediaSources(): Generator<MediaSourceEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.mediaSources()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *outboundRtps(): Generator<OutboundRtpEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.outboundRtps()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *remoteInboundRtps(): Generator<RemoteInboundRtpEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.remoteInboundRtps()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *remoteOutboundRtps(): Generator<RemoteOutboundRtpEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.remoteOutboundRtps()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *contributingSources(): Generator<ContributingSourceEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.contributingSources()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *dataChannels(): Generator<DataChannelEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.dataChannels()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *audioPlayouts(): Generator<AudioPlayoutEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.audioPlayouts()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *transceivers(): Generator<TransceiverEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.transceivers()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *senders(): Generator<SenderEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.senders()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *transports(): Generator<TransportEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.transports()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *sctpTransports(): Generator<SctpTransportEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.sctpTransports()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *iceCandidatePairs(): Generator<IceCandidatePairEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.iceCandidatePairs()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *localCandidates(): Generator<LocalCandidateEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.localCandidates()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *remoteCandidates(): Generator<RemoteCandidateEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.remoteCandidates()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *certificates(): Generator<CertificateEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.certificates()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *iceServers(): Generator<IceServerEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.iceServers()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *codecs(): Generator<CodecEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.codecs()) {
-                yield entry;
-            }
-        }
-    }
-
-    public *inboundRtps(): Generator<InboundRtpEntry, void, undefined> {
-        for (const pcEntry of this._peerConnections.values()) {
-            for (const entry of pcEntry.inboundRtps()) {
-                yield entry;
-            }
-        }
-    }
-
-    public getInboundTrack(trackId: string): InboundTrackEntry | undefined {
-        return this._inboundTrackEntries.get(trackId);
-    }
-
-    public getOutboundTrack(trackId: string): OutboundTrackEntry | undefined {
-        return this._outboundTrackEntries.get(trackId);
-    }
-
-    public getTrackEntry(trackId: string): ReturnType<StatsReader['getTrackEntry']> {
-        const outbTrack = this.getOutboundTrack(trackId);
-        if (outbTrack) {
-            return {
-                direction: 'outbound',
-                ...outbTrack
-            }
-        }
-
-        const inbTrack = this.getInboundTrack(trackId);
-        if (inbTrack) {
-            return {
-                direction: 'inbound',
-                ...inbTrack
-            }
-        }
-        return undefined;
-    }
-
-
-    private _updateInboundTrackEntries() {
-        const trackIdsToRemove = new Set(this._inboundTrackEntries.keys());
-        for (const inboundRtpEntry of this.inboundRtps()) {
-            const trackId = inboundRtpEntry.getTrackId();
-            if (!trackId) {
+            let track = this._tracks.get(trackId);
+            if (!track) {
+                track = createInboundTrackStats(
+                    inboundRtp.getPeerConnection(),
+                    trackId,
+                    inboundRtp.stats.kind
+                ) as InboundTrackStats;
+                this._tracks.set(trackId, track);
                 continue;
             }
-            trackIdsToRemove.delete(trackId);
+            track.update();
+        }
 
-            let inboundTrackEntry = this._inboundTrackEntries.get(trackId);
-            if (!inboundTrackEntry) {
-                const inboundRtpEntries = new Map<string, InboundRtpEntry>();
-                inboundTrackEntry = {
+        for (const outboundRtp of this.outboundRtps()) {
+            const trackId = outboundRtp.getTrackId();
+            if (!trackId) continue;
+
+            let track = this._tracks.get(trackId);
+            if (!track) {
+                track = createOutboundTrackStats(
+                    outboundRtp.getPeerConnection(),
                     trackId,
-                    inboundRtpEntries,
-                    getPeerConnection: () => inboundRtpEntry.getPeerConnection(),
-                    inboundRtps: () => inboundRtpEntries.values(),
-                }
-                this._inboundTrackEntries.set(inboundTrackEntry.trackId, inboundTrackEntry);
-            }
-            inboundTrackEntry.inboundRtpEntries.set(inboundRtpEntry.statsId, inboundRtpEntry);
-        }
-        if (0 < trackIdsToRemove.size) {
-            Array.from(trackIdsToRemove).forEach(trackId => this._inboundTrackEntries.delete(trackId));
-        }
-    }
-
-    private _updateOutboundTrackEntries() {
-        const trackIdsToRemove = new Set(this._outboundTrackEntries.keys());
-        for (const outboundRtpEntry of this.outboundRtps()) {
-            const trackId = outboundRtpEntry.getTrackId();
-            if (!trackId) {
+                    outboundRtp.stats.kind
+                ) as OutboundTrackStats;
+                this._tracks.set(trackId, track);
                 continue;
             }
-            trackIdsToRemove.delete(trackId);
-
-            let outboundTrackEntry = this._outboundTrackEntries.get(trackId);
-            if (!outboundTrackEntry) {
-                const outboundRtpEntries = new Map<string, OutboundRtpEntry>();
-                outboundTrackEntry = {
-                    trackId,
-                    outboundRtpEntries,
-                    getPeerConnection: () => outboundRtpEntry.getPeerConnection(),
-                    outboundRtps: () => outboundRtpEntries.values(),
-                }
-                this._outboundTrackEntries.set(outboundTrackEntry.trackId, outboundTrackEntry);
-            }
-            outboundTrackEntry.outboundRtpEntries.set(outboundRtpEntry.statsId, outboundRtpEntry);
+            track.update();
         }
-        if (0 < trackIdsToRemove.size) {
-            Array.from(trackIdsToRemove).forEach(trackId => this._outboundTrackEntries.delete(trackId));
+
+        for (const track of this._tracks.values()) {
+            if (track.direction === 'outbound') {
+                if (Array.from(track.outboundRtps()).length < 1) {
+                    this._tracks.delete(track.trackId);
+                }
+            } else if (track.direction === 'inbound') {
+                if (Array.from(track.inboundRtps()).length < 1) {
+                    this._tracks.delete(track.trackId);
+                }
+            }
         }
     }
 }

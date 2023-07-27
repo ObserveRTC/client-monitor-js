@@ -1,5 +1,5 @@
 import { ClientMonitorAlerts } from "../ClientMonitor";
-import { EvaluatorProcess } from "../Evaluators";
+import { StatsEvaluatorProcess } from "../StatsEvaluators";
 /**
  * Configuration for the dropped frames detector.
  */
@@ -34,13 +34,13 @@ export type CpuIssueDetectorConfig = {
    */
 export function createCpuIssueDetector(
 	alert: ClientMonitorAlerts['cpu-performance-alert'], 
-	config: CpuIssueDetectorConfig): EvaluatorProcess {
+	config: CpuIssueDetectorConfig): StatsEvaluatorProcess {
 	if (!config.enabled) {
 		return async () => {
 
 		};
 	}
-	const process: EvaluatorProcess = async (context) => {
+	const process: StatsEvaluatorProcess = async (context) => {
 		const { storage } = context;
 		let issueDetected = false;
 		for (const inboundRtp of storage.inboundRtps()) {

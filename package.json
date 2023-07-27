@@ -31,6 +31,14 @@
     "bowser": "^2.11.0",
     "uuid": "^8.3.2"
   },
+  "peerDependency": {
+    "mediasoup-client": "3.x"
+  },
+  "peerDependenciesMeta": {
+    "mediasoup-client": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/jest": "^27.5.2",
     "@typescript-eslint/eslint-plugin": "^5.38.0",
@@ -39,7 +47,6 @@
     "eslint": "^8.24.0",
     "jest": "^27.5.0",
     "ts-jest": "^27.1.5",
-    "typedoc": "^0.22.18",
     "typescript": "^4.8.3",
     "utf-8-validate": "^5.0.8",
     "pkgfiles": "2.3.0"

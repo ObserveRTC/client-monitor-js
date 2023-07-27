@@ -1,5 +1,5 @@
 import { ClientMonitorAlerts } from "../ClientMonitor";
-import { EvaluatorProcess } from "../Evaluators";
+import { StatsEvaluatorProcess } from "../StatsEvaluators";
 
 /**
  * Type definition for the configuration object of LowStabilityScoreDetector.
@@ -25,13 +25,13 @@ export type LowStabilityScoreDetectorConfig = {
 export function createLowStabilityScoreDetector(
 	alert: ClientMonitorAlerts['stability-score-alert'],
 	config: LowStabilityScoreDetectorConfig
-): EvaluatorProcess {
+): StatsEvaluatorProcess {
 	if (!config.enabled) {
 		return async () => {
 
 		};
 	}
-	const process: EvaluatorProcess = async (context) => {
+	const process: StatsEvaluatorProcess = async (context) => {
 		const { storage } = context;
 		const trackIds = new Set<string>();
 		for (const outboundRtp of storage.outboundRtps()) {

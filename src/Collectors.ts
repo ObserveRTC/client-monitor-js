@@ -1,298 +1,176 @@
-import { Adapter, AdapterConfig, createAdapter } from "./adapters/Adapter";
-import { PeerConnectionStatsCollector } from "./collectors/PeerConnectionStatsCollector";
-import { ScrappedStats, StatsCollector, StatsProvider } from "./collectors/StatsCollector";
-import { StatsWriter } from "./entries/StatsStorage";
+import { createPeerConnectionCollector } from "./collectors/PeerConnectionStatsCollector";
 import { createLogger } from "./utils/logger";
 import { v4 as uuid } from "uuid";
-import { ClientMonitor } from "./ClientMonitor";
 import { MediaosupDeviceSurrogate } from "./collectors/MediasoupSurrogates";
-import { MediasoupStatsCollector,  } from "./collectors/MediasoupStatsCollector";
+import { StatsMap, collectStatsValuesFromRtcStatsReport, createStatsMap } from "./utils/Stats";
+import { createProcessor } from "./utils/Processor";
+import { TypedEventEmitter } from "./utils/TypedEmitter";
+import { StatsProvider, createStatsProvider } from "./collectors/StatsProvider";
+import { StatsCollector } from "./collectors/StatsCollector";
+import { CustomCallEvent } from "./schema/Samples";
 
-const logger = createLogger("Collector");
+const logger = createLogger("Collectors");
 
-type ScrappedEntry = [string, ScrappedStats];
+export type CollectedStats = {
+    peerConnectionId: string;
+    statsMap: StatsMap;
+}[];
 
-export type CollectorsConfig = {
-    /**
-     * Sets the adapter adapt different browser type and version
-     * provided stats.
-     *
-     * by default the adapter is "guessed" by the observer
-     * extracting information about the browser type and version
-     */
-    adapter?: AdapterConfig;
-};
-
-type CollectorsConstructorConfig = CollectorsConfig;
-
-const supplyDefaultConfig = () => {
-    const defaultConfig: CollectorsConstructorConfig = {};
-    return defaultConfig;
-};
-
-interface SavedStatsCollector extends StatsCollector {
-    readonly statsProviders: Iterable<StatsProvider>;
-
-    // getScrappedEntries(): Promise<ScrappedEntry[]>;
+export type CollectorsEvents = {
+    'stats': CollectedStats,
+    'error': Error,
+    'added-stats-collector': StatsCollector,
+    'removed-stats-collector': StatsCollector,
+    'custom-call-event': CustomCallEvent,
 }
 
-export interface Collectors extends Iterable<StatsCollector> {
-    hasCollector(collectorId: string): boolean;
-    removeCollector(collectorId: string): boolean;
+export type CollectorsEmitter = TypedEventEmitter<CollectorsEvents>;
+
+export type Collectors = ReturnType<typeof createCollectors>;
+
+export function createCollectors() {
     
-    addGetStats(getStats: () => Promise<ScrappedStats>): StatsCollector | undefined;
-    
-    addStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined;
-    addRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined;
-    addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined;
-    
-}
+    const statsCollectors = new Map<string, StatsCollector>();
+    const statsProviders = new Map<string, StatsProvider>();
+    const processor = createProcessor<CollectedStats>();
+    const emitter = new TypedEventEmitter<CollectorsEvents>();
 
-export class CollectorsImpl implements Collectors {
-    public static create(config?: CollectorsConfig) {
-        const appliedConfig = Object.assign(supplyDefaultConfig(), config);
-        return new CollectorsImpl(appliedConfig);
-    }
-
-    private _statsWriter?: StatsWriter;
-    private _clientMonitor?: ClientMonitor;
-    private _config: CollectorsConstructorConfig;
-    private _statsCollectors: Map<string, SavedStatsCollector> = new Map();
-    private _lastScrappedStats: Map<string, ScrappedStats> = new Map();
-    private _adapter: Adapter;
-    private _closed = false;
-    private constructor(config: CollectorsConstructorConfig) {
-        this._config = config;
-        this._adapter = createAdapter(this._config.adapter);
-    }
-
-    /*eslint-disable @typescript-eslint/no-explicit-any*/
-    [Symbol.iterator](): Iterator<StatsCollector, any, undefined> {
-        return this._statsCollectors.values();
-    }
-
-    public set statsAcceptor(value: StatsWriter | undefined) {
-        this._statsWriter = value;
-    }
-
-    public set clientMonitor(value: ClientMonitor) {
-        this._clientMonitor = value;
-    }
-
-    public removeCollector(collectorId: string): boolean {
-        return this._removeStatsCollector(collectorId);
-    }
-
-    public addGetStats(getStats: () => Promise<ScrappedStats>, label?: string): StatsCollector | undefined {
-        return this.addStatsProvider({
-            peerConnectionId: uuid(),
-            label,
-            getStats
+    async function collect(): Promise<{ peerConnectionId: string, statsMap: StatsMap }[]> {
+        const collectingPromises: Promise<{ peerConnectionId: string, statsMap?: StatsMap, error?: Error }>[] = [];
+        for (const statsProvider of statsProviders.values()) {
+            const { peerConnectionId } = statsProvider;
+            const promise = statsProvider.getStats().then((statsReport: RTCStatsReport) => {
+                const statsValues = collectStatsValuesFromRtcStatsReport(statsReport);
+                if (!statsValues) {
+                    return {
+                        peerConnectionId,
+                        error: new Error(`Failed to collect stats from`),
+                        statsMap: undefined,
+                    };
+                }
+                const statsMap = createStatsMap(statsValues);
+                return { 
+                    peerConnectionId, 
+                    statsMap,
+                    error: undefined,
+                };
+            }).catch((error: Error) => {
+                
+                return {
+                    peerConnectionId,
+                    statsMap: undefined,
+                    error,
+                }
+            });
+            collectingPromises.push(promise);
+        }
+        
+        const result: CollectedStats = [];
+        for await (const { peerConnectionId, statsMap, error } of collectingPromises) {
+            if (error) {
+                statsProviders.delete(peerConnectionId);
+                logger.warn(`Failed to collect stats from ${peerConnectionId}. StatsProvider is removed`, error);
+                emitter.emit("error", error);
+                continue;
+            }
+            if (!statsMap) {
+                continue;
+            }
+            result.push({ peerConnectionId, statsMap });
+        }
+        await new Promise<void>((resolve, reject) => {
+            processor.process(result, (error) => {
+                if (error) reject(error);
+                else resolve();
+            });
         });
-    }
-
-    public addStatsProvider(statsProvider: StatsProvider): StatsCollector | undefined{
-        logger.trace(`addStatsProvider(): statsProvider`, statsProvider);
-
-        const peerConnectionId = statsProvider.peerConnectionId;
-        if (!this._statsWriter) {
-            logger.warn(`Added statsProvider with id ${statsProvider.peerConnectionId} cannot be added to the storage, because it is not assigned to the Collectors resource`);
-            return;
-        }
-        const close = () => {
-            this._removeStatsCollector(peerConnectionId);
-            this._statsWriter?.unregister(peerConnectionId);
-        };
-        const result: SavedStatsCollector = {
-            id: peerConnectionId,
-            statsProviders: [statsProvider],
-            close,
-        }
-        this._statsWriter?.register(peerConnectionId, statsProvider.label);
-        if (!this._addStatsCollector(result)) {
-            return;
-        }
         return result;
     }
 
-    public addRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionStatsCollector | undefined {
+    function addGetStats(getStats: () => Promise<RTCStatsReport>, label?: string) {
+        let closedStatsCollector = false;
+        const peerConnectionId = uuid();
+        const statsProvider = createStatsProvider(
+            getStats,
+            peerConnectionId,
+            label,
+        )
+        const statsCollector: StatsCollector = {
+            id: peerConnectionId,
+            close: () => {
+                if (closedStatsCollector) return;
+                closedStatsCollector = true;
+                statsProviders.delete(peerConnectionId);
+                statsCollectors.delete(peerConnectionId);
+                emitter.emit('removed-stats-collector', statsCollector);
+            },
+            get closed() {
+                return closedStatsCollector;
+            }
+        }
+        statsProviders.set(peerConnectionId, statsProvider);
+        statsCollectors.set(peerConnectionId, statsCollector);
+        emitter.emit('added-stats-collector', statsCollector);
+        return statsCollector;
+    }
+
+    function addRTCPeerConnection(peerConnection: RTCPeerConnection, peerConnectionLabel?: string): StatsCollector {
         logger.trace(`addRTCPeerConnection(): statsProvider`, peerConnection);
-
-        if (!this._clientMonitor) {
-            logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
-            return;
-        }
-
-        /* eslint-disable @typescript-eslint/no-this-alias */
-        const collectors = this;
-        const pcStatsCollector = new class extends PeerConnectionStatsCollector implements SavedStatsCollector {
-            protected _close(): void {
-                collectors._removeStatsCollector(pcStatsCollector.id);
+        const statsCollector = createPeerConnectionCollector({
+            peerConnectionId: uuid(), 
+            peerConnection,
+            peerConnectionLabel,
+            emitCallEvent: (event: CustomCallEvent) => {
+                emitter.emit('custom-call-event', event);
             }
-            protected _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void {
-                collectors._statsWriter?.register(peerConnectionId, peerConnectionLabel);
-            }
-            protected _removePeerConnection(peerConnectionId: string): void {
-                collectors._statsWriter?.unregister(peerConnectionId);
-            }
-
-        }(peerConnection, this._clientMonitor);
-
-        if (!this._addStatsCollector(pcStatsCollector)) {
-            return;
-        }
-        return pcStatsCollector;
+        });
+        statsCollector.onclose = () => {
+            statsCollectors.delete(statsCollector.id);
+            statsProviders.delete(statsCollector.id);
+            emitter.emit('removed-stats-collector', statsCollector);
+        };
+        statsCollectors.set(statsCollector.id, statsCollector);
+        statsProviders.set(statsCollector.id, statsCollector);
+        emitter.emit('added-stats-collector', statsCollector)
+        return statsCollector;
     }
 
-    public addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate): MediasoupStatsCollector | undefined {
+    function addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate) {
         logger.trace(`addMediasoupDevice(): mediasoupDevice: `, mediasoupDevice);
-
-        if (!this._clientMonitor) {
-            logger.warn(`Cannot add mediasoup device for mediasoup stats collector, becasue the clientMonitor is not initialized for Collectors`);
-            return;
-        }
-        
-        /* eslint-disable @typescript-eslint/no-this-alias */
-        const collectors = this;
-        const mediasoupStatsCollector = new class extends MediasoupStatsCollector {
-            get statsProviders(): IterableIterator<StatsProvider> {
-                return mediasoupStatsCollector.getStatsProviders();
-            }
-            protected _close(): void {
-                collectors._removeStatsCollector(mediasoupStatsCollector.id);
-            }
-            protected _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void {
-                collectors._statsWriter?.register(peerConnectionId, peerConnectionLabel);
-            }
-            protected _removePeerConnection(peerConnectionId: string): void {
-                collectors._statsWriter?.unregister(peerConnectionId);
-            }
-        }(mediasoupDevice, this._clientMonitor);
-
-        if (!this._addStatsCollector(mediasoupStatsCollector)) {
-            return;
-        }
-        return mediasoupStatsCollector;
     }
 
-    public async collect(): Promise<void> {
-        if (this._closed) {
-            throw new Error(`Collector is already closed`);
+    function clear() {
+        for (const statsCollector of statsCollectors.values()) {
+            statsCollector.close();
         }
-        if (!this._statsWriter) {
-            logger.warn(`Output of the collector has not been set`);
-            return;
-        }
-
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const failedCollectors: [string, any][] = [];
-        const promises: Promise<ScrappedEntry | undefined>[] = [];
-        for (const statsCollector of this._statsCollectors.values()) {
-            const { id: collectorId, statsProviders } = statsCollector;
-            for (const statsProvider of statsProviders) {
-                const promise: Promise<ScrappedEntry | undefined> = statsProvider.getStats()
-                    .then(scrappedStats => {
-                        const scrappedEntry: ScrappedEntry = [statsProvider.peerConnectionId, scrappedStats];
-                        return scrappedEntry;
-                    })
-                    .catch((err) => {
-                        failedCollectors.push([collectorId, err]);
-                        return undefined;
-                    });
-                promises.push(promise);
-            }
-        }
-
-        // reset the memory field
-        this._lastScrappedStats.clear();
-
-        for await (const scrappedEntry of promises) {
-            if (scrappedEntry === undefined) continue;
-            if (this._closed) {
-                // if this resource is closed meanwhile stats being vollected
-                return;
-            }
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            const [collectorId, scrappedStats] = scrappedEntry;
-            if (scrappedStats?.values) {
-                const lastScrappedStats = this._lastScrappedStats.get(collectorId) || [];
-                lastScrappedStats.push(...Array.from(scrappedStats.values()));
-                this._lastScrappedStats.set(collectorId, lastScrappedStats);
-            }
-            
-            for (const statsEntry of this._adapter.adapt(scrappedStats)) {
-                if (!statsEntry) continue;
-                try {
-                    this._statsWriter.accept(collectorId, statsEntry);
-                } catch (err: any) {
-                    failedCollectors.push([collectorId, err]);
-                }
-            }    
-        }
-        for (const failedCollector of failedCollectors) {
-            // remove and log problems
-            const [collectorId, err] = failedCollector;
-            this._removeStatsCollector(collectorId);
-            logger.warn(`collector ${collectorId} is removed due to reported error`, err);
-        }
+        statsCollectors.clear();
+        statsProviders.clear();
     }
 
-    public lastStats(): ScrappedStats[] {
-        return Array.from(this._lastScrappedStats.values());
+    const result = {
+        get: (collectorId: string) => statsCollectors.get(collectorId),
+        has: (collectorId: string) => statsCollectors.has(collectorId),
+        addGetStats,
+        addRTCPeerConnection,
+        addMediasoupDevice,
+        collect,
+        get processor() {
+            return processor;
+        },
+        on<K extends keyof CollectorsEvents>(event: K, listener: (data: CollectorsEvents[K]) => void) {
+            emitter.on(event, listener);
+            return result;
+        },
+        off<K extends keyof CollectorsEvents>(event: K, listener: (data: CollectorsEvents[K]) => void) {
+            emitter.off(event, listener);
+            return result;
+        },
+        once<K extends keyof CollectorsEvents>(event: K, listener: (data: CollectorsEvents[K]) => void) {
+            emitter.once(event, listener);
+            return result;
+        },
+        clear,
     }
-
-    public hasCollector(statsCollectorId: string): boolean {
-        return this._statsCollectors.has(statsCollectorId);
-    }
-
-    
-    public close(): void {
-        if (this._closed) {
-            logger.warn(`Attempted to close the resource twice`);
-            return;
-        }
-        try {
-            for (const statsCollector of this._statsCollectors.values()) {
-                statsCollector.close();
-            }
-            this._statsCollectors.clear();
-        } finally {
-            this._closed = true;
-            logger.info(`Closed`);
-        }
-    }
-
-    /**
-     * Adds a collector for a stats of a peer connection
-     * @param pcStatsCollector Collector wanted to add.
-     */
-    private _addStatsCollector(statsCollector: SavedStatsCollector): boolean {
-        if (this._closed) {
-            logger.warn(`Cannot add StatsCollector because the Collector is closed`);
-            return false;
-        }
-        const { id: collectorId } = statsCollector;
-        if (this._statsCollectors.has(collectorId)) {
-            logger.warn(`StatsCollector with id ${collectorId} has already been added`);
-            return false;
-        }
-        this._statsCollectors.set(collectorId, statsCollector);
-        return true;
-    }
-
-    private _removeStatsCollector(collectorId: string): boolean {
-        if (this._closed) {
-            logger.warn(`Cannot remove StatsCollector because the Collector is closed`);
-            return false;
-        }
-        
-        this._lastScrappedStats.delete(collectorId);
-
-        if (!this._statsCollectors.delete(collectorId)) {
-            logger.warn(`Collector with peer connection id ${collectorId} was not found`);
-            return false;
-        }
-        return true;
-    }
-
+    return result;
 }
+

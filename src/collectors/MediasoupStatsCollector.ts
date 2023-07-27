@@ -1,519 +1,356 @@
-import { StatsCollector, StatsProvider } from "./StatsCollector";
-import { v4 as uuid } from "uuid";
-import { ClientMonitor } from "../ClientMonitor";
-import { createLogger } from "../utils/logger";
-import { MediasoupConsumerSurrogate, 
-    MediasoupDeviceObserverListener, 
-    MediasoupProducerSurrogate,
-    MediaosupDeviceSurrogate,
-    MediasoupTransportSurrogate,
-    MediasoupTransportObserverListener,
-    MediasoupDataConsumerSurrogate,
-    MediasoupDataProducerSurrogate
+import { CustomCallEvent } from "../schema/Samples";
+import { StatsStorage } from "../entries/StatsStorage";
+import { listenTrackEvents } from "./utils";
+import { 
+    createIceGatheringStateChangedEvent, 
+    createPeerConnectionClosedEvent, 
+    createPeerConnectionOpenedEvent, 
+    createPeerConnectionStateChangedEvent 
+} from "../utils/callEvents";
+import { 
+    MediaosupDeviceSurrogate, 
+    MediasoupConsumerSurrogate, 
+    MediasoupDataConsumerSurrogate, 
+    MediasoupDataProducerSurrogate, 
+    MediasoupProducerSurrogate, 
+    MediasoupTransportSurrogate 
 } from "./MediasoupSurrogates";
-import  * as W3CStats from '../schema/W3cStatsIdentifiers';
-import { createEmptyIterable } from "../utils/common";
-import { CallEventType } from "../utils/callEvents";
 
-const logger = createLogger("MediasoupStatsCollector");
-
-
-
-
-type DisposedListener = () => void;
-
-interface MediasoupStatsProvider extends StatsProvider {
-    key: string,
+export type MediasoupStatsCollectorConfig = {
+    collectorId?: string,
+    device: MediaosupDeviceSurrogate,
+    emitCallEvent: ((event: CustomCallEvent) => void);
+    storage: StatsStorage
 }
 
-type MediasoupStatsCollectorConfig = {
-    pollConsumers: boolean,
-    pollProducers: boolean,
+export function createMediasoupStatsCollector(config: MediasoupStatsCollectorConfig) {
+    const {
+        collectorId = 'mediasoup',
+        device,
+        emitCallEvent,
+        storage,
+    } = config;
+    
+    const transports = new Map<string, MediasoupTransportSurrogate>();
+    const addedOutboundTrackIds = new Set<string>();
+    const producers = new Map<string, MediasoupProducerSurrogate>();
+    const consumers = new Map<string, MediasoupConsumerSurrogate>();
 
-    /**
-     * Since firefox does not provide mediaSource or any object can actually connect
-     * outbound-rtp to tracks, we need this hack
-     */
-    forgeSenderStats: boolean,
-
-    addInboundTrackIdentifier: boolean,
-}
-
-export abstract class MediasoupStatsCollector implements StatsCollector {
-
-    readonly id = uuid();
-
-    private _closed = false;
-    private _config: MediasoupStatsCollectorConfig;
-    private _statsProviders = new Map<string, MediasoupStatsProvider>();
-    private _device: MediaosupDeviceSurrogate;
-    private _clientMonitor: ClientMonitor;
-    private _trackIds = new Set<string>();
-    private _producers = new Map<string, MediasoupProducerSurrogate>();
-    private _consumers = new Map<string, MediasoupConsumerSurrogate>();
-    private _dataProducers = new Map<string, MediasoupDataProducerSurrogate>();
-    private _dataConsumers = new Map<string, MediasoupDataConsumerSurrogate>();
-    private _disposeDeviceListener?: DisposedListener;
-
-    public constructor(device: MediaosupDeviceSurrogate, clientMonitor: ClientMonitor, config?: Partial<MediasoupStatsCollectorConfig>) {
-        this._clientMonitor = clientMonitor;
-        this._device = device;
-        
-        const isFirefox = (clientMonitor.browser.name ?? "unknown").toLowerCase() === "firefox";
-        this._config = Object.assign({
-            forgeSenderStats: isFirefox,
-            pollConsumers: isFirefox,
-            pollProducers: isFirefox,
-            addInboundTrackIdentifier: isFirefox,
-        }, config ?? {});
-
-        const newTransportListener: MediasoupDeviceObserverListener = transport => {
-            this.addTransport(transport);
-        };
-        const statsCollectedListener = () => {
-            this._refresh();
-        };
-        
-        this._clientMonitor.on('stats-collected', statsCollectedListener);
-        this._disposeDeviceListener = () => {
-            device.observer.removeListener("newtransport", newTransportListener);
-            this._clientMonitor.off('stats-collected', statsCollectedListener);
-            this._disposeDeviceListener = undefined;
-        }
-        this._device.observer.on("newtransport", newTransportListener);
+    const getLastSndTransport = () => {
+        const sndTransports = Array.from(transports.values()).filter(transport => transport.direction === 'send');
+        return sndTransports.length < 1 ? undefined : sndTransports[sndTransports.length - 1];
     }
 
-    public get closed() {
-        return this._closed;
+    function addTrack(event: {
+        track: MediaStreamTrack,
+        peerConnectionId: string,
+        direction: 'outbound' | 'inbound',
+        added?: number,
+        sfuStreamId?: string,
+        sfuSinkId?: string,
+    }) {
+        const {
+            track,
+            ...eventBase
+        } = event;
+        if (!track.id || addedOutboundTrackIds.has(track.id)) {
+            return;
+        }
+        addedOutboundTrackIds.add(track.id);
+
+        listenTrackEvents({
+            ...eventBase,
+            track,
+            emitCallEvent,
+        });
+    }
+
+    function addOutboundTrack(track: MediaStreamTrack) {
+        const sndTransport = getLastSndTransport();
+        if (!sndTransport) {
+            return;
+        }
+        addTrack({
+            track,
+            peerConnectionId: sndTransport.id,
+            direction: 'outbound',
+        });
     }
     
-    public close() {
-        if (this._closed) {
-            logger.warn(`Attempted to close a resource twice`);
-            return;
-        }
-        this._closed = true;
-        if (this._disposeDeviceListener) {
-            this._disposeDeviceListener();
-        }
-        const statsProviders = Array.from(this._statsProviders.values());
-        this._statsProviders.clear();
-
-        const peerConnectionIds = new Set<string>(statsProviders.map(statsProvider => statsProvider.peerConnectionId));
-        for (const peerConnectionId of peerConnectionIds) {
-            this._removePeerConnection(peerConnectionId);
-        }
-        
-        this._close();
-    }
-    
-    protected getStatsProviders(): IterableIterator<StatsProvider> {
-        return this._statsProviders.values();
-    }
-
-    private _addTrack(trackId: string, sfuStreamId: string, sfuSinkId?: string) {
-        if (this._closed) {
-            return;
-        }
-        this._clientMonitor.addTrackRelation({
-            trackId,
-            sfuStreamId,
-            sfuSinkId,
-        });
-        this._trackIds.add(trackId);
-        logger.debug(`Producer (${sfuStreamId}) bound to track ${trackId}`);
-    }
-
-    private _removeTrack(trackId: string) {
-        this._clientMonitor.removeTrackRelation(trackId);
-        this._trackIds.delete(trackId);
-        logger.debug(`Track ${trackId} is unbound`);
-    }
-
-    public addTransport(transport: MediasoupTransportSurrogate): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
-            return;
-        }
-
-        const peerConnectionId = transport.id || uuid();
-        const statsProviderKey = `transport-${peerConnectionId}`;
-        const statsProvider: MediasoupStatsProvider = {
-            key: statsProviderKey,
-            peerConnectionId,
-            label: transport.direction,
-            getStats: async () => {
-                if (!this._config.pollConsumers || !this._config.pollProducers) {
-                    return await transport.getStats();
-                }
-                const rtcStats = await transport.getStats();
-                if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
-                    return rtcStats;
-                }
-                return {
-                    values: () => {
-                        /*eslint-disable @typescript-eslint/no-explicit-any */
-                        return Array.from(rtcStats.values()).filter((stats: any) => {
-                            if (this._config.pollProducers) {
-                                return stats?.type !== W3CStats.StatsType.outboundRtp && 
-                                    stats?.type !== W3CStats.StatsType.remoteInboundRtp;
-                            }
-                            if (this._config.pollConsumers) {
-                                return stats?.type !== W3CStats.StatsType.inboundRtp && 
-                                    stats?.type !== W3CStats.StatsType.remoteOutboundRtp;
-                            }
-                            return true;
-                        })
-                    }
-                }
-            },
-        }
-        this._statsProviders.set(statsProviderKey, statsProvider);
-        this._addPeerConnection(peerConnectionId, statsProvider.label);
-
-        const newProducerListener: MediasoupTransportObserverListener = data => {
-            this._addProducer(data as MediasoupProducerSurrogate, statsProvider);
-        }
-        transport.observer.on("newproducer", newProducerListener);
-
-        const newConsumerListener: MediasoupTransportObserverListener = data => {
-            this._addConsumer(data as MediasoupConsumerSurrogate, statsProvider);
-        }
-        transport.observer.on("newconsumer", newConsumerListener);
-
-        const newDataConsumerListener: MediasoupTransportObserverListener = data => {
-            this._addDataConsumer(data as MediasoupDataConsumerSurrogate);
-        }
-        transport.observer.on("newdataconsumer", newDataConsumerListener);
-
-        const newDataProducerListener: MediasoupTransportObserverListener = data => {
-            this._addDataProducer(data as MediasoupDataProducerSurrogate);
-        }
-        transport.observer.on("newdataproducer", newDataProducerListener);
-        
-        const connectionStateChangeListener: MediasoupTransportObserverListener = data => {
-            const connectionState = data as W3CStats.RtcIceTransportState;
-            if (this._clientMonitor.config.createCallEvents) {
-                this._clientMonitor.addCustomCallEvent({
-                    name: CallEventType.ICE_CONNECTION_STATE_CHANGED,
-                    peerConnectionId,
-                    value: connectionState,
-                    timestamp: Date.now(),
-                });
-            }
-        }
-        transport.observer.on("connectionstatechange", connectionStateChangeListener);
-
-        transport.observer.once("close", () => {
-            transport.observer.removeListener("newproducer", newProducerListener);
-            transport.observer.removeListener("newconsumer", newConsumerListener);
-            transport.observer.removeListener("newdataconsumer", newDataConsumerListener);
-            transport.observer.removeListener("newdataproducer", newDataProducerListener);
-            transport.observer.removeListener("connectionstatechange", connectionStateChangeListener);
-            
-            this._statsProviders.delete(statsProviderKey);
-            this._removePeerConnection(peerConnectionId);
-        });
-    }
-
-    private _addProducer(producer: MediasoupProducerSurrogate, parent: MediasoupStatsProvider): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
-            return;
-        }
-        const pausedListener = () => {
-            if (this._clientMonitor.config.createCallEvents) {
-                this._clientMonitor.addCustomCallEvent({
-                    name: CallEventType.PRODUCER_PAUSED,
-                    peerConnectionId: parent.peerConnectionId,
-                    mediaTrackId: producer.track.id,
-                    timestamp: Date.now(),
-                    attachments: JSON.stringify({
-                        producerId: producer.id,
-                    })
-                });
-            }
-        };
-        producer.observer.on("pause", pausedListener);
-
-        const resumedListener = () => {
-            if (this._clientMonitor.config.createCallEvents) {
-                this._clientMonitor.addCustomCallEvent({
-                    name: CallEventType.PRODUCER_RESUMED,
-                    peerConnectionId: parent.peerConnectionId,
-                    mediaTrackId: producer.track.id,
-                    timestamp: Date.now(),
-                    attachments: JSON.stringify({
-                        producerId: producer.id,
-                    })
-                });
-            }
-        };
-        producer.observer.on("resume", resumedListener);
-
-        this._addTrack(
-            producer.track.id,
-            producer.id
-        );
-        
-        const statsProviderKey = `producer-${producer.id}`
-        const statsProvider: MediasoupStatsProvider = {
-            key: statsProviderKey,
-            peerConnectionId: parent.peerConnectionId,
-            label: parent.label,
-            getStats: async () => {
-                if (!this._config.pollProducers) {
-                    return {
-                        values: () => createEmptyIterable<any>(undefined)
-                    }
-                }
-                const rtcStats = await producer.getStats();
-                if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
-                    return rtcStats;
-                }
-                if (!this._config.forgeSenderStats) {
-                    // if we don't have to add the forged sender stats, then we can rest (in piece)
-                    return rtcStats;
-                }
-                const senderStats: W3CStats.RtcSenderCompoundStats = {
-                    id: `client-monitor-forged-sender-stats-${producer.id}`,
-                    type: "sender",
-                    trackIdentifier: producer.track.id,
+    function createAddProducerListener(peerConnectionId: string) {
+        return (producer: MediasoupProducerSurrogate) => {
+            const eventBase = {
+                peerConnectionId,
+                mediaTrackId: producer.track?.id,
+                attachments: JSON.stringify({
+                    producerId: producer.id,
                     kind: producer.kind,
-                    timestamp: Date.now(),
-                }
-                return {
-                    values: () => {
-                        /*eslint-disable @typescript-eslint/no-explicit-any */
-                        const result: any[] = Array.from(rtcStats.values())
-                            /*eslint-disable @typescript-eslint/no-explicit-any */
-                            .map((stats: any) => {
-                                if (stats.type === "outbound-rtp") {
-                                    stats.senderId = senderStats.id
-                                }
-                                return stats;
-                            });
-                        result.push(senderStats);
-                        return result;
-                    }
-                }
-            },
-        }
-        this._statsProviders.set(statsProviderKey, statsProvider);
-        this._producers.set(producer.id, producer);
-
-        if (this._clientMonitor.config.createCallEvents) {
-            this._clientMonitor.addMediaTrackAddedCallEvent(
-                parent.peerConnectionId,
-                producer.track.id,
-                Date.now(),
-                JSON.stringify({
-                    kind: producer.kind,
-                    direction: 'outbound',
-                }),
-            );            
-        }
-
-        producer.observer.once("close", () => {
-            producer.observer.removeListener("pause", pausedListener);
-            producer.observer.removeListener("resume", resumedListener);
-            this._removeTrack(producer.track.id);
-        
-            this._statsProviders.delete(statsProviderKey);
-            this._producers.delete(producer.id);
-            
-            if (this._clientMonitor.config.createCallEvents) {
-                this._clientMonitor.addMediaTrackRemovedCallEvent(
-                    parent.peerConnectionId,
-                    producer.track.id,
-                    Date.now(),
-                    JSON.stringify({
-                        kind: producer.kind,
-                        direction: 'outbound',
-                    }),
-                );
+                })
+            };
+            const pauseListener = () => {
+                emitCallEvent({
+                    name: 'PRODUCER_PAUSED',
+                    ...eventBase
+                });
             }
-            
-        });
-    }
-
-    private _addDataProducer(dataProducer: MediasoupDataProducerSurrogate): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
-            return;
-        }
-
-        this._dataProducers.set(dataProducer.id, dataProducer);
-        dataProducer.observer.once("close", () => {
-            this._dataProducers.delete(dataProducer.id);
-        });
-    }
-
-    private _addConsumer(consumer: MediasoupConsumerSurrogate, parent: MediasoupStatsProvider): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
-            return;
-        }
-
-        const pausedListener = () => {
-           if (this._clientMonitor.config.createCallEvents) {
-            this._clientMonitor.addCustomCallEvent({
-                name: CallEventType.CONSUMER_PAUSED,
-                peerConnectionId: parent.peerConnectionId,
-                mediaTrackId: consumer.track.id,
-                timestamp: Date.now(),
+            const resumeListener = () => {
+                emitCallEvent({
+                    name: 'PRODUCER_RESUMED',
+                    ...eventBase
+                });
+            }
+            producer.observer.once('close', () => {
+                producer.observer.off('pause', pauseListener);
+                producer.observer.off('resume', resumeListener);
+                producers.delete(producer.id);
+                emitCallEvent({
+                    name: 'PRODUCER_REMOVED',
+                    ...eventBase
+                });
             });
-           }
-        };
-        consumer.observer.on("pause", pausedListener);
+            producer.observer.on('pause', pauseListener);
+            producer.observer.on('resume', resumeListener);
+            producers.set(producer.id, producer);
 
-        const resumedListener = () => {
-            if (this._clientMonitor.config.createCallEvents) {
-                this._clientMonitor.addCustomCallEvent({
-                    name: CallEventType.CONSUMER_RESUMED,
-                    peerConnectionId: parent.peerConnectionId,
-                    mediaTrackId: consumer.track.id,
-                    timestamp: Date.now(),
+            emitCallEvent({
+                name: 'PRODUCER_ADDED',
+                ...eventBase
+            });
+
+            if (producer.track) {
+                addTrack({
+                    peerConnectionId,
+                    direction: 'outbound',
+                    track: producer.track,
+                    sfuStreamId: producer.id,
                 });
             }
-            
-        };
-        consumer.observer.on("resume", resumedListener);
-
-        this._addTrack(
-            consumer.track.id,
-            consumer.producerId,
-            consumer.id
-        );
-        
-        const statsProviderKey = `consumer-${consumer.id}`
-        const statsProvider: MediasoupStatsProvider = {
-            key: statsProviderKey,
-            peerConnectionId: parent.peerConnectionId,
-            label: parent.label,
-            getStats: async () => {
-                if (!this._config.pollConsumers) {
-                    return {
-                        values: () => createEmptyIterable<any>(undefined)
-                    }
-                }
-                const rtcStats = await consumer.getStats();
-                if (rtcStats === undefined || rtcStats.values === undefined || typeof rtcStats.values !== 'function') {
-                    return rtcStats;
-                }
-                if (!this._config.addInboundTrackIdentifier) {
-                    return rtcStats;
-                }
-                return {
-                    values: () => {
-                        return Array.from(rtcStats.values())
-                            /*eslint-disable @typescript-eslint/no-explicit-any */
-                            .map((stats: any) => {
-                                if (stats.type === "inbound-rtp") {
-                                    stats.trackIdentifier = consumer.track.id;
-                                }
-                                return stats;
-                            });
-                    }
-                }
-            },
         }
-        this._statsProviders.set(statsProviderKey, statsProvider);
-        this._consumers.set(consumer.id, consumer);
-        
-        if (this._clientMonitor.config.createCallEvents) {
-            this._clientMonitor.addMediaTrackAddedCallEvent(
-                parent.peerConnectionId,
-                consumer.track.id,
-                Date.now(),
-                JSON.stringify({
-                    kind: consumer.kind,
-                    direction: 'inbound',
-                }),
-            );
-        }
+    }
 
-        consumer.observer.once("close", () => {
-            consumer.observer.removeListener("pause", pausedListener);
-            consumer.observer.removeListener("resume", resumedListener);
-            this._removeTrack(consumer.track.id);
-            
-            this._statsProviders.delete(statsProviderKey);
-            this._consumers.delete(consumer.id);
-
-            if (this._clientMonitor.config.createCallEvents) {
-                this._clientMonitor.addMediaTrackRemovedCallEvent(
-                    parent.peerConnectionId,
-                    consumer.track.id,
-                    Date.now(),
-                    JSON.stringify({
+    function createAddConsumerListener(peerConnectionId: string) {
+        return (consumer: MediasoupConsumerSurrogate) => {
+            const eventBase = {
+                    peerConnectionId,
+                    mediaTrackId: consumer.track.id,
+                    attachments: JSON.stringify({
+                        producerId: consumer.id,
                         kind: consumer.kind,
-                        direction: 'inbound',
-                    }),
-                );
+                    })
+                };
+            const pauseListener = () => {
+                emitCallEvent({
+                    name: 'CONSUMER_PAUSED',
+                    ...eventBase
+                });
             }
-        });
+            const resumeListener = () => {
+                emitCallEvent({
+                    name: 'CONSUMER_RESUMED',
+                    ...eventBase
+                });
+            }
+            consumer.observer.once('close', () => {
+                consumer.observer.off('pause', pauseListener);
+                consumer.observer.off('resume', resumeListener);
+                consumers.delete(consumer.id);
+                emitCallEvent({
+                    name: 'CONSUMER_REMOVED',
+                    ...eventBase
+                });
+            });
+            consumer.observer.on('pause', pauseListener);
+            consumer.observer.on('resume', resumeListener);
+            consumers.set(consumer.id, consumer);
+            emitCallEvent({
+                name: 'CONSUMER_ADDED',
+                ...eventBase
+            });
+
+            addTrack({
+                peerConnectionId,
+                direction: 'inbound',
+                track: consumer.track,
+                sfuStreamId: consumer.producerId,
+                sfuSinkId: consumer.id,
+            });
+        }
     }
 
-    private _addDataConsumer(dataConsumer: MediasoupDataConsumerSurrogate): void {
-        if (this._closed) {
-            // might happens that we closed this collector, but the device tached something
+    function createAddDataProducerListener(peerConnectionId: string) {
+        return (dataProducer: MediasoupDataProducerSurrogate) => {
+            const eventBase = {
+                peerConnectionId,
+                attachments: JSON.stringify({
+                    dataProducerId: dataProducer.id,
+                })
+            };
+            const closeListener = () => {
+                emitCallEvent({
+                    name: 'DATA_PRODUCER_CLOSED',
+                    ...eventBase
+                });
+            }
+            dataProducer.observer.once('close', closeListener);
+            emitCallEvent({
+                name: 'DATA_PRODUCER_OPENED',
+                ...eventBase
+            });
+        }
+    }
+
+    function createAddDataConsumerListener(peerConnectionId: string) {
+        return (dataConsumer: MediasoupDataConsumerSurrogate) => {
+            const eventBase = {
+                peerConnectionId,
+                attachments: JSON.stringify({
+                    dataProducerId: dataConsumer.dataProducerId,
+                    dataConsumerId: dataConsumer.id,
+                })
+            };
+            const closeListener = () => {
+                emitCallEvent({
+                    name: 'DATA_CONSUMER_CLOSED',
+                    ...eventBase
+                });
+            }
+            dataConsumer.observer.once('close', closeListener);
+            emitCallEvent({
+                name: 'DATA_CONSUMER_OPENED',
+                ...eventBase
+            });
+        }
+    }
+
+
+    function addTransport(transport: MediasoupTransportSurrogate, timestamp?: number) {
+        const eventBase = {
+            peerConnectionId: transport.id,
+            attachments: JSON.stringify({
+                label: transport.direction,
+            })
+        }
+        const addProducerListener = createAddProducerListener(transport.id);
+        const addConsumerListener = createAddConsumerListener(transport.id);
+        const addDataProducerListener = createAddDataProducerListener(transport.id);
+        const addDataConsumerListener = createAddDataConsumerListener(transport.id);
+        const peerConnectionStateChangeListener = (peerConnectionState: RTCPeerConnectionState) => {
+            emitCallEvent(
+                createPeerConnectionStateChangedEvent({
+                    ...eventBase,
+                    peerConnectionState
+                })
+            );
+        };
+        const iceGatheringStateChangeListener = (iceGatheringState: RTCIceGatheringState) => {
+            emitCallEvent(
+                createIceGatheringStateChangedEvent({
+                    ...eventBase,
+                    iceGatheringState
+                })
+            );
+        };
+        
+        transport.observer.once('close', () => {
+            transport.observer.off("newproducer", addProducerListener);
+            transport.observer.off("newconsumer", addConsumerListener);
+            transport.observer.off("newdataproducer", addDataProducerListener);
+            transport.observer.off("newdataconsumer", addDataConsumerListener);
+            transport.off('connectionstatechange', peerConnectionStateChangeListener);
+            transport.off('icegatheringstatechange', iceGatheringStateChangeListener);
+            transports.delete(transport.id);
+            emitCallEvent(
+                createPeerConnectionClosedEvent(eventBase)
+            );
+        });
+        transport.observer.on("newproducer", addProducerListener);
+        transport.observer.on("newconsumer", addConsumerListener);
+        transport.observer.on("newdataproducer", addDataProducerListener);
+        transport.observer.on("newdataconsumer", addDataConsumerListener);
+        transport.on('connectionstatechange', peerConnectionStateChangeListener);
+        transport.on('icegatheringstatechange', iceGatheringStateChangeListener);
+        emitCallEvent(
+            createPeerConnectionOpenedEvent({
+                ...eventBase,
+                timestamp
+            })
+        );
+    }
+
+    function adaptStorageMiddleware(storage: StatsStorage, next: (storage: StatsStorage) => void) {
+        const sndTransport = getLastSndTransport();
+        const peerConnectionStats = storage.getPeerConnection(sndTransport?.id ?? '');
+        if (!peerConnectionStats) {
+            return next(storage);
+        }
+        for (const producer of producers.values()) {
+            if (!producer.track) {
+                continue;
+            }
+            producer.rtpParameters.encodings?.forEach(encoding => {
+                const ssrc = encoding.ssrc;
+                if (!ssrc) {
+                    return;
+                }
+                for (const outboundRtp of peerConnectionStats.outboundRtps(ssrc)) {
+                    outboundRtp.sfuStreamId = producer.id;
+
+                    const mediaSource = outboundRtp.getMediaSource();
+                    if (mediaSource && producer.track) {
+                        mediaSource.stats.trackIdentifier = producer.track.id;
+                    }
+                }
+            });
+            if (producer.track && !addedOutboundTrackIds.has(producer.track.id) && producer.track.readyState === 'live') {
+                addTrack({
+                    track: producer.track,
+                    peerConnectionId: peerConnectionStats.peerConnectionId,
+                    direction: 'outbound',
+                });
+            }
+        }
+        for (const consumer of consumers.values()) {
+            consumer.rtpParameters.encodings?.forEach(encoding => {
+                const ssrc = encoding.ssrc;
+                if (!ssrc) {
+                    return;
+                }
+                for (const inboundRtp of peerConnectionStats.inboundRtps(ssrc)) {
+                    if (inboundRtp.getTrackId() !== consumer.track.id) {
+                        inboundRtp.stats.trackIdentifier = consumer.track.id;
+                    }
+                    inboundRtp.sfuStreamId = consumer.producerId;
+                    inboundRtp.sfuSinkId = consumer.id;
+                }
+            });
+        }
+        return next(storage);
+    }
+
+    let closed = false;
+    function close() {
+        if (closed) {
             return;
         }
-
-        this._dataConsumers.set(dataConsumer.id, dataConsumer);
-        dataConsumer.observer.once("close", () => {
-            this._dataConsumers.delete(dataConsumer.id);
-        });
+        closed = true;
+        transports.clear();
+        producers.clear();
+        consumers.clear();
+        device.observer.off("newtransport", addTransport);
+        storage.processor.removeMiddleware(adaptStorageMiddleware);
     }
+    device.observer.on("newtransport", addTransport);
+    storage.processor.addMiddleware(adaptStorageMiddleware)
 
-    private _refresh(): void {
-        if (this._closed) {
-            return;
-        }
-        let failed = 0;
-        try {
-            const removedTrackIds = new Set<string>(this._trackIds);
-            for (const producer of Array.from(this._producers.values())) {
-                if (producer?.track?.id === undefined) {
-                    continue;
-                }
-                const bound = removedTrackIds.delete(producer.track.id);
-                if (!bound) {
-                    this._addTrack(
-                        producer.track.id,
-                        producer.id
-                    )
-                }
-            }
-            for (const consumer of Array.from(this._consumers.values())) {
-                if (consumer?.track?.id === undefined) {
-                    continue;
-                }
-                const bound = removedTrackIds.delete(consumer.track.id);
-                if (!bound) {
-                    this._addTrack(
-                        consumer.track.id,
-                        consumer.producerId,
-                        consumer.id
-                    )
-                }
-            }
-            for (const trackId of Array.from(removedTrackIds)) {
-                this._removeTrack(trackId);
-            }
-            failed = 0;
-        } catch (err) {
-            logger.warn("Error occurred while refreshing track relations", err);
-            if (2 < ++failed) {
-                logger.warn("The refresh for track relations failed 3 consecutive times, the collector will be closed");
-                this.close();
-            }
+    return {
+        get id() {
+            return collectorId;
+        },
+        close,
+        addTransport,
+        addOutboundTrack,
+        get closed() {
+            return closed;
         }
     }
-
-    protected abstract _close(): void;
-    protected abstract _addPeerConnection(peerConnectionId: string, peerConnectionLabel?: string): void;
-    protected abstract _removePeerConnection(peerConnectionId: string): void;
-
 }

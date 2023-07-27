@@ -1,7 +1,7 @@
 import { Sampler, TrackRelation } from "./Sampler";
 import { ClientDevices } from "./ClientDevices";
 import { MediaDevices } from "./utils/MediaDevices";
-import { AdapterConfig } from "./adapters/Adapter";
+import { AdapterConfig } from "./browser-adapters/Adapter";
 import { Timer } from "./utils/Timer";
 import { StatsReader, StatsStorage } from "./entries/StatsStorage";
 import { Accumulator } from "./Accumulator";
@@ -21,9 +21,10 @@ import {
     Samples,
     schemaVersion,
     CustomCallEvent,
+    ClientSample,
 } from './schema/Samples';
 import { CallEventType } from "./utils/callEvents";
-import { EvaluatorProcess, Evaluators } from "./Evaluators";
+import { StatsEvaluatorProcess, Evaluators } from "./StatsEvaluators";
 import { CongestionDetectorConfig, createCongestionDetector } from "./detectors/CongestionDetector";
 import { AudioDesyncDetectorConfig, createAudioDesyncDetector } from "./detectors/AudioDesyncDetector";
 import { CpuIssueDetectorConfig, createCpuIssueDetector } from "./detectors/CpuIssueDetector";
@@ -124,7 +125,7 @@ export class ClientMonitorImpl implements ClientMonitor {
     private _collectors: CollectorsImpl;
     private _sampler: Sampler;
     private _timer?: Timer;
-    private _statsStorage: StatsStorage;
+    public readonly stats = new StatsStorage();
     private _accumulator: Accumulator;
     private _metrics: Metrics;
     private _emitter = new EventEmitter();
@@ -135,7 +136,6 @@ export class ClientMonitorImpl implements ClientMonitor {
     ) {
         this._clientDevices = new ClientDevices();
         this._mediaDevices = new MediaDevices();
-        this._statsStorage = new StatsStorage(this);
         this._metrics = new Metrics();
         this._accumulator = Accumulator.create(config.accumulator);
         this._collectors = this._makeCollector();
@@ -168,18 +168,6 @@ export class ClientMonitorImpl implements ClientMonitor {
         return this._clientDevices.engine;
     }
 
-    public get audioInputs(): IterableIterator<MediaDevice> {
-        return this._mediaDevices.values("audioinput");
-    }
-
-    public get audioOutputs(): IterableIterator<MediaDevice> {
-        return this._mediaDevices.values("audiooutput");
-    }
-
-    public get videoInputs(): IterableIterator<MediaDevice> {
-        return this._mediaDevices.values("videoinput");
-    }
-
     public get storage(): StatsReader {
         return this._statsStorage;
     }
@@ -192,19 +180,11 @@ export class ClientMonitorImpl implements ClientMonitor {
         this._sampler.setMarker(value);
     }
 
-    public addTrackRelation(trackRelation: TrackRelation): void {
-        this._sampler.addTrackRelation(trackRelation);
-    }
-
-    public removeTrackRelation(trackId: string): void {
-        this._sampler.removeTrackRelation(trackId);
-    }
-
-    public addEvaluator(process: EvaluatorProcess): void {
+    public addStatsEvaluator(process: StatsEvaluatorProcess): void {
         this._evaluators.add(process);
     }
 
-    public removeEvaluator(process: EvaluatorProcess): boolean {
+    public removeStatsEvaluator(process: StatsEvaluatorProcess): boolean {
         return this._evaluators.remove(process);
     }
 
@@ -216,9 +196,8 @@ export class ClientMonitorImpl implements ClientMonitor {
         }
     }
 
-    public addMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
-        const message = JSON.stringify(constrains);
-        this._sampler.addMediaConstraints(message);
+    public setMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
+        
     }
 
     /*eslint-disable @typescript-eslint/no-explicit-any */
@@ -327,7 +306,7 @@ export class ClientMonitorImpl implements ClientMonitor {
         await this._evaluate(elapsedInMs);
     }
 
-    public sample(): void {
+    public sample(): ClientSample | undefined{
         try {
             this._collectClientDevices();
             const clientSample = this._sampler.make();
@@ -337,8 +316,7 @@ export class ClientMonitorImpl implements ClientMonitor {
                 clientSample
             });
 
-            const now = Date.now();
-            this._metrics.setLastSampled(now);
+            return clientSample;
         } catch (error) {
             logger.warn(`An error occurred while sampling`, error);
         }

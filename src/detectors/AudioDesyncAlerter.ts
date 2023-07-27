@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import { ClientMonitorAlerts, ClientMonitorEvents } from "../ClientMonitor";
-import { EvaluatorProcess } from "../Evaluators";
+import { StatsEvaluatorProcess } from "../StatsEvaluators";
 
 /**
  * Configuration object for the AudioDesyncDetector function.
@@ -37,7 +37,7 @@ export type AudioDesyncDetectorConfig = {
 export function createAudioDesyncDetector(
 	alert: ClientMonitorAlerts['audio-desync-alert'],
 	config: AudioDesyncDetectorConfig
-): EvaluatorProcess {
+): StatsEvaluatorProcess {
 	if (!config.enabled) {
 		return async () => {
 
@@ -49,7 +49,7 @@ export function createAudioDesyncDetector(
 		visited: boolean,
 	}
 	const audioSyncTraces = new Map<string, AudioSyncTrace>();
-	const process: EvaluatorProcess = async (context) => {
+	const process: StatsEvaluatorProcess = async (context) => {
 		const { storage } = context;
 		const trackIds = new Set<string>();
 		for (const inboundRtp of storage.inboundRtps()) {
