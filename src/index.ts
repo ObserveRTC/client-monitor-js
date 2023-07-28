@@ -80,7 +80,7 @@ export function createClientMonitor(config?: ClientMonitorConfig & {
             config.tickingTimeInMs = 1000;
         }
     }
-    if (loggerSet && config?.logLevel) {
+    if (!loggerSet && config?.logLevel) {
         addLoggerProcess(createConsoleLogger(config.logLevel));
         loggerSet = true;
     }
