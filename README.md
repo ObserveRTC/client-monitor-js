@@ -8,7 +8,7 @@ Table of Contents:
  * [Quick Start](#quick-start)
  * [Integrations](#integrations)
     - [Mediasoup](#mediasoup)
- * [Alerts and Detectors](#alerts)
+ * [Detectors and Alerts](#detectors-and-alerts)
  * [Calculated updates](#calculated-updates)
  * [Configurations](#configurations)
  * [NPM package](#npm-package)
@@ -106,12 +106,11 @@ const monitor = createClientMonitor({
 
 const storage = monitor.storage;
 monitor.on('stats-collected', () => {
-    const updates = storage.updates;
-    console.log('average RTT in seconds', updates.avgRttInS);
-    console.log('Sending audio bitrate', updates.sendingAudioBitrate);
-    console.log('Sending video bitrate', updates.sendingVideoBitrate);
-    console.log('Receiving audio bitrate', updates.receivingAudioBitrate);
-    console.log('Receiving video bitrate', updates.receivingVideoBitrate);
+    console.log('average RTT in seconds', storage.avgRttInS);
+    console.log('Sending audio bitrate', storage.sendingAudioBitrate);
+    console.log('Sending video bitrate', storage.sendingVideoBitrate);
+    console.log('Receiving audio bitrate', storage.receivingAudioBitrate);
+    console.log('Receiving video bitrate', storage.receivingVideoBitrate);
 
 ```
 
@@ -128,12 +127,11 @@ const monitor = createClientMonitor({
 const storage = monitor.storage;
 monitor.on('stats-collected', () => {
     for (const peerConnection of storage.peerConnections()) {
-        const updates = peerConnection.updates;
-        console.log('average RTT in seconds', updates.avgRttInS);
-        console.log('Sending audio bitrate on PC', updates.sendingAudioBitrate);
-        console.log('Sending video bitrate on PC', updates.sendingVideoBitrate);
-        console.log('Receiving audio bitrate on PC', updates.receivingAudioBitrate);
-        console.log('Receiving video bitrate on PC', updates.receivingVideoBitrate);
+        console.log('average RTT in seconds', peerConnection.avgRttInS);
+        console.log('Sending audio bitrate on PC', peerConnection.sendingAudioBitrate);
+        console.log('Sending video bitrate on PC', peerConnection.sendingVideoBitrate);
+        console.log('Receiving audio bitrate on PC', peerConnection.receivingAudioBitrate);
+        console.log('Receiving video bitrate on PC', peerConnection.receivingVideoBitrate);
     }
 });
 
@@ -153,15 +151,12 @@ const storage = monitor.storage;
 monitor.on('stats-collected', () => {
     for (const inboundRtp of storage.inboundRtps()) {
 
-        console.log('mean opinion score for inbound-rtp', inboundRtp.meanOpinionScore);
+        console.log('mean opinion score for inbound-rtp', inboundRtp.score);
 
-        const updates = inboundRtp.updates;
-        console.log('receiving bitrate', updates.receivingBitrate);
-        console.log('lost packets since last stats-collected', updates.lostPackets);
-        console.log('received packets since last stats-collected', updates.receivedPackets);
-        console.log('decoded frames since last stats-collected', updates.decodedFrames);
-
-        console.log('full list of calculations changed since last stats-collected ', updates);
+        console.log('receiving bitrate', inboundRtp.receivingBitrate);
+        console.log('lost packets since last stats-collected', inboundRtp.lostPackets);
+        console.log('received packets since last stats-collected', inboundRtp.receivedPackets);
+        console.log('decoded frames since last stats-collected', inboundRtp.decodedFrames);
     }
 });
 
@@ -181,32 +176,23 @@ const storage = monitor.storage;
 monitor.on('stats-collected', () => {
     for (const outboundRtp of storage.outboundRtps()) {
 
-        console.log('stability score outbound-rtp', outboundRtp.stabilityScore);
+        console.log('stability score outbound-rtp', outboundRtp.score);
 
-        const updates = outboundRtp.updates;
-        console.log('sending bitrate', updates.sendingBitrate);
-        console.log('sent packets since last stats-collected', updates.sentPackets);
+        console.log('sending bitrate', outboundRtp.sendingBitrate);
+        console.log('sent packets since last stats-collected', outboundRtp.sentPackets);
         
         const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
-        console.log('Received packets on remote inbound-rtp belongs to this outbound-rtp', remoteInboundRtp?.updates.receivedPackets);
+        console.log('Received packets on remote inbound-rtp belongs to this outbound-rtp', remoteInboundRtp?.receivedPackets);
     }
 });
 
 ```
 
+## Detectors and Alerts
 
-
-## Alerts and Detectors
-
-Alerts and detectors provide events of tracking and responding to anomalies or performance issues based on the polled stats. Detectors are components that continuously monitor for specific conditions in the polled stats, and set an alert if certain thresholds are hit. You can subscribe to alerts of an instantiated client-monitor-js and configure detectors via initial configurations.
-
-
-To configure the Congestion Detector according to your specific requirements, please refer to the [Configuration](#configuration)  section for further guidance.
-
+Detectors and alerts provide events of tracking and responding to anomalies or performance issues based on the polled stats. Detectors are components that continuously monitor for specific conditions in the polled stats, and set an alert if certain thresholds are hit. You can subscribe to alerts of an instantiated client-monitor-js and configure detectors via initial configurations.
 
 List of built-in alerts:
- * `stability-score-alert`: triggered whenever an outbound network is considered to be instable based on the calculated stability score
- * `mean-opinion-score-alert`: triggered when a calculated MoS score for an inbound-rtp is lower than the configured threshold
  * `audio-desync-alert`: triggered when for an audio track several acceleration and deceleration is detected in a short amount of time indicating that the controlling system tries compensate discrepancies. 
  * `cpu-performance-alert`: triggered whenever a browser detects quality limitation becasue of CPU, or the number of decoded frames per sec hit a certain threshold
 
@@ -218,42 +204,22 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-monitor.on('alerts-changed', (alerts) => {
-
-    const stabilityAlert = alerts['stability-score-alert'];
-    if (stabilityAlert === 'on') {
-        console.log('Network condition for sending media is instable');
-    } else if (stabilityAlert === 'off') {
-        console.log('Network condition for sending media is considered to be stable again');
-    }
-
-    const meanOpionionScoreAlert = alerts['mean-opinion-score-alert'];
-    if (meanOpionionScoreAlert === 'on') {
-        console.log('Mean opinion score for received media is considered to be low');
-    } else if (meanOpionionScoreAlert === 'off') {
-        console.log('Mean opinion score for received media is normalized');
-    }
-
-    const audioDesyncAlert = alerts['audio-desync-alert'];
-    if (audioDesyncAlert === 'on') {
-        console.log('Audio is desynced from video');
+monitor.on('audio-desync-alert', (alertState) => {
+    if (alertState === 'on') {
+        console.log('Audio is desynced is video');
     } else if (meanOpionionScoreAlert === 'off') {
         console.log('Audio is synced back');
     }
 });
+
+monitor.on('cpu-performance-alert', alertState => {
+    if (alertState === 'on') {
+        console.log('CPU performance problem is detected');
+    } else if (meanOpionionScoreAlert === 'off') {
+        console.log('CPU performance problem is gone');
+    }
+})
 ```
-
-
-### Outbound Stability Detector
-
-Outbound Stability Detector is based on a score calculated for each outbound tracks 
-giving a normalized value between `0.0..1.0` indicate how reliable the network 
-for transmitting media. The score consideres RTT fluctuations, and packet losses in it's calculation
-
-### Mean Opinion Score Detector
-
-For each inbound-rtp a MoS is calculated, which is a value between `0.0..5.0` indicate the quality of the rendered media.
-
 
 ## Configurations
 
