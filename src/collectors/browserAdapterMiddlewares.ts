@@ -40,7 +40,7 @@ export function createTrackStatsAdapterMiddleware(): Middleware<CollectedStats> 
             }
         }
         return next(data);
-    }
+    };
 }
 
 export function createFirefox94AdapterMiddleware(): Middleware<CollectedStats> {

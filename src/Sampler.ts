@@ -23,6 +23,7 @@ import {
 } from './schema/Samples'
 import { StatsStorage } from "./entries/StatsStorage";
 import { createLogger } from "./utils/logger";
+import { roundNumber } from './utils/common';
 
 const logger = createLogger("Sampler");
 
@@ -178,18 +179,18 @@ export class Sampler {
                 if (outboundRtp.stats.kind === "audio") {
                     if (!outboundAudioTracks) outboundAudioTracks = [];
                     const outboundAudioTrack: OutboundAudioTrack = {
-                        ssrc: outboundRtpStats.ssrc,
+                        ssrc: Math.round(outboundRtpStats.ssrc),
                         peerConnectionId,
                         trackId: outboundRtp.getTrackId(),
                         sfuStreamId: outboundRtp.sfuStreamId,
                         packetsSent: outboundRtpStats.packetsSent,
-                        bytesSent: outboundRtpStats.bytesSent,
+                        bytesSent: roundNumber(outboundRtpStats.bytesSent),
                         rid: outboundRtpStats.rid,
-                        headerBytesSent: outboundRtpStats.headerBytesSent,
-                        retransmittedBytesSent: outboundRtpStats.retransmittedBytesSent,
-                        retransmittedPacketsSent: outboundRtpStats.retransmittedPacketsSent,
+                        headerBytesSent: roundNumber(outboundRtpStats.headerBytesSent),
+                        retransmittedBytesSent: roundNumber(outboundRtpStats.retransmittedBytesSent),
+                        retransmittedPacketsSent: roundNumber(outboundRtpStats.retransmittedPacketsSent),
                         targetBitrate: outboundRtpStats.targetBitrate,
-                        totalEncodedBytesTarget: outboundRtpStats.totalEncodedBytesTarget,
+                        totalEncodedBytesTarget: roundNumber( outboundRtpStats.totalEncodedBytesTarget),
                         totalPacketSendDelay: outboundRtpStats.totalPacketSendDelay,
                         averageRtcpInterval: outboundRtpStats.averageRtcpInterval,
                         nackCount: outboundRtpStats.nackCount,
@@ -216,18 +217,18 @@ export class Sampler {
                 } else if (outboundRtp.stats.kind === "video") {
                     if (!outboundVideoTracks) outboundVideoTracks = [];
                     const outboundVideoTrack: OutboundVideoTrack = {
-                        ssrc: outboundRtpStats.ssrc,
+                        ssrc: Math.round(outboundRtpStats.ssrc),
                         trackId: outboundRtp.getTrackId(),
                         peerConnectionId,
                         sfuStreamId: outboundRtp.sfuStreamId,
                         packetsSent: outboundRtpStats.packetsSent,
-                        bytesSent: outboundRtpStats.bytesSent,
+                        bytesSent: roundNumber(outboundRtpStats.bytesSent),
                         rid: outboundRtpStats.rid,
-                        headerBytesSent: outboundRtpStats.headerBytesSent,
-                        retransmittedBytesSent: outboundRtpStats.retransmittedBytesSent,
-                        retransmittedPacketsSent: outboundRtpStats.retransmittedPacketsSent,
+                        headerBytesSent: roundNumber(outboundRtpStats.headerBytesSent),
+                        retransmittedBytesSent: roundNumber(outboundRtpStats.retransmittedBytesSent),
+                        retransmittedPacketsSent: roundNumber(outboundRtpStats.retransmittedPacketsSent),
                         targetBitrate: outboundRtpStats.targetBitrate,
-                        totalEncodedBytesTarget: outboundRtpStats.totalEncodedBytesTarget,
+                        totalEncodedBytesTarget: roundNumber(outboundRtpStats.totalEncodedBytesTarget),
                         totalPacketSendDelay: outboundRtpStats.totalPacketSendDelay,
                         averageRtcpInterval: outboundRtpStats.averageRtcpInterval,
                         nackCount: outboundRtpStats.nackCount,
@@ -240,7 +241,7 @@ export class Sampler {
                         hugeFramesSent: outboundRtpStats?.hugeFramesSent,
                         framesEncoded: outboundRtpStats?.framesEncoded,
                         keyFramesEncoded: outboundRtpStats?.keyFramesEncoded,
-                        qpSum: outboundRtpStats?.qpSum,
+                        qpSum: roundNumber(outboundRtpStats?.qpSum),
                         totalEncodeTime: outboundRtpStats?.totalEncodeTime,
                         qualityLimitationDurationNone: outboundRtpStats?.qualityLimitationDurations?.none,
                         qualityLimitationDurationCPU: outboundRtpStats?.qualityLimitationDurations?.cpu,
@@ -260,7 +261,7 @@ export class Sampler {
                 if (inboundRtpStats.kind === 'audio') {
                     if (!inboundAudioTracks) inboundAudioTracks = [];
                     const inboundAudioTrack: InboundAudioTrack = {
-                        ssrc: inboundRtpStats.ssrc,
+                        ssrc: Math.round(inboundRtpStats.ssrc),
                         trackId: inboundRtp.getTrackId(),
                         peerConnectionId,
                         remoteClientId: inboundRtp.remoteClientId,
@@ -269,15 +270,15 @@ export class Sampler {
                         packetsReceived: inboundRtpStats.packetsReceived,
                         packetsLost: inboundRtpStats.packetsLost,
                         jitter: inboundRtpStats.jitter,
-                        lastPacketReceivedTimestamp: inboundRtpStats.lastPacketReceivedTimestamp,
-                        headerBytesReceived: inboundRtpStats.headerBytesReceived,
+                        lastPacketReceivedTimestamp: roundNumber(inboundRtpStats.lastPacketReceivedTimestamp),
+                        headerBytesReceived: roundNumber(inboundRtpStats.headerBytesReceived),
                         packetsDiscarded: inboundRtpStats.packetsDiscarded,
                         fecPacketsReceived: inboundRtpStats.fecPacketsReceived,
                         fecPacketsDiscarded: inboundRtpStats.fecPacketsDiscarded,
-                        bytesReceived: inboundRtpStats.bytesReceived,
+                        bytesReceived: roundNumber(inboundRtpStats.bytesReceived),
                         nackCount: inboundRtpStats.nackCount,
                         totalProcessingDelay: inboundRtpStats.totalProcessingDelay,
-                        estimatedPlayoutTimestamp: inboundRtpStats.estimatedPlayoutTimestamp,
+                        estimatedPlayoutTimestamp: roundNumber(inboundRtpStats.estimatedPlayoutTimestamp),
                         jitterBufferDelay: inboundRtpStats.jitterBufferDelay,
                         jitterBufferTargetDelay: inboundRtpStats.jitterBufferTargetDelay,
                         jitterBufferEmittedCount: inboundRtpStats.jitterBufferEmittedCount,
@@ -293,8 +294,8 @@ export class Sampler {
                         totalSamplesDuration: inboundRtpStats.totalSamplesDuration,
                         decoderImplementation: inboundRtpStats.decoderImplementation,
                         packetsSent: remoteOutboundRtpStats?.packetsSent,
-                        bytesSent: remoteOutboundRtpStats?.bytesSent,
-                        remoteTimestamp: remoteOutboundRtpStats?.remoteTimestamp,
+                        bytesSent: roundNumber(remoteOutboundRtpStats?.bytesSent),
+                        remoteTimestamp: roundNumber(remoteOutboundRtpStats?.remoteTimestamp),
                         reportsSent: remoteOutboundRtpStats?.reportsSent,
                         roundTripTime: remoteOutboundRtpStats?.roundTripTime,
                         totalRoundTripTime: remoteOutboundRtpStats?.totalRoundTripTime,
@@ -308,7 +309,7 @@ export class Sampler {
                 } else if (inboundRtpStats.kind === 'video') {
                     if (!inboundVideoTracks) inboundVideoTracks = [];
                     const inboundVideoTrack: InboundVideoTrack = {
-                        ssrc: inboundRtpStats.ssrc,
+                        ssrc: Math.round( inboundRtpStats.ssrc),
                         trackId: inboundRtp.getTrackId(),
                         peerConnectionId,
                         remoteClientId: inboundRtp.remoteClientId,
@@ -318,15 +319,15 @@ export class Sampler {
                         packetsLost: inboundRtpStats.packetsLost,
                         jitter: inboundRtpStats.jitter,
                         framesDropped: inboundRtpStats.framesDropped,
-                        lastPacketReceivedTimestamp: inboundRtpStats.lastPacketReceivedTimestamp,
-                        headerBytesReceived: inboundRtpStats.headerBytesReceived,
+                        lastPacketReceivedTimestamp: roundNumber(inboundRtpStats.lastPacketReceivedTimestamp),
+                        headerBytesReceived: roundNumber(inboundRtpStats.headerBytesReceived),
                         packetsDiscarded: inboundRtpStats.packetsDiscarded,
                         fecPacketsReceived: inboundRtpStats.fecPacketsReceived,
                         fecPacketsDiscarded: inboundRtpStats.fecPacketsDiscarded,
-                        bytesReceived: inboundRtpStats.bytesReceived,
+                        bytesReceived: roundNumber(inboundRtpStats.bytesReceived),
                         nackCount: inboundRtpStats.nackCount,
                         totalProcessingDelay: inboundRtpStats.totalProcessingDelay,
-                        estimatedPlayoutTimestamp: inboundRtpStats.estimatedPlayoutTimestamp,
+                        estimatedPlayoutTimestamp: roundNumber(inboundRtpStats.estimatedPlayoutTimestamp),
                         jitterBufferDelay: inboundRtpStats.jitterBufferDelay,
                         jitterBufferTargetDelay: inboundRtpStats.jitterBufferTargetDelay,
                         jitterBufferEmittedCount: inboundRtpStats.jitterBufferEmittedCount,
@@ -337,7 +338,7 @@ export class Sampler {
                         frameWidth: inboundRtpStats.frameWidth,
                         frameHeight: inboundRtpStats.frameHeight,
                         framesPerSecond: inboundRtpStats.framesPerSecond,
-                        qpSum: inboundRtpStats.qpSum,
+                        qpSum: roundNumber(inboundRtpStats.qpSum),
                         totalDecodeTime: inboundRtpStats.totalDecodeTime,
                         totalInterFrameDelay: inboundRtpStats.totalInterFrameDelay,
                         totalSquaredInterFrameDelay: inboundRtpStats.totalSquaredInterFrameDelay,
@@ -345,8 +346,8 @@ export class Sampler {
                         pliCount: inboundRtpStats.pliCount,
                         framesReceived: inboundRtpStats?.framesReceived,
                         packetsSent: remoteOutboundRtpStats?.packetsSent,
-                        bytesSent: remoteOutboundRtpStats?.bytesSent,
-                        remoteTimestamp: remoteOutboundRtpStats?.remoteTimestamp,
+                        bytesSent: roundNumber(remoteOutboundRtpStats?.bytesSent),
+                        remoteTimestamp: roundNumber(remoteOutboundRtpStats?.remoteTimestamp),
                         reportsSent: remoteOutboundRtpStats?.reportsSent,
                         roundTripTime: remoteOutboundRtpStats?.roundTripTime,
                         totalRoundTripTime: remoteOutboundRtpStats?.totalRoundTripTime,
@@ -371,10 +372,10 @@ export class Sampler {
                     nominated: stats.nominated,
                     packetsSent: stats.packetsSent,
                     packetsReceived: stats.packetsReceived,
-                    bytesSent: stats.bytesSent,
-                    bytesReceived: stats.bytesReceived,
-                    lastPacketSentTimestamp: stats.lastPacketSentTimestamp,
-                    lastPacketReceivedTimestamp: stats.lastPacketReceivedTimestamp,
+                    bytesSent: roundNumber(stats.bytesSent),
+                    bytesReceived: roundNumber(stats.bytesReceived),
+                    lastPacketSentTimestamp: roundNumber(stats.lastPacketSentTimestamp),
+                    lastPacketReceivedTimestamp: roundNumber(stats.lastPacketReceivedTimestamp),
                     totalRoundTripTime: stats.totalRoundTripTime,
                     currentRoundTripTime: stats.currentRoundTripTime,
                     availableOutgoingBitrate: stats.availableOutgoingBitrate,
@@ -385,7 +386,7 @@ export class Sampler {
                     responsesSent: stats.responsesSent,
                     consentRequestsSent: stats.consentRequestsSent,
                     packetsDiscardedOnSend: stats.packetsDiscardedOnSend,
-                    bytesDiscardedOnSend: stats.bytesDiscardedOnSend,
+                    bytesDiscardedOnSend: roundNumber(stats.bytesDiscardedOnSend),
                 };
                 iceCandidatePairs.push(iceCandidatePairSample);
             }
@@ -399,8 +400,8 @@ export class Sampler {
                     label: peerConnection.label,
                     packetsSent: stats.packetsSent,
                     packetsReceived: stats.packetsReceived,
-                    bytesSent: stats.bytesSent,
-                    bytesReceived: stats.bytesReceived,
+                    bytesSent: roundNumber(stats.bytesSent),
+                    bytesReceived: roundNumber(stats.bytesReceived),
                     iceRole: stats.iceRole,
                     iceLocalUsernameFragment: stats.iceLocalUsernameFragment,
                     dtlsState: stats.dtlsState,
@@ -472,6 +473,8 @@ export class Sampler {
             }
 
             for (const iceLocalCandidate of peerConnection.localCandidates()) {
+                if (iceLocalCandidate.sampled) continue;
+                iceLocalCandidate.sampled = true;
                 const localCandidateStats = iceLocalCandidate.stats;
                 if (!iceLocalCandidates) iceLocalCandidates = [];
                 iceLocalCandidates.push({
@@ -488,6 +491,8 @@ export class Sampler {
             }
 
             for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
+                if (iceRemoteCandidate.sampled) continue;
+                iceRemoteCandidate.sampled = true;
                 const iceRemoteCandidateStats = iceRemoteCandidate.stats;
                 if (!iceRemoteCandidates) iceRemoteCandidates = [];
                 iceRemoteCandidates.push({
@@ -513,9 +518,9 @@ export class Sampler {
                     protocol: dataChannelStats.protocol,
                     state: dataChannelStats.state,
                     messageSent: dataChannelStats.messagesSent,
-                    bytesSent: dataChannelStats.bytesSent,
+                    bytesSent: roundNumber(dataChannelStats.bytesSent),
                     messageReceived: dataChannelStats.messagesReceived,
-                    bytesReceived: dataChannelStats.bytesReceived,
+                    bytesReceived: roundNumber(dataChannelStats.bytesReceived),
 
                 });
             }

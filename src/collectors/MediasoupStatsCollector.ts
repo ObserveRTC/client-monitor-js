@@ -15,13 +15,18 @@ import {
     MediasoupProducerSurrogate, 
     MediasoupTransportSurrogate 
 } from "./MediasoupSurrogates";
+import { StatsProvider, createStatsProvider } from "./StatsProvider";
 
 export type MediasoupStatsCollectorConfig = {
     collectorId?: string,
     device: MediaosupDeviceSurrogate,
-    emitCallEvent: ((event: CustomCallEvent) => void);
     storage: StatsStorage
+    emitCallEvent: ((event: CustomCallEvent) => void);
+    addStatsProvider: ((statsProvider: StatsProvider) => void);
+    removeStatsProvider: ((statsProviderId: string) => void);
 }
+
+export type MediasoupStatsCollector = ReturnType<typeof createMediasoupStatsCollector>;
 
 export function createMediasoupStatsCollector(config: MediasoupStatsCollectorConfig) {
     const {
@@ -29,6 +34,8 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         device,
         emitCallEvent,
         storage,
+        addStatsProvider,
+        removeStatsProvider,
     } = config;
     
     const transports = new Map<string, MediasoupTransportSurrogate>();
@@ -250,7 +257,11 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                 })
             );
         };
-        
+        const statsProvider = createStatsProvider(
+            () => transport.getStats(),
+            transport.id,
+            transport.direction,
+        );
         transport.observer.once('close', () => {
             transport.observer.off("newproducer", addProducerListener);
             transport.observer.off("newconsumer", addConsumerListener);
@@ -262,6 +273,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             emitCallEvent(
                 createPeerConnectionClosedEvent(eventBase)
             );
+            removeStatsProvider(statsProvider.peerConnectionId);
         });
         transport.observer.on("newproducer", addProducerListener);
         transport.observer.on("newconsumer", addConsumerListener);
@@ -275,6 +287,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                 timestamp
             })
         );
+        addStatsProvider(statsProvider);
     }
 
     function adaptStorageMiddleware(storage: StatsStorage, next: (storage: StatsStorage) => void) {
@@ -327,6 +340,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         return next(storage);
     }
 
+    let onclose: (() => void) | undefined;
     let closed = false;
     function close() {
         if (closed) {
@@ -338,6 +352,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         consumers.clear();
         device.observer.off("newtransport", addTransport);
         storage.processor.removeMiddleware(adaptStorageMiddleware);
+        onclose?.();
     }
     device.observer.on("newtransport", addTransport);
     storage.processor.addMiddleware(adaptStorageMiddleware)
@@ -351,6 +366,9 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         addOutboundTrack,
         get closed() {
             return closed;
+        },
+        set onclose(listener: (() => void) | undefined) {
+            onclose = listener;
         }
     }
 }

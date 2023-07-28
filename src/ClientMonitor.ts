@@ -6,9 +6,10 @@ import { StatsStorage } from './entries/StatsStorage';
 import { TypedEventEmitter } from './utils/TypedEmitter';
 import { createTimer } from './utils/Timer';
 import { Sampler } from './Sampler';
-import { createAdapterMiddlewares } from './browser-adapters/Adapter';
+import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
 import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces';
+import { createDetectors } from './Detectors';
 
 const logger = createLogger('ClientMonitor');
 
@@ -44,38 +45,29 @@ export type ClientMonitorConfig = {
 
 export type AlertState = 'on' | 'off';
 
-export type ClientMonitorAlerts = {
-    'stability-score-alert': {
-        state: AlertState,
-        trackIds: string[],
-    },
-    'mean-opinion-score-alert': {
-        state: AlertState,
-        trackIds: string[],
-    },
-    'audio-desync-alert': {
-        state: AlertState,
-        trackIds: string[],
-    },
-    'cpu-performance-alert': {
-        state: AlertState,
-    }
-}
-
 export interface ClientMonitorEvents {
     'error': Error,
     'close': undefined,
     'stats-collected': CollectedStats,
     'sample-created': ClientSample,
+
+    'congestion-alert': AlertState,
+    'audio-desync-alert': AlertState,
+    'cpu-performance-alert': AlertState,
 }
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public readonly meta: ClientMetaData;
-    public readonly collectors = createCollectors();
     public readonly storage = new StatsStorage();
-    public readonly detectors = createDetectors(this);
+    public readonly collectors = createCollectors({
+        storage: this.storage,
+    });
+
     private readonly _sampler = new Sampler(this.storage);
     private readonly _timer = createTimer();
+    private readonly _detectors = createDetectors({
+        clientMonitor: this,
+    });
     private _closed = false;
 
     public constructor(
@@ -160,6 +152,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         }
     }
 
+    public addUserMediaError(err: unknown): void {
+        this._sampler.addUserMediaError(`${err}`);
+    }
+
     public setMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
         this._sampler.addMediaConstraints(JSON.stringify(constrains));
     }
@@ -188,6 +184,18 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public setSamplingPeriod(samplingPeriodInMs: number): void {
         this._config.samplingPeriodInMs = samplingPeriodInMs;
         this._setupTimer();
+    }
+
+    public get audioDesyncDetector() { 
+        return this._detectors.audioDesyncDetector;
+    }
+
+    public get cpuPerformanceDetector() {
+        return this._detectors.cpuPerformanceDetector;
+    }
+
+    public get congestionDetector() {
+        return this._detectors.congestionDetector;
     }
 
     public getTrackStats(trackId: string): TrackStats | undefined {

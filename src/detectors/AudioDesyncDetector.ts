@@ -1,14 +1,9 @@
-import { ClientMonitorAlerts } from "../ClientMonitor";
-import { StatsEvaluatorProcess } from "../StatsEvaluators";
+import { AlertState, ClientMonitor } from "../ClientMonitor";
 
 /**
  * Configuration object for the AudioDesyncDetector function.
  */
 export type AudioDesyncDetectorConfig = {
-	/**
-	 * Specifies whether the audio desynchronization detector is enabled or not.
-	 */
-	enabled: boolean;
 	/**
 	 * The fractional threshold used to determine if the audio desynchronization
 	 * correction is considered significant or not.
@@ -27,6 +22,12 @@ export type AudioDesyncDetectorConfig = {
 	fractionalCorrectionAlertOffThreshold: number;
 };
 
+export type AudioDesyncDetectorContext = AudioDesyncDetectorConfig & {
+	clientMonitor: ClientMonitor,
+}
+
+export type AudioDesyncDetector = ReturnType<typeof createAudioDesyncDetector>;
+
 /**
  * Creates an audio desynchronization detector process.
  * @param emitter The event emitter used to emit audio desynchronization events.
@@ -34,24 +35,22 @@ export type AudioDesyncDetectorConfig = {
  * @returns The evaluator process function.
  */
 export function createAudioDesyncDetector(
-	alert: ClientMonitorAlerts['audio-desync-alert'],
-	config: AudioDesyncDetectorConfig
-): StatsEvaluatorProcess {
-	if (!config.enabled) {
-		return async () => {
-
-		};
-	}
+	context: AudioDesyncDetectorContext
+) {
 	type AudioSyncTrace = {
 		correctedSamples: number,
 		prevCorrectedSamples: number,
 		visited: boolean,
 	}
+	const {
+		clientMonitor
+	} = context;
 	const audioSyncTraces = new Map<string, AudioSyncTrace>();
-	const process: StatsEvaluatorProcess = async (context) => {
-		const { storage } = context;
-		const trackIds = new Set<string>();
-		for (const inboundRtp of storage.inboundRtps()) {
+	const id = 'audio-desync-detector';
+	let alertState: AlertState	= 'off';
+	const desyncedTrackIds = new Set<string>();
+	async function update() {
+		for (const inboundRtp of clientMonitor.storage.inboundRtps()) {
 			const stats = inboundRtp.stats;
 			if (stats.kind !== 'audio' || inboundRtp.getTrackId() === undefined) {
 				continue;
@@ -60,28 +59,31 @@ export function createAudioDesyncDetector(
 			if (!trackId) {
 				continue;
 			}
-
-			const trace = audioSyncTraces.get(trackId) ?? audioSyncTraces.set(trackId, {
-				correctedSamples: 0,
-				prevCorrectedSamples: 0,
-				visited: false,
-			}).get(trackId)!;
+			let trace = audioSyncTraces.get(trackId);
+			if (!trace) {
+				trace = {
+					correctedSamples: 0,
+					prevCorrectedSamples: 0,
+					visited: false,
+				};
+				audioSyncTraces.set(trackId, trace);
+			}
 
 			trace.visited = true;
 			trace.correctedSamples = (stats.insertedSamplesForDeceleration ?? 0) + (stats.removedSamplesForAcceleration ?? 0);
 			const dCorrectedSamples = trace.correctedSamples - trace.prevCorrectedSamples;
-			if (dCorrectedSamples < 1 || inboundRtp.updates.receivedSamples < 1) {
+			if (dCorrectedSamples < 1 || (inboundRtp.receivedSamples ?? 0) < 1) {
 				continue;
 			}
-			const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + inboundRtp.updates.receivedSamples);
+			const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + (inboundRtp.receivedSamples ?? 0));
 
-			if (alert.trackIds.includes(trackId)) {
+			if (desyncedTrackIds.has(trackId)) {
 				// it is on for this track
-				if (config.fractionalCorrectionAlertOffThreshold < fractionalCorrection) {
-					trackIds.add(trackId)
+				if (context.fractionalCorrectionAlertOffThreshold < fractionalCorrection) {
+					desyncedTrackIds.add(trackId)
 				}
-			} else if (config.fractionalCorrectionAlertOnThreshold < fractionalCorrection) {
-				trackIds.add(trackId)
+			} else if (context.fractionalCorrectionAlertOnThreshold < fractionalCorrection) {
+				desyncedTrackIds.add(trackId)
 			}
 			
 		}
@@ -94,9 +96,19 @@ export function createAudioDesyncDetector(
 			trace.prevCorrectedSamples = trace.correctedSamples;
 			trace.visited = false;
 		}
+		const prevAlertState = alertState;
+		alertState = 0 < desyncedTrackIds.size ? 'on' : 'off';
+		if (prevAlertState !== alertState) {
+			clientMonitor.emit('audio-desync-alert', alertState);
+		}
+	}
 
-		alert.trackIds = Array.from(trackIds);
-		alert.state = 0 < trackIds.size ? 'on' : 'off';
-	};
-	return process;
+	return {
+		id,
+		update,
+		desyncedTrackIds,
+		get alert() {
+			return alertState;
+		},
+	}
 }

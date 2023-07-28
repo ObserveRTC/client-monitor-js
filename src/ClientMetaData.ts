@@ -72,14 +72,24 @@ export class ClientMetaData {
     }
 
     public set mediaDevices(values: MediaDevice[]) {
-        this._mediaDevices.clear();
+        const visited = new Set<string>();
         for (const mediaDevice of values) {
             if (!mediaDevice.id) continue;
+            visited.add(mediaDevice.id);
+            if (this._mediaDevices.has(mediaDevice.id)) continue;
             this._mediaDevices.set(mediaDevice.id, {
                 ...mediaDevice,
                 sampled: false,
             });
         }
+        for (const [id] of this._mediaDevices.entries()) {
+            if (visited.has(id)) continue;
+            this._mediaDevices.delete(id);
+        }
+    }
+
+    public get mediaDevices(): MediaDevice[] {
+        return Array.from(this._mediaDevices.values());
     }
 
     /**

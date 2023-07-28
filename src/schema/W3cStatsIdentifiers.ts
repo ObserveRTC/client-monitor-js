@@ -129,10 +129,10 @@ export type IceServerStats = RtcStats & RtcIceServerStats & {
 }
 
 // Deprecated 2021
-export type StreamStats = RtcStats & {
+export type StreamStats = RtcStats & Record<string, unknown> & {
     type: 'stream';
 }
-export type TrackStats = RtcStats & {
+export type TrackStats = RtcStats & Record<string, unknown> & {
     type: 'track';
 }
 

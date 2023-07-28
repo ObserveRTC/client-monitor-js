@@ -11,10 +11,13 @@ type Action = {
 
 export type Timer = ReturnType<typeof createTimer>;
 
-export function createTimer() {
+export function createTimer(tickTimeInMs?: number) {
     let timer: ReturnType<typeof setInterval> | undefined;
     let collecting: Action | undefined;
     let sampling: Action | undefined;
+    if (tickTimeInMs) {
+        setTickingTime(tickTimeInMs);
+    }
 
     function setTickingTime(tickInMs?: number): void {
         if (timer) {
@@ -100,6 +103,9 @@ export function createTimer() {
     }
 
     return {
+        get active() {
+            return !!timer;
+        },
         set tickTimeInMs(value: number | undefined) {
             setTickingTime(value);
         },

@@ -1,17 +1,13 @@
 import { StatsStorage } from "../../src/entries/StatsStorage";
 import * as W3C from '../../src/schema/W3cStatsIdentifiers';
+import { createStatsMap } from "../../src/utils/Stats";
 import * as Generator from "../helpers/StatsGenerator";
-import { StatsEntry } from "../../src/utils/StatsVisitor";
-import { createClientMonitor } from "../helpers/ClientMonitorGenerator";
+
 describe("StatsStorage", () => {
     describe("Given a normally updated StatsStorage", () => {
-        const collectorId = "peerConnectionStatsCollectorId";
-        const collectorLabel = "collectorLabel";
-        const clientMonitor = createClientMonitor({
-            config: {
-            }
-        });
-        const storage = new StatsStorage(clientMonitor);
+        const peerConnectionId = "peerConnectionStatsCollectorId";
+        const peerConnectionLabel = "collectorLabel";
+        const storage = new StatsStorage();
         const codecStats = Generator.createCodecStats();
         const inboundRtpStats = Generator.createInboundRtpStats();
         const outboundRtpStats = Generator.createOutboundRtpStats();
@@ -31,31 +27,32 @@ describe("StatsStorage", () => {
         const remoteCandidateStats = Generator.createIceRemoteCandidateStats();
         const certificateStats = Generator.createCertificateStats();
         const iceServerStats = Generator.createIceServerStats();
-        const entries: StatsEntry[] = [
-            [W3C.StatsType.codec, codecStats],
-            [W3C.StatsType.inboundRtp, inboundRtpStats],
-            [W3C.StatsType.outboundRtp, outboundRtpStats],
-            [W3C.StatsType.remoteInboundRtp, remoteInboundRtpStats],
-            [W3C.StatsType.remoteOutboundRtp, remoteOutboundRtpStats],
-            [W3C.StatsType.mediaSource, mediaSourceStats],
-            [W3C.StatsType.csrc, csrcStats],
-            [W3C.StatsType.peerConnection, peerConnectionStats],
-            [W3C.StatsType.dataChannel, dataChannelStats],
-            [W3C.StatsType.transceiver, transceiverStats],
-            [W3C.StatsType.sender, senderStats],
-            [W3C.StatsType.receiver, receiverStats],
-            [W3C.StatsType.transport, transportStats],
-            [W3C.StatsType.sctpTransport, sctpTransportStats],
-            [W3C.StatsType.candidatePair, candidatePairStats],
-            [W3C.StatsType.localCandidate, localCandidateStats],
-            [W3C.StatsType.remoteCandidate, remoteCandidateStats],
-            [W3C.StatsType.certificate, certificateStats],
-            [W3C.StatsType.iceServer, iceServerStats],
-        ];
-        storage.register(collectorId, collectorLabel);
-        for (const statsEntry of entries) {
-            storage.accept(collectorId, statsEntry);
-        }
+        const statsMap = createStatsMap([
+            codecStats,
+            inboundRtpStats,
+            outboundRtpStats,
+            remoteInboundRtpStats,
+            remoteOutboundRtpStats,
+            mediaSourceStats,
+            csrcStats,
+            peerConnectionStats,
+            dataChannelStats,
+            transceiverStats,
+            senderStats,
+            receiverStats,
+            transportStats,
+            sctpTransportStats,
+            candidatePairStats,
+            localCandidateStats,
+            remoteCandidateStats,
+            certificateStats,
+            iceServerStats,
+        ])
+        storage.addPeerConnection(peerConnectionId, peerConnectionLabel);
+        storage.update([{
+            peerConnectionId,
+            statsMap
+        }]);
         describe("When codecs() is iterated", () => {
             const codec = Array.from(storage.codecs())[0];
             it ("id equals to the stats.statsId", () => {

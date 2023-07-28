@@ -71,10 +71,10 @@ function generateBoolean(): boolean {
 
 
 export function createCodecStats(data?: any) {
-    const result: W3C.RtcCodecStats = {
+    const result: W3C.CodecStats = {
         id: DEFAULT_CODEC_ID,
         codecType: generateFrom<RtcCodecType>("encode", "decode"),
-        type: W3C.StatsType.codec,
+        type: 'codec',
         timestamp: Date.now(),
         payloadType: "128",
         transportId: DEFAULT_TRANSPORT_ID,
@@ -85,9 +85,9 @@ export function createCodecStats(data?: any) {
 }
 
 export function createInboundRtpStats(data?: any) {
-    const result: W3C.RtcInboundRtpStreamStats = {
+    const result: W3C.InboundRtpStats = {
         id: DEFAULT_INBOUND_ID,
-        type: W3C.StatsType.inboundRtp,
+        type: 'inbound-rtp',
         timestamp: Date.now(),
         transportId: DEFAULT_TRANSPORT_ID,
         receiverId: DEFAULT_RECEIVER_ID,
@@ -99,9 +99,9 @@ export function createInboundRtpStats(data?: any) {
 }
 
 export function createOutboundRtpStats(data?: any) {
-    const result: W3C.RtcOutboundRTPStreamStats = {
+    const result: W3C.OutboundRtpStats = {
         id: DEFAULT_OUTBOUND_ID,
-        type: W3C.StatsType.outboundRtp,
+        type: 'outbound-rtp',
         timestamp: generateRandomTimestampInMs(),
         transportId: DEFAULT_TRANSPORT_ID,
         senderId: DEFAULT_SENDER_ID,
@@ -114,9 +114,9 @@ export function createOutboundRtpStats(data?: any) {
 }
 
 export function createRemoteInboundRtpStats(data?: any) {
-    const result: W3C.RtcRemoteInboundRtpStreamStats = {
+    const result: W3C.RemoteInboundRtpStats = {
         id: DEFAULT_REMOTE_INBOUND_RTP_ID,
-        type: W3C.StatsType.remoteInboundRtp,
+        type: 'remote-inbound-rtp',
         timestamp: generateRandomTimestampInMs(),
         transportId: DEFAULT_TRANSPORT_ID,
         ssrc: DEFAULT_OUTBOUND_RTP_SSRC,
@@ -127,9 +127,9 @@ export function createRemoteInboundRtpStats(data?: any) {
 }
 
 export function createRemoteOutboundRtpStats(data?: any) {
-    const result: W3C.RtcRemoteOutboundRTPStreamStats = {
+    const result: W3C.RemoteOutboundRtpStats = {
         id: DEFAULT_REMOTE_OUTBOUND_RTP_ID,
-        type: W3C.StatsType.remoteOutboundRtp,
+        type: 'remote-outbound-rtp',
         timestamp: generateRandomTimestampInMs(),
         transportId: DEFAULT_TRANSPORT_ID,
         ssrc: DEFAULT_INBOUND_RTP_SSRC,
@@ -140,9 +140,9 @@ export function createRemoteOutboundRtpStats(data?: any) {
 }
 
 export function createMediaSourceStats(data?: any) {
-    const result: W3C.RtcMediaSourceStats = {
+    const result: W3C.MediaSourceStats = {
         id: DEFAULT_MEDIA_SOURCE_ID,
-        type: W3C.StatsType.mediaSource,
+        type: 'media-source',
         timestamp: generateRandomTimestampInMs(),
         trackIdentifier: DEFAULT_TRACK_ID,
         kind: generateFrom<RtcMediaKind>("audio", "video"),
@@ -152,11 +152,11 @@ export function createMediaSourceStats(data?: any) {
 }
 
 export function createCsrcStats(data?: any) {
-    const result: W3C.RtcRtpContributingSourceStats = {
+    const result: W3C.ContributingSourceStats = {
         id: DEFAULT_CSRC_ID,
         contributorSsrc: generateIntegerBetween(34623746, 99999999),
         inboundRtpStreamId: DEFAULT_INBOUND_ID,
-        type: W3C.StatsType.csrc,
+        type: 'csrc',
         timestamp: generateRandomTimestampInMs(),
         ...(data || {}),
     };
@@ -164,9 +164,9 @@ export function createCsrcStats(data?: any) {
 }
 
 export function createPeerConnectionStats(data?: any) {
-    const result: W3C.RtcPeerConnectionStats = {
+    const result: W3C.PeerConnectionStats = {
         id: DEFAULT_PEER_CONNECTION_ID,
-        type: W3C.StatsType.peerConnection,
+        type: 'peer-connection',
         timestamp: generateRandomTimestampInMs(),
         ...(data || {}),
     };
@@ -175,9 +175,9 @@ export function createPeerConnectionStats(data?: any) {
 
 
 export function createDataChannelStats(data?: any) {
-    const result: W3C.RtcDataChannelStats = {
+    const result: W3C.DataChannelStats = {
         id: DEFAULT_DATA_CHANNEL_ID,
-        type: W3C.StatsType.dataChannel,
+        type: 'data-channel',
         timestamp: generateRandomTimestampInMs(),
         state: generateFrom<RtcDataChannelState>("open", "closed", "closing"),
         ...(data || {}),
@@ -186,9 +186,9 @@ export function createDataChannelStats(data?: any) {
 }
 
 export function createTransceiverStats(data?: any) {
-    const result: W3C.RtcRtpTransceiverStats = {
+    const result: W3C.TransceiverStats = {
         id: DEFAULT_TRANSCEIVER_ID,
-        type: W3C.StatsType.transceiver,
+        type: 'transceiver',
         timestamp: generateRandomTimestampInMs(),
         senderId: DEFAULT_SENDER_ID,
         receiverId: DEFAULT_RECEIVER_ID,
@@ -197,9 +197,9 @@ export function createTransceiverStats(data?: any) {
     return result;
 }
 export function createSenderStats(data?: any) {
-    const result: W3C.RtcSenderCompoundStats = {
+    const result: W3C.SenderStats = {
         id: DEFAULT_SENDER_ID,
-        type: W3C.StatsType.sender,
+        type: 'sender',
         timestamp: generateRandomTimestampInMs(),
         kind: generateFrom<RtcMediaKind>("audio", "video"),
         // ended: generateBoolean(),
@@ -209,9 +209,9 @@ export function createSenderStats(data?: any) {
     return result;
 }
 export function createReceiverStats(data?: any) {
-    const result: W3C.RtcReceiverCompoundStats = {
+    const result: W3C.ReceiverStats = {
         id: DEFAULT_RECEIVER_ID,
-        type: W3C.StatsType.receiver,
+        type: 'receiver',
         timestamp: generateRandomTimestampInMs(),
         kind: generateFrom<RtcMediaKind>("audio", "video"),
         // ended: generateBoolean(),
@@ -222,9 +222,9 @@ export function createReceiverStats(data?: any) {
 }
 
 export function createTransportStats(data?: any) {
-    const result: W3C.RtcTransportStats = {
+    const result: W3C.TransportStats = {
         id: DEFAULT_TRANSPORT_ID,
-        type: W3C.StatsType.transport,
+        type: 'transport',
         timestamp: generateRandomTimestampInMs(),
         dtlsState: generateFrom<RtcDtlsTransportState>("closed", "connected", "new"),
         selectedCandidatePairId: DEFAULT_ICE_CANDIDATE_PAIR_ID,
@@ -236,10 +236,10 @@ export function createTransportStats(data?: any) {
 }
 
 export function createSctpTransportStats(data?: any) {
-    const result: W3C.RtcSctpTransportStats = {
+    const result: W3C.SctpTransportStats = {
         id: DEFAULT_SCTP_TRANSPORT_ID,
         transportId: DEFAULT_TRANSPORT_ID,
-        type: W3C.StatsType.sctpTransport,
+        type: 'sctp-transport',
         timestamp: generateRandomTimestampInMs(),
         ...(data || {}),
     };
@@ -247,9 +247,9 @@ export function createSctpTransportStats(data?: any) {
 }
 
 export function createIceCandidatePairStats(data?: any) {
-    let result: W3C.RtcIceCandidatePairStats = {
+    const result: W3C.CandidatePairStats = {
         id: DEFAULT_ICE_CANDIDATE_PAIR_ID,
-        type: W3C.StatsType.candidatePair,
+        type: 'candidate-pair',
         timestamp: generateRandomTimestampInMs(),
         localCandidateId: DEFAULT_LOCAL_CANDIDATE_ID,
         remoteCandidateId: DEFAULT_REMOTE_CANDIDATE_ID,
@@ -261,10 +261,10 @@ export function createIceCandidatePairStats(data?: any) {
 }
 
 export function createIceLocalCandidateStats(data?: any) {
-    const result: W3C.RtcIceCandidateStats = {
+    const result: W3C.LocalCandidateStats = {
         id: DEFAULT_LOCAL_CANDIDATE_ID,
         transportId: DEFAULT_TRANSPORT_ID,
-        type: W3C.StatsType.localCandidate,
+        type: 'local-candidate',
         timestamp: generateRandomTimestampInMs(),
         candidateType: generateFrom<RtcIceCandidateType>("host", "prflx"),
         ...(data || {}),
@@ -273,10 +273,10 @@ export function createIceLocalCandidateStats(data?: any) {
 }
 
 export function createIceRemoteCandidateStats(data?: any) {
-    const result: W3C.RtcIceCandidateStats = {
+    const result: W3C.RemoteCandidateStats = {
         id: DEFAULT_REMOTE_CANDIDATE_ID,
         transportId: DEFAULT_TRANSPORT_ID,
-        type: W3C.StatsType.remoteCandidate,
+        type: 'remote-candidate',
         timestamp: generateRandomTimestampInMs(),
         candidateType: generateFrom<RtcIceCandidateType>("host", "prflx"),
         ...(data || {}),
@@ -285,9 +285,9 @@ export function createIceRemoteCandidateStats(data?: any) {
 }
 
 export function createCertificateStats(data?: any) {
-    const result: W3C.RtcCertificateStats = {
+    const result: W3C.CertificateStats = {
         id: DEFAULT_CERTIFICATE_ID,
-        type: W3C.StatsType.certificate,
+        type: 'certificate',
         timestamp: generateRandomTimestampInMs(),
         fingerprint: generateRandomString(),
         fingerprintAlgorithm: "noAlg",
@@ -299,9 +299,9 @@ export function createCertificateStats(data?: any) {
 
 
 export function createIceServerStats(data?: any) {
-    const result: W3C.RtcIceServerStats = {
+    const result: W3C.IceServerStats = {
         id: DEFAULT_ICE_SERVER_ID,
-        type: W3C.StatsType.iceServer,
+        type: 'ice-server',
         timestamp: generateRandomTimestampInMs(),
         url: "localhost",
         ...(data || {}),

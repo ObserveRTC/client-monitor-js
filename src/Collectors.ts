@@ -8,6 +8,8 @@ import { TypedEventEmitter } from "./utils/TypedEmitter";
 import { StatsProvider, createStatsProvider } from "./collectors/StatsProvider";
 import { StatsCollector } from "./collectors/StatsCollector";
 import { CustomCallEvent } from "./schema/Samples";
+import { MediasoupStatsCollectorConfig, createMediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
+import { StatsStorage } from "./entries/StatsStorage";
 
 const logger = createLogger("Collectors");
 
@@ -28,8 +30,11 @@ export type CollectorsEmitter = TypedEventEmitter<CollectorsEvents>;
 
 export type Collectors = ReturnType<typeof createCollectors>;
 
-export function createCollectors() {
-    
+export function createCollectors(config: {
+    storage: StatsStorage,
+}) {
+    const { storage } = config;
+
     const statsCollectors = new Map<string, StatsCollector>();
     const statsProviders = new Map<string, StatsProvider>();
     const processor = createProcessor<CollectedStats>();
@@ -135,8 +140,33 @@ export function createCollectors() {
         return statsCollector;
     }
 
-    function addMediasoupDevice(mediasoupDevice: MediaosupDeviceSurrogate) {
-        logger.trace(`addMediasoupDevice(): mediasoupDevice: `, mediasoupDevice);
+    function addMediasoupDevice(config: { collectorId?: string, device: MediaosupDeviceSurrogate}) {
+        const { device, collectorId } = config;
+        logger.trace(`addMediasoupDevice(): mediasoupDevice: `, device);
+        const statsCollector = createMediasoupStatsCollector({
+            device,
+            collectorId,
+
+            storage,
+            emitCallEvent: (event: CustomCallEvent) => {
+                emitter.emit('custom-call-event', event);
+            },
+            addStatsProvider: (statsProvider) => {
+                statsProviders.set(statsProvider.peerConnectionId, statsProvider);
+                return statsProvider;
+            },
+            removeStatsProvider: (statsProviderId) => {
+                statsProviders.delete(statsProviderId);
+            }
+        });
+        
+        statsCollector.onclose = () => {
+            statsCollectors.delete(statsCollector.id);
+            emitter.emit('removed-stats-collector', statsCollector);
+        };
+        statsCollectors.set(statsCollector.id, statsCollector);
+        emitter.emit('added-stats-collector', statsCollector);
+        return statsCollector;
     }
 
     function clear() {

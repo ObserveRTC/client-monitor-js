@@ -317,18 +317,23 @@ export type PeerConnectionEntryEvents = {
  * to navigate to its relations
  */
 export interface PeerConnectionEntry {
-    /**
-     * The id of the peer connection
-     */
     readonly peerConnectionId: string;
-    // readonly collectorId: string;
     readonly statsId: string | undefined;
     readonly stats: W3C.PeerConnectionStats | undefined;
-    // readonly created: number;
-    // readonly touched: number;
-    // readonly updated: number;
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
+
+    readonly totalInboundPacketsLost?: number;
+    readonly totalInboundPacketsReceived?: number;
+    readonly totalOutboundPacketsLost?: number;
+    readonly totalOutbounPacketsReceived?: number;
+    readonly totalOutboundPacketsSent?: number;
+    readonly avgRttInS?: number;
+    readonly sendingAudioBitrate?: number;
+    readonly sendingVideoBitrate?: number;
+    readonly receivingAudioBitrate?: number;
+    readonly receivingVideoBitrate?: number;
+
     getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     codecs(): IterableIterator<CodecEntry>;
     inboundRtps(ssrc?: number): IterableIterator<InboundRtpEntry>;

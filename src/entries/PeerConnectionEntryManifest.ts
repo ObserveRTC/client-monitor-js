@@ -1038,6 +1038,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             yield ['certificate', pcEntry._certificates];
             yield ['ice-server', pcEntry._iceServers];
             yield ['sctp-transport', pcEntry._sctpTransports];
+            return;
         }
         return iterator();
     }
