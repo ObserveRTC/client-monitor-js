@@ -52,7 +52,9 @@ export interface ClientMonitorEvents {
     'error': Error,
     'close': undefined,
     'stats-collected': CollectedStats,
-    'sample-created': ClientSample,
+    'sample-created': {
+        clientSample: ClientSample,
+    },
 
     'congestion-alert': AlertState,
     'audio-desync-alert': AlertState,
@@ -129,12 +131,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public sample(): ClientSample | undefined {
-        const sample = this._sampler.createClientSample();
-        if (!sample) {
+        const clientSample = this._sampler.createClientSample();
+        if (!clientSample) {
             return;
         }
-        this.emit('sample-created', sample);
-        return sample;
+        this.emit('sample-created', {
+            clientSample
+        });
+        return clientSample;
     }
 
     public setMarker(value?: string) {
