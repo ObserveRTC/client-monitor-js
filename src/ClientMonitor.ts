@@ -1,6 +1,6 @@
 import { MediaDevice, CustomCallEvent, ExtensionStat, ClientSample } from './schema/Samples';
 import { CollectedStats, createCollectors } from "./Collectors";
-import { LogLevel, createLogger } from "./utils/logger";
+import { LogLevel, addLoggerProcess, createConsoleLogger, createLogger } from "./utils/logger";
 import { ClientMetaData } from './ClientMetaData';
 import { StatsStorage } from './entries/StatsStorage';
 import { TypedEventEmitter } from './utils/TypedEmitter';
@@ -17,11 +17,6 @@ import { CongestionDetectorConfig } from './detectors/CongestionDetector';
 const logger = createLogger('ClientMonitor');
 
 export type ClientMonitorConfig = {
-
-    /**
-     * Set the loglevel for the client-monitor module
-     */
-    logLevel?: LogLevel,
 
     /**
      * By setting this, the observer calls the added statsCollectors periodically
@@ -105,7 +100,6 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         adapterMiddlewares.forEach((middleware) => {
             this.collectors.processor.addMiddleware(middleware);
         });
-        
     }
 
     public get closed() {

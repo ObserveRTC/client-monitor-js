@@ -62,16 +62,27 @@ export type {
 } from './schema/Samples';
 
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
+import { LogLevel, addLoggerProcess, createConsoleLogger } from "./utils/logger";
+let loggerSet = false;
 /**
  * Create ClientObserver
  *
  * @param config the given config to setup the observer
  */
-export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor {
+export function createClientMonitor(config?: ClientMonitorConfig & {
+    /**
+     * Set the loglevel for the client-monitor module
+     */
+    logLevel?: LogLevel,
+}): ClientMonitor {
     if (config && 0 < ((config?.collectingPeriodInMs ?? 0) + (config?.samplingPeriodInMs ?? 0))) {
         if (!config.tickingTimeInMs) {
             config.tickingTimeInMs = 1000;
         }
+    }
+    if (loggerSet && config?.logLevel) {
+        addLoggerProcess(createConsoleLogger(config.logLevel));
+        loggerSet = true;
     }
     return new ClientMonitor({
         ...(config ?? {}),
