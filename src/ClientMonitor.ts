@@ -10,6 +10,9 @@ import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
 import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces';
 import { createDetectors } from './Detectors';
+import { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
+import { CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
+import { CongestionDetectorConfig } from './detectors/CongestionDetector';
 
 const logger = createLogger('ClientMonitor');
 
@@ -62,7 +65,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public readonly collectors = createCollectors({
         storage: this.storage,
     });
-    public readonly detectors = createDetectors({
+    private readonly _detectors = createDetectors({
         clientMonitor: this,
     });
 
@@ -190,12 +193,38 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return this._detectors.audioDesyncDetector;
     }
 
+    public addAudioDesyncDetector(config?: AudioDesyncDetectorConfig) {
+        this._detectors.addAudioDesyncDetector({
+            fractionalCorrectionAlertOnThreshold: config?.fractionalCorrectionAlertOnThreshold ?? 0.1,
+            fractionalCorrectionAlertOffThreshold: config?.fractionalCorrectionAlertOffThreshold ?? 0.05,
+        });
+    }
+
     public get cpuPerformanceDetector() {
         return this._detectors.cpuPerformanceDetector;
     }
 
+    public addCpuPerformanceDetector(config?: CpuPerformanceDetectorConfig) {
+        this._detectors.addCpuPerformanceDetector({
+            droppedIncomingFramesFractionAlertOff: config?.droppedIncomingFramesFractionAlertOff ?? 0.1,
+            droppedIncomingFramesFractionAlertOn: config?.droppedIncomingFramesFractionAlertOn ?? 0.2,
+        });
+    }
+
     public get congestionDetector() {
         return this._detectors.congestionDetector;
+    }
+
+    public addCongestionDetector(config?: CongestionDetectorConfig) {
+        this._detectors.addCongestionDetector({
+            deviationFoldThreshold: config?.deviationFoldThreshold ?? 3,
+            measurementsWindowInMs: config?.measurementsWindowInMs ?? 10000,
+            minConsecutiveTickThreshold: 3,
+            minDurationThresholdInMs: 3000,
+            minMeasurementsLengthInMs: 5000,
+            minRTTDeviationThresholdInMs: 100,
+            fractionLossThreshold: 0.2,
+        });
     }
 
     public getTrackStats(trackId: string): TrackStats | undefined {
