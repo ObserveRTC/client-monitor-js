@@ -1,5 +1,3 @@
-import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
-
 export type { StatsCollector } from "./collectors/StatsCollector";
 export type { StatsProvider } from "./collectors/StatsProvider";
 export type { MediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
@@ -63,15 +61,26 @@ export type {
     CustomCallEvent,
 } from './schema/Samples';
 
+import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 /**
  * Create ClientObserver
  *
  * @param config the given config to setup the observer
  */
 export function createClientMonitor(config?: ClientMonitorConfig): ClientMonitor {
+    if (config && 0 < ((config?.collectingPeriodInMs ?? 0) + (config?.samplingPeriodInMs ?? 0))) {
+        if (!config.tickingTimeInMs) {
+            config.tickingTimeInMs = 1000;
+        }
+    }
     return new ClientMonitor({
         ...(config ?? {}),
     });
 }
 
-export { createConsoleLogger, createLogger } from "./utils/logger";
+export { 
+    createLogger, 
+    addLoggerProcess, 
+    removeLoggerProcess,
+    createConsoleLogger, 
+} from "./utils/logger";

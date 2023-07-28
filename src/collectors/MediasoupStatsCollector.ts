@@ -16,6 +16,9 @@ import {
     MediasoupTransportSurrogate 
 } from "./MediasoupSurrogates";
 import { StatsProvider, createStatsProvider } from "./StatsProvider";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("MediasoupStatsCollector");
 
 export type MediasoupStatsCollectorConfig = {
     collectorId?: string,
@@ -274,6 +277,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                 createPeerConnectionClosedEvent(eventBase)
             );
             removeStatsProvider(statsProvider.peerConnectionId);
+            logger.debug(`Removed transport ${transport.id}`);
         });
         transport.observer.on("newproducer", addProducerListener);
         transport.observer.on("newconsumer", addConsumerListener);
@@ -288,6 +292,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             })
         );
         addStatsProvider(statsProvider);
+        logger.debug(`Added transport ${transport.id}`);
     }
 
     function adaptStorageMiddleware(storage: StatsStorage, next: (storage: StatsStorage) => void) {

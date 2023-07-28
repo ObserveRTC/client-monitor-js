@@ -8,7 +8,7 @@ import { TypedEventEmitter } from "./utils/TypedEmitter";
 import { StatsProvider, createStatsProvider } from "./collectors/StatsProvider";
 import { StatsCollector } from "./collectors/StatsCollector";
 import { CustomCallEvent } from "./schema/Samples";
-import { MediasoupStatsCollectorConfig, createMediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
+import { createMediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
 import { StatsStorage } from "./entries/StatsStorage";
 
 const logger = createLogger("Collectors");
@@ -107,6 +107,7 @@ export function createCollectors(config: {
                 closedStatsCollector = true;
                 statsProviders.delete(peerConnectionId);
                 statsCollectors.delete(peerConnectionId);
+                storage.removePeerConnection(peerConnectionId);
                 emitter.emit('removed-stats-collector', statsCollector);
             },
             get closed() {
@@ -115,6 +116,7 @@ export function createCollectors(config: {
         }
         statsProviders.set(peerConnectionId, statsProvider);
         statsCollectors.set(peerConnectionId, statsCollector);
+        storage.addPeerConnection(peerConnectionId, label);
         emitter.emit('added-stats-collector', statsCollector);
         return statsCollector;
     }
@@ -132,10 +134,12 @@ export function createCollectors(config: {
         statsCollector.onclose = () => {
             statsCollectors.delete(statsCollector.id);
             statsProviders.delete(statsCollector.id);
+            storage.removePeerConnection(statsCollector.id);
             emitter.emit('removed-stats-collector', statsCollector);
         };
         statsCollectors.set(statsCollector.id, statsCollector);
         statsProviders.set(statsCollector.id, statsCollector);
+        storage.addPeerConnection(statsCollector.id, statsCollector.peerConnectionLabel);
         emitter.emit('added-stats-collector', statsCollector)
         return statsCollector;
     }
@@ -152,10 +156,12 @@ export function createCollectors(config: {
             },
             addStatsProvider: (statsProvider) => {
                 statsProviders.set(statsProvider.peerConnectionId, statsProvider);
+                storage.addPeerConnection(statsProvider.peerConnectionId, statsProvider.peerConnectionLabel);
                 return statsProvider;
             },
             removeStatsProvider: (statsProviderId) => {
                 statsProviders.delete(statsProviderId);
+                storage.removePeerConnection(statsProviderId);
             }
         });
         

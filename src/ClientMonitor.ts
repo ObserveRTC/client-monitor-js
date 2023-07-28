@@ -259,5 +259,6 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                 fixedDelayInMs: this._config.samplingPeriodInMs,
             });
         }
+        this._timer.tickTimeInMs = this._config.tickingTimeInMs;
     }
 }
