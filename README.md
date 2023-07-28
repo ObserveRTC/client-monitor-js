@@ -204,6 +204,15 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
+monitor.detectors.addAudioDesyncDetector({
+    // setup the config or leave it empty to use the default config
+})
+
+monitor.detectors.addCpuPerformanceDetector({
+    // setup the config or leave it empty to use the default config
+})
+
+
 monitor.on('audio-desync-alert', (alertState) => {
     if (alertState === 'on') {
         console.log('Audio is desynced is video');

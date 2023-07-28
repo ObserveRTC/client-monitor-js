@@ -62,12 +62,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public readonly collectors = createCollectors({
         storage: this.storage,
     });
+    public readonly detectors = createDetectors({
+        clientMonitor: this,
+    });
 
     private readonly _sampler = new Sampler(this.storage);
     private readonly _timer = createTimer();
-    private readonly _detectors = createDetectors({
-        clientMonitor: this,
-    });
     private _closed = false;
 
     public constructor(

@@ -1,3 +1,20 @@
+## 2.3.0
+ * refactored collectors and sampler
+ * `clientMontior.os` is moved to `clientMonitor.meta.operationSystem`
+ * `clientMontior.engine` is moved to `clientMonitor.meta.engine`
+ * `clientMontior.browser` is moved to `clientMonitor.meta.browser`
+ * `clientMontior.audioInputs` is moved to `clientMonitor.meta.audioInputs`
+ * `clientMontior.audioOutputs` is moved to `clientMonitor.meta.audioOutputs`
+ * `clientMontior.videoInputs` is moved to `clientMonitor.meta.videoInputs`
+ * `clientMonitor.alerts` is removed, `clientMonitor.audioDesyncDetector`, `clientMonitor.cpuPerformanceDetector`, and `clientMonitor.congestionDetector`
+ * all `updates` fields in storage entries are moved to the entries and to the `storage`
+ * refactored mediasoup-collector
+ * add events are collected automatically 
+ * simplified configuration, and detectors configurations are moved to create detectors
+
+
+
+
 ## 2.1.0
  * Remove dependency @observertc/samples-schema
  * Add Samples and W3cStats to the source under the `./src/schema` library
