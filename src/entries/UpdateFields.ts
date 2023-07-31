@@ -1,5 +1,3 @@
-import { InboundRtpUpdates, OutboundRtpUpdates, RemoteInboundRtpUpdates } from "./StatsEntryInterfaces";
-import * as W3C from '../schema/W3cStatsIdentifiers'
 import { clamp } from "../utils/common";
 
 
@@ -52,60 +50,4 @@ export function calculateVideoMOS(
 	const MOS = base - 1.9 * Math.log(expectedFrameRate / frameRate) - delayInMs * 0.002;
 
 	return clamp(Math.round(MOS * 100) / 100, 1, 5);
-}
-
-export function calculateInboundRtpUpdates(
-	prevStats: W3C.RtcInboundRtpStreamStats, 
-	actualStats: W3C.RtcInboundRtpStreamStats,
-	elapsedTimeInSec: number,
-): InboundRtpUpdates {
-	const avgJitterBufferDelayInMs = (((actualStats.jitterBufferDelay ?? 0) - (prevStats.jitterBufferDelay ?? 0)) / ((Math.max(actualStats.jitterBufferEmittedCount ?? 1, 1)) - (prevStats.jitterBufferEmittedCount ?? 0))) * 1000.0;
-	const receivedPackets = (actualStats.packetsReceived ?? 0) - (prevStats.packetsReceived ?? 0);
-	const receivingBitrate = (((actualStats.bytesReceived ?? 0) - (prevStats.bytesReceived ?? 0)) * 8) / elapsedTimeInSec;
-	const lostPackets = (actualStats.packetsLost ?? 0) - (prevStats.packetsLost ?? 0);
-	const receivedFrames = (actualStats.framesReceived ?? 0) - (prevStats.framesReceived ?? 0);
-	const decodedFrames = (actualStats.framesDecoded ?? 0) - (prevStats.framesDecoded ?? 0);
-	const droppedFrames = (actualStats.framesDropped ?? 0) - (prevStats.framesDropped ?? 0);
-	const receivedSamples = (actualStats.totalSamplesReceived ?? 0) - (prevStats.totalSamplesReceived ?? 0);
-	const silentConcealedSamples = (actualStats.silentConcealedSamples ?? 0) - (prevStats.silentConcealedSamples ?? 0);
-	const fractionLoss = lostPackets / (lostPackets + receivedPackets);
-
-	return {
-		avgJitterBufferDelayInMs,
-		receivingBitrate,
-		receivedPackets,
-		lostPackets,
-		receivedFrames,
-		decodedFrames,
-		droppedFrames,
-		receivedSamples,
-		silentConcealedSamples,
-		fractionLoss
-	}
-}
-
-export function calculateOutboundRtpUpdates(
-	prevStats: W3C.RtcOutboundRTPStreamStats, 
-	actualStats: W3C.RtcOutboundRTPStreamStats,
-	elapsedTimeInSec: number,
-): OutboundRtpUpdates {
-	const sendingBitrate = (((actualStats.bytesSent ?? 0) - (prevStats.bytesSent ?? 0)) * 8) / elapsedTimeInSec;
-	const sentPackets = (actualStats.packetsSent ?? 0) - (prevStats.packetsSent ?? 0);
-
-	return {
-		sendingBitrate,
-		sentPackets,
-	}
-}
-
-export function calculateRemoteInboundRtpUpdates(
-	prevStats: W3C.RtcRemoteInboundRtpStreamStats, 
-	actualStats: W3C.RtcRemoteInboundRtpStreamStats,
-): RemoteInboundRtpUpdates {
-	const receivedPackets = (actualStats.packetsReceived ?? 0) - (prevStats.packetsReceived ?? 0);
-	const lostPackets = (actualStats.packetsLost ?? 0) - (prevStats.packetsLost ?? 0);
-	return {
-		lostPackets,
-		receivedPackets,
-	}
 }

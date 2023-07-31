@@ -1,80 +1,174 @@
+/* eslint-disable @typescript-eslint/no-empty-interface */
 type RtcStatsVersion = {
     date: Date;
 }
 
 export const version: RtcStatsVersion = {
-    date: new Date("2022-09-21"),
+    date: new Date("2023-07-20"),
 }
 
-export enum StatsType {
-    codec = "codec",
-    inboundRtp = "inbound-rtp",
-    outboundRtp = "outbound-rtp",
-    remoteInboundRtp = "remote-inbound-rtp",
-    remoteOutboundRtp = "remote-outbound-rtp",
-    mediaSource = "media-source",
-    mediaPlayout = "media-playout",
-    peerConnection = "peer-connection", 
-    dataChannel = "data-channel",
-    transport = "transport",
-    candidatePair = "candidate-pair",
-    localCandidate = "local-candidate",
-    remoteCandidate = "remote-candidate",
-    certificate = "certificate",
-    
-    // Deprecated 2021
-    // -----------------
-    stream = "stream", 
-    track = "track",
+export type StatsType = 
+    | 'codec' 
+    | 'inbound-rtp'
+    | 'outbound-rtp'
+    | 'remote-inbound-rtp'
+    | 'remote-outbound-rtp'
+    | 'media-source'
+    | 'media-playout'
+    | 'peer-connection'
+    | 'data-channel'
+    | 'transport'
+    | 'candidate-pair'
+    | 'local-candidate'
+    | 'remote-candidate'
+    | 'certificate'
+    | 'transceiver' // Deprecated 2022-09-21
+    | 'csrc'
+    | 'sender'
+    | 'receiver'
+    | 'sctp-transport'
+    | 'ice-server'
 
+    // Deprecated 2021
+    | 'stream'
+    | 'track'
+;
+
+export type StatsValue =
+    | CodecStats
+    | InboundRtpStats
+    | OutboundRtpStats
+    | RemoteInboundRtpStats
+    | RemoteOutboundRtpStats
+    | MediaSourceStats
+    | MediaPlayoutStats
+    | PeerConnectionStats
+    | DataChannelStats
+    | TransportStats
+    | CandidatePairStats
+    | LocalCandidateStats
+    | RemoteCandidateStats
+    | CertificateStats
     // Deprecated 2022-09-21
-    // ----------------------
-    transceiver = "transceiver",
-    csrc = "csrc", 
-    sender = "sender", 
-    receiver = "receiver", 
-    sctpTransport = "sctp-transport", 
-    iceServer = "ice-server",
-};
+    | TransceiverStats 
+    | ContributingSourceStats 
+    | SenderStats
+    | ReceiverStats
+    | SctpTransportStats
+    | IceServerStats
+    // Deprecated 2021
+    | StreamStats
+    | TrackStats
+;
 
 // https://www.w3.org/TR/webrtc-stats/#summary
-// export type CodecStats = RtcCodecStats;
-// export type InboundRtpStats = RtcInboundRtpStreamStats;
-// export type OutboundRtpStats = RtcOutboundRTPStreamStats;
-// export type RemoteInboundRtpStats = RtcRemoteInboundRtpStreamStats;
-// export type RemoteOutboundRtpStats = RtcRemoteOutboundRTPStreamStats;
-// export type AudioSourceStats = RtcAudioSourceStats;
-// export type VideoSrouceStats = RtcVideoSourceStats;
-// export type RtcMediaSourceCompoundStats = RtcMediaSourceStats & (RtcAudioSourceStats | RtcVideoSourceStats);
-export type RtcMediaSourceCompoundStats = RtcAudioSourceStats | RtcVideoSourceStats;
+export type CodecStats = RtcStats & RtcCodecStats & {
+    type: 'codec';
+}
+export type InboundRtpStats = RtcStats & RtcRtpStreamStats & RtcReceivedRtpStreamStats & RtcInboundRtpStreamStats & {
+    type: 'inbound-rtp';
+}
+export type OutboundRtpStats = RtcStats & RtcRtpStreamStats & RtcSentRtpStreamStats & RtcOutboundRTPStreamStats & {
+    type: 'outbound-rtp';
+}
+export type RemoteInboundRtpStats = RtcStats & RtcRtpStreamStats & RtcReceivedRtpStreamStats & RtcRemoteInboundRtpStreamStats & {
+    type: 'remote-inbound-rtp';
+}
+export type RemoteOutboundRtpStats = RtcStats & RtcRtpStreamStats & RtcSentRtpStreamStats & RtcRemoteOutboundRTPStreamStats & {
+    type: 'remote-outbound-rtp';
+}
+export type MediaSourceStats = RtcStats & RtcMediaSourceStats & RtcAudioSourceStats & RtcVideoSourceStats & {
+    type: 'media-source';
+}
+export type MediaPlayoutStats = RtcStats & RtcAudioPlayoutStats & {
+    type: 'media-playout';
+}
+export type PeerConnectionStats = RtcStats & RtcPeerConnectionStats & {
+    type: 'peer-connection';
+}
+export type DataChannelStats = RtcStats & RtcDataChannelStats & {
+    type: 'data-channel';
+}
+export type TransportStats = RtcStats & RtcTransportStats & {
+    type: 'transport';
+}
+export type CandidatePairStats = RtcStats & RtcIceCandidatePairStats & {
+    type: 'candidate-pair';
+}
+export type LocalCandidateStats = RtcStats & RtcIceCandidateStats & {
+    type: 'local-candidate';
+}
+export type RemoteCandidateStats = RtcStats & RtcIceCandidateStats & {
+    type: 'remote-candidate';
+}
+export type CertificateStats = RtcStats & RtcCertificateStats & {
+    type: 'certificate';
+}
 
-export type RtcSenderCompoundStats = RtcAudioSenderStats | RtcVideoSenderStats;
-export type RtcReceiverCompoundStats = RtcAudioReceiverStats | RtcVideoReceiverStats;
-export type RtcLocalCandidateStats = RtcIceCandidateStats;
-export type RtcRemoteCandidateStats = RtcIceCandidateStats;
+// Deprecated 2022-09-21
+export type TransceiverStats = RtcStats & RtcRtpStreamStats & RtcRtpContributingSourceStats & RtcRtpTransceiverStats & {
+    type: 'transceiver';
+}
 
-// RTCStat (https://www.w3.org/TR/webrtc-stats/#dom-rtcstats)
-export interface RtcStats {
-    id: string;
-    type: string;
-    timestamp: number;
+export type ContributingSourceStats = RtcStats & RtcRtpStreamStats & RtcRtpContributingSourceStats & {
+    type: 'csrc';
+}
+export type SenderStats = RtcStats & RtcRtpStreamStats & RtcSentRtpStreamStats & RtcSenderCompoundStats & {
+    type: 'sender';
+    trackIdentifier?: string;
+}
+export type ReceiverStats = RtcStats & RtcRtpStreamStats & RtcReceivedRtpStreamStats & RtcReceiverCompoundStats & {
+    type: 'receiver';
+    trackIdentifier?: string;
+}
+export type SctpTransportStats = RtcStats & RtcSctpTransportStats & {
+    type: 'sctp-transport';
+}
+export type IceServerStats = RtcStats & RtcIceServerStats & {
+    type: 'ice-server';
+}
+
+// Deprecated 2021
+export type StreamStats = RtcStats & Record<string, unknown> & {
+    type: 'stream';
+}
+export type TrackStats = RtcStats & Record<string, unknown> & {
+    type: 'track';
 }
 
 export type RtcMediaKind = "audio" | "video";
+export type RtcQualityLimitationReason = "none" | "cpu" | "bandwidth" | "other";
+export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";
+export type RtcIceRole = "unknown" | "controlling" | "controlled";
+export type RtcDtlsTransportState = "closed" | "connected" | "connecting" | "failed" | "new";
+export type RtcIceTransportState =  "closed" | "connected" | "failed" | "new" | "checking" | "completed" | "disconnected";
+export type RtcDtlsRole = "client" | "server" | "unknown";
+export type RtcIceCandidateType = "host" | "prflx" | "relay" | "srflx";
+export type RtcTransportProtocol = "udp" | "tcp";
+export type RtcRelayProtocol = "udp" | "tcp" | "tls";
+export type RtcStatsIceCandidatePairState = "failed" | "cancelled" | "frozen" | "inprogress" | "succeeded" | "waiting";
+export type RtcIceTcpCandidateType = "active" | "passive" | "so";
+
+// Deprecated 2022-09-21
+export type RtcCodecType = "encode" | "decode";
+
+// RTCStat (https://www.w3.org/TR/webrtc-stats/#dom-rtcstats)
+type RtcStats = {
+    id: string;
+    type: StatsType;
+    timestamp: number;
+}
 
 // RTCRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#dom-rtcrtpstreamstats)
-export interface RtcRtpStreamStats extends RtcStats {
+type RtcRtpStreamStats = {
     ssrc: number;
     kind: RtcMediaKind;
     transportId?: string;
     codecId?: string;
 }
 
-// Deprecated 2022-09-21
-export type RtcCodecType = "encode" | "decode";
-
 // RTCCodecStats (https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats)
-export interface RtcCodecStats extends RtcStats {
+type RtcCodecStats = {
     payloadType: string;
     transportId: string;
     mimeType: string;
@@ -88,11 +182,13 @@ export interface RtcCodecStats extends RtcStats {
 }
 
 // RTCReceivedRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#dom-rtcreceivedrtpstreamstats)
-export interface RtcReceivedRtpStreamStats extends RtcRtpStreamStats {
+type RtcReceivedRtpStreamStats = {
     packetsReceived?: number;
     packetsLost?: number;
     jitter?: number;
-    framesDropped?: number; // only video
+    
+    // Deprecated 2023-07-20 (moved to RtcInboundRtpStreamStats)
+    // framesDropped?: number; // only video
 
     // Deprecated 2022-09-21
     // ---------------------
@@ -110,14 +206,16 @@ export interface RtcReceivedRtpStreamStats extends RtcRtpStreamStats {
     // fullFramesLost?: number; // only video
 }
 
-export type DscpPacketStats = Record<string, number>
+type DscpPacketStats = Record<string, number>
 // RTCInboundRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#inboundrtpstats-dict*)
-export interface RtcInboundRtpStreamStats extends RtcReceivedRtpStreamStats {
+type RtcInboundRtpStreamStats = {
     trackIdentifier?: string;
     mid?: string;
     remoteId?: string;
     framesDecoded?: number; // only video
     keyFramesDecoded?: number; // only video
+    framesRendered?: number; // only video
+    framesDropped?: number; // only video
     frameWidth?: number; // only video
     frameHeight?: number; // only video
     framesPerSecond?: number; // only vidoe
@@ -125,9 +223,16 @@ export interface RtcInboundRtpStreamStats extends RtcReceivedRtpStreamStats {
     totalDecodeTime?: number; // only video
     totalInterFrameDelay?: number; // only video
     totalSquaredInterFrameDelay?: number; // only video
+
+    pauseCaount?: number;
+    totalPausesDuration?: number;
+    freezeCount?: number;
+    totalFreezesDuration?: number;
+    
     lastPacketReceivedTimestamp?: number;
     headerBytesReceived?: number;
     packetsDiscarded?: number;
+    fecBytesReceived?: number;
     fecPacketsReceived?: number;
     fecPacketsDiscarded?: number;
     bytesReceived?: number;
@@ -152,6 +257,11 @@ export interface RtcInboundRtpStreamStats extends RtcReceivedRtpStreamStats {
     framesReceived?: number; // only video
     decoderImplementation?: string;
     playoutId?: string;
+    powerEfficientDecoder?: boolean; // video only
+    framesAssembledFromMultiplePackets?: number;
+    totalAssemblyTime?: number;
+    retransmittedPacketsReceived?: number;
+    retransmittedBytesReceived?: number;
     
     // Deprecated 2022-09-21, but kept for backward compatibility
     receiverId?: string;
@@ -172,7 +282,7 @@ export interface RtcInboundRtpStreamStats extends RtcReceivedRtpStreamStats {
 }
 
 // RTCRemoteInboundRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#remoteinboundrtpstats-dict*)
-export interface RtcRemoteInboundRtpStreamStats extends RtcReceivedRtpStreamStats {
+type RtcRemoteInboundRtpStreamStats = {
     localId?: string;
     roundTripTime?: number;
     totalRoundTripTime?: number;
@@ -184,22 +294,18 @@ export interface RtcRemoteInboundRtpStreamStats extends RtcReceivedRtpStreamStat
 }
 
 // RTCSentRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#sentrtpstats-dict*)
-export interface RtcSentRtpStreamStats extends RtcRtpStreamStats {
+type RtcSentRtpStreamStats = {
     packetsSent?: number;
     bytesSent?: number;
 }
 
-export type RtcQualityLimitationReason = "none" | "cpu" | "bandwidth" | "other";
 // export type RtcQualityLimitationDurations = Record<RtcQualityLimitationReason, number>
-export type RtcQualityLimitationDurations = {
-    none?: number;
-    cpu?: number;
-    bandwidth?: number;
-    other?: number;
+type RtcQualityLimitationDurations = {
+    [K in keyof Record<RtcQualityLimitationReason, number>]?: number;
 }
 
 // RTCOutboundRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#outboundrtpstats-dict*)
-export interface RtcOutboundRTPStreamStats extends RtcSentRtpStreamStats {
+type RtcOutboundRTPStreamStats = {
     mid?: string;
     mediaSourceId?: string;
     remoteId?: string;
@@ -227,7 +333,9 @@ export interface RtcOutboundRTPStreamStats extends RtcSentRtpStreamStats {
     firCount?: number; // video only
     pliCount?: number; // video only
     encoderImplementation?: string;
+    powerEfficientEncoding?: boolean; // video only
     active?: boolean;
+    scalabilityMode?: string; // video only
 
     // Deprecated, but due to backward compatibility it is kept here
     senderId?: string;
@@ -251,7 +359,7 @@ export interface RtcOutboundRTPStreamStats extends RtcSentRtpStreamStats {
 }
 
 // RTCRemoteOutboundRtpStreamStats (https://www.w3.org/TR/webrtc-stats/#remoteoutboundrtpstats-dict*)
-export interface RtcRemoteOutboundRTPStreamStats extends RtcSentRtpStreamStats {
+type RtcRemoteOutboundRTPStreamStats = {
     localId?: string;
     remoteTimestamp?: number;
     reportsSent?: number;
@@ -261,7 +369,7 @@ export interface RtcRemoteOutboundRTPStreamStats extends RtcSentRtpStreamStats {
 }
 
 // RTCMediaSourceStats (https://www.w3.org/TR/webrtc-stats/#mediasourcestats-dict*)
-export interface RtcMediaSourceStats extends RtcStats {
+type RtcMediaSourceStats = {
     trackIdentifier: string;
     kind: RtcMediaKind;
 
@@ -269,7 +377,7 @@ export interface RtcMediaSourceStats extends RtcStats {
 }
 
 // RTCAudioSourceStats (https://www.w3.org/TR/webrtc-stats/#audiosourcestats-dict*)
-export interface RtcAudioSourceStats extends RtcMediaHandlerStats {
+type RtcAudioSourceStats = {
     audioLevel?: number; // audio only
     totalAudioEnergy?: number; // audio only
     totalSamplesDuration?: number; // audio only
@@ -283,7 +391,7 @@ export interface RtcAudioSourceStats extends RtcMediaHandlerStats {
 }
 
 // RTCVideoSourceStats (https://www.w3.org/TR/webrtc-stats/#videosourcestats-dict*)
-export interface RtcVideoSourceStats extends RtcMediaSourceStats {
+type RtcVideoSourceStats = {
     width?: number; // video only
     height?: number; // video only
     frames?: number; // video only
@@ -295,7 +403,7 @@ export interface RtcVideoSourceStats extends RtcMediaSourceStats {
 
 // Deprecated 2022-09-21
 // RTCRtpContributingSourceStats (https://www.w3.org/TR/webrtc-stats/#dom-rtcrtpcontributingsourcestats)
-export interface RtcRtpContributingSourceStats extends RtcStats {
+type RtcRtpContributingSourceStats = {
     contributorSsrc: number;
     inboundRtpStreamId: string;
 
@@ -303,7 +411,7 @@ export interface RtcRtpContributingSourceStats extends RtcStats {
     audioLevel?: number;
 }
 // RTCPeerConnectionStats (https://www.w3.org/TR/webrtc-stats/#pcstats-dict*)
-export interface RtcPeerConnectionStats extends RtcStats {
+type RtcPeerConnectionStats = {
     dataChannelsOpened?: number;
     dataChannelsClosed?: number;
     
@@ -315,55 +423,14 @@ export interface RtcPeerConnectionStats extends RtcStats {
 
 // Deprecated since 2022-09-21
 // RTCRtpTransceiverStats (https://www.w3.org/TR/webrtc-stats/#transceiver-dict*)
-export interface RtcRtpTransceiverStats extends RtcStats {
+type RtcRtpTransceiverStats = {
     senderId: string;
     receiverId: string;
     mid?: string;
 }
 
-// Deprecated since 2022-09-21
-// RTCMediaHandlerStats (https://www.w3.org/TR/webrtc-stats/#mststats-dict*)
-export interface RtcMediaHandlerStats extends RtcStats {
-    trackIdentifier?: string;
-    ended?: boolean;
-
-    kind: RtcMediaKind;
-}
-
-// Deprecated since 2022-09-21
-// RTCVideoHandlerStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
-export interface RtcVideoHandlerStats extends RtcMediaHandlerStats {
-
-}
-
-// Deprecated since 2022-09-21
-// RTCVideoHandlerStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
-export interface RtcVideoSenderStats extends RtcVideoHandlerStats {
-    mediaSourceId?: string;
-}
-
-// Deprecated since 2022-09-21
-// RTCVideoReceiverStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
-export interface RtcVideoReceiverStats extends RtcVideoHandlerStats {
-
-}
-
-// RTCAudioHandlerStats (https://www.w3.org/TR/webrtc-stats/#aststats-dict*)
-export interface RtcAudioHandlerStats extends RtcMediaHandlerStats {
-
-}
-
-// RTCAudioSenderStats (https://www.w3.org/TR/webrtc-stats/#asstats-dict*)
-export interface RtcAudioSenderStats extends RtcAudioHandlerStats {
-    mediaSourceId?: string;
-}
-
-// RTCAudioReceiverStats (https://www.w3.org/TR/webrtc-stats/#raststats-dict*)
-export interface RtcAudioReceiverStats extends RtcAudioHandlerStats {
-
-}
-
-export interface RTCAudioPlayoutStats extends RtcStats {
+type RtcAudioPlayoutStats = {
+    kind: 'audio';
     synthesizedSamplesDuration?: number;
     synthesizedSamplesEvents?: number;
     totalSamplesDuration?: number;
@@ -371,11 +438,11 @@ export interface RTCAudioPlayoutStats extends RtcStats {
     totalSamplesCount?: number;
 }
 
-export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";
+
 
 // Deprecated 2022-09-21
 // RTCDataChannelStats (https://www.w3.org/TR/webrtc-stats/#dcstats-dict*)
-export interface RtcDataChannelStats extends RtcStats {
+type RtcDataChannelStats = {
     label?: string;
     protocol?: string;
     dataChannelIdentifier?: number;
@@ -386,13 +453,9 @@ export interface RtcDataChannelStats extends RtcStats {
     bytesReceived?: number;
 }
 
-export type RtcIceRole = "unknown" | "controlling" | "controlled";
-export type RtcDtlsTransportState = "closed" | "connected" | "connecting" | "failed" | "new";
-export type RtcIceTransportState =  "closed" | "connected" | "failed" | "new" | "checking" | "completed" | "disconnected";
-export type RtcDtlsRole = "client" | "server" | "unknown";
 // Deprecated 2022-09-21
 // RTCTransportStats (https://www.w3.org/TR/webrtc-stats/#transportstats-dict*)
-export interface RtcTransportStats extends RtcStats {
+type RtcTransportStats = {
     packetsSent?: number;
     packetsReceived?: number;
     bytesSent?: number;
@@ -421,7 +484,7 @@ export interface RtcTransportStats extends RtcStats {
 
 // Deprecated 2022-09-21
 // RTCSctpTransportStats (https://www.w3.org/TR/webrtc-stats/#sctptransportstats-dict*)
-export interface RtcSctpTransportStats extends RtcStats {
+type RtcSctpTransportStats = {
     transportId?: string;
     smoothedRoundTripTime?: number
     congestionWindow?: number;
@@ -430,11 +493,8 @@ export interface RtcSctpTransportStats extends RtcStats {
     unackData?: number;
 }
 
-export type RtcIceCandidateType = "host" | "prflx" | "relay" | "srflx";
-export type RtcTransportProtocol = "udp" | "tcp";
-export type RtcRelayProtocol = "udp" | "tcp" | "tls";
 // RTCIceCandidateStats (https://www.w3.org/TR/webrtc-stats/#icecandidate-dict*)
-export interface RtcIceCandidateStats extends RtcStats {
+type RtcIceCandidateStats = {
     transportId: string;
     
     address?: string;
@@ -446,12 +506,16 @@ export interface RtcIceCandidateStats extends RtcStats {
     priority?: number;
     url?: string;
     relayProtocol?: RtcRelayProtocol;
+
+    foundation?: string;
+    relatedAddress?: string;
+    relatedPort?: number;
+    userNameFragment?: string;
+    tcpType?: RtcIceTcpCandidateType;
 }
 
-export type RtcStatsIceCandidatePairState = "failed" | "cancelled" | "frozen" | "inprogress" | "succeeded" | "waiting";
-
 // RTCIceCandidatePairStats (https://www.w3.org/TR/webrtc-stats/#dom-rtcicecandidatepairstats)
-export interface RtcIceCandidatePairStats extends RtcStats {
+type RtcIceCandidatePairStats = {
     transportId: string;
     localCandidateId: string;
     remoteCandidateId: string;
@@ -489,7 +553,7 @@ export interface RtcIceCandidatePairStats extends RtcStats {
     // responseBytesSent?: number;
 }
 
-export interface RtcCertificateStats extends RtcStats {
+type RtcCertificateStats = {
     fingerprint: string;
     fingerprintAlgorithm: string;
     base64Certificate: string;
@@ -497,11 +561,25 @@ export interface RtcCertificateStats extends RtcStats {
 }
 
 // Deprecated 2022-09-21
-export interface RtcIceServerStats extends RtcStats {
+type RtcIceServerStats = {
     url: string;
     port?: number;
     relayProtocol?: RtcRelayProtocol;
     totalRequestsSent?: number;
     totalResponsesReceived?: number;
     totalRoundTripTime?: number;
+}
+
+// Deprecated since 2022-09-21
+// RTCVideoHandlerStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
+// union of RtcVideoSenderStats, RtcVideoHandlerStats
+type RtcSenderCompoundStats = {
+    mediaSourceId?: string;
+}
+
+// Deprecated since 2022-09-21
+// RTCVideoHandlerStats (https://www.w3.org/TR/webrtc-stats/#rvststats-dict*)
+// union of RtcAudioReceiverStats, RtcVideoReceiverStats
+type RtcReceiverCompoundStats = {
+    // empty
 }

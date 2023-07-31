@@ -1,13 +1,8 @@
-import { ClientMonitorAlerts } from "../ClientMonitor";
-import { EvaluatorProcess } from "../Evaluators";
+import { AlertState, ClientMonitor } from "../ClientMonitor";
 /**
  * Configuration for the dropped frames detector.
  */
-export type CpuIssueDetectorConfig = {
-	/**
-	 * Specifies whether the CPU issue detector is enabled or not.
-	 */
-	enabled: boolean;
+export type CpuPerformanceDetectorConfig = {
 	/**
 	 * The fractional threshold used to determine if the incoming frames
 	 * dropped fraction is considered significant or not.
@@ -32,38 +27,53 @@ export type CpuIssueDetectorConfig = {
    * @param config The configuration for the dropped frames detector.
    * @returns The evaluator process function.
    */
-export function createCpuIssueDetector(
-	alert: ClientMonitorAlerts['cpu-performance-alert'], 
-	config: CpuIssueDetectorConfig): EvaluatorProcess {
-	if (!config.enabled) {
-		return async () => {
-
-		};
-	}
-	const process: EvaluatorProcess = async (context) => {
-		const { storage } = context;
-		let issueDetected = false;
+export function createCpuPerformanceDetector(config: CpuPerformanceDetectorConfig & {
+	clientMonitor: ClientMonitor,
+}) {
+	const {
+		clientMonitor,
+	} = config;
+	let alertState: AlertState	= 'off';
+	let outboundIsOk = true;
+	let inboundIsOk = true;
+	async function update() {
+		const { storage } = clientMonitor;
+		inboundIsOk = true;
 		for (const inboundRtp of storage.inboundRtps()) {
-			if (inboundRtp.updates.receivedFrames < 1 || inboundRtp.updates.decodedFrames < 1) {
+			const receivedFrames = inboundRtp.receivedFrames ?? 0;
+			const decodedFrames = inboundRtp.decodedFrames ?? 0;
+			if (receivedFrames < 1 || decodedFrames < 1) {
 				continue;
 			}
-			const framesDroppedFraction = inboundRtp.updates.droppedFrames / inboundRtp.updates.receivedFrames;
-			if (alert.state === 'on') {
+			const droppedFrames = inboundRtp.droppedFrames ?? 0;
+			const framesDroppedFraction = droppedFrames / receivedFrames;
+			if (!inboundIsOk) {
 				if (framesDroppedFraction < config.droppedIncomingFramesFractionAlertOff) {
 					continue;
 				}
 			} else if (framesDroppedFraction < config.droppedIncomingFramesFractionAlertOn) {
 				continue;
 			}
-			issueDetected = true;
+			inboundIsOk = false;
 		}
+		outboundIsOk = true;
 		for (const outboundRtp of storage.outboundRtps()) {
 			if (outboundRtp.stats.qualityLimitationReason !== 'cpu') {
 				continue;
 			}
-			issueDetected = true;
+			outboundIsOk = false;
 		}
-		alert.state = issueDetected ? 'on' : 'off';
+	}
+	const previousAlertState = alertState;
+	alertState = inboundIsOk && outboundIsOk ? 'off' : 'on';
+	if (previousAlertState !== alertState) {
+		clientMonitor.emit('cpu-performance-alert', alertState);
+	}
+	return {
+		id: 'cpu-issue-detector',
+		update,
+		get alert() {
+			return alertState;
+		},
 	};
-	return process;
 }

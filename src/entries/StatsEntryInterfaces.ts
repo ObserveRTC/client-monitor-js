@@ -1,41 +1,29 @@
 import * as W3C from '../schema/W3cStatsIdentifiers'
+import { TypedEvents } from '../utils/TypedEmitter';
+import { InboundTrackStats } from './InboundTrackStats';
+import { OutboundTrackStats } from './OutboundTrackStats';
 
 export interface StatsEntryAbs {
     /*eslint-disable @typescript-eslint/no-explicit-any */
-    appData: Record<string, unknown>;
     statsId: string;
     visited: boolean,
-    // created: number;
-    // updated: number;
-    // touched: number;
     getPeerConnection(): PeerConnectionEntry;
-    // hashCode: string;
 }
 
-export interface OutboundTrackEntry {
-    trackId: string;
-    getPeerConnection(): PeerConnectionEntry;
-    outboundRtps(): IterableIterator<OutboundRtpEntry>;
-}
-
-export interface InboundTrackEntry {
-    trackId: string;
-    getPeerConnection(): PeerConnectionEntry;
-    inboundRtps(): IterableIterator<InboundRtpEntry>;
-}
+export type TrackStats = InboundTrackStats | OutboundTrackStats;
 
 /**
  * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods
  * to navigate to its relations
  */
-export interface CodecEntry extends StatsEntryAbs {
-    stats: W3C.RtcCodecStats;
-    sampled: boolean;
-    /**
-     * Navigate to the related TransportEntry the codec is used
-     */
-    getTransport(): TransportEntry | undefined;
-}
+// export interface CodecEntry extends StatsEntryAbs {
+//     stats: W3C.RtcCodecStats;
+//     sampled: boolean;
+//     /**
+//      * Navigate to the related TransportEntry the codec is used
+//      */
+//     getTransport(): TransportEntry | undefined;
+// }
 
 interface RtpStreamEntry {
     /**
@@ -53,19 +41,16 @@ interface ReceivedRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 interface SenderRtpStreamEntry extends RtpStreamEntry, StatsEntryAbs {}
 
 /**
- * 
+ * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods
+ * to navigate to its relations
  */
-export interface InboundRtpUpdates {
-    readonly avgJitterBufferDelayInMs: number,
-    readonly receivingBitrate: number,
-    readonly lostPackets: number,
-    readonly receivedPackets: number,
-    readonly receivedFrames: number,
-    readonly decodedFrames: number,
-    readonly droppedFrames: number,
-    readonly receivedSamples: number,
-    readonly silentConcealedSamples: number,
-    readonly fractionLoss: number,
+export interface CodecEntry extends StatsEntryAbs {
+    stats: W3C.CodecStats;
+    sampled: boolean;
+    /**
+     * Navigate to the related TransportEntry the codec is used
+     */
+    getTransport(): TransportEntry | undefined;
 }
 
 /**
@@ -73,20 +58,24 @@ export interface InboundRtpUpdates {
  * to navigate to its relations
  */
 export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
-    stats: W3C.RtcInboundRtpStreamStats;
-    /**
-     * Tracks the differences between the last collected stats and the current collected stats
-     */
-    updates: InboundRtpUpdates,
-
-    /**
-     * Calculated Mean Opinion Score for the inbound audio or video stream.
-     * 
-     * In case of video, the expectedFrameRate of this entry is used to calculate the MOS.
-     */
-    meanOpinionScore: number,
-
+    stats: W3C.InboundRtpStats;
     expectedFrameRate?: number,
+    sfuStreamId?: string,
+    sfuSinkId?: string,
+    remoteClientId?: string,
+
+    // calculated fields
+    score?: number,
+    avgJitterBufferDelayInMs?: number,
+    receivingBitrate?: number,
+    lostPackets?: number,
+    receivedPackets?: number,
+    receivedFrames?: number,
+    decodedFrames?: number,
+    droppedFrames?: number,
+    receivedSamples?: number,
+    silentConcealedSamples?: number,
+    fractionLoss?: number,
 
     /**
      * Navigate to the related ReceiverEntry
@@ -107,20 +96,17 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
 }
 
 /**
- * 
- */
-export interface OutboundRtpUpdates {
-    readonly sendingBitrate: number,
-    readonly sentPackets: number,
-}
-
-/**
  * Wraps the [RTCOutboundRtpStreamStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcoutboundrtpstreamstats) and provide methods
  * to navigate to its relations
  */
 export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
-    stats: W3C.RtcOutboundRTPStreamStats;
-    stabilityScore: number;
+    stats: W3C.OutboundRtpStats;
+    sfuStreamId?: string,
+
+    // calculated fields
+    score?: number;
+    sendingBitrate?: number,
+    sentPackets?: number,
     /**
      * Gets the SSRC of the Rtp session
      */
@@ -130,24 +116,22 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     getSender(): SenderEntry | undefined;
     getRemoteInboundRtp(): RemoteInboundRtpEntry | undefined;
 
-    updates: OutboundRtpUpdates;
 }
 
-export interface RemoteInboundRtpUpdates {
-    readonly receivedPackets: number,
-    readonly lostPackets: number,
-}
 
 /**
  * Wraps the [RTCRemoteInboundRtpStreamStats](https://www.w3.org/TR/webrtc-stats/#dom-rtcremoteinboundrtpstreamstats) and provide methods
  * to navigate to its relations
  */
 export interface RemoteInboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
-    stats: W3C.RtcRemoteInboundRtpStreamStats;
+    stats: W3C.RemoteInboundRtpStats;
+    
+    // calculated fields
+    receivedPackets?: number,
+    lostPackets?: number,
+
     getSsrc(): number | undefined;
     getOutboundRtp(): OutboundRtpEntry | undefined;
-
-    updates: RemoteInboundRtpUpdates;
 }
 
 /**
@@ -155,7 +139,7 @@ export interface RemoteInboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntr
  * to navigate to its relations
  */
 export interface RemoteOutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
-    stats: W3C.RtcRemoteOutboundRTPStreamStats;
+    stats: W3C.RemoteOutboundRtpStats;
     getSsrc(): number | undefined;
     getInboundRtp(): InboundRtpEntry | undefined;
 }
@@ -165,7 +149,7 @@ export interface RemoteOutboundRtpEntry extends SenderRtpStreamEntry, StatsEntry
  * to navigate to its relations
  */
 export interface MediaSourceEntry extends StatsEntryAbs {
-    stats: W3C.RtcMediaSourceCompoundStats;
+    stats: W3C.MediaSourceStats;
     sampled: boolean;
 }
 
@@ -176,7 +160,7 @@ export interface MediaSourceEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface ContributingSourceEntry extends StatsEntryAbs {
-    stats: W3C.RtcRtpContributingSourceStats;
+    stats: W3C.ContributingSourceStats;
     sampled: boolean;
 
     getInboundRtp(): InboundRtpEntry | undefined;
@@ -187,7 +171,7 @@ export interface ContributingSourceEntry extends StatsEntryAbs {
  * to navigate to its relations
  */
 export interface DataChannelEntry extends StatsEntryAbs {
-    stats: W3C.RtcDataChannelStats;
+    stats: W3C.DataChannelStats;
 }
 
 /**
@@ -197,7 +181,7 @@ export interface DataChannelEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface TransceiverEntry extends StatsEntryAbs {
-    stats: W3C.RtcRtpTransceiverStats;
+    stats: W3C.TransceiverStats;
     sampled: boolean;
 
     getSender(): SenderEntry | undefined;
@@ -212,7 +196,7 @@ export interface TransceiverEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface SenderEntry extends StatsEntryAbs {
-    stats: W3C.RtcSenderCompoundStats;
+    stats: W3C.SenderStats;
     sampled: boolean;
     
     getMediaSource(): MediaSourceEntry | undefined;
@@ -226,7 +210,7 @@ export interface SenderEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface ReceiverEntry extends StatsEntryAbs {
-    stats: W3C.RtcReceiverCompoundStats;
+    stats: W3C.ReceiverStats;
     sampled: boolean;
 
 }
@@ -238,7 +222,7 @@ export interface ReceiverEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface TransportEntry extends StatsEntryAbs {
-    stats: W3C.RtcTransportStats;
+    stats: W3C.TransportStats;
     getRtcpTransport(): TransportEntry | undefined;
     getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     getLocalCertificate(): CertificateEntry | undefined;
@@ -252,7 +236,7 @@ export interface TransportEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface SctpTransportEntry extends StatsEntryAbs {
-    stats: W3C.RtcSctpTransportStats;
+    stats: W3C.SctpTransportStats;
     getTransport(): TransportEntry | undefined;
 }
 
@@ -261,7 +245,7 @@ export interface SctpTransportEntry extends StatsEntryAbs {
  * to navigate to its relations
  */
 export interface IceCandidatePairEntry extends StatsEntryAbs {
-    stats: W3C.RtcIceCandidatePairStats;
+    stats: W3C.CandidatePairStats;
     getTransport(): TransportEntry | undefined;
     getLocalCandidate(): LocalCandidateEntry | undefined;
     getRemoteCandidate(): RemoteCandidateEntry | undefined;
@@ -272,7 +256,7 @@ export interface IceCandidatePairEntry extends StatsEntryAbs {
  * to navigate to its relations
  */
 export interface LocalCandidateEntry extends StatsEntryAbs {
-    stats: W3C.RtcLocalCandidateStats;
+    stats: W3C.LocalCandidateStats;
     sampled: boolean;
 
     getTransport(): TransportEntry | undefined;
@@ -283,7 +267,7 @@ export interface LocalCandidateEntry extends StatsEntryAbs {
  * to navigate to its relations
  */
 export interface RemoteCandidateEntry extends StatsEntryAbs {
-    stats: W3C.RtcRemoteCandidateStats;
+    stats: W3C.RemoteCandidateStats;
     sampled: boolean;
 
     getTransport(): TransportEntry | undefined;
@@ -295,7 +279,7 @@ export interface RemoteCandidateEntry extends StatsEntryAbs {
  *
  */
 export interface CertificateEntry extends StatsEntryAbs {
-    stats: W3C.RtcCertificateStats;
+    stats: W3C.CertificateStats;
     sampled: boolean;
 
 }
@@ -307,26 +291,25 @@ export interface CertificateEntry extends StatsEntryAbs {
  * Deprecated in WebRTC Stats since 2022-09-21
  */
 export interface IceServerEntry extends StatsEntryAbs {
-    stats: W3C.RtcIceServerStats;
+    stats: W3C.IceServerStats;
     sampled: boolean;
     
 }
 
 export interface AudioPlayoutEntry extends StatsEntryAbs {
-    stats: W3C.RTCAudioPlayoutStats;
+    stats: W3C.MediaPlayoutStats;
 }
 
-export interface PeerConnectionUpdates {
-    readonly totalInboundPacketsLost: number;
-    readonly totalInboundPacketsReceived: number;
-    readonly totalOutboundPacketsLost: number;
-    readonly totalOutbounPacketsReceived: number;
-    readonly totalOutboundPacketsSent: number;
-    readonly avgRttInS: number,
-    readonly sendingAudioBitrate: number,
-    readonly sendingVideoBitrate: number,
-    readonly receivingAudioBitrate: number,
-    readonly receivingVideoBitrate: number,
+export type PeerConnectionEntryEvents = {
+    'inbound-rtp-added': InboundRtpEntry,
+    'inbound-rtp-removed': InboundRtpEntry,
+    'outbound-rtp-added': OutboundRtpEntry,
+    'outbound-rtp-removed': OutboundRtpEntry,
+    'remote-inbound-rtp-added': RemoteInboundRtpEntry,
+    'remote-inbound-rtp-removed': RemoteInboundRtpEntry,
+    'remote-outbound-rtp-added': RemoteOutboundRtpEntry,
+    'remote-outbound-rtp-removed': RemoteOutboundRtpEntry,
+    'close': undefined,
 }
 
 /**
@@ -334,21 +317,27 @@ export interface PeerConnectionUpdates {
  * to navigate to its relations
  */
 export interface PeerConnectionEntry {
-    /**
-     * The id of the peer connection
-     */
-    readonly id: string;
-    // readonly collectorId: string;
+    readonly peerConnectionId: string;
     readonly statsId: string | undefined;
-    readonly stats: W3C.RtcPeerConnectionStats | undefined;
-    // readonly created: number;
-    // readonly touched: number;
-    // readonly updated: number;
+    readonly stats: W3C.PeerConnectionStats | undefined;
     readonly label: string | undefined;
+    readonly events: TypedEvents<PeerConnectionEntryEvents>;
+
+    readonly totalInboundPacketsLost?: number;
+    readonly totalInboundPacketsReceived?: number;
+    readonly totalOutboundPacketsLost?: number;
+    readonly totalOutbounPacketsReceived?: number;
+    readonly totalOutboundPacketsSent?: number;
+    readonly avgRttInS?: number;
+    readonly sendingAudioBitrate?: number;
+    readonly sendingVideoBitrate?: number;
+    readonly receivingAudioBitrate?: number;
+    readonly receivingVideoBitrate?: number;
+
     getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     codecs(): IterableIterator<CodecEntry>;
-    inboundRtps(): IterableIterator<InboundRtpEntry>;
-    outboundRtps(): IterableIterator<OutboundRtpEntry>;
+    inboundRtps(ssrc?: number): IterableIterator<InboundRtpEntry>;
+    outboundRtps(ssrc?: number): IterableIterator<OutboundRtpEntry>;
     remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry>;
     remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry>;
     mediaSources(): IterableIterator<MediaSourceEntry>;
@@ -365,7 +354,4 @@ export interface PeerConnectionEntry {
     certificates(): IterableIterator<CertificateEntry>;
     iceServers(): IterableIterator<IceServerEntry>;
     contributingSources(): IterableIterator<ContributingSourceEntry>;
-    trackIds(): IterableIterator<string>;
-
-    updates: PeerConnectionUpdates;
 }

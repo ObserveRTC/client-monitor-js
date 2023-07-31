@@ -21,21 +21,11 @@ import {
     CustomCallEvent,
     CustomObserverEvent,
 } from './schema/Samples'
-import * as W3C from './schema/W3cStatsIdentifiers';
-import { NULL_UUID } from "./utils/common";
-import { StatsReader } from "./entries/StatsStorage";
-import { PeerConnectionEntry } from "./entries/StatsEntryInterfaces";
+import { StatsStorage } from "./entries/StatsStorage";
 import { createLogger } from "./utils/logger";
+import { roundNumber } from './utils/common';
 
 const logger = createLogger("Sampler");
-
-export type TrackRelation = {
-    trackId: string;
-    sfuStreamId?: string;
-    sfuSinkId?: string;
-    remoteClientId?: string;
-};
-
 
 export class Sampler {
     // all of the following fields until empty line must be reset after sampled
@@ -51,26 +41,12 @@ export class Sampler {
     private _mediaDevices?: MediaDevice[];
     private _localSDP?: string[];
     private _marker?: string;
-
-    // private _statsReader?: StatsReader;
-    // private _peerConnections: Map<string, PeerConnectionEntry> = new Map();
-    private _trackRelations: Map<string, TrackRelation> = new Map();
     private _sampleSeq = 0;
-    private _timezoneOffset: number = new Date().getTimezoneOffset();
-    private _closed = false;
+    private readonly _timezoneOffset: number = new Date().getTimezoneOffset();
+    
     public constructor(
-        private _statsReader: StatsReader,
+        private readonly _storage: StatsStorage,
     ) {
-    }
-
-    public addTrackRelation(trackRelation: TrackRelation): void {
-        this._trackRelations.set(trackRelation.trackId, trackRelation);
-        logger.debug(`Track relation for trackId: ${trackRelation.trackId} is set`, trackRelation);
-    }
-
-    public removeTrackRelation(trackId: string): void {
-        logger.debug(`Track relation for trackId: trackId: ${trackId} is removed`, this._trackRelations.get(trackId));
-        this._trackRelations.delete(trackId);
     }
 
     public addEngine(engine: Engine) {
@@ -85,7 +61,7 @@ export class Sampler {
         this._browser = browser;
     }
 
-    public addOs(os: OperationSystem) {
+    public addOperationSystem(os: OperationSystem) {
         this._os = os;
     }
 
@@ -128,19 +104,21 @@ export class Sampler {
         this._marker = value;
     }
 
-    public close(): void {
-        if (this._closed) {
-            logger.warn(`Attempted to close the Sampler twice`);
-            return;
-        }
-        this._closed = true;
-        logger.info(`Closed`);
+    public clear() {
+        this._engine = undefined;
+        this._platform = undefined;
+        this._browser = undefined;
+        this._os = undefined;
+        this._mediaConstraints = undefined;
+        this._userMediaErrors = undefined;
+        this._extensionStats = undefined;
+        this._customCallEvents = undefined;
+        this._customObservedEvents = undefined;
+        this._mediaDevices = undefined;
+        this._localSDP = undefined;
     }
 
-    public make(): ClientSample | undefined {
-        if (this._closed) {
-            throw new Error(`Cannot sample a closed Sampler`);
-        }
+    public createClientSample(): ClientSample {
         const clientSample: ClientSample = {
             // Deprecated fields, no longer have relevance in the coming schema
             callId: 'NULL',
@@ -190,72 +168,369 @@ export class Sampler {
         let iceRemoteCandidates: IceRemoteCandidate[] | undefined;
         let dataChannels: DataChannel[] | undefined;
         let iceServers: string[] | undefined;
-        for (const peerConnection of this._statsReader.peerConnections()) {
-            for (const [inboundAudioTrack, inboundVideoTrack] of this._makeInboundTrack(peerConnection)) {
-                if (inboundAudioTrack) {
-                    if (!inboundAudioTracks) inboundAudioTracks = [];
-                    inboundAudioTracks.push(inboundAudioTrack);
+        for (const peerConnection of this._storage.peerConnections()) {
+            const {
+                peerConnectionId
+            } = peerConnection;
+            for (const outboundRtp of peerConnection.outboundRtps()) {
+                const outboundRtpStats = outboundRtp.stats;
+                const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats;
+                const mediaSourceStats = outboundRtp.getMediaSource()?.stats;
+                if (outboundRtp.stats.kind === "audio") {
+                    if (!outboundAudioTracks) outboundAudioTracks = [];
+                    const outboundAudioTrack: OutboundAudioTrack = {
+                        ssrc: Math.round(outboundRtpStats.ssrc),
+                        peerConnectionId,
+                        trackId: outboundRtp.getTrackId(),
+                        sfuStreamId: outboundRtp.sfuStreamId,
+                        packetsSent: outboundRtpStats.packetsSent,
+                        bytesSent: roundNumber(outboundRtpStats.bytesSent),
+                        rid: outboundRtpStats.rid,
+                        headerBytesSent: roundNumber(outboundRtpStats.headerBytesSent),
+                        retransmittedBytesSent: roundNumber(outboundRtpStats.retransmittedBytesSent),
+                        retransmittedPacketsSent: roundNumber(outboundRtpStats.retransmittedPacketsSent),
+                        targetBitrate: outboundRtpStats.targetBitrate,
+                        totalEncodedBytesTarget: roundNumber( outboundRtpStats.totalEncodedBytesTarget),
+                        totalPacketSendDelay: outboundRtpStats.totalPacketSendDelay,
+                        averageRtcpInterval: outboundRtpStats.averageRtcpInterval,
+                        nackCount: outboundRtpStats.nackCount,
+                        encoderImplementation: outboundRtpStats.encoderImplementation,
+                        active: outboundRtpStats.active,
+                        packetsReceived: remoteInboundRtpStats?.packetsReceived,
+                        packetsLost: remoteInboundRtpStats?.packetsLost,
+                        jitter: remoteInboundRtpStats?.jitter,
+                        roundTripTime: remoteInboundRtpStats?.roundTripTime,
+                        totalRoundTripTime: remoteInboundRtpStats?.totalRoundTripTime,
+                        fractionLost: remoteInboundRtpStats?.fractionLost,
+                        roundTripTimeMeasurements: remoteInboundRtpStats?.roundTripTimeMeasurements,
+                        relayedSource: mediaSourceStats?.relayedSource,
+                        audioLevel: mediaSourceStats?.audioLevel,
+                        totalAudioEnergy: mediaSourceStats?.totalAudioEnergy,
+                        totalSamplesDuration: mediaSourceStats?.totalSamplesDuration,
+                        echoReturnLoss: mediaSourceStats?.echoReturnLoss,
+                        echoReturnLossEnhancement: mediaSourceStats?.echoReturnLossEnhancement,
+                        droppedSamplesDuration: mediaSourceStats?.droppedSamplesDuration,
+                        totalCaptureDelay: mediaSourceStats?.totalCaptureDelay,
+                        totalSamplesCaptured: mediaSourceStats?.totalSamplesCaptured,
+                    };
+                    outboundAudioTracks.push(outboundAudioTrack);
+                } else if (outboundRtp.stats.kind === "video") {
+                    if (!outboundVideoTracks) outboundVideoTracks = [];
+                    const outboundVideoTrack: OutboundVideoTrack = {
+                        ssrc: Math.round(outboundRtpStats.ssrc),
+                        trackId: outboundRtp.getTrackId(),
+                        peerConnectionId,
+                        sfuStreamId: outboundRtp.sfuStreamId,
+                        packetsSent: outboundRtpStats.packetsSent,
+                        bytesSent: roundNumber(outboundRtpStats.bytesSent),
+                        rid: outboundRtpStats.rid,
+                        headerBytesSent: roundNumber(outboundRtpStats.headerBytesSent),
+                        retransmittedBytesSent: roundNumber(outboundRtpStats.retransmittedBytesSent),
+                        retransmittedPacketsSent: roundNumber(outboundRtpStats.retransmittedPacketsSent),
+                        targetBitrate: outboundRtpStats.targetBitrate,
+                        totalEncodedBytesTarget: roundNumber(outboundRtpStats.totalEncodedBytesTarget),
+                        totalPacketSendDelay: outboundRtpStats.totalPacketSendDelay,
+                        averageRtcpInterval: outboundRtpStats.averageRtcpInterval,
+                        nackCount: outboundRtpStats.nackCount,
+                        encoderImplementation: outboundRtpStats.encoderImplementation,
+                        active: outboundRtpStats.active,
+                        frameWidth: outboundRtpStats?.frameWidth,
+                        frameHeight: outboundRtpStats?.frameHeight,
+                        framesPerSecond: outboundRtpStats?.framesPerSecond,
+                        framesSent: outboundRtpStats?.framesSent,
+                        hugeFramesSent: outboundRtpStats?.hugeFramesSent,
+                        framesEncoded: outboundRtpStats?.framesEncoded,
+                        keyFramesEncoded: outboundRtpStats?.keyFramesEncoded,
+                        qpSum: roundNumber(outboundRtpStats?.qpSum),
+                        totalEncodeTime: outboundRtpStats?.totalEncodeTime,
+                        qualityLimitationDurationNone: outboundRtpStats?.qualityLimitationDurations?.none,
+                        qualityLimitationDurationCPU: outboundRtpStats?.qualityLimitationDurations?.cpu,
+                        qualityLimitationDurationBandwidth: outboundRtpStats?.qualityLimitationDurations?.bandwidth,
+                        qualityLimitationDurationOther: outboundRtpStats?.qualityLimitationDurations?.other,
+                        qualityLimitationReason: outboundRtpStats?.qualityLimitationReason,
+                        qualityLimitationResolutionChanges: outboundRtpStats?.qualityLimitationResolutionChanges,
+                        firCount: outboundRtpStats?.firCount,
+                    };
+                    outboundVideoTracks.push(outboundVideoTrack);
                 }
-                if (inboundVideoTrack) {
+            }
+            for (const inboundRtp of peerConnection.inboundRtps()) {
+                const inboundRtpStats = inboundRtp.stats;
+                const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats;
+                const audioPlayoutStats = inboundRtp.getAudioPlayout()?.stats;
+                if (inboundRtpStats.kind === 'audio') {
+                    if (!inboundAudioTracks) inboundAudioTracks = [];
+                    const inboundAudioTrack: InboundAudioTrack = {
+                        ssrc: Math.round(inboundRtpStats.ssrc),
+                        trackId: inboundRtp.getTrackId(),
+                        peerConnectionId,
+                        remoteClientId: inboundRtp.remoteClientId,
+                        sfuStreamId: inboundRtp.sfuStreamId,
+                        sfuSinkId: inboundRtp.sfuSinkId,
+                        packetsReceived: inboundRtpStats.packetsReceived,
+                        packetsLost: inboundRtpStats.packetsLost,
+                        jitter: inboundRtpStats.jitter,
+                        lastPacketReceivedTimestamp: roundNumber(inboundRtpStats.lastPacketReceivedTimestamp),
+                        headerBytesReceived: roundNumber(inboundRtpStats.headerBytesReceived),
+                        packetsDiscarded: inboundRtpStats.packetsDiscarded,
+                        fecPacketsReceived: inboundRtpStats.fecPacketsReceived,
+                        fecPacketsDiscarded: inboundRtpStats.fecPacketsDiscarded,
+                        bytesReceived: roundNumber(inboundRtpStats.bytesReceived),
+                        nackCount: inboundRtpStats.nackCount,
+                        totalProcessingDelay: inboundRtpStats.totalProcessingDelay,
+                        estimatedPlayoutTimestamp: roundNumber(inboundRtpStats.estimatedPlayoutTimestamp),
+                        jitterBufferDelay: inboundRtpStats.jitterBufferDelay,
+                        jitterBufferTargetDelay: inboundRtpStats.jitterBufferTargetDelay,
+                        jitterBufferEmittedCount: inboundRtpStats.jitterBufferEmittedCount,
+                        jitterBufferMinimumDelay: inboundRtpStats.jitterBufferMinimumDelay,
+                        totalSamplesReceived: inboundRtpStats.totalSamplesReceived,
+                        concealedSamples: inboundRtpStats.concealedSamples,
+                        silentConcealedSamples: inboundRtpStats.silentConcealedSamples,
+                        concealmentEvents: inboundRtpStats.concealmentEvents,
+                        insertedSamplesForDeceleration: inboundRtpStats.insertedSamplesForDeceleration,
+                        removedSamplesForAcceleration: inboundRtpStats.removedSamplesForAcceleration,
+                        audioLevel: inboundRtpStats.audioLevel,
+                        totalAudioEnergy: inboundRtpStats.totalAudioEnergy,
+                        totalSamplesDuration: inboundRtpStats.totalSamplesDuration,
+                        decoderImplementation: inboundRtpStats.decoderImplementation,
+                        packetsSent: remoteOutboundRtpStats?.packetsSent,
+                        bytesSent: roundNumber(remoteOutboundRtpStats?.bytesSent),
+                        remoteTimestamp: roundNumber(remoteOutboundRtpStats?.remoteTimestamp),
+                        reportsSent: remoteOutboundRtpStats?.reportsSent,
+                        roundTripTime: remoteOutboundRtpStats?.roundTripTime,
+                        totalRoundTripTime: remoteOutboundRtpStats?.totalRoundTripTime,
+                        roundTripTimeMeasurements: remoteOutboundRtpStats?.roundTripTimeMeasurements,
+                        synthesizedSamplesDuration: audioPlayoutStats?.synthesizedSamplesDuration,
+                        synthesizedSamplesEvents: audioPlayoutStats?.synthesizedSamplesEvents,
+                        totalPlayoutDelay: audioPlayoutStats?.totalPlayoutDelay,
+                        totalSamplesCount: audioPlayoutStats?.totalSamplesCount,
+                    };
+                    inboundAudioTracks.push(inboundAudioTrack);
+                } else if (inboundRtpStats.kind === 'video') {
                     if (!inboundVideoTracks) inboundVideoTracks = [];
+                    const inboundVideoTrack: InboundVideoTrack = {
+                        ssrc: Math.round( inboundRtpStats.ssrc),
+                        trackId: inboundRtp.getTrackId(),
+                        peerConnectionId,
+                        remoteClientId: inboundRtp.remoteClientId,
+                        sfuStreamId: inboundRtp.sfuStreamId,
+                        sfuSinkId: inboundRtp.sfuSinkId,
+                        packetsReceived: inboundRtpStats.packetsReceived,
+                        packetsLost: inboundRtpStats.packetsLost,
+                        jitter: inboundRtpStats.jitter,
+                        framesDropped: inboundRtpStats.framesDropped,
+                        lastPacketReceivedTimestamp: roundNumber(inboundRtpStats.lastPacketReceivedTimestamp),
+                        headerBytesReceived: roundNumber(inboundRtpStats.headerBytesReceived),
+                        packetsDiscarded: inboundRtpStats.packetsDiscarded,
+                        fecPacketsReceived: inboundRtpStats.fecPacketsReceived,
+                        fecPacketsDiscarded: inboundRtpStats.fecPacketsDiscarded,
+                        bytesReceived: roundNumber(inboundRtpStats.bytesReceived),
+                        nackCount: inboundRtpStats.nackCount,
+                        totalProcessingDelay: inboundRtpStats.totalProcessingDelay,
+                        estimatedPlayoutTimestamp: roundNumber(inboundRtpStats.estimatedPlayoutTimestamp),
+                        jitterBufferDelay: inboundRtpStats.jitterBufferDelay,
+                        jitterBufferTargetDelay: inboundRtpStats.jitterBufferTargetDelay,
+                        jitterBufferEmittedCount: inboundRtpStats.jitterBufferEmittedCount,
+                        jitterBufferMinimumDelay: inboundRtpStats.jitterBufferMinimumDelay,
+                        decoderImplementation: inboundRtpStats.decoderImplementation,   
+                        framesDecoded: inboundRtpStats.framesDecoded,
+                        keyFramesDecoded: inboundRtpStats.keyFramesDecoded,
+                        frameWidth: inboundRtpStats.frameWidth,
+                        frameHeight: inboundRtpStats.frameHeight,
+                        framesPerSecond: inboundRtpStats.framesPerSecond,
+                        qpSum: roundNumber(inboundRtpStats.qpSum),
+                        totalDecodeTime: inboundRtpStats.totalDecodeTime,
+                        totalInterFrameDelay: inboundRtpStats.totalInterFrameDelay,
+                        totalSquaredInterFrameDelay: inboundRtpStats.totalSquaredInterFrameDelay,
+                        firCount: inboundRtpStats.firCount,
+                        pliCount: inboundRtpStats.pliCount,
+                        framesReceived: inboundRtpStats?.framesReceived,
+                        packetsSent: remoteOutboundRtpStats?.packetsSent,
+                        bytesSent: roundNumber(remoteOutboundRtpStats?.bytesSent),
+                        remoteTimestamp: roundNumber(remoteOutboundRtpStats?.remoteTimestamp),
+                        reportsSent: remoteOutboundRtpStats?.reportsSent,
+                        roundTripTime: remoteOutboundRtpStats?.roundTripTime,
+                        totalRoundTripTime: remoteOutboundRtpStats?.totalRoundTripTime,
+                        roundTripTimeMeasurements: remoteOutboundRtpStats?.roundTripTimeMeasurements,
+                    };
                     inboundVideoTracks.push(inboundVideoTrack);
                 }
             }
 
-            for (const [outboundAudioTrack, outboundVideoTrack] of this._makeOutboundTrack(peerConnection)) {
-                if (outboundAudioTrack) {
-                    if (!outboundAudioTracks) outboundAudioTracks = [];
-                    outboundAudioTracks.push(outboundAudioTrack);
-                }
-                if (outboundVideoTrack) {
-                    if (!outboundVideoTracks) outboundVideoTracks = [];
-                    outboundVideoTracks.push(outboundVideoTrack);
-                }
-            }
 
-            for (const iceCandidatePair of this._makeIceCandidatePair(peerConnection)) {
+            for (const iceCandidatePair of peerConnection.iceCandidatePairs()) {
+                const stats = iceCandidatePair.stats;
                 if (!iceCandidatePairs) iceCandidatePairs = [];
-                iceCandidatePairs.push(iceCandidatePair);
+                const iceCandidatePairSample: IceCandidatePair = {
+                    candidatePairId: stats.id,
+                    peerConnectionId,
+                    label: peerConnection.label,
+                    transportId: stats.transportId,
+                    localCandidateId: stats.localCandidateId,
+                    remoteCandidateId: stats.remoteCandidateId,
+                    state: stats.state,
+                    nominated: stats.nominated,
+                    packetsSent: stats.packetsSent,
+                    packetsReceived: stats.packetsReceived,
+                    bytesSent: roundNumber(stats.bytesSent),
+                    bytesReceived: roundNumber(stats.bytesReceived),
+                    lastPacketSentTimestamp: roundNumber(stats.lastPacketSentTimestamp),
+                    lastPacketReceivedTimestamp: roundNumber(stats.lastPacketReceivedTimestamp),
+                    totalRoundTripTime: stats.totalRoundTripTime,
+                    currentRoundTripTime: stats.currentRoundTripTime,
+                    availableOutgoingBitrate: stats.availableOutgoingBitrate,
+                    availableIncomingBitrate: stats.availableIncomingBitrate,
+                    requestsReceived: stats.requestsReceived,
+                    requestsSent: stats.requestsSent,
+                    responsesReceived: stats.responsesReceived,
+                    responsesSent: stats.responsesSent,
+                    consentRequestsSent: stats.consentRequestsSent,
+                    packetsDiscardedOnSend: stats.packetsDiscardedOnSend,
+                    bytesDiscardedOnSend: roundNumber(stats.bytesDiscardedOnSend),
+                };
+                iceCandidatePairs.push(iceCandidatePairSample);
             }
 
-            for (const pcTransport of this._makePcTransport(peerConnection)) {
+            for (const pcTransport of peerConnection.transports()) {
+                const stats = pcTransport.stats;
                 if (!pcTransports) pcTransports = [];
-                pcTransports.push(pcTransport);
+                const pcTransportSample: PeerConnectionTransport = {
+                    transportId: stats.id,
+                    peerConnectionId,
+                    label: peerConnection.label,
+                    packetsSent: stats.packetsSent,
+                    packetsReceived: stats.packetsReceived,
+                    bytesSent: roundNumber(stats.bytesSent),
+                    bytesReceived: roundNumber(stats.bytesReceived),
+                    iceRole: stats.iceRole,
+                    iceLocalUsernameFragment: stats.iceLocalUsernameFragment,
+                    dtlsState: stats.dtlsState,
+                    selectedCandidatePairId: stats.selectedCandidatePairId,
+                    iceState: stats.iceState,
+                    localCertificateId: stats.localCertificateId,
+                    remoteCertificateId: stats.remoteCertificateId,
+                    tlsVersion: stats.tlsVersion,
+                    dtlsCipher: stats.dtlsCipher,
+                    dtlsRole: stats.dtlsRole,
+                    srtpCipher: stats.srtpCipher,
+                    // tlsGroup: stats.tlsGroup,
+                    selectedCandidatePairChanges: stats.selectedCandidatePairChanges,
+                }
+                pcTransports.push(pcTransportSample);
             }
 
-            for (const mediaSource of this._makeMediaSource(peerConnection)) {
+            for (const mediaSource of peerConnection.mediaSources()) {
+                if (mediaSource.sampled) continue;
+                mediaSource.sampled = true;
+                const stats = mediaSource.stats;
                 if (!mediaSources) mediaSources = [];
-                mediaSources.push(mediaSource);
+
+                mediaSources.push({
+                    trackIdentifier: stats.trackIdentifier,
+                    kind: stats.kind,
+                    audioLevel: stats.audioLevel,
+                    totalAudioEnergy: stats.totalAudioEnergy,
+                    totalSamplesDuration: stats.totalSamplesDuration,
+                    echoReturnLoss: stats.echoReturnLoss,
+                    echoReturnLossEnhancement: stats.echoReturnLossEnhancement,
+                    droppedSamplesDuration: stats.droppedSamplesDuration,
+                    droppedSamplesEvents: stats.droppedSamplesEvents,
+                    totalCaptureDelay: stats.totalCaptureDelay,
+                    totalSamplesCaptured: stats.totalSamplesCaptured,
+                    width: stats.width,
+                    height: stats.height,
+                    frames: stats.frames,
+                    framesPerSecond: stats.framesPerSecond,
+                });
             }
 
-            for (const codec of this._makeCodec(peerConnection)) {
+            for (const codec of peerConnection.codecs()) {
+                if (codec.sampled) continue;
+                codec.sampled = true;
+                const stats = codec.stats;
                 if (!codecs) codecs = [];
-                codecs.push(codec);
+                codecs.push({
+                    payloadType: stats.payloadType,
+                    // codecType: stats.codecType,
+                    mimeType: stats.mimeType,
+                    clockRate: stats.clockRate,
+                    channels: stats.channels,
+                    sdpFmtpLine: stats.sdpFmtpLine,
+                });
             }
 
-            for (const certificate of this._makeCertificate(peerConnection)) {
+            for (const certificate of peerConnection.certificates()) {
+                if (certificate.sampled) continue;
+                certificate.sampled = true;
+                const stats = certificate.stats;
                 if (!certificates) certificates = [];
-                certificates.push(certificate);
+                certificates.push({
+                    fingerprint: stats.fingerprint,
+                    fingerprintAlgorithm: stats.fingerprintAlgorithm,
+                    base64Certificate: stats.base64Certificate,
+                    issuerCertificateId: stats.issuerCertificateId,
+                });
             }
 
-            for (const iceLocalCandidate of this._makeIceLocalCandidate(peerConnection)) {
+            for (const iceLocalCandidate of peerConnection.localCandidates()) {
+                if (iceLocalCandidate.sampled) continue;
+                iceLocalCandidate.sampled = true;
+                const localCandidateStats = iceLocalCandidate.stats;
                 if (!iceLocalCandidates) iceLocalCandidates = [];
-                iceLocalCandidates.push(iceLocalCandidate);
+                iceLocalCandidates.push({
+                    peerConnectionId,
+                    id: localCandidateStats.id,
+                    address: localCandidateStats.address,
+                    port: localCandidateStats.port,
+                    protocol: localCandidateStats.protocol,
+                    candidateType: localCandidateStats.candidateType,
+                    priority: localCandidateStats.priority,
+                    url: localCandidateStats.url,
+                    relayProtocol: localCandidateStats.relayProtocol,
+                });
             }
 
-            for (const iceRemoteCandidate of this._makeIceRemoteCandidate(peerConnection)) {
+            for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
+                if (iceRemoteCandidate.sampled) continue;
+                iceRemoteCandidate.sampled = true;
+                const iceRemoteCandidateStats = iceRemoteCandidate.stats;
                 if (!iceRemoteCandidates) iceRemoteCandidates = [];
-                iceRemoteCandidates.push(iceRemoteCandidate);
+                iceRemoteCandidates.push({
+                    peerConnectionId,
+                    id: iceRemoteCandidateStats.id,
+                    address: iceRemoteCandidateStats.address,
+                    port: iceRemoteCandidateStats.port,
+                    protocol: iceRemoteCandidateStats.protocol,
+                    candidateType: iceRemoteCandidateStats.candidateType,
+                    priority: iceRemoteCandidateStats.priority,
+                    url: iceRemoteCandidateStats.url,
+                    relayProtocol: iceRemoteCandidateStats.relayProtocol,
+                });
             }
 
-            for (const dataChannel of this._makeDataChannel(peerConnection)) {
+            for (const dataChannel of peerConnection.dataChannels()) {
+                const dataChannelStats = dataChannel.stats;
                 if (!dataChannels) dataChannels = [];
-                dataChannels.push(dataChannel);
+                dataChannels.push({
+                    peerConnectionId,
+                    dataChannelIdentifier: dataChannelStats.dataChannelIdentifier,
+                    label: dataChannelStats.label,
+                    protocol: dataChannelStats.protocol,
+                    state: dataChannelStats.state,
+                    messageSent: dataChannelStats.messagesSent,
+                    bytesSent: roundNumber(dataChannelStats.bytesSent),
+                    messageReceived: dataChannelStats.messagesReceived,
+                    bytesReceived: roundNumber(dataChannelStats.bytesReceived),
+
+                });
             }
 
-            for (const iceServer of this._makeIceServer(peerConnection)) {
+            for (const iceServer of peerConnection.iceServers()) {
+                if (iceServer.sampled) continue;
+                iceServer.sampled = true;
+                const stats = iceServer.stats;
                 if (!iceServers) iceServers = [];
-                iceServers.push(iceServer);
+                iceServers.push(stats.url);
             }
         }
         clientSample.inboundAudioTracks = inboundAudioTracks;
@@ -271,236 +546,7 @@ export class Sampler {
         clientSample.iceRemoteCandidates = iceRemoteCandidates;
         clientSample.dataChannels = dataChannels;
         clientSample.iceServers = iceServers;
-        logger.debug(`Assembled ClientSample`, clientSample);
+        logger.trace(`Assembled ClientSample`, clientSample);
         return clientSample;
-    }
-
-    private *_makeOutboundTrack(
-        peerConnection: PeerConnectionEntry
-    ): Generator<[OutboundAudioTrack | undefined, OutboundVideoTrack | undefined], void, undefined> {
-        for (const outboundRtp of peerConnection.outboundRtps()) {
-            // we always want to send an updatefor outbound track
-            const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats || {};
-            const mediaSource = outboundRtp.getMediaSource();
-            const trackId = outboundRtp.getTrackId();
-            if (!trackId) {
-                logger.debug(`TrackId ${trackId} was not provided`);
-                continue;
-            }
-            if (outboundRtp.stats.kind === "audio") {
-                /* eslint-disable @typescript-eslint/no-explicit-any */
-                const { trackIdentifier, ...mediaSourceStats }: any = mediaSource
-                    ? (mediaSource.stats as W3C.RtcAudioSourceStats)
-                    : {};
-                const { sfuStreamId } = this._trackRelations.get(trackId || "notId") || {};
-                const outboundAudioTrack: OutboundAudioTrack = {
-                    ...mediaSourceStats,
-                    ...remoteInboundRtpStats,
-                    ...outboundRtp.stats,
-                    peerConnectionId: peerConnection.id,
-                    trackId: trackId ?? trackIdentifier,
-                    sfuStreamId,
-                };
-                yield [outboundAudioTrack, undefined];
-            }
-            if (outboundRtp.stats.kind === "video") {
-                const { _trackIdentifier, ...videoSourceStats }: any = mediaSource
-                    ? (mediaSource.stats as W3C.RtcVideoSourceStats)
-                    : {};
-                let mediaSourceStats = {};
-                if (videoSourceStats) {
-                    mediaSourceStats = videoSourceStats;
-                }
-                const { sfuStreamId } = this._trackRelations.get(trackId || "notId") ?? {};
-                const { qualityLimitationDurations, ...outboundStats }: W3C.RtcOutboundRTPStreamStats =
-                    outboundRtp.stats;
-                const outboundVideoTrack: OutboundVideoTrack = {
-                    ...mediaSourceStats,
-                    ...remoteInboundRtpStats,
-                    ...outboundStats,
-                    peerConnectionId: peerConnection.id,
-                    qualityLimitationDurationNone: qualityLimitationDurations?.none,
-                    qualityLimitationDurationCPU: qualityLimitationDurations?.cpu,
-                    qualityLimitationDurationBandwidth: qualityLimitationDurations?.bandwidth,
-                    qualityLimitationDurationOther: qualityLimitationDurations?.none,
-                    // perDscpId,
-                    trackId,
-                    sfuStreamId,
-                };
-                yield [undefined, outboundVideoTrack];
-            }
-        }
-    }
-
-    private *_makeInboundTrack(
-        peerConnection: PeerConnectionEntry
-    ): Generator<[InboundAudioTrack | undefined, InboundVideoTrack | undefined], void, undefined> {
-        // remoteOutboundRtp.getTransport().
-        for (const inboundRtp of peerConnection.inboundRtps()) {
-            const trackId = inboundRtp.getTrackId();
-            if (!trackId) {
-                logger.debug(`TrackId ${trackId} was not provided`);
-                continue;
-            }
-            const remoteOutboundRtpStats = inboundRtp.getRemoteOutboundRtp()?.stats || {};
-            const { sfuStreamId, sfuSinkId, remoteClientId } = this._trackRelations.get(trackId || "notId") || {};
-            const audioPlayoutStats = inboundRtp.getAudioPlayout() || {};
-            if (inboundRtp.stats.kind === "audio") {
-                const inboundAudioTrack: InboundAudioTrack = {
-                    ...audioPlayoutStats,
-                    ...remoteOutboundRtpStats,
-                    ...inboundRtp.stats,
-                    trackId,
-                    sfuStreamId,
-                    sfuSinkId,
-                    remoteClientId,
-                    peerConnectionId: peerConnection.id,
-                };
-                yield [inboundAudioTrack, undefined];
-            }
-            if (inboundRtp.stats.kind === "video") {
-                const inboundVideoTrack: InboundVideoTrack = {
-                    ...remoteOutboundRtpStats,
-                    ...inboundRtp.stats,
-                    trackId,
-                    sfuStreamId,
-                    sfuSinkId,
-                    remoteClientId,
-                    peerConnectionId: peerConnection.id,
-                };
-                yield [undefined, inboundVideoTrack];
-            }
-        }
-    }
-
-    private *_makeIceCandidatePair(peerConnection: PeerConnectionEntry): Generator<IceCandidatePair, void, undefined> {
-        for (const entry of peerConnection.iceCandidatePairs()) {
-            const candidatePairId = entry.statsId;
-            const peerConnectionId = peerConnection.id;
-            const sample: IceCandidatePair = {
-                candidatePairId,
-                peerConnectionId,
-                ...entry.stats,
-            };
-            yield sample;
-        }
-    }
-
-    private *_makePcTransport(
-        peerConnection: PeerConnectionEntry
-    ): Generator<PeerConnectionTransport, void, undefined> {
-        for (const transport of peerConnection.transports()) {
-            const peerConnectionId = peerConnection.id;
-            const transportStats = transport.stats;
-            const sample: PeerConnectionTransport = {
-                peerConnectionId,
-                transportId: transport.statsId,
-                label: peerConnection.label,
-                ...transportStats,
-            };
-            yield sample;
-        }
-    }
-
-    private *_makeMediaSource(peerConnection: PeerConnectionEntry): Generator<MediaSourceStat, void, undefined> {
-        for (const mediaSourceEntry of peerConnection.mediaSources()) {
-            if (mediaSourceEntry.sampled) {
-                continue;
-            }
-            mediaSourceEntry.sampled = true;
-
-            const stats = mediaSourceEntry.stats;
-            const sample: MediaSourceStat = {
-                ...(stats.kind === "audio" ? (stats as W3C.RtcAudioSourceStats) : (stats as W3C.RtcVideoSourceStats)),
-            };
-            yield sample;
-        }
-    }
-
-    private *_makeCodec(peerConnection: PeerConnectionEntry): Generator<MediaCodecStats, void, undefined> {
-        for (const codec of peerConnection.codecs()) {
-            if (codec.sampled) {
-                continue;
-            }
-            codec.sampled = true;
-
-            const stats = codec.stats;
-            const sampledCodec: MediaCodecStats = {
-                ...stats,
-            };
-            yield sampledCodec;
-        }
-    }
-
-    private *_makeCertificate(peerConnection: PeerConnectionEntry): Generator<Certificate, void, undefined> {
-        for (const certificate of peerConnection.certificates()) {
-            if (certificate.sampled) {
-                continue;
-            }
-            certificate.sampled = true;
-
-            const stats = certificate.stats;
-            const sampledCertificate: Certificate = {
-                ...stats,
-            };
-            yield sampledCertificate;
-        }
-    }
-
-    private *_makeIceLocalCandidate(
-        peerConnection: PeerConnectionEntry
-    ): Generator<IceLocalCandidate, void, undefined> {
-        for (const iceLocalCandidate of peerConnection.localCandidates()) {
-            if (iceLocalCandidate.sampled) {
-                continue;
-            }
-            iceLocalCandidate.sampled = true;
-
-            const stats = iceLocalCandidate.stats;
-            const sampledLocalCandidate: IceLocalCandidate = {
-                ...stats,
-                peerConnectionId: peerConnection.id,
-            };
-            yield sampledLocalCandidate;
-        }
-    }
-
-    private *_makeIceRemoteCandidate(
-        peerConnection: PeerConnectionEntry
-    ): Generator<IceRemoteCandidate, void, undefined> {
-        for (const iceRemoteCandidate of peerConnection.remoteCandidates()) {
-            if (iceRemoteCandidate.sampled) {
-                continue;
-            }
-            iceRemoteCandidate.sampled = true;
-
-            const stats = iceRemoteCandidate.stats;
-            yield {
-                ...stats,
-                peerConnectionId: peerConnection.id,
-            };
-        }
-    }
-
-    private *_makeDataChannel(peerConnection: PeerConnectionEntry): Generator<DataChannel, void, undefined> {
-        for (const dataChannel of peerConnection.dataChannels()) {
-            const stats = dataChannel.stats;
-            yield {
-                ...stats,
-                peerConnectionId: peerConnection.id ?? NULL_UUID,
-            };
-        }
-    }
-
-    private *_makeIceServer(peerConnection: PeerConnectionEntry): Generator<string, void, undefined> {
-        for (const iceServer of peerConnection.iceServers()) {
-            if (iceServer.sampled) {
-                continue;
-            }
-            iceServer.sampled = true;
-
-            const url = iceServer.stats.url;
-            yield url;
-        }
     }
 }
