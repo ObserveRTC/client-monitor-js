@@ -15,6 +15,10 @@ export type { Detectors } from './Detectors';
 export type { Collectors } from './Collectors';
 
 export type {
+    StatsMap,
+} from './utils/Stats';
+
+export type {
     StatsStorage,
     StatsStorageEvents,
 } from './entries/StatsStorage'

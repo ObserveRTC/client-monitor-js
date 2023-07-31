@@ -92,6 +92,15 @@ export function createCollectors(config: {
         return result;
     }
 
+    const addStatsProvider = (statsProvider: StatsProvider) => {
+        statsProviders.set(statsProvider.peerConnectionId, statsProvider);
+        storage.addPeerConnection(statsProvider.peerConnectionId, statsProvider.peerConnectionLabel);
+    }
+    const removeStatsProvider = (statsProviderId: string) => {
+        statsProviders.delete(statsProviderId);
+        storage.removePeerConnection(statsProviderId);
+    }
+
     function addGetStats(getStats: () => Promise<RTCStatsReport>, label?: string) {
         let closedStatsCollector = false;
         const peerConnectionId = uuid();
@@ -105,21 +114,20 @@ export function createCollectors(config: {
             close: () => {
                 if (closedStatsCollector) return;
                 closedStatsCollector = true;
-                statsProviders.delete(peerConnectionId);
                 statsCollectors.delete(peerConnectionId);
-                storage.removePeerConnection(peerConnectionId);
                 emitter.emit('removed-stats-collector', statsCollector);
+                removeStatsProvider(peerConnectionId);
             },
             get closed() {
                 return closedStatsCollector;
             }
         }
-        statsProviders.set(peerConnectionId, statsProvider);
         statsCollectors.set(peerConnectionId, statsCollector);
-        storage.addPeerConnection(peerConnectionId, label);
         emitter.emit('added-stats-collector', statsCollector);
+        addStatsProvider(statsProvider);
         return statsCollector;
     }
+
 
     function addRTCPeerConnection(peerConnection: RTCPeerConnection, peerConnectionLabel?: string): StatsCollector {
         logger.trace(`addRTCPeerConnection(): statsProvider`, peerConnection);
@@ -133,14 +141,12 @@ export function createCollectors(config: {
         });
         statsCollector.onclose = () => {
             statsCollectors.delete(statsCollector.id);
-            statsProviders.delete(statsCollector.id);
-            storage.removePeerConnection(statsCollector.id);
             emitter.emit('removed-stats-collector', statsCollector);
+            removeStatsProvider(statsCollector.id);
         };
         statsCollectors.set(statsCollector.id, statsCollector);
-        statsProviders.set(statsCollector.id, statsCollector);
-        storage.addPeerConnection(statsCollector.id, statsCollector.peerConnectionLabel);
         emitter.emit('added-stats-collector', statsCollector)
+        addStatsProvider(statsCollector);
         return statsCollector;
     }
 

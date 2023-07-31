@@ -9,6 +9,8 @@ Table of Contents:
  * [Integrations](#integrations)
     - [Mediasoup](#mediasoup)
  * [Detectors and Alerts](#detectors-and-alerts)
+    - [Audio Desync Detector](#audio-desync-detector)
+    - [CPU Performance Detector](#cpu-performance-detector)
  * [Calculated updates](#calculated-updates)
  * [Configurations](#configurations)
  * [NPM package](#npm-package)
@@ -70,7 +72,7 @@ const config = {
 const monitor = createClientMonitor(config);
 const mediasoupStatsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
 
-monitor.events.onStatsCollected(() => {
+monitor.on('stats-collected', () => {
     // do your stuff
 
     // you can close detach mediasoup 
@@ -196,6 +198,8 @@ List of built-in alerts:
  * `audio-desync-alert`: triggered when for an audio track several acceleration and deceleration is detected in a short amount of time indicating that the controlling system tries compensate discrepancies. 
  * `cpu-performance-alert`: triggered whenever a browser detects quality limitation becasue of CPU, or the number of decoded frames per sec hit a certain threshold
 
+### Audio Desync Detector
+
 ```javascript
 import { createClientMonitor } from 'client-monitor-js';
 
@@ -205,21 +209,55 @@ const monitor = createClientMonitor({
 });
 
 monitor.detectors.addAudioDesyncDetector({
-    // setup the config or leave it empty to use the default config
-})
-
-monitor.detectors.addCpuPerformanceDetector({
-    // setup the config or leave it empty to use the default config
-})
-
+    /**
+     * The fractional threshold used to determine if the audio desynchronization
+     * correction is considered significant or not.
+     * It represents the minimum required ratio of corrected samples to total samples.
+     * For example, a value of 0.1 means that if the corrected samples ratio
+     * exceeds 0.1, it will be considered a significant audio desynchronization issue.
+     */
+    fractionalCorrectionAlertOnThreshold: 0.1;
+    /**
+     * The fractional threshold used to determine if the audio desynchronization
+     * correction is considered negligible and the alert should be turned off.
+     * It represents the maximum allowed ratio of corrected samples to total samples.
+     * For example, a value of 0.05 means that if the corrected samples ratio
+     * falls below 0.05, the audio desynchronization alert will be turned off.
+     */
+    fractionalCorrectionAlertOffThreshold: 0.2;
+});
 
 monitor.on('audio-desync-alert', (alertState) => {
     if (alertState === 'on') {
-        console.log('Audio is desynced is video');
+        console.log('Audio is desynced from video');
     } else if (meanOpionionScoreAlert === 'off') {
         console.log('Audio is synced back');
     }
 });
+```
+
+### CPU Performance Detector
+
+```javascript
+monitor.detectors.addCpuPerformanceDetector({
+    /**
+     * The fractional threshold used to determine if the incoming frames
+     * dropped fraction is considered significant or not.
+     * It represents the maximum allowed ratio of dropped frames to received frames.
+     * For example, a value of 0.1 means that if the dropped frames fraction
+     * exceeds 0.1, it will be considered a significant issue.
+     */
+    droppedIncomingFramesFractionAlertOn: 0.5;
+    /**
+     * The fractional threshold used to determine if the incoming frames
+     * dropped fraction is considered negligible and the alert should be turned off.
+     * It represents the maximum allowed ratio of dropped frames to received frames.
+     * For example, a value of 0.05 means that if the dropped frames fraction
+     * falls below 0.05, the CPU issue alert will be turned off.
+     */
+    droppedIncomingFramesFractionAlertOff: 0.8;
+})
+
 
 monitor.on('cpu-performance-alert', alertState => {
     if (alertState === 'on') {
@@ -249,136 +287,12 @@ const config = {
     samplingPeriodInMs: 10000,
 
     /**
-     * By setting it, the monitor sends the samples periodically.
+     * This is the interval the monitor periodically checks
+     * if collecting or sampling action should be invoked or not.
      * 
-     * DEFAULT: undefined
+     * DEFAULT: if collecting or sampling period is set the default value is 1000, otherwise it's undefined
      */
-    sendingPeriodInMs: 10000,
-
-    /**
-     * By enabling this option, the monitor automatically generates events
-     * when a peer connection added to the collector undergoes a change in connection state or when a track on it is added or removed.
-     *
-     * If this option is set to true, the samples created by the monitor will include the generated events. However, if
-     * no sample is created, events will accumulate indefinitely within the monitor. It is recommended to set this option to true
-     * if you want to create a sample with events.
-     *
-     * DEFAULT: false
-     */
-    createCallEvents: false,
-
-    /**
-     * Collector Component related configurations
-     * 
-     * DEFAULT: configured by the monitor
-     */
-    collectors: {
-        /**
-         * Sets the adapter adapt different browser type and version 
-         * provided stats.
-         * 
-         * DEFAULT: configured by the monitor
-         */
-        adapter: {
-            /**
-             * the type of the browser, e.g.: chrome, firefox, safari
-             * 
-             * DEFAULT: configured by the collector
-             */
-            browserType: "chrome",
-            /**
-             * the version of the browser, e.g.: 97.xx.xxxxx
-             * 
-             * DEFAULT: configured by the collector
-             */
-            browserVersion: "97.1111.111",
-        },
-    },
-
-    /**
-     * Configuration for the CpuIssueDetector function.
-     * 
-     * Default configuration below
-     */
-    cpuIssueDetector: {
-        /**
-         * Specifies whether the CPU issue detector is enabled or not.
-         */
-        enabled: true;
-        /**
-         * The fractional threshold used to determine if the incoming frames
-         * dropped fraction is considered significant or not.
-         * It represents the maximum allowed ratio of dropped frames to received frames.
-         * For example, a value of 0.1 means that if the dropped frames fraction
-         * exceeds 0.1, it will be considered a significant issue.
-         */
-        droppedIncomingFramesFractionAlertOn: 0.5;
-        /**
-         * The fractional threshold used to determine if the incoming frames
-         * dropped fraction is considered negligible and the alert should be turned off.
-         * It represents the maximum allowed ratio of dropped frames to received frames.
-         * For example, a value of 0.05 means that if the dropped frames fraction
-         * falls below 0.05, the CPU issue alert will be turned off.
-         */
-        droppedIncomingFramesFractionAlertOff: 0.8;
-    },
-    /**
-     * Configuration for the AudioDesyncDetector function.
-     * 
-     * Default configuration below
-     */
-    audioDesyncDetector: {
-        /**
-         * Specifies whether the audio desynchronization detector is enabled or not.
-         */
-        enabled: true;
-        /**
-         * The fractional threshold used to determine if the audio desynchronization
-         * correction is considered significant or not.
-         * It represents the minimum required ratio of corrected samples to total samples.
-         * For example, a value of 0.1 means that if the corrected samples ratio
-         * exceeds 0.1, it will be considered a significant audio desynchronization issue.
-         */
-        fractionalCorrectionAlertOnThreshold: 0.1;
-        /**
-         * The fractional threshold used to determine if the audio desynchronization
-         * correction is considered negligible and the alert should be turned off.
-         * It represents the maximum allowed ratio of corrected samples to total samples.
-         * For example, a value of 0.05 means that if the corrected samples ratio
-         * falls below 0.05, the audio desynchronization alert will be turned off.
-         */
-        fractionalCorrectionAlertOffThreshold: 0.2;
-    },
-    lowStabilityScoreDetector: {
-        /**
-         * Boolean indicating whether the detector is enabled or not
-         */
-        enabled: true;
-        /**
-         * The threshold at which an alert is turned on
-         */
-        alertOnThreshold: 0.8;
-        /**
-         * The threshold at which an alert is turned off
-         */
-        alertOffThreshold: 0.9;
-    },
-    lowMosDetector: {
-        /**
-         * Specifies whether the Low Mean Opinion Score detector is enabled or not.
-         */
-        enabled: true;
-        /**
-         * The threshold value for triggering a Low Mean Opinion Score alert.
-         * If the mean opinion score (MOS) falls below this value, an alert will be triggered.
-         */
-        alertOnThreshold: 3.0;
-        /**
-         * The threshold value for turning off the Low Mean Opinion Score alert.
-         * If the mean opinion score (MOS) rises above this value, the alert will be turned off.
-         */
-        alertOffThreshold: 4.0;
-    }
+    tickingTimeInMs: 10000,
 };
 ```
 

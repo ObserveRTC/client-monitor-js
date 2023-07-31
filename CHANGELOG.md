@@ -7,7 +7,8 @@
  * `clientMontior.audioOutputs` is moved to `clientMonitor.meta.audioOutputs`
  * `clientMontior.videoInputs` is moved to `clientMonitor.meta.videoInputs`
  * `clientMonitor.alerts` is removed, `clientMonitor.audioDesyncDetector`, `clientMonitor.cpuPerformanceDetector`, and `clientMonitor.congestionDetector`
- * all `updates` fields in storage entries are moved to the entries and to the `storage`
+ * all `updates` fields in storage entries are moved to the entries of the `storage`
+ * `metrics` field is removed `elapsedSinceLastCollectInMs` and `elapsedSinceLastSampleInMs` is added to the `stats-collected`, and `sample-created` events
  * refactored mediasoup-collector
  * add events are collected automatically 
  * simplified configuration, and detectors configurations are moved to create detectors

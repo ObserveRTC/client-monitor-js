@@ -1,6 +1,6 @@
 import { MediaDevice, CustomCallEvent, ExtensionStat, ClientSample } from './schema/Samples';
 import { CollectedStats, createCollectors } from "./Collectors";
-import { LogLevel, addLoggerProcess, createConsoleLogger, createLogger } from "./utils/logger";
+import { createLogger } from "./utils/logger";
 import { ClientMetaData } from './ClientMetaData';
 import { StatsStorage } from './entries/StatsStorage';
 import { TypedEventEmitter } from './utils/TypedEmitter';
@@ -46,8 +46,12 @@ export type AlertState = 'on' | 'off';
 export interface ClientMonitorEvents {
     'error': Error,
     'close': undefined,
-    'stats-collected': CollectedStats,
+    'stats-collected': {
+        elapsedSinceLastCollectedInMs: number,
+        collectedStats: CollectedStats,
+    },
     'sample-created': {
+        elapsedSinceLastSampleInMs: number,
         clientSample: ClientSample,
     },
 
@@ -68,6 +72,9 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     private readonly _sampler = new Sampler(this.storage);
     private readonly _timer = createTimer();
+    
+    private _lastCollectedAt = 0;
+    private _lastSampledAt = 0;
     private _closed = false;
 
     public constructor(
@@ -116,22 +123,31 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this.collectors.clear();
         this._sampler.clear();
     }
+    
 
     public async collect(): Promise<CollectedStats> {
         const collectedStats = await this.collectors.collect();
         await this.storage.update(collectedStats);
-        this.emit('stats-collected', collectedStats);
+        const timestamp = Date.now();
+        this.emit('stats-collected', {
+            collectedStats,
+            elapsedSinceLastCollectedInMs: timestamp - this._lastCollectedAt,
+        });
+        this._lastCollectedAt = timestamp;
         return collectedStats;
     }
 
     public sample(): ClientSample | undefined {
         const clientSample = this._sampler.createClientSample();
+        const timestamp = Date.now();
         if (!clientSample) {
             return;
         }
         this.emit('sample-created', {
-            clientSample
+            clientSample,
+            elapsedSinceLastSampleInMs: timestamp - this._lastSampledAt,
         });
+        this._lastSampledAt = timestamp;
         return clientSample;
     }
 
