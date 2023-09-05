@@ -292,55 +292,39 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             })
         );
         addStatsProvider(statsProvider);
+        transports.set(transport.id, transport);
         logger.debug(`Added transport ${transport.id}`);
     }
 
     function adaptStorageMiddleware(storage: StatsStorage, next: (storage: StatsStorage) => void) {
         const sndTransport = getLastSndTransport();
         const peerConnectionStats = storage.getPeerConnection(sndTransport?.id ?? '');
-        if (!peerConnectionStats) {
-            return next(storage);
-        }
-        for (const producer of producers.values()) {
-            if (!producer.track) {
-                continue;
-            }
-            producer.rtpParameters.encodings?.forEach(encoding => {
-                const ssrc = encoding.ssrc;
-                if (!ssrc) {
-                    return;
-                }
-                for (const outboundRtp of peerConnectionStats.outboundRtps(ssrc)) {
-                    outboundRtp.sfuStreamId = producer.id;
 
-                    const mediaSource = outboundRtp.getMediaSource();
-                    if (mediaSource && producer.track) {
-                        mediaSource.stats.trackIdentifier = producer.track.id;
-                    }
+        if (peerConnectionStats) {
+            for (const producer of producers.values()) {
+                if (!producer.track) {
+                    continue;
                 }
-            });
-            if (producer.track && !addedOutboundTrackIds.has(producer.track.id) && producer.track.readyState === 'live') {
-                addTrack({
-                    track: producer.track,
-                    peerConnectionId: peerConnectionStats.peerConnectionId,
-                    direction: 'outbound',
-                });
+                const trackStats = storage.getTrack(producer.track.id);
+                if (trackStats) {
+                    trackStats.sfuStreamId = producer.id;
+                }
+                if (!addedOutboundTrackIds.has(producer.track.id) && producer.track.readyState === 'live') {
+                    addTrack({
+                        track: producer.track,
+                        peerConnectionId: peerConnectionStats.peerConnectionId,
+                        direction: 'outbound',
+                    });
+                }
             }
         }
+       
         for (const consumer of consumers.values()) {
-            consumer.rtpParameters.encodings?.forEach(encoding => {
-                const ssrc = encoding.ssrc;
-                if (!ssrc) {
-                    return;
-                }
-                for (const inboundRtp of peerConnectionStats.inboundRtps(ssrc)) {
-                    if (inboundRtp.getTrackId() !== consumer.track.id) {
-                        inboundRtp.stats.trackIdentifier = consumer.track.id;
-                    }
-                    inboundRtp.sfuStreamId = consumer.producerId;
-                    inboundRtp.sfuSinkId = consumer.id;
-                }
-            });
+            const trackStats = storage.getTrack(consumer.track.id);
+            if (trackStats && trackStats.direction === 'inbound') {
+                trackStats.sfuStreamId = consumer.producerId;
+                trackStats.sfuSinkId = consumer.id;
+            }
         }
         return next(storage);
     }
