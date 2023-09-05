@@ -4,7 +4,7 @@
 	{
 		"lib": [ "ES2018", "dom" ],
 		"target": "ES2020",
-		"module": "ES6",
+		"module": "commonjs",
 		"moduleResolution": "node",
 		"esModuleInterop": true,
 		"isolatedModules": true,
