@@ -55,6 +55,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         track: MediaStreamTrack,
         peerConnectionId: string,
         direction: 'outbound' | 'inbound',
+        kind: 'audio' | 'video',
         added?: number,
         sfuStreamId?: string,
         sfuSinkId?: string,
@@ -75,7 +76,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         });
     }
 
-    function addOutboundTrack(track: MediaStreamTrack) {
+    function addOutboundTrack(track: MediaStreamTrack, producerId: string) {
         const sndTransport = getLastSndTransport();
         if (!sndTransport) {
             return;
@@ -84,6 +85,8 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             track,
             peerConnectionId: sndTransport.id,
             direction: 'outbound',
+            sfuStreamId: producerId,
+            kind: track.kind as 'audio' | 'video',
         });
     }
     
@@ -133,6 +136,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                     direction: 'outbound',
                     track: producer.track,
                     sfuStreamId: producer.id,
+                    kind: producer.kind,
                 });
             }
         }
@@ -180,6 +184,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             addTrack({
                 peerConnectionId,
                 direction: 'inbound',
+                kind: consumer.kind,
                 track: consumer.track,
                 sfuStreamId: consumer.producerId,
                 sfuSinkId: consumer.id,
@@ -314,6 +319,8 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                         track: producer.track,
                         peerConnectionId: peerConnectionStats.peerConnectionId,
                         direction: 'outbound',
+                        sfuStreamId: producer.id,
+                        kind: producer.kind,
                     });
                 }
             }

@@ -1,5 +1,3 @@
-import * as W3CStats from '../schema/W3cStatsIdentifiers';
-
 export type MediasoupProducerObserverEvents = {
     'close': undefined,
     'pause': undefined,
