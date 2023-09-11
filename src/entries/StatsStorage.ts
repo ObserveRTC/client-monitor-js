@@ -62,7 +62,7 @@ export class StatsStorage {
     private readonly _tracks = new Map<string, TrackStats>();
     private readonly _emitter = new TypedEventEmitter<StatsStorageEvents>();
     private readonly _peerConnections = new Map<string, PeerConnectionEntryManifest>();
-
+    private readonly _pendingTrackToSfuBindings = new Map<string, { sfuStreamId: string, sfuSinkId?: string }>();
     public get events(): TypedEventEmitter<StatsStorageEvents> {
         return this._emitter;
     }
@@ -129,6 +129,13 @@ export class StatsStorage {
 
     public tracks(): IterableIterator<TrackStats> {
         return this._tracks.values();
+    }
+
+    public bindTrackToSfu(trackId: string, sfuStreamId: string, sfuSinkId?: string): void {
+        if (this._tryBindTrackToSfu(trackId, sfuStreamId, sfuSinkId)) {
+            return;
+        }
+        this._pendingTrackToSfuBindings.set(trackId, { sfuStreamId, sfuSinkId });
     }
 
     /**
@@ -491,6 +498,13 @@ export class StatsStorage {
                 continue;
             }
             track.update();
+            
+            const { sfuStreamId, sfuSinkId } = this._pendingTrackToSfuBindings.get(trackId) ?? {};
+            if (sfuStreamId) {
+                if (this._tryBindTrackToSfu(trackId, sfuStreamId, sfuSinkId)) {
+                    this._pendingTrackToSfuBindings.delete(trackId);    
+                }
+            }
         }
 
         for (const outboundRtp of this.outboundRtps()) {
@@ -508,6 +522,13 @@ export class StatsStorage {
                 continue;
             }
             track.update();
+
+            const { sfuStreamId } = this._pendingTrackToSfuBindings.get(trackId) ?? {};
+            if (sfuStreamId) {
+                if (this._tryBindTrackToSfu(trackId, sfuStreamId)) {
+                    this._pendingTrackToSfuBindings.delete(trackId);    
+                }
+            }
         }
 
         for (const track of this._tracks.values()) {
@@ -521,5 +542,17 @@ export class StatsStorage {
                 }
             }
         }
+    }
+
+    private _tryBindTrackToSfu(trackId: string, sfuStreamId: string, sfuSinkId?: string): boolean {
+        const track = this._tracks.get(trackId);
+        if (!track) {
+            return false;
+        }
+        track.sfuStreamId = sfuStreamId;
+        if (sfuSinkId && track.direction === 'inbound') {
+            track.sfuSinkId = sfuSinkId;
+        }
+        return true;
     }
 }

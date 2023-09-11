@@ -43,9 +43,9 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     
     const transports = new Map<string, MediasoupTransportSurrogate>();
     const addedOutboundTrackIds = new Set<string>();
-    const producers = new Map<string, MediasoupProducerSurrogate>();
-    const consumers = new Map<string, MediasoupConsumerSurrogate>();
-
+    // const producers = new Map<string, MediasoupProducerSurrogate>();
+    // const consumers = new Map<string, MediasoupConsumerSurrogate>();
+    const pendingProducerBindings = new Map<string, { producer: MediasoupProducerSurrogate, peerConnectionId: string }>();
     const getLastSndTransport = () => {
         const sndTransports = Array.from(transports.values()).filter(transport => transport.direction === 'send');
         return sndTransports.length < 1 ? undefined : sndTransports[sndTransports.length - 1];
@@ -115,7 +115,6 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             producer.observer.once('close', () => {
                 producer.observer.off('pause', pauseListener);
                 producer.observer.off('resume', resumeListener);
-                producers.delete(producer.id);
                 emitCallEvent({
                     name: 'PRODUCER_REMOVED',
                     ...eventBase
@@ -123,7 +122,6 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             });
             producer.observer.on('pause', pauseListener);
             producer.observer.on('resume', resumeListener);
-            producers.set(producer.id, producer);
 
             emitCallEvent({
                 name: 'PRODUCER_ADDED',
@@ -138,6 +136,14 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                     sfuStreamId: producer.id,
                     kind: producer.kind,
                 });
+                storage.bindTrackToSfu(producer.track.id, producer.id);
+                producer.track.onended = () => {
+                    if (!producer.closed) {
+                        pendingProducerBindings.set(producer.id, { producer, peerConnectionId });        
+                    }
+                }
+            } else {
+                pendingProducerBindings.set(producer.id, { producer, peerConnectionId });
             }
         }
     }
@@ -148,7 +154,8 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                     peerConnectionId,
                     mediaTrackId: consumer.track.id,
                     attachments: JSON.stringify({
-                        producerId: consumer.id,
+                        consumerId: consumer.id,
+                        producerId: consumer.producerId,
                         kind: consumer.kind,
                     })
                 };
@@ -167,7 +174,6 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             consumer.observer.once('close', () => {
                 consumer.observer.off('pause', pauseListener);
                 consumer.observer.off('resume', resumeListener);
-                consumers.delete(consumer.id);
                 emitCallEvent({
                     name: 'CONSUMER_REMOVED',
                     ...eventBase
@@ -175,7 +181,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             });
             consumer.observer.on('pause', pauseListener);
             consumer.observer.on('resume', resumeListener);
-            consumers.set(consumer.id, consumer);
+            storage.bindTrackToSfu(consumer.track.id, consumer.producerId, consumer.id);
             emitCallEvent({
                 name: 'CONSUMER_ADDED',
                 ...eventBase
@@ -302,35 +308,22 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     }
 
     function adaptStorageMiddleware(storage: StatsStorage, next: (storage: StatsStorage) => void) {
-        const sndTransport = getLastSndTransport();
-        const peerConnectionStats = storage.getPeerConnection(sndTransport?.id ?? '');
-
-        if (peerConnectionStats) {
-            for (const producer of producers.values()) {
-                if (!producer.track) {
-                    continue;
+        for (const [producerId, { producer, peerConnectionId }] of Array.from(pendingProducerBindings.entries())) {
+            if (producer.track) {
+                storage.bindTrackToSfu(producer.track.id, producerId);
+                addTrack({
+                    peerConnectionId,
+                    direction: 'outbound',
+                    track: producer.track,
+                    sfuStreamId: producer.id,
+                    kind: producer.kind,
+                });
+                producer.track.onended = () => {
+                    if (!producer.closed) {
+                        pendingProducerBindings.set(producer.id, { producer, peerConnectionId });        
+                    }
                 }
-                const trackStats = storage.getTrack(producer.track.id);
-                if (trackStats) {
-                    trackStats.sfuStreamId = producer.id;
-                }
-                if (!addedOutboundTrackIds.has(producer.track.id) && producer.track.readyState === 'live') {
-                    addTrack({
-                        track: producer.track,
-                        peerConnectionId: peerConnectionStats.peerConnectionId,
-                        direction: 'outbound',
-                        sfuStreamId: producer.id,
-                        kind: producer.kind,
-                    });
-                }
-            }
-        }
-       
-        for (const consumer of consumers.values()) {
-            const trackStats = storage.getTrack(consumer.track.id);
-            if (trackStats && trackStats.direction === 'inbound') {
-                trackStats.sfuStreamId = consumer.producerId;
-                trackStats.sfuSinkId = consumer.id;
+                pendingProducerBindings.delete(producerId);
             }
         }
         return next(storage);
@@ -344,8 +337,6 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         }
         closed = true;
         transports.clear();
-        producers.clear();
-        consumers.clear();
         device.observer.off("newtransport", addTransport);
         storage.processor.removeMiddleware(adaptStorageMiddleware);
         onclose?.();

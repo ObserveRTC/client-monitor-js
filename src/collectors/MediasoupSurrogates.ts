@@ -21,6 +21,7 @@ export type MediasoupRtpParameters = {
 
 export interface MediasoupProducerSurrogate {
     readonly id: string;
+    readonly closed: boolean;
     readonly observer: MediasoupProducerObserverSurrogate;   
     readonly track?: MediaStreamTrack;
     readonly kind: "audio" | "video";
