@@ -135,7 +135,14 @@ export class StatsStorage {
         if (this._tryBindTrackToSfu(trackId, sfuStreamId, sfuSinkId)) {
             return;
         }
+        // clean bindings added here but never realized
+        for (const entry of Array.from(this._pendingTrackToSfuBindings)) {
+            if (entry[1].sfuStreamId === sfuStreamId && entry[1].sfuSinkId === sfuSinkId) {
+                this._pendingTrackToSfuBindings.delete(entry[0]);
+            }
+        }
         this._pendingTrackToSfuBindings.set(trackId, { sfuStreamId, sfuSinkId });
+        
     }
 
     /**
