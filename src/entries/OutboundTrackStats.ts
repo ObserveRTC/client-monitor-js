@@ -6,9 +6,9 @@ export type OutboundTrackStats = ReturnType<typeof createOutboundTrackStats> & {
 
 export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, trackId: string, kind: "audio" | "video") {
 		function *iterator() {
-			for (const inboundRtp of peerConnection.outboundRtps()) {
-				if (inboundRtp.getTrackId() === trackId) {
-					yield inboundRtp;
+			for (const outboundRtp of peerConnection.outboundRtps()) {
+				if (outboundRtp.getTrackId() === trackId) {
+					yield outboundRtp;
 				}
 			}
 		}
@@ -23,8 +23,8 @@ export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, tr
 			},
 			set sfuStreamId(value: string | undefined) {
 				sfuStreamId = value;
-				for (const inboundRtp of iterator()) {
-					inboundRtp.sfuStreamId = value;
+				for (const outboundRtp of iterator()) {
+					outboundRtp.sfuStreamId = value;
 				}
 			},
 			

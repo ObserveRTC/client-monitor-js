@@ -1,5 +1,3 @@
-import * as W3CStats from '../schema/W3cStatsIdentifiers';
-
 export type MediasoupProducerObserverEvents = {
     'close': undefined,
     'pause': undefined,
@@ -23,6 +21,7 @@ export type MediasoupRtpParameters = {
 
 export interface MediasoupProducerSurrogate {
     readonly id: string;
+    readonly closed: boolean;
     readonly observer: MediasoupProducerObserverSurrogate;   
     readonly track?: MediaStreamTrack;
     readonly kind: "audio" | "video";

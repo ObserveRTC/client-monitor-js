@@ -230,7 +230,7 @@ monitor.detectors.addAudioDesyncDetector({
 monitor.on('audio-desync-alert', (alertState) => {
     if (alertState === 'on') {
         console.log('Audio is desynced from video');
-    } else if (meanOpionionScoreAlert === 'off') {
+    } else if (alertState === 'off') {
         console.log('Audio is synced back');
     }
 });
@@ -262,7 +262,7 @@ monitor.detectors.addCpuPerformanceDetector({
 monitor.on('cpu-performance-alert', alertState => {
     if (alertState === 'on') {
         console.log('CPU performance problem is detected');
-    } else if (meanOpionionScoreAlert === 'off') {
+    } else if (alertState === 'off') {
         console.log('CPU performance problem is gone');
     }
 })
