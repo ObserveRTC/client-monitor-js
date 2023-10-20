@@ -76,6 +76,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     receivedSamples?: number,
     silentConcealedSamples?: number,
     fractionLoss?: number,
+    avgRttInS?: number,
 
     /**
      * Navigate to the related ReceiverEntry
