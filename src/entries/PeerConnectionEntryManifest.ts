@@ -286,6 +286,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         entry.avgJitterBufferDelayInMs = (((stats.jitterBufferDelay ?? 0) - (entry.stats.jitterBufferDelay ?? 0)) / ((Math.max(stats.jitterBufferEmittedCount ?? 1, 1)) - (entry.stats.jitterBufferEmittedCount ?? 0))) * 1000.0;
         entry.receivedPackets = (stats.packetsReceived ?? 0) - (entry.stats.packetsReceived ?? 0);
         entry.receivingBitrate = (((stats.bytesReceived ?? 0) - (entry.stats.bytesReceived ?? 0)) * 8) / elapsedTimeInSec;
+        entry.receivedBytes = ((stats.bytesReceived ?? 0) - (entry.stats.bytesReceived ?? 0));
         entry.lostPackets = (stats.packetsLost ?? 0) - (entry.stats.packetsLost ?? 0);
         entry.receivedFrames = (stats.framesReceived ?? 0) - (entry.stats.framesReceived ?? 0);
         entry.decodedFrames = (stats.framesDecoded ?? 0) - (entry.stats.framesDecoded ?? 0);
@@ -329,6 +330,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         }
         const elapsedTimeInSec = (stats.timestamp - entry.stats.timestamp) / 1000.0;
         entry.sendingBitrate = (((stats.bytesSent ?? 0) - (entry.stats.bytesSent ?? 0)) * 8) / elapsedTimeInSec;
+        entry.sentBytes = ((stats.bytesSent ?? 0) - (entry.stats.bytesSent ?? 0));
         entry.sentPackets = (stats.packetsSent ?? 0) - (entry.stats.packetsSent ?? 0);
         entry.stats = stats;
         entry.visited = true;
@@ -520,10 +522,10 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         for (const inboundRtpEntry of this.inboundRtps()) {
             if (inboundRtpEntry.stats.kind === 'audio') {
                 this.receivingAudioBitrate += inboundRtpEntry.receivingBitrate ?? 0;
-                this.deltaReceivedAudioBytes += inboundRtpEntry?.stats?.bytesReceived ?? 0;
+                this.deltaReceivedAudioBytes += inboundRtpEntry.receivedBytes ?? 0;
             } else if (inboundRtpEntry.stats.kind === 'video') {
                 this.receivingVideoBitrate += inboundRtpEntry.receivingBitrate ?? 0;
-                this.deltaReceivedVideoBytes += inboundRtpEntry?.stats?.bytesReceived ?? 0;
+                this.deltaReceivedVideoBytes += inboundRtpEntry.receivedBytes ?? 0;
             }
             this.deltaInboundPacketsLost += inboundRtpEntry.lostPackets ?? 0;
             this.deltaInboundPacketsReceived += inboundRtpEntry.receivedPackets ?? 0;
@@ -565,10 +567,10 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         for (const outboundRtpEntry of this._outboundRtps.values()) {
             if (outboundRtpEntry.stats.kind === 'audio') {
                 this.sendingAudioBitrate += outboundRtpEntry.sendingBitrate ?? 0;
-                this.deltaSentAudioBytes += outboundRtpEntry?.stats?.bytesSent ?? 0;
+                this.deltaSentAudioBytes += outboundRtpEntry.sentBytes ?? 0;
             } else if (outboundRtpEntry.stats.kind === 'video') {
                 this.sendingVideoBitrate += outboundRtpEntry.sendingBitrate ?? 0;
-                this.deltaSentVideoBytes += outboundRtpEntry?.stats?.bytesSent ?? 0;
+                this.deltaSentVideoBytes += outboundRtpEntry.sentBytes ?? 0;
             }
             this.deltaOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
             outboundRtpEntry.updateStabilityScore(avgRttInS);

@@ -68,6 +68,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     score?: number,
     avgJitterBufferDelayInMs?: number,
     receivingBitrate?: number,
+    receivedBytes?: number,
     lostPackets?: number,
     receivedPackets?: number,
     receivedFrames?: number,
@@ -107,6 +108,7 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     // calculated fields
     score?: number;
     sendingBitrate?: number,
+    sentBytes?: number,
     sentPackets?: number,
     /**
      * Gets the SSRC of the Rtp session
