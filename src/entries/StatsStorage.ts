@@ -50,6 +50,10 @@ export class StatsStorage {
     public totalOutboundPacketsSent = 0;
     public totalOutbounPacketsReceived = 0;
     public totalOutboundPacketsLost = 0;
+    public totalSentAudioBytes = 0;
+    public totalSentVideoBytes = 0;
+    public totalReceivedAudioBytes = 0;
+    public totalReceivedVideoBytes = 0;
 
     public deltaInboundPacketsLost?: number;
     public deltaInboundPacketsReceived?: number;
@@ -454,6 +458,7 @@ export class StatsStorage {
         this.sendingVideoBitrate = 0;
         this.receivingAudioBitrate = 0;
         this.receivingVideoBitrate = 0;
+
         this.deltaInboundPacketsLost = 0;
         this.deltaInboundPacketsReceived = 0;
         this.deltaOutboundPacketsSent = 0;
@@ -477,6 +482,10 @@ export class StatsStorage {
             this.deltaOutboundPacketsSent += peerConnectionEntry.deltaOutboundPacketsSent ?? 0;
             this.deltaOutbounPacketsReceived += peerConnectionEntry.deltaOutbounPacketsReceived ?? 0;
             this.deltaOutboundPacketsLost += peerConnectionEntry.deltaOutboundPacketsLost ?? 0;
+            this.totalSentAudioBytes += peerConnectionEntry.totalSentAudioBytes ?? 0;
+            this.totalSentVideoBytes += peerConnectionEntry.totalSentVideoBytes ?? 0;
+            this.totalReceivedAudioBytes += peerConnectionEntry.totalReceivedAudioBytes ?? 0;
+            this.totalReceivedVideoBytes += peerConnectionEntry.totalReceivedVideoBytes ?? 0;
         }
         this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
         this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;

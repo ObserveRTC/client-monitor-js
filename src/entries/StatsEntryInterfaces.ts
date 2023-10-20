@@ -324,11 +324,16 @@ export interface PeerConnectionEntry {
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
 
-    readonly totalInboundPacketsLost?: number;
-    readonly totalInboundPacketsReceived?: number;
-    readonly totalOutboundPacketsLost?: number;
-    readonly totalOutbounPacketsReceived?: number;
-    readonly totalOutboundPacketsSent?: number;
+    readonly totalInboundPacketsLost: number;
+    readonly totalInboundPacketsReceived: number;
+    readonly totalOutboundPacketsLost: number;
+    readonly totalOutbounPacketsReceived: number;
+    readonly totalOutboundPacketsSent: number;
+    readonly totalSentAudioBytes: number;
+    readonly totalSentVideoBytes: number;
+    readonly totalReceivedAudioBytes: number;
+    readonly totalReceivedVideoBytes: number;
+
     readonly deltaInboundPacketsLost?: number;
     readonly deltaInboundPacketsReceived?: number;
     readonly deltaOutboundPacketsLost?: number;
