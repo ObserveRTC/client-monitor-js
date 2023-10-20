@@ -64,6 +64,10 @@ export class StatsStorage {
     public deltaOutboundPacketsLost?: number;
     public deltaDataChannelBytesSent?: number;
     public deltaDataChannelBytesReceived?: number;
+    public deltaSentAudioBytes?: number;
+    public deltaSentVideoBytes?: number;
+    public deltaReceivedAudioBytes?: number;
+    public deltaReceivedVideoBytes?: number;
     public totalAvailableIncomingBitrate?: number;
     public totalAvailableOutgoingBitrate?: number;
     public avgRttInS?: number;
@@ -470,6 +474,10 @@ export class StatsStorage {
         this.deltaOutboundPacketsLost = 0;
         this.deltaDataChannelBytesSent = 0;
         this.deltaDataChannelBytesReceived = 0;
+        this.deltaSentAudioBytes = 0;
+        this.deltaSentVideoBytes = 0;
+        this.deltaReceivedAudioBytes = 0;
+        this.deltaReceivedVideoBytes = 0;
         this.totalAvailableIncomingBitrate = 0;
         this.totalAvailableOutgoingBitrate = 0;
         for (const peerConnectionEntry of this._peerConnections.values()) {
@@ -490,6 +498,11 @@ export class StatsStorage {
             this.deltaOutboundPacketsSent += peerConnectionEntry.deltaOutboundPacketsSent ?? 0;
             this.deltaOutbounPacketsReceived += peerConnectionEntry.deltaOutboundPacketsReceived ?? 0;
             this.deltaOutboundPacketsLost += peerConnectionEntry.deltaOutboundPacketsLost ?? 0;
+
+            this.deltaSentAudioBytes += peerConnectionEntry.deltaSentAudioBytes ?? 0;
+            this.deltaSentVideoBytes += peerConnectionEntry.deltaSentVideoBytes ?? 0;
+            this.deltaReceivedAudioBytes += peerConnectionEntry.deltaReceivedAudioBytes ?? 0;
+            this.deltaReceivedVideoBytes += peerConnectionEntry.deltaReceivedVideoBytes ?? 0;
         }
         this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
         this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
@@ -498,10 +511,10 @@ export class StatsStorage {
         this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
         this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
         this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
-        this.totalSentAudioBytes += this.sendingAudioBitrate;
-        this.totalSentVideoBytes += this.sendingVideoBitrate;
-        this.totalReceivedAudioBytes += this.receivingAudioBitrate;
-        this.totalReceivedVideoBytes += this.receivingVideoBitrate;
+        this.totalSentAudioBytes += this.deltaSentAudioBytes;
+        this.totalSentVideoBytes += this.deltaSentVideoBytes;
+        this.totalReceivedAudioBytes += this.deltaReceivedAudioBytes;
+        this.totalReceivedVideoBytes += this.deltaReceivedVideoBytes;
 
         this.highestSeenSendingBitrate = Math.max(
             this.highestSeenSendingBitrate ?? 0, 

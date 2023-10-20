@@ -341,6 +341,10 @@ export interface PeerConnectionEntry {
     readonly deltaOutboundPacketsLost?: number;
     readonly deltaOutboundPacketsReceived?: number;
     readonly deltaOutboundPacketsSent?: number;
+    readonly deltaSentAudioBytes?: number;
+    readonly deltaSentVideoBytes?: number;
+    readonly deltaReceivedAudioBytes?: number;
+    readonly deltaReceivedVideoBytes?: number;
     readonly deltaDataChannelBytesSent?: number;
     readonly deltaDataChannelBytesReceived?: number;
 

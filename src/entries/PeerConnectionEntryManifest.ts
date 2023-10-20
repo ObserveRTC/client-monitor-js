@@ -56,6 +56,11 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public deltaOutboundPacketsSent?: number;
     public deltaDataChannelBytesSent?: number;
     public deltaDataChannelBytesReceived?: number;
+    public deltaReceivedAudioBytes?: number;
+    public deltaReceivedVideoBytes?: number;
+    public deltaSentAudioBytes?: number;
+    public deltaSentVideoBytes?: number;
+
     
     public avgRttInS?: number;
     public sendingAudioBitrate?: number;
@@ -506,21 +511,22 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         this.receivingVideoBitrate = 0;
         this.deltaDataChannelBytesSent = 0;
         this.deltaDataChannelBytesReceived = 0;
+        this.deltaReceivedAudioBytes = 0;
+        this.deltaReceivedVideoBytes = 0;
+        this.deltaSentAudioBytes = 0;
+        this.deltaSentVideoBytes = 0;
 
         const roundTripTimesInS = [];
         for (const inboundRtpEntry of this.inboundRtps()) {
             if (inboundRtpEntry.stats.kind === 'audio') {
                 this.receivingAudioBitrate += inboundRtpEntry.receivingBitrate ?? 0;
+                this.deltaReceivedAudioBytes += inboundRtpEntry?.stats?.bytesReceived ?? 0;
             } else if (inboundRtpEntry.stats.kind === 'video') {
                 this.receivingVideoBitrate += inboundRtpEntry.receivingBitrate ?? 0;
+                this.deltaReceivedVideoBytes += inboundRtpEntry?.stats?.bytesReceived ?? 0;
             }
             this.deltaInboundPacketsLost += inboundRtpEntry.lostPackets ?? 0;
             this.deltaInboundPacketsReceived += inboundRtpEntry.receivedPackets ?? 0;
-            if (inboundRtpEntry.stats.kind === 'video') {
-                this.totalReceivedVideoBytes += inboundRtpEntry.stats.bytesReceived ?? 0;
-            } else if (inboundRtpEntry.stats.kind === 'audio') {
-                this.totalReceivedAudioBytes += inboundRtpEntry.stats.bytesReceived ?? 0;
-            }
         }
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
@@ -531,6 +537,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
         this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
         this.totalOutboundPacketsReceived += this.deltaOutboundPacketsReceived;
+        this.totalReceivedAudioBytes += this.deltaReceivedAudioBytes;
+        this.totalReceivedVideoBytes += this.deltaReceivedVideoBytes;
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             const { roundTripTime } = remoteInboundRtpEntry.stats;
@@ -557,18 +565,17 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         for (const outboundRtpEntry of this._outboundRtps.values()) {
             if (outboundRtpEntry.stats.kind === 'audio') {
                 this.sendingAudioBitrate += outboundRtpEntry.sendingBitrate ?? 0;
+                this.deltaSentAudioBytes += outboundRtpEntry?.stats?.bytesSent ?? 0;
             } else if (outboundRtpEntry.stats.kind === 'video') {
                 this.sendingVideoBitrate += outboundRtpEntry.sendingBitrate ?? 0;
+                this.deltaSentVideoBytes += outboundRtpEntry?.stats?.bytesSent ?? 0;
             }
             this.deltaOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
             outboundRtpEntry.updateStabilityScore(avgRttInS);
-            if (outboundRtpEntry.stats.kind === 'video') {
-                this.totalSentAudioBytes += outboundRtpEntry.stats.bytesSent ?? 0;
-            } else if (outboundRtpEntry.stats.kind === 'audio') {
-                this.totalSentVideoBytes += outboundRtpEntry.stats.bytesSent ?? 0;
-            }
         }
         this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
+        this.totalSentAudioBytes += this.deltaSentAudioBytes;
+        this.totalSentVideoBytes += this.deltaSentVideoBytes;
 
         for (const dataChannelEntry of this.dataChannels()) {
             this.deltaDataChannelBytesSent += dataChannelEntry.stats.bytesSent ?? 0;
