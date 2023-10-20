@@ -480,7 +480,7 @@ export class StatsStorage {
             this.deltaInboundPacketsLost += peerConnectionEntry.deltaInboundPacketsLost ?? 0;
             this.deltaInboundPacketsReceived += peerConnectionEntry.deltaInboundPacketsReceived ?? 0;
             this.deltaOutboundPacketsSent += peerConnectionEntry.deltaOutboundPacketsSent ?? 0;
-            this.deltaOutbounPacketsReceived += peerConnectionEntry.deltaOutbounPacketsReceived ?? 0;
+            this.deltaOutbounPacketsReceived += peerConnectionEntry.deltaOutboundPacketsReceived ?? 0;
             this.deltaOutboundPacketsLost += peerConnectionEntry.deltaOutboundPacketsLost ?? 0;
             this.totalSentAudioBytes += peerConnectionEntry.totalSentAudioBytes ?? 0;
             this.totalSentVideoBytes += peerConnectionEntry.totalSentVideoBytes ?? 0;

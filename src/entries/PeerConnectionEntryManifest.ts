@@ -40,7 +40,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public totalInboundPacketsLost = 0;
     public totalInboundPacketsReceived = 0;
     public totalOutboundPacketsLost = 0;
-    public totalOutbounPacketsReceived = 0;
+    public totalOutboundPacketsReceived = 0;
     public totalOutboundPacketsSent = 0;
     public totalSentAudioBytes = 0;
     public totalSentVideoBytes = 0;
@@ -50,7 +50,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public deltaInboundPacketsLost?: number;
     public deltaInboundPacketsReceived?: number;
     public deltaOutboundPacketsLost?: number;
-    public deltaOutbounPacketsReceived?: number;
+    public deltaOutboundPacketsReceived?: number;
     public deltaOutboundPacketsSent?: number;
     
     public avgRttInS?: number;
@@ -494,7 +494,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         this.deltaInboundPacketsLost = 0;
         this.deltaInboundPacketsReceived = 0;
         this.deltaOutboundPacketsLost = 0;
-        this.deltaOutbounPacketsReceived = 0;
+        this.deltaOutboundPacketsReceived = 0;
         this.deltaOutboundPacketsSent = 0;
         this.sendingAudioBitrate = 0;
         this.sendingVideoBitrate = 0;
@@ -518,12 +518,12 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             this.deltaOutboundPacketsLost += remoteInboundRtpEntry.stats.packetsLost ?? 0;
-            this.deltaOutbounPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
+            this.deltaOutboundPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
         }
         this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
         this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
         this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
-        this.totalOutbounPacketsReceived += this.deltaOutbounPacketsReceived;
+        this.totalOutboundPacketsReceived += this.deltaOutboundPacketsReceived;
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             const { roundTripTime } = remoteInboundRtpEntry.stats;
