@@ -333,12 +333,17 @@ export interface PeerConnectionEntry {
     readonly totalSentVideoBytes: number;
     readonly totalReceivedAudioBytes: number;
     readonly totalReceivedVideoBytes: number;
+    readonly totalDataChannelBytesSent: number;
+    readonly totalDataChannelBytesReceived: number;
 
     readonly deltaInboundPacketsLost?: number;
     readonly deltaInboundPacketsReceived?: number;
     readonly deltaOutboundPacketsLost?: number;
     readonly deltaOutboundPacketsReceived?: number;
     readonly deltaOutboundPacketsSent?: number;
+    readonly deltaDataChannelBytesSent?: number;
+    readonly deltaDataChannelBytesReceived?: number;
+
     readonly avgRttInS?: number;
     readonly sendingAudioBitrate?: number;
     readonly sendingVideoBitrate?: number;

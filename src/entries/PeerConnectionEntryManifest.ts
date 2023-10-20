@@ -42,6 +42,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public totalOutboundPacketsLost = 0;
     public totalOutboundPacketsReceived = 0;
     public totalOutboundPacketsSent = 0;
+    public totalDataChannelBytesSent = 0;
+    public totalDataChannelBytesReceived = 0;
     public totalSentAudioBytes = 0;
     public totalSentVideoBytes = 0;
     public totalReceivedAudioBytes = 0;
@@ -52,6 +54,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public deltaOutboundPacketsLost?: number;
     public deltaOutboundPacketsReceived?: number;
     public deltaOutboundPacketsSent?: number;
+    public deltaDataChannelBytesSent?: number;
+    public deltaDataChannelBytesReceived?: number;
     
     public avgRttInS?: number;
     public sendingAudioBitrate?: number;
@@ -500,6 +504,9 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         this.sendingVideoBitrate = 0;
         this.receivingAudioBitrate = 0;
         this.receivingVideoBitrate = 0;
+        this.deltaDataChannelBytesSent = 0;
+        this.deltaDataChannelBytesReceived = 0;
+
         const roundTripTimesInS = [];
         for (const inboundRtpEntry of this.inboundRtps()) {
             if (inboundRtpEntry.stats.kind === 'audio') {
@@ -563,6 +570,12 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         }
         this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
 
+        for (const dataChannelEntry of this.dataChannels()) {
+            this.deltaDataChannelBytesSent += dataChannelEntry.stats.bytesSent ?? 0;
+            this.deltaDataChannelBytesReceived += dataChannelEntry.stats.bytesReceived ?? 0;
+        }
+        this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
+        this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
         this.avgRttInS = avgRttInS;
     }
 
