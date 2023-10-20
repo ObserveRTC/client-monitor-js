@@ -536,6 +536,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             this.totalOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
             outboundRtpEntry.updateStabilityScore(avgRttInS);
         }
+
+        this.avgRttInS = avgRttInS;
     }
 
     private _createCodecEntry(stats: W3C.CodecStats): CodecEntry {

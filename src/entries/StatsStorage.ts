@@ -51,6 +51,7 @@ export class StatsStorage {
     public totalOutboundPacketsLost?: number;
     public totalAvailableIncomingBitrate?: number;
     public totalAvailableOutgoingBitrate?: number;
+    public avgRttInS?: number;
 
     public highestSeenSendingBitrate?: number;
 	public highestSeenReceivingBitrate?: number;
@@ -487,6 +488,19 @@ export class StatsStorage {
             this.highestSeenAvailableIncomingBitrate ?? 0, 
             this.totalAvailableIncomingBitrate
         );
+
+        let avgRttInS = undefined;
+        for (const peerConnection of this._peerConnections.values()) {
+            if (peerConnection.avgRttInS === undefined) {
+                continue;
+            }
+            if (avgRttInS === undefined) {
+                avgRttInS = peerConnection.avgRttInS;
+            } else {
+                avgRttInS = (avgRttInS + peerConnection.avgRttInS) / 2;
+            }
+        }
+        this.avgRttInS = avgRttInS;
     }
 
     private _updateTracks() {
