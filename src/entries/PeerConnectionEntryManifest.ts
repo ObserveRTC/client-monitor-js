@@ -37,11 +37,18 @@ interface InnerOutboundRtpEntry extends OutboundRtpEntry {
 
 export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     
-    public totalInboundPacketsLost?: number;
-    public totalInboundPacketsReceived?: number;
-    public totalOutboundPacketsLost?: number;
-    public totalOutbounPacketsReceived?: number;
-    public totalOutboundPacketsSent?: number;
+    public totalInboundPacketsLost = 0;
+    public totalInboundPacketsReceived = 0;
+    public totalOutboundPacketsLost = 0;
+    public totalOutbounPacketsReceived = 0;
+    public totalOutboundPacketsSent = 0;
+
+    public deltaInboundPacketsLost?: number;
+    public deltaInboundPacketsReceived?: number;
+    public deltaOutboundPacketsLost?: number;
+    public deltaOutbounPacketsReceived?: number;
+    public deltaOutboundPacketsSent?: number;
+    
     public avgRttInS?: number;
     public sendingAudioBitrate?: number;
     public sendingVideoBitrate?: number;
@@ -480,11 +487,11 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     }
 
     private _updateMetrics() {
-        this.totalInboundPacketsLost = 0;
-        this.totalInboundPacketsReceived = 0;
-        this.totalOutboundPacketsLost = 0;
-        this.totalOutbounPacketsReceived = 0;
-        this.totalOutboundPacketsSent = 0;
+        this.deltaInboundPacketsLost = 0;
+        this.deltaInboundPacketsReceived = 0;
+        this.deltaOutboundPacketsLost = 0;
+        this.deltaOutbounPacketsReceived = 0;
+        this.deltaOutboundPacketsSent = 0;
         this.sendingAudioBitrate = 0;
         this.sendingVideoBitrate = 0;
         this.receivingAudioBitrate = 0;
@@ -496,14 +503,18 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             } else if (inboundRtpEntry.stats.kind === 'video') {
                 this.receivingVideoBitrate += inboundRtpEntry.receivingBitrate ?? 0;
             }
-            this.totalInboundPacketsLost += inboundRtpEntry.lostPackets ?? 0;
-            this.totalInboundPacketsReceived += inboundRtpEntry.receivedPackets ?? 0;
+            this.deltaInboundPacketsLost += inboundRtpEntry.lostPackets ?? 0;
+            this.deltaInboundPacketsReceived += inboundRtpEntry.receivedPackets ?? 0;
         }
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
-            this.totalOutboundPacketsLost += remoteInboundRtpEntry.stats.packetsLost ?? 0;
-            this.totalOutbounPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
+            this.deltaOutboundPacketsLost += remoteInboundRtpEntry.stats.packetsLost ?? 0;
+            this.deltaOutbounPacketsReceived += remoteInboundRtpEntry.stats.packetsReceived ?? 0;
         }
+        this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
+        this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
+        this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
+        this.totalOutbounPacketsReceived += this.deltaOutbounPacketsReceived;
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             const { roundTripTime } = remoteInboundRtpEntry.stats;
@@ -533,9 +544,10 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             } else if (outboundRtpEntry.stats.kind === 'video') {
                 this.sendingVideoBitrate += outboundRtpEntry.sendingBitrate ?? 0;
             }
-            this.totalOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
+            this.deltaOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
             outboundRtpEntry.updateStabilityScore(avgRttInS);
         }
+        this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
 
         this.avgRttInS = avgRttInS;
     }

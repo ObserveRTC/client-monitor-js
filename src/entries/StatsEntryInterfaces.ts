@@ -329,6 +329,11 @@ export interface PeerConnectionEntry {
     readonly totalOutboundPacketsLost?: number;
     readonly totalOutbounPacketsReceived?: number;
     readonly totalOutboundPacketsSent?: number;
+    readonly deltaInboundPacketsLost?: number;
+    readonly deltaInboundPacketsReceived?: number;
+    readonly deltaOutboundPacketsLost?: number;
+    readonly deltaOutbounPacketsReceived?: number;
+    readonly deltaOutboundPacketsSent?: number;
     readonly avgRttInS?: number;
     readonly sendingAudioBitrate?: number;
     readonly sendingVideoBitrate?: number;

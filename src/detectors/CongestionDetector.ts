@@ -68,11 +68,11 @@ export function createCongestionDetector(config: CongestionDetectorConfig & {
 	const peerConnectionStates = new Map<string, PeerConnectionState>();
 	const isCongested = (now: number, state: PeerConnectionState, peerConnection: PeerConnectionEntry): boolean => {
 		const {
-			totalInboundPacketsLost = 0,
-			totalInboundPacketsReceived = 0,
+			deltaInboundPacketsLost: totalInboundPacketsLost = 0,
+			deltaInboundPacketsReceived: totalInboundPacketsReceived = 0,
 			avgRttInS = -1,
-			totalOutboundPacketsSent = 0,
-			totalOutboundPacketsLost = 0,
+			deltaOutboundPacketsSent: totalOutboundPacketsSent = 0,
+			deltaOutboundPacketsLost: totalOutboundPacketsLost = 0,
 		} = peerConnection;
 		
 		if (state.congested !== undefined && (now - state.congested) < config.minDurationThresholdInMs) {
