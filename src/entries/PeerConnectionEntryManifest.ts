@@ -329,8 +329,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             this._emitter.emit('outbound-rtp-added', entry);
         }
         const elapsedTimeInSec = (stats.timestamp - entry.stats.timestamp) / 1000.0;
+        entry.sentBytes = Math.max(0, ((stats.bytesSent ?? 0) - (entry.stats.bytesSent ?? 0)));
         entry.sendingBitrate = (((stats.bytesSent ?? 0) - (entry.stats.bytesSent ?? 0)) * 8) / elapsedTimeInSec;
-        entry.sentBytes = ((stats.bytesSent ?? 0) - (entry.stats.bytesSent ?? 0));
         entry.sentPackets = (stats.packetsSent ?? 0) - (entry.stats.packetsSent ?? 0);
         entry.stats = stats;
         entry.visited = true;
@@ -343,7 +343,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             this._remoteInboundRtps.set(stats.id, entry);
             this._emitter.emit('remote-inbound-rtp-added', entry);
         }
-        entry.receivedPackets = (stats.packetsReceived ?? 0) - (entry.stats.packetsReceived ?? 0);
+        entry.receivedPackets = Math.max(0, (stats.packetsReceived ?? 0) - (entry.stats.packetsReceived ?? 0));
         entry.lostPackets = (stats.packetsLost ?? 0) - (entry.stats.packetsLost ?? 0);
         entry.stats = stats;
         entry.visited = true;
@@ -544,21 +544,21 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
 
         for (const remoteInboundRtpEntry of this.remoteInboundRtps()) {
             const { roundTripTime } = remoteInboundRtpEntry.stats;
-            if (roundTripTime) {
+            if (roundTripTime && 0 < roundTripTime) {
                 roundTripTimesInS.push(roundTripTime)
             }
         }
 
         for (const remoteOutboundRtp of this.remoteOutboundRtps()) {
             const { roundTripTime } = remoteOutboundRtp.stats;
-            if (roundTripTime) {
+            if (roundTripTime && 0 < roundTripTime) {
                 roundTripTimesInS.push(roundTripTime)
             }
         }
 
         for (const iceCandidatePair of this.iceCandidatePairs()) {
             const { currentRoundTripTime } = iceCandidatePair.stats;
-            if (currentRoundTripTime) {
+            if (currentRoundTripTime && 0 < currentRoundTripTime) {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
