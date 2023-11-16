@@ -68,6 +68,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     score?: number,
     avgJitterBufferDelayInMs?: number,
     receivingBitrate?: number,
+    receivedBytes?: number,
     lostPackets?: number,
     receivedPackets?: number,
     receivedFrames?: number,
@@ -107,6 +108,7 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     // calculated fields
     score?: number;
     sendingBitrate?: number,
+    sentBytes?: number,
     sentPackets?: number,
     /**
      * Gets the SSRC of the Rtp session
@@ -324,11 +326,30 @@ export interface PeerConnectionEntry {
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
 
-    readonly totalInboundPacketsLost?: number;
-    readonly totalInboundPacketsReceived?: number;
-    readonly totalOutboundPacketsLost?: number;
-    readonly totalOutbounPacketsReceived?: number;
-    readonly totalOutboundPacketsSent?: number;
+    readonly totalInboundPacketsLost: number;
+    readonly totalInboundPacketsReceived: number;
+    readonly totalOutboundPacketsLost: number;
+    readonly totalOutboundPacketsReceived: number;
+    readonly totalOutboundPacketsSent: number;
+    readonly totalSentAudioBytes: number;
+    readonly totalSentVideoBytes: number;
+    readonly totalReceivedAudioBytes: number;
+    readonly totalReceivedVideoBytes: number;
+    readonly totalDataChannelBytesSent: number;
+    readonly totalDataChannelBytesReceived: number;
+
+    readonly deltaInboundPacketsLost?: number;
+    readonly deltaInboundPacketsReceived?: number;
+    readonly deltaOutboundPacketsLost?: number;
+    readonly deltaOutboundPacketsReceived?: number;
+    readonly deltaOutboundPacketsSent?: number;
+    readonly deltaSentAudioBytes?: number;
+    readonly deltaSentVideoBytes?: number;
+    readonly deltaReceivedAudioBytes?: number;
+    readonly deltaReceivedVideoBytes?: number;
+    readonly deltaDataChannelBytesSent?: number;
+    readonly deltaDataChannelBytesReceived?: number;
+
     readonly avgRttInS?: number;
     readonly sendingAudioBitrate?: number;
     readonly sendingVideoBitrate?: number;

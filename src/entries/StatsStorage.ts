@@ -44,11 +44,30 @@ export class StatsStorage {
     public sendingVideoBitrate?: number;
     public receivingAudioBitrate?: number;
     public receivingVideoBitrate?: number;
-    public totalInboundPacketsLost?: number;
-    public totalInboundPacketsReceived?: number;
-    public totalOutboundPacketsSent?: number;
-    public totalOutbounPacketsReceived?: number;
-    public totalOutboundPacketsLost?: number;
+
+    public totalInboundPacketsLost = 0;
+    public totalInboundPacketsReceived = 0;
+    public totalOutboundPacketsSent = 0;
+    public totalOutbounPacketsReceived = 0;
+    public totalOutboundPacketsLost = 0;
+    public totalDataChannelBytesSent = 0;
+    public totalDataChannelBytesReceived = 0;
+    public totalSentAudioBytes = 0;
+    public totalSentVideoBytes = 0;
+    public totalReceivedAudioBytes = 0;
+    public totalReceivedVideoBytes = 0;
+
+    public deltaInboundPacketsLost?: number;
+    public deltaInboundPacketsReceived?: number;
+    public deltaOutboundPacketsSent?: number;
+    public deltaOutbounPacketsReceived?: number;
+    public deltaOutboundPacketsLost?: number;
+    public deltaDataChannelBytesSent?: number;
+    public deltaDataChannelBytesReceived?: number;
+    public deltaSentAudioBytes?: number;
+    public deltaSentVideoBytes?: number;
+    public deltaReceivedAudioBytes?: number;
+    public deltaReceivedVideoBytes?: number;
     public totalAvailableIncomingBitrate?: number;
     public totalAvailableOutgoingBitrate?: number;
     public avgRttInS?: number;
@@ -447,11 +466,18 @@ export class StatsStorage {
         this.sendingVideoBitrate = 0;
         this.receivingAudioBitrate = 0;
         this.receivingVideoBitrate = 0;
-        this.totalInboundPacketsLost = 0;
-        this.totalInboundPacketsReceived = 0;
-        this.totalOutboundPacketsSent = 0;
-        this.totalOutbounPacketsReceived = 0;
-        this.totalOutboundPacketsLost = 0;
+
+        this.deltaInboundPacketsLost = 0;
+        this.deltaInboundPacketsReceived = 0;
+        this.deltaOutboundPacketsSent = 0;
+        this.deltaOutbounPacketsReceived = 0;
+        this.deltaOutboundPacketsLost = 0;
+        this.deltaDataChannelBytesSent = 0;
+        this.deltaDataChannelBytesReceived = 0;
+        this.deltaSentAudioBytes = 0;
+        this.deltaSentVideoBytes = 0;
+        this.deltaReceivedAudioBytes = 0;
+        this.deltaReceivedVideoBytes = 0;
         this.totalAvailableIncomingBitrate = 0;
         this.totalAvailableOutgoingBitrate = 0;
         for (const peerConnectionEntry of this._peerConnections.values()) {
@@ -465,12 +491,30 @@ export class StatsStorage {
             this.sendingVideoBitrate += peerConnectionEntry.sendingVideoBitrate ?? 0;
             this.receivingAudioBitrate += peerConnectionEntry.receivingAudioBitrate ?? 0;
             this.receivingVideoBitrate += peerConnectionEntry.receivingVideoBitrate ?? 0;
-            this.totalInboundPacketsLost += peerConnectionEntry.totalInboundPacketsLost ?? 0;
-            this.totalInboundPacketsReceived += peerConnectionEntry.totalInboundPacketsReceived ?? 0;
-            this.totalOutboundPacketsSent += peerConnectionEntry.totalOutboundPacketsSent ?? 0;
-            this.totalOutbounPacketsReceived += peerConnectionEntry.totalOutbounPacketsReceived ?? 0;
-            this.totalOutboundPacketsLost += peerConnectionEntry.totalOutboundPacketsLost ?? 0;
+            this.deltaDataChannelBytesSent += peerConnectionEntry.deltaDataChannelBytesSent ?? 0;
+            this.deltaDataChannelBytesReceived += peerConnectionEntry.deltaDataChannelBytesReceived ?? 0;
+            this.deltaInboundPacketsLost += peerConnectionEntry.deltaInboundPacketsLost ?? 0;
+            this.deltaInboundPacketsReceived += peerConnectionEntry.deltaInboundPacketsReceived ?? 0;
+            this.deltaOutboundPacketsSent += peerConnectionEntry.deltaOutboundPacketsSent ?? 0;
+            this.deltaOutbounPacketsReceived += peerConnectionEntry.deltaOutboundPacketsReceived ?? 0;
+            this.deltaOutboundPacketsLost += peerConnectionEntry.deltaOutboundPacketsLost ?? 0;
+
+            this.deltaSentAudioBytes += peerConnectionEntry.deltaSentAudioBytes ?? 0;
+            this.deltaSentVideoBytes += peerConnectionEntry.deltaSentVideoBytes ?? 0;
+            this.deltaReceivedAudioBytes += peerConnectionEntry.deltaReceivedAudioBytes ?? 0;
+            this.deltaReceivedVideoBytes += peerConnectionEntry.deltaReceivedVideoBytes ?? 0;
         }
+        this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
+        this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
+        this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
+        this.totalOutbounPacketsReceived += this.deltaOutbounPacketsReceived;
+        this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
+        this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
+        this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
+        this.totalSentAudioBytes += this.deltaSentAudioBytes;
+        this.totalSentVideoBytes += this.deltaSentVideoBytes;
+        this.totalReceivedAudioBytes += this.deltaReceivedAudioBytes;
+        this.totalReceivedVideoBytes += this.deltaReceivedVideoBytes;
 
         this.highestSeenSendingBitrate = Math.max(
             this.highestSeenSendingBitrate ?? 0, 
