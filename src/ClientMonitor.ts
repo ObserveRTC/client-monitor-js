@@ -73,7 +73,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     private readonly _sampler = new Sampler(this.storage);
     private readonly _timer = createTimer();
     
-    private _lastCollectedAt = 0;
+    private _lastCollectedAt = Date.now();
     private _lastSampledAt = 0;
     private _closed = false;
 
