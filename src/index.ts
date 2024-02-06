@@ -79,17 +79,18 @@ export function createClientMonitor(config?: ClientMonitorConfig & {
      */
     logLevel?: LogLevel,
 }): ClientMonitor {
-    if (config && 0 < ((config?.collectingPeriodInMs ?? 0) + (config?.samplingPeriodInMs ?? 0))) {
-        if (!config.tickingTimeInMs) {
-            config.tickingTimeInMs = 1000;
-        }
-    }
     if (!loggerSet && config?.logLevel) {
         addLoggerProcess(createConsoleLogger(config.logLevel));
         loggerSet = true;
     }
+    
+    if (config && !config.samplingTick) config.samplingTick = 1;
+
     return new ClientMonitor({
-        ...(config ?? {}),
+        ...(config ?? {
+            collectingPeriodInMs: 5000,
+            samplingTick: 1,
+        }),
     });
 }
 

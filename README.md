@@ -1,23 +1,22 @@
-Javascript library to monitor WebRTC applications
----
+## Javascript library to monitor WebRTC applications
 
 @observertc/client-monitor-js is a client side library to monitor [WebRTCStats](https://www.w3.org/TR/webrtc-stats/) and to integrate your app to observertc components.
 
 Table of Contents:
 
- * [Quick Start](#quick-start)
- * [Integrations](#integrations)
-    - [Mediasoup](#mediasoup)
- * [Detectors and Alerts](#detectors-and-alerts)
-    - [Audio Desync Detector](#audio-desync-detector)
-    - [CPU Performance Detector](#cpu-performance-detector)
- * [Calculated updates](#calculated-updates)
- * [Configurations](#configurations)
- * [NPM package](#npm-package)
- * [API docs](#api-docs)
- * [Schemas](#schemas)
- * [Getting Involved](#getting-involved)
- * [License](#license)
+-   [Quick Start](#quick-start)
+-   [Integrations](#integrations)
+    -   [Mediasoup](#mediasoup)
+-   [Detectors and Alerts](#detectors-and-alerts)
+    -   [Audio Desync Detector](#audio-desync-detector)
+    -   [CPU Performance Detector](#cpu-performance-detector)
+-   [Calculated updates](#calculated-updates)
+-   [Configurations](#configurations)
+-   [NPM package](#npm-package)
+-   [API docs](#api-docs)
+-   [Schemas](#schemas)
+-   [Getting Involved](#getting-involved)
+-   [License](#license)
 
 ## Qucik Start
 
@@ -38,7 +37,7 @@ const config = {
 const monitor = createClientMonitor(config);
 const statsCollector = monitor.collectors.collectFromRTCPeerConnection(peerConnection);
 
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     const storage = monitor.storage;
     for (const inboundRtp of storage.inboundRtps()) {
         const trackId = inboundRtp.getTrackId();
@@ -51,11 +50,11 @@ statsCollector.close();
 ```
 
 The above example do as follows:
- 1. create a client monitor, which collect stats every 5s
- 2. setup a stats collector from a peer connection
- 3. register an event called after stats are collected
- 4. print out the inbound rtps and then close the stats collector we registered in step 3.
 
+1.  create a client monitor, which collect stats every 5s
+2.  setup a stats collector from a peer connection
+3.  register an event called after stats are collected
+4.  print out the inbound rtps and then close the stats collector we registered in step 3.
 
 ## Integrations
 
@@ -72,29 +71,28 @@ const config = {
 const monitor = createClientMonitor(config);
 const mediasoupStatsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
 
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     // do your stuff
 
-    // you can close detach mediasoup 
+    // you can close detach mediasoup
     // collector by calling the close
     mediasoupStatsCollector.close();
-})
+});
 ```
 
-**Important Note**: The created collector is hooked on the device 'newtransport' event, 
+**Important Note**: The created collector is hooked on the device 'newtransport' event,
 and can detect transports automatically when they are created after the device is added.
 If you create transports before you add the device to the monitor,  
-transports you created before will not be monitored automatically, you need to add them 
+transports you created before will not be monitored automatically, you need to add them
 to the statscollector, like this:
 
 ```javascript
-const myTransport = // your transport created before the device is added to the monitor
-mediasoupStatsCollector.addTransport(myTransport)
+const myTransport = mediasoupStatsCollector.addTransport(myTransport); // your transport created before the device is added to the monitor
 ```
 
 ## Calculated Updates
 
-The Calculated Updates lets you observer metrics derived from the polled webrtc stats  captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can give you.
+The Calculated Updates lets you observer metrics derived from the polled webrtc stats captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can give you.
 
 ### Storage Updates
 
@@ -119,7 +117,7 @@ monitor.on('stats-collected', () => {
 ### PeerConnection Updates
 
 ```javascript
-import { createClientMonitor } from 'client-monitor-js';
+import { createClientMonitor } from "client-monitor-js";
 
 // Create a ClientMonitor instance
 const monitor = createClientMonitor({
@@ -127,22 +125,21 @@ const monitor = createClientMonitor({
 });
 
 const storage = monitor.storage;
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const peerConnection of storage.peerConnections()) {
-        console.log('average RTT in seconds', peerConnection.avgRttInS);
-        console.log('Sending audio bitrate on PC', peerConnection.sendingAudioBitrate);
-        console.log('Sending video bitrate on PC', peerConnection.sendingVideoBitrate);
-        console.log('Receiving audio bitrate on PC', peerConnection.receivingAudioBitrate);
-        console.log('Receiving video bitrate on PC', peerConnection.receivingVideoBitrate);
+        console.log("average RTT in seconds", peerConnection.avgRttInS);
+        console.log("Sending audio bitrate on PC", peerConnection.sendingAudioBitrate);
+        console.log("Sending video bitrate on PC", peerConnection.sendingVideoBitrate);
+        console.log("Receiving audio bitrate on PC", peerConnection.receivingAudioBitrate);
+        console.log("Receiving video bitrate on PC", peerConnection.receivingVideoBitrate);
     }
 });
-
 ```
 
 ### Inbound RTP stats updates
 
 ```javascript
-import { createClientMonitor } from 'client-monitor-js';
+import { createClientMonitor } from "client-monitor-js";
 
 // Create a ClientMonitor instance
 const monitor = createClientMonitor({
@@ -150,24 +147,22 @@ const monitor = createClientMonitor({
 });
 
 const storage = monitor.storage;
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const inboundRtp of storage.inboundRtps()) {
+        console.log("mean opinion score for inbound-rtp", inboundRtp.score);
 
-        console.log('mean opinion score for inbound-rtp', inboundRtp.score);
-
-        console.log('receiving bitrate', inboundRtp.receivingBitrate);
-        console.log('lost packets since last stats-collected', inboundRtp.lostPackets);
-        console.log('received packets since last stats-collected', inboundRtp.receivedPackets);
-        console.log('decoded frames since last stats-collected', inboundRtp.decodedFrames);
+        console.log("receiving bitrate", inboundRtp.receivingBitrate);
+        console.log("lost packets since last stats-collected", inboundRtp.lostPackets);
+        console.log("received packets since last stats-collected", inboundRtp.receivedPackets);
+        console.log("decoded frames since last stats-collected", inboundRtp.decodedFrames);
     }
 });
-
 ```
 
 ### Outbound RTP stats updates
 
 ```javascript
-import { createClientMonitor } from 'client-monitor-js';
+import { createClientMonitor } from "client-monitor-js";
 
 // Create a ClientMonitor instance
 const monitor = createClientMonitor({
@@ -175,19 +170,20 @@ const monitor = createClientMonitor({
 });
 
 const storage = monitor.storage;
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const outboundRtp of storage.outboundRtps()) {
+        console.log("stability score outbound-rtp", outboundRtp.score);
 
-        console.log('stability score outbound-rtp', outboundRtp.score);
+        console.log("sending bitrate", outboundRtp.sendingBitrate);
+        console.log("sent packets since last stats-collected", outboundRtp.sentPackets);
 
-        console.log('sending bitrate', outboundRtp.sendingBitrate);
-        console.log('sent packets since last stats-collected', outboundRtp.sentPackets);
-        
         const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
-        console.log('Received packets on remote inbound-rtp belongs to this outbound-rtp', remoteInboundRtp?.receivedPackets);
+        console.log(
+            "Received packets on remote inbound-rtp belongs to this outbound-rtp",
+            remoteInboundRtp?.receivedPackets
+        );
     }
 });
-
 ```
 
 ## Detectors and Alerts
@@ -195,8 +191,9 @@ monitor.on('stats-collected', () => {
 Detectors and alerts provide events of tracking and responding to anomalies or performance issues based on the polled stats. Detectors are components that continuously monitor for specific conditions in the polled stats, and set an alert if certain thresholds are hit. You can subscribe to alerts of an instantiated client-monitor-js and configure detectors via initial configurations.
 
 List of built-in alerts:
- * `audio-desync-alert`: triggered when for an audio track several acceleration and deceleration is detected in a short amount of time indicating that the controlling system tries compensate discrepancies. 
- * `cpu-performance-alert`: triggered whenever a browser detects quality limitation becasue of CPU, or the number of decoded frames per sec hit a certain threshold
+
+-   `audio-desync-alert`: triggered when for an audio track several acceleration and deceleration is detected in a short amount of time indicating that the controlling system tries compensate discrepancies.
+-   `cpu-performance-alert`: triggered whenever a browser detects quality limitation becasue of CPU, or the number of decoded frames per sec hit a certain threshold
 
 ### Audio Desync Detector
 
@@ -275,24 +272,19 @@ const config = {
     /**
      * By setting it, the monitor calls the added statsCollectors periodically
      * and pulls the stats.
-     * 
-     * DEFAULT: undefined
+     *
+     * DEFAULT: 5000
      */
     collectingPeriodInMs: 5000,
-    /**
-     * By setting it, the monitor make samples periodically.
-     * 
-     * DEFAULT: undefined
-     */
-    samplingPeriodInMs: 10000,
 
     /**
-     * This is the interval the monitor periodically checks
-     * if collecting or sampling action should be invoked or not.
-     * 
-     * DEFAULT: if collecting or sampling period is set the default value is 1000, otherwise it's undefined
+     * By setting this, the observer makes samples after n number or collected stats.
+     *
+     * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
+     *
+     * DEFAULT: 1
      */
-    tickingTimeInMs: 10000,
+    samplingTick: 1,
 };
 ```
 
@@ -308,11 +300,10 @@ https://observertc.org/docs/api/client-monitor-js-v2/
 
 https://github.com/observertc/schemas
 
-
 ## Getting Involved
 
-Client-monitor is made with the intention to provide an open-source monitoring solution for 
-WebRTC developers. If you are interested in getting involved 
+Client-monitor is made with the intention to provide an open-source monitoring solution for
+WebRTC developers. If you are interested in getting involved
 please read our [contribution](CONTRIBUTING.md) guideline.
 
 ## License
