@@ -123,7 +123,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     
     public async collect(): Promise<CollectedStats> {
         const collectedStats = await this.collectors.collect();
-        await this.storage.update(collectedStats);
+        this.storage.update(collectedStats);
         const timestamp = Date.now();
         this.emit('stats-collected', {
             collectedStats,

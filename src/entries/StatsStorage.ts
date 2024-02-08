@@ -87,7 +87,7 @@ export class StatsStorage {
         return this._emitter;
     }
 
-    public async update(peerConnectionStats: { peerConnectionId: string, statsMap: StatsMap }[]): Promise<void> {
+    public update(peerConnectionStats: { peerConnectionId: string, statsMap: StatsMap }[]): void {
         for (const { peerConnectionId, statsMap } of peerConnectionStats) {
             const pcEntry = this._peerConnections.get(peerConnectionId);
             if (!pcEntry) {
@@ -96,11 +96,8 @@ export class StatsStorage {
             }
             pcEntry.update(statsMap);
         }
-        await new Promise<void>((resolve, reject) => {
-            this.processor.process(this, (err) => {
-                if (err) reject(err);
-                else resolve();
-            });
+        this.processor.process(this, (err) => {
+            logger.warn(`update(): Failed to process stats`, err);
         });
         this._updateTracks();
         this._updateMetrics();
@@ -171,75 +168,35 @@ export class StatsStorage {
      * The corresponded stats (receiver stats) are deprecated and will be removed from browser
      */
     public receivers(): IterableIterator<ReceiverEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.receivers()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.receivers()]).values();
     }
 
     /**
      * Gives an iterator to read the collected media source stats and navigate to its relations.
      */
     public mediaSources(): IterableIterator<MediaSourceEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.mediaSources()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.mediaSources()]).values();
     }
 
     /**
      * Gives an iterator to read the collected outbound-rtp stats and navigate to its relations.
      */
     public outboundRtps(): IterableIterator<OutboundRtpEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.outboundRtps()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.outboundRtps()]).values();
     }
 
     /**
      * Gives an iterator to read the collected remote-inbound-rtp stats and navigate to its relations.
      */
     public remoteInboundRtps(): IterableIterator<RemoteInboundRtpEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.remoteInboundRtps()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.remoteInboundRtps()]).values();
     }
 
     /**
      * Gives an iterator to read the collected remote-outbound-rtp stats and navigate to its relations.
      */
     public remoteOutboundRtps(): IterableIterator<RemoteOutboundRtpEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.remoteOutboundRtps()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.remoteOutboundRtps()]).values();
     }
 
     /**
@@ -248,60 +205,28 @@ export class StatsStorage {
      * The corresponded stats (csrc stats) are deprecated and will be removed from browser
      */
     public contributingSources(): IterableIterator<ContributingSourceEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.contributingSources()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.contributingSources()]).values();
     }
 
     /**
      * Gives an iterator to read the collected data channel stats and navigate to its relations.
      */
     public dataChannels(): IterableIterator<DataChannelEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.dataChannels()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.dataChannels()]).values();
     }
 
     /**
      * Gives an iterator to read the collected Audio Playout stats and navigate to its relations.
      */
     public audioPlayouts(): IterableIterator<AudioPlayoutEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.audioPlayouts()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.audioPlayouts()]).values();
     }
 
     /**
      * Gives an iterator to read the collected transceiver stats and navigate to its relations.
      */
     public transceivers(): IterableIterator<TransceiverEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.transceivers()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.transceivers()]).values();
     }
 
     /**
@@ -310,30 +235,14 @@ export class StatsStorage {
      * The corresponded stats (sender stats) are deprecated and will be removed from browser
      */
     public senders(): IterableIterator<SenderEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.senders()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.senders()]).values();
     }
 
     /**
      * Gives an iterator to read the collected transport stats and navigate to its relations.
      */
     public transports(): IterableIterator<TransportEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.transports()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.transports()]).values();
     }
 
     /**
@@ -342,60 +251,28 @@ export class StatsStorage {
      * The corresponded stats (sctp-transport stats) are deprecated and will be removed from browser
      */
     public sctpTransports(): IterableIterator<SctpTransportEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.sctpTransports()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.sctpTransports()]).values();
     }
 
     /**
      * Gives an iterator to read the collected ICE candidate pair stats and navigate to its relations.
      */
     public iceCandidatePairs(): IterableIterator<IceCandidatePairEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.iceCandidatePairs()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.iceCandidatePairs()]).values();
     }
 
     /**
      * Gives an iterator to read the collected local ICE candidate stats and navigate to its relations.
      */
     public localCandidates(): IterableIterator<LocalCandidateEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.localCandidates()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.localCandidates()]).values();
     }
 
     /**
      * Gives an iterator to read the collected remote ICE candidate stats and navigate to its relations.
      */
     public remoteCandidates(): IterableIterator<RemoteCandidateEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.remoteCandidates()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.remoteCandidates()]).values();
     }
 
     /**
@@ -403,15 +280,7 @@ export class StatsStorage {
      *
      */
     public certificates(): IterableIterator<CertificateEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.certificates()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.certificates()]).values();
     }
 
     /**
@@ -420,45 +289,21 @@ export class StatsStorage {
      * The corresponded stats (ice-server stats) are deprecated and will be removed from browser
      */
     public iceServers(): IterableIterator<IceServerEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.iceServers()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.iceServers()]).values();
     }
 
     /**
      * Gives an iterator to read the collected codecs and navigate to its relations.
      */
     public codecs(): IterableIterator<CodecEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.codecs()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.codecs()]).values();
     }
 
     /**
      * Gives an iterator to read the collected inbound-rtp stats and navigate to its relations.
      */
     public inboundRtps(): IterableIterator<InboundRtpEntry> {
-        const peerConnections = this._peerConnections;
-        function *iterator() {
-            for (const pcEntry of peerConnections.values()) {
-                for (const entry of pcEntry.inboundRtps()) {
-                    yield entry;
-                }
-            }
-        }
-        return iterator();
+        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.inboundRtps()]).values();
     }
 
     private _updateMetrics() {
