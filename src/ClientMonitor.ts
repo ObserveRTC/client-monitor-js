@@ -249,6 +249,86 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return this.storage.getPeerConnection(peerConnectionId);
     }
 
+    public get codecs() {
+        return [...this.storage.codecs()];
+    }
+
+    public get inboundRtps() {
+        return [...this.storage.inboundRtps()];
+    }
+
+    public get outboundRtps() {
+        return [...this.storage.outboundRtps()];
+    }
+
+    public get remoteInboundRtps() {
+        return [...this.storage.remoteInboundRtps()];
+    }
+
+    public get remoteOutboundRtps() {
+        return [...this.storage.remoteOutboundRtps()];
+    }
+
+    public get mediaSources() {
+        return [...this.storage.mediaSources()];
+    }
+
+    public get contributingSources() {
+        return [...this.storage.contributingSources()];
+    }
+
+    public get dataChannels() {
+        return [...this.storage.dataChannels()];
+    }
+
+    public get transceivers() {
+        return [...this.storage.transceivers()];
+    }
+
+    public get senders() {
+        return [...this.storage.senders()];
+    }
+
+    public get receivers() {
+        return [...this.storage.receivers()];
+    }
+
+    public get transports() {
+        return [...this.storage.transports()];
+    }
+
+    public get sctpTransports() {
+        return [...this.storage.sctpTransports()];
+    }
+
+    public get iceCandidatePairs() {
+        return [...this.storage.iceCandidatePairs()];
+    }
+
+    public get iceLocalCandidates() {
+        return [...this.storage.localCandidates()];
+    }
+
+    public get iceRemoteCandidates() {
+        return [...this.storage.remoteCandidates()];
+    }
+
+    public get certificates() {
+        return [...this.storage.certificates()];
+    }
+
+    public get iceServers() {
+        return [...this.storage.iceServers()];
+    }
+
+    public get peerConnections() {
+        return [...this.storage.peerConnections()];
+    }
+
+    public get tracks() {
+        return [...this.storage.tracks()];
+    }
+
     private _setupTimer(): void {
         this._timer && clearInterval(this._timer);
         this._timer = undefined;

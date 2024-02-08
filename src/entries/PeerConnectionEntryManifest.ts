@@ -293,7 +293,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         entry.droppedFrames = (stats.framesDropped ?? 0) - (entry.stats.framesDropped ?? 0);
         entry.receivedSamples = (stats.totalSamplesReceived ?? 0) - (entry.stats.totalSamplesReceived ?? 0);
         entry.silentConcealedSamples = (stats.silentConcealedSamples ?? 0) - (entry.stats.silentConcealedSamples ?? 0);
-        entry.fractionLoss =  entry.lostPackets / (entry.lostPackets +  entry.receivedPackets);
+        entry.fractionLoss = entry.lostPackets === 0 && entry.receivedPackets === 0 ? 0 : entry.lostPackets / (entry.lostPackets +  entry.receivedPackets);
         
         entry.stats = stats;
         entry.visited = true;
