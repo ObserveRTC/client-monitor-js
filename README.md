@@ -7,11 +7,13 @@ Table of Contents:
 -   [Quick Start](#quick-start)
 -   [Integrations](#integrations)
     -   [Mediasoup](#mediasoup)
+-   [Calculated updates](#calculated-updates)
 -   [Detectors and Alerts](#detectors-and-alerts)
     -   [Audio Desync Detector](#audio-desync-detector)
     -   [CPU Performance Detector](#cpu-performance-detector)
--   [Calculated updates](#calculated-updates)
 -   [Configurations](#configurations)
+-   [Events](#events)
+-   [Sampling](#sampling)
 -   [NPM package](#npm-package)
 -   [API docs](#api-docs)
 -   [Schemas](#schemas)
@@ -24,6 +26,10 @@ Install it from [npm](https://www.npmjs.com/package/@observertc/client-monitor-j
 
 ```
 npm i @observertc/client-monitor-js
+```
+or
+```
+yarn add @observertc/client-monitor-js
 ```
 
 Add `@observertc/client-monitor-js` to your WebRTC app.
@@ -79,11 +85,7 @@ monitor.on("stats-collected", () => {
 });
 ```
 
-**Important Note**: The created collector is hooked on the device 'newtransport' event,
-and can detect transports automatically when they are created after the device is added.
-If you create transports before you add the device to the monitor,  
-transports you created before will not be monitored automatically, you need to add them
-to the statscollector, like this:
+**Important Note**: The created collector is hooked to the device's 'newtransport' event and can automatically detect transports created **after** the device has been added. If you create transports before adding the device to the monitor, those previously created transports will not be monitored automatically. You will need to manually add them to the stats collector like this:
 
 ```javascript
 const myTransport = mediasoupStatsCollector.addTransport(myTransport); // your transport created before the device is added to the monitor
@@ -91,7 +93,7 @@ const myTransport = mediasoupStatsCollector.addTransport(myTransport); // your t
 
 ## Calculated Updates
 
-The Calculated Updates lets you observer metrics derived from the polled webrtc stats captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can give you.
+Calculated updates allow you to observe metrics derived from polled WebRTC stats captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can provide.
 
 ### Storage Updates
 
@@ -104,11 +106,12 @@ const monitor = createClientMonitor({
 });
 
 monitor.on('stats-collected', () => {
-    console.log('average RTT in seconds', monitor.avgRttInS);
-    console.log('Sending audio bitrate', monitor.sendingAudioBitrate);
-    console.log('Sending video bitrate', monitor.sendingVideoBitrate);
-    console.log('Receiving audio bitrate', monitor.receivingAudioBitrate);
-    console.log('Receiving video bitrate', monitor.receivingVideoBitrate);
+    const storage = monitor.storage;
+    console.log('average RTT in seconds', storage.avgRttInS);
+    console.log('Sending audio bitrate', storage.sendingAudioBitrate);
+    console.log('Sending video bitrate', storage.sendingVideoBitrate);
+    console.log('Receiving audio bitrate', storage.receivingAudioBitrate);
+    console.log('Receiving video bitrate', storage.receivingVideoBitrate);
 });
 ```
 
@@ -276,12 +279,129 @@ const config = {
      * By setting this, the observer makes samples after n number or collected stats.
      *
      * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
+     * if the value is less or equal than 0
      *
      * DEFAULT: 1
      */
     samplingTick: 1,
 };
 ```
+
+## Events
+
+In the context of our monitoring library, events play a crucial role in enabling real-time insights and interactions. These events are emitted by the monitor to signal various occurrences, such as the creation of a peer connection, media track, or ICE connections. Below, we detail the events detected by the monitor.
+ * `CLIENT_JOINED`: A client has joined
+ * `CLIENT_LEFT`: A client has left
+ * `PEER_CONNECTION_OPENED`: A peer connection is opened
+ * `PEER_CONNECTION_CLOSED`: A peer connection is closed
+ * `MEDIA_TRACK_ADDED`: A media track is added
+ * `MEDIA_TRACK_REMOVED`: A media track is removed
+ * `MEDIA_TRACK_MUTED`: A media track is muted
+ * `MEDIA_TRACK_UNMUTED`: A media track is unmuted
+ * `ICE_GATHERING_STATE_CHANGED`: The ICE gathering state has changed
+ * `PEER_CONNECTION_STATE_CHANGED`: The peer connection state has changed
+ * `ICE_CONNECTION_STATE_CHANGED`: The ICE connection state has changed
+ * `DATA_CHANNEL_OPEN`: A data channel is opened
+ * `DATA_CHANNEL_CLOSED`: A data channel is closed
+ * `DATA_CHANNEL_ERROR`: A data channel error occurred
+
+For Mediasoup integration the following events are detected:
+ * `PRODUCER_ADDED`: A producer is added
+ * `PRODUCER_REMOVED`: A producer is removed
+ * `PRODUCER_PAUSED`: A producer is paused
+ * `PRODUCER_RESUMED`: A producer is resumed
+ * `CONSUMER_ADDED`: A consumer is added
+ * `CONSUMER_REMOVED`: A consumer is removed
+ * `CONSUMER_PAUSED`: A consumer is paused
+ * `CONSUMER_RESUMED`: A consumer is resumed
+ * `DATA_PRODUCER_ADDED`: A data producer is added
+ * `DATA_PRODUCER_REMOVED`: A data producer is removed
+ * `DATA_CONSUMER_ADDED`: A data consumer is added
+ * `DATA_CONSUMER_REMOVED`: A data consumer is removed
+
+### CLIENT_JOINED Event
+
+A client event is automatically generated when the first sample is created, and 
+the joined timestamp is set to the time of the monitor creation. However, you can
+manually set the event by calling the `monitor.join()` method. 
+
+**Important Note**: The `monitor.join()` method is called only once, and in case of manual setup it should be called before the first sample is created.
+
+```javascript
+monitor.join({
+    timestamp: Date.now(),
+});
+```
+
+### CLIENT_LEFT Event
+
+A client event is automatically generated when the monitor is closed, and the left timestamp is set to the time of the monitor closing. However, you can manually set the event by calling the `monitor.leave()` method.
+
+**Important Note**: The `monitor.leave()` method is called only once, and in case of manual setup it should be called before the monitor is closed.
+
+```javascript
+monitor.leave({
+    timestamp: Date.now(),
+});
+```
+
+
+### Custom Call Event
+
+You can create a custom event by calling the `monitor.addCustomCallEvent()` method. The method takes an object with the following properties:
+
+```javascript
+monitor.addCustomCallEvent({
+    name: 'MY CUSTOM EVENT', // mandatory
+
+    message: 'my custom message', // optional;
+    attachments: JSON.stringify({
+        value: 'my custom value',
+    }), // optional
+	timestamp: Date.now(), // optional
+	value: `simple string value`, // optional
+	peerConnectionId: 'peer-connection-id', // optional;
+	mediaTrackId: 'media-track-id', // optional;
+	
+});
+```
+
+### Extension State Event
+
+You can create an extension state event by calling the `monitor.addExtensionStateEvent()` method. The method takes an object with the following properties:
+
+```javascript
+monitor.addExtensionStateEvent({
+    type: 'CLIENT_CPU_STATS',
+    payload: {
+        cpuUsage: 0.5,
+        memoryUsage: 0.3,
+    }
+});
+```
+
+As a rule of thumb for when to use `addCustomCallEvent` and `addExtensionStateEvent`:
+- Use `addCustomCallEvent` for events that are related to the call itself, such as user clicked a button.
+- Use `addExtensionStateEvent` for events that are related to the periodic stats collection, such as CPU usage, memory usage, etc.
+
+
+## Sampling
+
+The monitor generates samples by invoking the `monitor.sample()` method. The monitor will automatically call the `sample()` method unless `samplingTick` is set to a value less than or equal to 0. The ClientMonitor creates a `ClientSample`, a compound object that contains all observed stats and created events. The ClientSample object is emitted, and an event listener can listen to it by subscribing to the `sample-created` event:
+
+```javascript
+monitor.on('sample-created', ({
+    clientSample,
+    elapsedSinceLastSampleInMs,
+}) => {
+    console.log('The created client sample is:', clientSample);
+    console.log('Elapsed time in milliseconds since the last sample was created:', elapsedSinceLastSampleInMs);
+})
+```
+
+The ClientSample can be forwarded to a backend service, where the samples can be further processed (e.g., saved into a database or used for anomaly detection). To facilitate this, we have developed the [observer-js](https://github.com/ObserveRTC/observer-js) library, which you can use to process the samples.
+
+
 
 ## NPM package
 
