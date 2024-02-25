@@ -55,6 +55,7 @@ export interface ClientMonitorEvents {
 }
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
+    public readonly created = Date.now();
     public readonly meta: ClientMetaData;
     public readonly storage = new StatsStorage();
     public readonly collectors = createCollectors({
@@ -66,7 +67,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     private readonly _sampler = new Sampler(this.storage);
     private _timer?: ReturnType<typeof setInterval>;
-    
+    private _joined = false;
+    private _left = false;
     private _lastCollectedAt = Date.now();
     private _lastSampledAt = 0;
     private _closed = false;
@@ -117,11 +119,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this.storage.clear();
         this.collectors.clear();
         this._sampler.clear();
+        this.leave();
 
         this._timer = undefined;
     }
     
     public async collect(): Promise<CollectedStats> {
+        if (this._closed) throw new Error('ClientMonitor is closed');
+
         const collectedStats = await this.collectors.collect();
         this.storage.update(collectedStats);
         const timestamp = Date.now();
@@ -138,6 +143,9 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public sample(): ClientSample | undefined {
+        if (this._closed) throw new Error('ClientMonitor is closed');
+        if (!this._joined) this.join();
+        
         const clientSample = this._sampler.createClientSample();
         const timestamp = Date.now();
         if (!clientSample) {
@@ -149,6 +157,30 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         });
         this._lastSampledAt = timestamp;
         return clientSample;
+    }
+
+    public join(settings?: Pick<CustomCallEvent, 'attachments' | 'timestamp' | 'message'>): void {
+        if (this._joined) return;
+        this._joined = true;
+
+        this._sampler.addCustomCallEvent({
+            name: 'CLIENT_JOINED',
+            message: settings?.message ?? 'Client joined',
+            timestamp: settings?.timestamp ?? this.created,
+            attachments: settings?.attachments,
+        })
+    }
+
+    public leave(settings?: Pick<CustomCallEvent, 'attachments' | 'timestamp' | 'message'>): void {
+        if (!this._left) return;
+        this._left = true;
+        
+        this._sampler.addCustomCallEvent({
+            name: 'CLIENT_LEFT',
+            message: settings?.message ?? 'Client left',
+            timestamp: settings?.timestamp ?? Date.now(),
+            attachments: settings?.attachments,
+        });
     }
 
     public setMarker(value?: string) {
@@ -186,7 +218,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public addCustomCallEvent(event: CustomCallEvent) {
-        this._sampler.addCustomCallEvent(event);
+        this._sampler.addCustomCallEvent({
+            timestamp: Date.now(),
+            ...event,
+        });
     }
 
     public addLocalSDP(localSDP: string[]): void {

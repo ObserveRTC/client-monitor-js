@@ -52,19 +52,6 @@ export function createMediaTrackRemovedEvent(
 	}
 }
 
-export function createMediaTrackResumedEvent(
-	event: RequiredBy<PartialCallEvent, | 'peerConnectionId' | 'mediaTrackId'>,
-): CustomCallEvent {
-	return {
-		...event,
-		name: 'MEDIA_TRACK_RESUMED',
-		peerConnectionId: event.peerConnectionId,
-		mediaTrackId: event.mediaTrackId,
-		message: 'Media track is resumed',
-		timestamp: event.timestamp ?? Date.now(),
-	}
-}
-
 export function createMediaTrackMutedEvent(
 	event: RequiredBy<PartialCallEvent, | 'peerConnectionId' | 'mediaTrackId'>,
 ): CustomCallEvent {
@@ -74,6 +61,19 @@ export function createMediaTrackMutedEvent(
 		peerConnectionId: event.peerConnectionId,
 		mediaTrackId: event.mediaTrackId,
 		message: 'Media track is muted',
+		timestamp: event.timestamp ?? Date.now(),
+	}
+}
+
+export function createMediaTrackResumedEvent(
+	event: RequiredBy<PartialCallEvent, | 'peerConnectionId' | 'mediaTrackId'>,
+): CustomCallEvent {
+	return {
+		...event,
+		name: 'MEDIA_TRACK_RESUMED',
+		peerConnectionId: event.peerConnectionId,
+		mediaTrackId: event.mediaTrackId,
+		message: 'Media track is resumed',
 		timestamp: event.timestamp ?? Date.now(),
 	}
 }
