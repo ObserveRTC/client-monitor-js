@@ -366,12 +366,12 @@ monitor.addCustomCallEvent({
 });
 ```
 
-### Extension State Event
+### Extension Stats Event
 
-You can create an extension state event by calling the `monitor.addExtensionStateEvent()` method. The method takes an object with the following properties:
+You can create an extension state event by calling the `monitor.addExtensionStats()` method. The method takes an object with the following properties:
 
 ```javascript
-monitor.addExtensionStateEvent({
+monitor.addExtensionStats({
     type: 'CLIENT_CPU_STATS',
     payload: {
         cpuUsage: 0.5,
@@ -382,7 +382,7 @@ monitor.addExtensionStateEvent({
 
 As a rule of thumb for when to use `addCustomCallEvent` and `addExtensionStateEvent`:
 - Use `addCustomCallEvent` for events that are related to the call itself, such as user clicked a button.
-- Use `addExtensionStateEvent` for events that are related to the periodic stats collection, such as CPU usage, memory usage, etc.
+- Use `addExtensionStats` for events that are related to the client's environment, such as CPU usage and collected periodically.
 
 
 ## Sampling
