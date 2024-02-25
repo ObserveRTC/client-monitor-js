@@ -4,7 +4,6 @@ import { createLogger } from "./utils/logger";
 import { ClientMetaData } from './ClientMetaData';
 import { StatsStorage } from './entries/StatsStorage';
 import { TypedEventEmitter } from './utils/TypedEmitter';
-import { createTimer } from './utils/Timer';
 import { Sampler } from './Sampler';
 import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
@@ -27,18 +26,13 @@ export type ClientMonitorConfig = {
     collectingPeriodInMs?: number;
 
     /**
-     * By setting this, the observer makes samples periodically.
+     * By setting this, the observer makes samples after n number or collected stats.
+     * 
+     * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
      *
      * DEFAULT: undefined
      */
-    samplingPeriodInMs?: number;
-
-    /**
-     * Sets the ticking time of the timer that invokes processes for collecting, sampling, and sending.
-     * 
-     * DEFAULT: 1000
-     */
-    tickingTimeInMs?: number;
+    samplingTick?: number;
 };
 
 export type AlertState = 'on' | 'off';
@@ -71,11 +65,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     });
 
     private readonly _sampler = new Sampler(this.storage);
-    private readonly _timer = createTimer();
+    private _timer?: ReturnType<typeof setInterval>;
     
     private _lastCollectedAt = Date.now();
     private _lastSampledAt = 0;
     private _closed = false;
+    private _actualCollectingTick = 0;
 
     public constructor(
         private _config: ClientMonitorConfig
@@ -118,22 +113,27 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             return;
         }
         this._closed = true;
-        this._timer.clear();
+        clearInterval(this._timer);
         this.storage.clear();
         this.collectors.clear();
         this._sampler.clear();
+
+        this._timer = undefined;
     }
     
-
     public async collect(): Promise<CollectedStats> {
         const collectedStats = await this.collectors.collect();
-        await this.storage.update(collectedStats);
+        this.storage.update(collectedStats);
         const timestamp = Date.now();
         this.emit('stats-collected', {
             collectedStats,
             elapsedSinceLastCollectedInMs: timestamp - this._lastCollectedAt,
         });
         this._lastCollectedAt = timestamp;
+        if (this._config.samplingTick && this._config.samplingTick <= ++this._actualCollectingTick ) {
+            this._actualCollectingTick = 0;
+            this.sample();
+        }
         return collectedStats;
     }
 
@@ -198,8 +198,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._setupTimer();
     }
 
-    public setSamplingPeriod(samplingPeriodInMs: number): void {
-        this._config.samplingPeriodInMs = samplingPeriodInMs;
+    public setSamplingTick(samplingTick: number): void {
+        this._config.samplingTick = samplingTick;
         this._setupTimer();
     }
 
@@ -249,26 +249,94 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return this.storage.getPeerConnection(peerConnectionId);
     }
 
-    private _setupTimer(): ReturnType<typeof setInterval> | undefined {
-        if (!this._config.tickingTimeInMs) {
-            return;
-        }
-        if (this._config.collectingPeriodInMs) {
-            this._timer.setCollectingAction({
-                action: () => this.collect().then(() => {
-                    // empty
-                }),
-                fixedDelayInMs: this._config.collectingPeriodInMs,
-            });
-        }
-        if (this._config.samplingPeriodInMs) {
-            this._timer.setSamplingAction({
-                action: async () => {
-                    this.sample();
-                },
-                fixedDelayInMs: this._config.samplingPeriodInMs,
-            });
-        }
-        this._timer.tickTimeInMs = this._config.tickingTimeInMs;
+    public get codecs() {
+        return [...this.storage.codecs()];
+    }
+
+    public get inboundRtps() {
+        return [...this.storage.inboundRtps()];
+    }
+
+    public get outboundRtps() {
+        return [...this.storage.outboundRtps()];
+    }
+
+    public get remoteInboundRtps() {
+        return [...this.storage.remoteInboundRtps()];
+    }
+
+    public get remoteOutboundRtps() {
+        return [...this.storage.remoteOutboundRtps()];
+    }
+
+    public get mediaSources() {
+        return [...this.storage.mediaSources()];
+    }
+
+    public get contributingSources() {
+        return [...this.storage.contributingSources()];
+    }
+
+    public get dataChannels() {
+        return [...this.storage.dataChannels()];
+    }
+
+    public get transceivers() {
+        return [...this.storage.transceivers()];
+    }
+
+    public get senders() {
+        return [...this.storage.senders()];
+    }
+
+    public get receivers() {
+        return [...this.storage.receivers()];
+    }
+
+    public get transports() {
+        return [...this.storage.transports()];
+    }
+
+    public get sctpTransports() {
+        return [...this.storage.sctpTransports()];
+    }
+
+    public get iceCandidatePairs() {
+        return [...this.storage.iceCandidatePairs()];
+    }
+
+    public get iceLocalCandidates() {
+        return [...this.storage.localCandidates()];
+    }
+
+    public get iceRemoteCandidates() {
+        return [...this.storage.remoteCandidates()];
+    }
+
+    public get certificates() {
+        return [...this.storage.certificates()];
+    }
+
+    public get iceServers() {
+        return [...this.storage.iceServers()];
+    }
+
+    public get peerConnections() {
+        return [...this.storage.peerConnections()];
+    }
+
+    public get tracks() {
+        return [...this.storage.tracks()];
+    }
+
+    private _setupTimer(): void {
+        this._timer && clearInterval(this._timer);
+        this._timer = undefined;
+        
+        if (!this._config.collectingPeriodInMs) return;
+
+        this._timer = setInterval(() => {
+            this.collect().catch(err => logger.error(err));
+        }, this._config.collectingPeriodInMs);
     }
 }
