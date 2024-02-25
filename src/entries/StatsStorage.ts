@@ -303,7 +303,8 @@ export class StatsStorage {
      * Gives an iterator to read the collected inbound-rtp stats and navigate to its relations.
      */
     public inboundRtps(): IterableIterator<InboundRtpEntry> {
-        return [...this._peerConnections.values()].flatMap(pcEntry => [...pcEntry.inboundRtps()]).values();
+        return [...this._peerConnections.values()]
+            .flatMap(pcEntry => [...pcEntry.inboundRtps()]).values();
     }
 
     private _updateMetrics() {

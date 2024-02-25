@@ -38,8 +38,7 @@ const monitor = createClientMonitor(config);
 const statsCollector = monitor.collectors.collectFromRTCPeerConnection(peerConnection);
 
 monitor.on("stats-collected", () => {
-    const storage = monitor.storage;
-    for (const inboundRtp of storage.inboundRtps()) {
+    for (const inboundRtp of monitor.inboundRtps) {
         const trackId = inboundRtp.getTrackId();
         const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
         console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
@@ -104,14 +103,13 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-const storage = monitor.storage;
 monitor.on('stats-collected', () => {
-    console.log('average RTT in seconds', storage.avgRttInS);
-    console.log('Sending audio bitrate', storage.sendingAudioBitrate);
-    console.log('Sending video bitrate', storage.sendingVideoBitrate);
-    console.log('Receiving audio bitrate', storage.receivingAudioBitrate);
-    console.log('Receiving video bitrate', storage.receivingVideoBitrate);
-
+    console.log('average RTT in seconds', monitor.avgRttInS);
+    console.log('Sending audio bitrate', monitor.sendingAudioBitrate);
+    console.log('Sending video bitrate', monitor.sendingVideoBitrate);
+    console.log('Receiving audio bitrate', monitor.receivingAudioBitrate);
+    console.log('Receiving video bitrate', monitor.receivingVideoBitrate);
+});
 ```
 
 ### PeerConnection Updates
@@ -124,9 +122,8 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-const storage = monitor.storage;
 monitor.on("stats-collected", () => {
-    for (const peerConnection of storage.peerConnections()) {
+    for (const peerConnection of monitor.peerConnections) {
         console.log("average RTT in seconds", peerConnection.avgRttInS);
         console.log("Sending audio bitrate on PC", peerConnection.sendingAudioBitrate);
         console.log("Sending video bitrate on PC", peerConnection.sendingVideoBitrate);
@@ -146,9 +143,8 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-const storage = monitor.storage;
 monitor.on("stats-collected", () => {
-    for (const inboundRtp of storage.inboundRtps()) {
+    for (const inboundRtp of monitor.inboundRtps) {
         console.log("mean opinion score for inbound-rtp", inboundRtp.score);
 
         console.log("receiving bitrate", inboundRtp.receivingBitrate);
@@ -169,9 +165,8 @@ const monitor = createClientMonitor({
     collectingPeriodInMs: 2000,
 });
 
-const storage = monitor.storage;
 monitor.on("stats-collected", () => {
-    for (const outboundRtp of storage.outboundRtps()) {
+    for (const outboundRtp of monitor.outboundRtps) {
         console.log("stability score outbound-rtp", outboundRtp.score);
 
         console.log("sending bitrate", outboundRtp.sendingBitrate);
