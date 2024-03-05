@@ -21,12 +21,6 @@ export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, tr
 			get sfuStreamId() {
 				return sfuStreamId;
 			},
-			set sfuStreamId(value: string | undefined) {
-				sfuStreamId = value;
-				for (const outboundRtp of iterator()) {
-					outboundRtp.sfuStreamId = value;
-				}
-			},
 			
 			sendingBitrate: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.sendingBitrate ?? 0), 0),
 			sentPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.sentPackets ?? 0), 0),
@@ -44,8 +38,10 @@ export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, tr
 				result.remoteReceivedPackets = 0;
 
 				for (const outboundRtp of iterator()) {
-					outboundRtp.sfuStreamId = result.sfuStreamId;
-
+					if (!sfuStreamId) {
+						sfuStreamId = outboundRtp.sfuStreamId;
+					}
+					
 					result.sendingBitrate += outboundRtp.sendingBitrate ?? 0;
 					result.sentPackets += outboundRtp.sentPackets ?? 0;
 					result.remoteLostPackets += outboundRtp.getRemoteInboundRtp()?.lostPackets ?? 0;
