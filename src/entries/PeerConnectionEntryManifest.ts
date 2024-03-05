@@ -321,17 +321,6 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 entry.expectedFrameRate ?? 30,
             );
         }
-
-        // if (!entry.sfuStreamId) {
-        //     const trackId = entry.getTrackId() ?? '';
-        //     const binding = this.storage.pendingSfuBindings.get(trackId);
-            
-        //     if (binding) {
-        //         entry.sfuStreamId = binding.sfuStreamId;
-        //         entry.sfuSinkId = binding.sfuSinkId;
-        //         this.storage.pendingSfuBindings.delete(trackId);
-        //     }
-        // }
     }
     
     private _visitOutboundRtp(stats: W3C.OutboundRtpStats): void {
@@ -347,16 +336,6 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         entry.sentPackets = (stats.packetsSent ?? 0) - (entry.stats.packetsSent ?? 0);
         entry.stats = stats;
         entry.visited = true;
-
-        // if (!entry.sfuStreamId) {
-        //     const trackId = entry.getTrackId() ?? '';
-        //     const binding = this.storage.pendingSfuBindings.get(trackId);
-            
-        //     if (binding) {
-        //         entry.sfuStreamId = binding.sfuStreamId;
-        //         this.storage.pendingSfuBindings.delete(trackId);
-        //     }
-        // }
     }
 
     private _visitRemoteInboundRtp(stats: W3C.RemoteInboundRtpStats): void {
@@ -585,7 +564,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
-        const avgRttInS = (roundTripTimesInS.length < 1 ? (this.avgRttInS ?? -1) : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
+        const avgRttInS = (roundTripTimesInS.length < 1 ? this.avgRttInS : Math.max(0, roundTripTimesInS.reduce((acc, rtt) => acc + rtt, 0) / roundTripTimesInS.length));
         
         for (const outboundRtpEntry of this._outboundRtps.values()) {
             if (outboundRtpEntry.stats.kind === 'audio') {
@@ -596,7 +575,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 this.deltaSentVideoBytes += outboundRtpEntry.sentBytes ?? 0;
             }
             this.deltaOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
-            outboundRtpEntry.updateStabilityScore(avgRttInS);
+            avgRttInS && outboundRtpEntry.updateStabilityScore(avgRttInS);
         }
         this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
         this.totalSentAudioBytes += this.deltaSentAudioBytes;
