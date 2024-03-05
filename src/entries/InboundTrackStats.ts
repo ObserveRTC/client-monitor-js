@@ -26,22 +26,22 @@ export function createInboundTrackStats(peerConnection: PeerConnectionEntry, tra
 			get sfuStreamId() {
 				return sfuStreamId;
 			},
-			// set sfuStreamId(value: string | undefined) {
-			// 	sfuStreamId = value;
-			// 	for (const inboundRtp of iterator()) {
-			// 		inboundRtp.sfuStreamId = value;
-			// 	}
-			// },
+			set sfuStreamId(value: string | undefined) {
+				sfuStreamId = value;
+				for (const inboundRtp of iterator()) {
+					inboundRtp.sfuStreamId = value;
+				}
+			},
 
 			get sfuSinkId() {
 				return sfuSinkId;
 			},
-			// set sfuSinkId(value: string | undefined) {
-			// 	sfuSinkId = value;
-			// 	for (const inboundRtp of iterator()) {
-			// 		inboundRtp.sfuSinkId = value;
-			// 	}
-			// },
+			set sfuSinkId(value: string | undefined) {
+				sfuSinkId = value;
+				for (const inboundRtp of iterator()) {
+					inboundRtp.sfuSinkId = value;
+				}
+			},
 
 			get remoteClientId() {
 				return remoteClientId;
@@ -80,14 +80,8 @@ export function createInboundTrackStats(peerConnection: PeerConnectionEntry, tra
 				result.fractionLoss = 0;
 
 				for (const inboundRtp of iterator()) {
-					if (!sfuStreamId) {
-						sfuStreamId = inboundRtp.sfuStreamId;
-					}
-					if (!sfuSinkId) {
-						sfuSinkId = inboundRtp.sfuSinkId;
-					}
-					// inboundRtp.sfuStreamId = result.sfuStreamId;
-					// inboundRtp.sfuSinkId = result.sfuSinkId;
+					inboundRtp.sfuStreamId = result.sfuStreamId;
+					inboundRtp.sfuSinkId = result.sfuSinkId;
 
 					result.receivingBitrate += inboundRtp.receivingBitrate ?? 0;
 					result.lostPackets += inboundRtp.lostPackets ?? 0;

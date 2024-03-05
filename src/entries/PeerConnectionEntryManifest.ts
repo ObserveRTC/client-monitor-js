@@ -322,16 +322,16 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             );
         }
 
-        if (!entry.sfuStreamId) {
-            const trackId = entry.getTrackId() ?? '';
-            const binding = this.storage.pendingSfuBindings.get(trackId);
+        // if (!entry.sfuStreamId) {
+        //     const trackId = entry.getTrackId() ?? '';
+        //     const binding = this.storage.pendingSfuBindings.get(trackId);
             
-            if (binding) {
-                entry.sfuStreamId = binding.sfuStreamId;
-                entry.sfuSinkId = binding.sfuSinkId;
-                this.storage.pendingSfuBindings.delete(trackId);
-            }
-        }
+        //     if (binding) {
+        //         entry.sfuStreamId = binding.sfuStreamId;
+        //         entry.sfuSinkId = binding.sfuSinkId;
+        //         this.storage.pendingSfuBindings.delete(trackId);
+        //     }
+        // }
     }
     
     private _visitOutboundRtp(stats: W3C.OutboundRtpStats): void {
@@ -348,15 +348,15 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         entry.stats = stats;
         entry.visited = true;
 
-        if (!entry.sfuStreamId) {
-            const trackId = entry.getTrackId() ?? '';
-            const binding = this.storage.pendingSfuBindings.get(trackId);
+        // if (!entry.sfuStreamId) {
+        //     const trackId = entry.getTrackId() ?? '';
+        //     const binding = this.storage.pendingSfuBindings.get(trackId);
             
-            if (binding) {
-                entry.sfuStreamId = binding.sfuStreamId;
-                this.storage.pendingSfuBindings.delete(trackId);
-            }
-        }
+        //     if (binding) {
+        //         entry.sfuStreamId = binding.sfuStreamId;
+        //         this.storage.pendingSfuBindings.delete(trackId);
+        //     }
+        // }
     }
 
     private _visitRemoteInboundRtp(stats: W3C.RemoteInboundRtpStats): void {
