@@ -136,7 +136,9 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                     sfuStreamId: producer.id,
                     kind: producer.kind,
                 });
-                storage.bindTrackToSfu(producer.track.id, producer.id);
+                storage.pendingSfuBindings.set(producer.track.id, {
+                    sfuStreamId: producer.id,
+                });
                 producer.track.onended = () => {
                     if (!producer.closed) {
                         pendingProducerBindings.set(producer.id, { producer, peerConnectionId });        
@@ -181,7 +183,10 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
             });
             consumer.observer.on('pause', pauseListener);
             consumer.observer.on('resume', resumeListener);
-            storage.bindTrackToSfu(consumer.track.id, consumer.producerId, consumer.id);
+            storage.pendingSfuBindings.set(consumer.track.id, {
+                sfuStreamId: consumer.producerId,
+                sfuSinkId: consumer.id,
+            });
             emitCallEvent({
                 name: 'CONSUMER_ADDED',
                 ...eventBase
@@ -310,7 +315,9 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     function adaptStorageMiddleware(storage: StatsStorage, next: (storage: StatsStorage) => void) {
         for (const [producerId, { producer, peerConnectionId }] of Array.from(pendingProducerBindings.entries())) {
             if (producer.track) {
-                storage.bindTrackToSfu(producer.track.id, producerId);
+                storage.pendingSfuBindings.set(producer.track.id, {
+                    sfuStreamId: producer.id,
+                });
                 addTrack({
                     peerConnectionId,
                     direction: 'outbound',
