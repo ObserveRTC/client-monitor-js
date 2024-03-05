@@ -418,6 +418,13 @@ export class StatsStorage {
                 ) as OutboundTrackStats;
                 this._tracks.set(trackId, track);
                 continue;
+            } else {
+                const binding = this.pendingSfuBindings.get(trackId);
+                if (!track.sfuStreamId && binding) {
+                    track.sfuStreamId = binding.sfuStreamId;
+                    track.direction === 'inbound' && (track.sfuSinkId = binding.sfuSinkId);
+                    this.pendingSfuBindings.delete(trackId);
+                }
             }
             track.update();
         }
