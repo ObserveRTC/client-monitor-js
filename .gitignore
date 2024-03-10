@@ -4,3 +4,4 @@ dist/
 lib/
 keys/
 draft.md
+yarn-error.log
