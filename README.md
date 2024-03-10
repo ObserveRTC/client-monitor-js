@@ -41,7 +41,7 @@ const config = {
     collectingPeriodInMs: 5000,
 };
 const monitor = createClientMonitor(config);
-const statsCollector = monitor.collectors.collectFromRTCPeerConnection(peerConnection);
+const collector = monitor.collectors.addRTCPeerConnection(peerConnection);
 
 monitor.on("stats-collected", () => {
     for (const inboundRtp of monitor.inboundRtps) {
@@ -51,7 +51,7 @@ monitor.on("stats-collected", () => {
     }
 });
 // if you want to stop collecting from the peerConnection, then:
-statsCollector.close();
+collector.close();
 ```
 
 The above example do as follows:
@@ -74,21 +74,25 @@ const config = {
     collectingPeriodInMs: 5000,
 };
 const monitor = createClientMonitor(config);
-const mediasoupStatsCollector = monitor.collectors.collectFromMediasoupDevice(mediasoupDevice);
+const collector = monitor.collectors.addMediasoupDevice(mediasoupDevice);
+
+collector.onclose = () => {
+    console.log(`mediasoup collector ${collector.id} is closed`);
+}
 
 monitor.on("stats-collected", () => {
     // do your stuff
 
     // you can close detach mediasoup
     // collector by calling the close
-    mediasoupStatsCollector.close();
+    collector.close();
 });
 ```
 
 **Important Note**: The created collector is hooked to the device's 'newtransport' event and can automatically detect transports created **after** the device has been added. If you create transports before adding the device to the monitor, those previously created transports will not be monitored automatically. You will need to manually add them to the stats collector like this:
 
 ```javascript
-const myTransport = mediasoupStatsCollector.addTransport(myTransport); // your transport created before the device is added to the monitor
+const myTransport = collector.addTransport(myTransport); // your transport created before the device is added to the monitor
 ```
 
 ## Calculated Updates
