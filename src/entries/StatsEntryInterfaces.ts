@@ -94,7 +94,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     getRemoteOutboundRtp(): RemoteOutboundRtpEntry | undefined;
     getAudioPlayout(): AudioPlayoutEntry | undefined;
     
-    
+    readonly kind: "audio" | "video" | undefined;
 }
 
 /**
@@ -118,6 +118,8 @@ export interface OutboundRtpEntry extends SenderRtpStreamEntry, StatsEntryAbs {
     getMediaSource(): MediaSourceEntry | undefined;
     getSender(): SenderEntry | undefined;
     getRemoteInboundRtp(): RemoteInboundRtpEntry | undefined;
+
+    readonly kind: "audio" | "video" | undefined;
 
 }
 

@@ -55,6 +55,7 @@ export interface ClientMonitorEvents {
 }
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
+    public readonly created = Date.now();
     public readonly meta: ClientMetaData;
     public readonly storage = new StatsStorage();
     public readonly collectors = createCollectors({
@@ -67,6 +68,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     private readonly _sampler = new Sampler(this.storage);
     private _timer?: ReturnType<typeof setInterval>;
     
+    private _joined = false;
+    private _left = false;
     private _lastCollectedAt = Date.now();
     private _lastSampledAt = 0;
     private _closed = false;
@@ -114,6 +117,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         }
         this._closed = true;
         clearInterval(this._timer);
+
+        if (!this._left) this.leave();
+        if (0 < (this._config.samplingTick ?? 0)) {
+            this.sample();
+        }
+        
         this.storage.clear();
         this.collectors.clear();
         this._sampler.clear();
@@ -122,6 +131,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
     
     public async collect(): Promise<CollectedStats> {
+        if (this._closed) throw new Error('ClientMonitor is closed');
+
         const collectedStats = await this.collectors.collect();
         this.storage.update(collectedStats);
         const timestamp = Date.now();
@@ -138,6 +149,9 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public sample(): ClientSample | undefined {
+        if (this._closed) return;
+        if (!this._joined) this.join();
+
         const clientSample = this._sampler.createClientSample();
         const timestamp = Date.now();
         if (!clientSample) {
@@ -150,6 +164,31 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._lastSampledAt = timestamp;
         return clientSample;
     }
+
+    public join(settings?: Pick<CustomCallEvent, 'attachments' | 'timestamp' | 'message'>): void {
+        if (this._joined) return;
+        this._joined = true;
+
+        this._sampler.addCustomCallEvent({
+            name: 'CLIENT_JOINED',
+            message: settings?.message ?? 'Client joined',
+            timestamp: settings?.timestamp ?? this.created,
+            attachments: settings?.attachments,
+        })
+    }
+
+    public leave(settings?: Pick<CustomCallEvent, 'attachments' | 'timestamp' | 'message'>): void {
+        if (!this._left) return;
+        this._left = true;
+        
+        this._sampler.addCustomCallEvent({
+            name: 'CLIENT_LEFT',
+            message: settings?.message ?? 'Client left',
+            timestamp: settings?.timestamp ?? Date.now(),
+            attachments: settings?.attachments,
+        });
+    }
+
 
     public setMarker(value?: string) {
         this._sampler.setMarker(value);

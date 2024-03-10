@@ -2,6 +2,29 @@ import { CustomCallEvent } from "../schema/Samples";
 import { RequiredBy } from "./common";
 
 type PartialCallEvent = Omit<CustomCallEvent, 'name' | 'message'>;
+
+export function createClientJoinedEvent(
+	event: RequiredBy<PartialCallEvent, | 'clientId'>,
+): CustomCallEvent {
+	return {
+		...event,
+		name: 'CLIENT_JOINED',
+		message: 'Client joined the call',
+		timestamp: event.timestamp ?? Date.now(),
+	}
+}
+
+export function createClientLeftEvent(
+	event: RequiredBy<PartialCallEvent, | 'clientId'>,
+): CustomCallEvent {
+	return {
+		...event,
+		name: 'CLIENT_LEFT',
+		message: 'Client joined the call',
+		timestamp: event.timestamp ?? Date.now(),
+	}
+}
+
 export function createPeerConnectionOpenedEvent(
 	event: RequiredBy<PartialCallEvent, | 'peerConnectionId'>,
 ): CustomCallEvent {

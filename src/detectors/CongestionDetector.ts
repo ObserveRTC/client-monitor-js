@@ -197,7 +197,6 @@ export function createCongestionDetector(config: CongestionDetectorConfig & {
 		}
 
 		for (const [pcId, state] of Array.from(peerConnectionStates)) {
-			// console.warn("pc", pcId, state);
 			if (state.visited) {
 				state.visited = false;
 			} else {
