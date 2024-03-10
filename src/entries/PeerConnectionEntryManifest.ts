@@ -27,6 +27,7 @@ import * as W3C from '../schema/W3cStatsIdentifiers'
 import { TypedEventEmitter, TypedEvents } from "../utils/TypedEmitter";
 import { IndexedMap } from "../utils/IndexedMap";
 import { calculateAudioMOS, calculateVideoMOS } from "./UpdateFields";
+import type { StatsStorage } from "./StatsStorage";
 
 const SSRC_INDEX = 'ssrc';
 
@@ -101,10 +102,11 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     private readonly _iceServers = new Map<string, IceServerEntry>();
 
     // helper fields
-    private _lastAvgRttInS = -1;
+    // private _lastAvgRttInS = -1;
     private _visit: StatsVisitor;
     
     public constructor(
+        public readonly storage: StatsStorage,
         public readonly peerConnectionId: string,
         public readonly label: string | undefined,
     ) {
@@ -303,7 +305,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 entry.receivingBitrate,
                 entry.fractionLoss,
                 entry.avgJitterBufferDelayInMs,
-                this._lastAvgRttInS * 1000.0,
+                (this.avgRttInS ?? 0) * 1000.0,
                 false,
                 false,
             );
@@ -313,7 +315,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 entry.stats.frameWidth ?? 640,
                 entry.stats.frameHeight ?? 480,
                 entry.avgJitterBufferDelayInMs,
-                this._lastAvgRttInS * 1000.0,
+                (this.avgRttInS ?? 0) * 1000.0,
                 'vp8',
                 entry.stats.framesPerSecond ?? 30,
                 entry.expectedFrameRate ?? 30,
@@ -562,7 +564,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
-        const avgRttInS = (roundTripTimesInS.length < 1 ? this._lastAvgRttInS : roundTripTimesInS.reduce((a, x) => a + x, 0) / roundTripTimesInS.length);
+        const avgRttInS = (roundTripTimesInS.length < 1 ? this.avgRttInS : Math.max(0, roundTripTimesInS.reduce((acc, rtt) => acc + rtt, 0) / roundTripTimesInS.length));
         
         for (const outboundRtpEntry of this._outboundRtps.values()) {
             if (outboundRtpEntry.stats.kind === 'audio') {
@@ -573,7 +575,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 this.deltaSentVideoBytes += outboundRtpEntry.sentBytes ?? 0;
             }
             this.deltaOutboundPacketsSent += outboundRtpEntry.sentPackets ?? 0;
-            outboundRtpEntry.updateStabilityScore(avgRttInS);
+            avgRttInS && outboundRtpEntry.updateStabilityScore(avgRttInS);
         }
         this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
         this.totalSentAudioBytes += this.deltaSentAudioBytes;
@@ -721,7 +723,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 if (!remoteInb) return;
                 // Packet Jitter measured in seconds
                 // let's say we normalize it to a deviation of 100ms in a linear scale
-                const latencyFactor = 1.0 - Math.min(0.1, Math.abs(currentRttInS - this._lastAvgRttInS)) / 0.1
+                const latencyFactor = 1.0 - Math.min(0.1, Math.abs(currentRttInS - (this.avgRttInS ?? 0))) / 0.1
                 const sentPackets = Math.max(1, (result.sentPackets ?? 0));
                 const lostPackets = remoteInb.lostPackets ?? 0;
                 const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + sentPackets));
