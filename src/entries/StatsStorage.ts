@@ -48,7 +48,7 @@ export class StatsStorage {
     public totalInboundPacketsLost = 0;
     public totalInboundPacketsReceived = 0;
     public totalOutboundPacketsSent = 0;
-    public totalOutbounPacketsReceived = 0;
+    public totalOutboundPacketsReceived = 0;
     public totalOutboundPacketsLost = 0;
     public totalDataChannelBytesSent = 0;
     public totalDataChannelBytesReceived = 0;
@@ -60,7 +60,7 @@ export class StatsStorage {
     public deltaInboundPacketsLost?: number;
     public deltaInboundPacketsReceived?: number;
     public deltaOutboundPacketsSent?: number;
-    public deltaOutbounPacketsReceived?: number;
+    public deltaOutboundPacketsReceived?: number;
     public deltaOutboundPacketsLost?: number;
     public deltaDataChannelBytesSent?: number;
     public deltaDataChannelBytesReceived?: number;
@@ -303,7 +303,7 @@ export class StatsStorage {
         this.deltaInboundPacketsLost = 0;
         this.deltaInboundPacketsReceived = 0;
         this.deltaOutboundPacketsSent = 0;
-        this.deltaOutbounPacketsReceived = 0;
+        this.deltaOutboundPacketsReceived = 0;
         this.deltaOutboundPacketsLost = 0;
         this.deltaDataChannelBytesSent = 0;
         this.deltaDataChannelBytesReceived = 0;
@@ -329,7 +329,7 @@ export class StatsStorage {
             this.deltaInboundPacketsLost += peerConnectionEntry.deltaInboundPacketsLost ?? 0;
             this.deltaInboundPacketsReceived += peerConnectionEntry.deltaInboundPacketsReceived ?? 0;
             this.deltaOutboundPacketsSent += peerConnectionEntry.deltaOutboundPacketsSent ?? 0;
-            this.deltaOutbounPacketsReceived += peerConnectionEntry.deltaOutboundPacketsReceived ?? 0;
+            this.deltaOutboundPacketsReceived += peerConnectionEntry.deltaOutboundPacketsReceived ?? 0;
             this.deltaOutboundPacketsLost += peerConnectionEntry.deltaOutboundPacketsLost ?? 0;
 
             this.deltaSentAudioBytes += peerConnectionEntry.deltaSentAudioBytes ?? 0;
@@ -340,7 +340,7 @@ export class StatsStorage {
         this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
         this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
         this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
-        this.totalOutbounPacketsReceived += this.deltaOutbounPacketsReceived;
+        this.totalOutboundPacketsReceived += this.deltaOutboundPacketsReceived;
         this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
         this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
         this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;

@@ -7,12 +7,21 @@ Table of Contents:
 -   [Quick Start](#quick-start)
 -   [Integrations](#integrations)
     -   [Mediasoup](#mediasoup)
--   [Calculated updates](#calculated-updates)
+-   [Collected Metrics](#collected-metrics)
+    -   [Calculated updates](#calculated-updates)
+    -   [PeerConnection Entry](#peerconnection-entry)
+    -   [MediaStreamTrack Entry](#mediastreamtrack-entry)
+    -   [InboundRTP Entry](#inboundrtp-entry)
+    -   [OutboundRTP Entry](#outboundrtp-entry)
 -   [Detectors and Alerts](#detectors-and-alerts)
     -   [Audio Desync Detector](#audio-desync-detector)
     -   [CPU Performance Detector](#cpu-performance-detector)
 -   [Configurations](#configurations)
 -   [Events](#events)
+    -   [CLIENT_JOINED Event](#client_joined-event)
+    -   [CLIENT_LEFT Event](#client_left-event)
+    -   [Custom Call Event](#custom-call-event)
+    -   [Extension Stats Event](#extension-stats-event)
 -   [Sampling](#sampling)
 -   [NPM package](#npm-package)
 -   [API docs](#api-docs)
@@ -95,98 +104,292 @@ monitor.on("stats-collected", () => {
 const myTransport = collector.addTransport(myTransport); // your transport created before the device is added to the monitor
 ```
 
-## Calculated Updates
+## Collected Metrics
+
+Collecting WebRTC Metrics is either done periodically according to the `collectingPeriodInMs` configuration or manually by calling the `monitor.collect()` method. The collected metrics are stored in the `ClientMonitor` instance and assigned to Entries.
+Each entry in clientMonitor represents a WebRTC component such as `RTCPeerConnection`, `MediaStreamTrack`, etc. Entries can relate to each other and from one entry you can navigate to a correspondent entry. For example, from an `InboundRTP` entry you can navigate to the correspondent `RemoteOutboundRtp` entry, and reverse. Additionally entries are exposing basic derivatives calculated from the collected metrics.
+
+
+### Calculated Updates
 
 Calculated updates allow you to observe metrics derived from polled WebRTC stats captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can provide.
 
-### Storage Updates
+For example by accessing `storage` you can get the following calculated updates:
 
 ```javascript
-import { createClientMonitor } from 'client-monitor-js';
-
-// Create a ClientMonitor instance
-const monitor = createClientMonitor({
-    collectingPeriodInMs: 2000,
-});
 
 monitor.on('stats-collected', () => {
-    const storage = monitor.storage;
-    console.log('average RTT in seconds', storage.avgRttInS);
-    console.log('Sending audio bitrate', storage.sendingAudioBitrate);
-    console.log('Sending video bitrate', storage.sendingVideoBitrate);
-    console.log('Receiving audio bitrate', storage.receivingAudioBitrate);
-    console.log('Receiving video bitrate', storage.receivingVideoBitrate);
+    const {
+        totalInboundPacketsLost,
+        totalInboundPacketsReceived,
+        totalOutboundPacketsLost,
+        totalOutboundPacketsReceived,
+        totalOutboundPacketsSent,
+        totalSentAudioBytes,
+        totalSentVideoBytes,
+        totalReceivedAudioBytes,
+        totalReceivedVideoBytes,
+        totalDataChannelBytesSent,
+        totalDataChannelBytesReceived,
+    
+        deltaInboundPacketsLost,
+        deltaInboundPacketsReceived,
+        deltaOutboundPacketsLost,
+        deltaOutboundPacketsReceived,
+        deltaOutboundPacketsSent,
+        deltaSentAudioBytes,
+        deltaSentVideoBytes,
+        deltaReceivedAudioBytes,
+        deltaReceivedVideoBytes,
+        deltaDataChannelBytesSent,
+        deltaDataChannelBytesReceived,
+    
+        avgRttInS,
+        sendingAudioBitrate,
+        sendingVideoBitrate,
+        receivingAudioBitrate,
+        receivingVideoBitrate,
+    } = monitor.storage
+
+    console.log(`Total inbound packets lost: ${totalInboundPacketsLost}`);
+    console.log(`Total inbound packets received: ${totalInboundPacketsReceived}`);
+    console.log(`Total outbound packets lost: ${totalOutboundPacketsLost}`);
+    console.log(`Total outbound packets received: ${totalOutboundPacketsReceived}`);
+    console.log(`Total outbound packets sent: ${totalOutboundPacketsSent}`);
+    console.log(`Total sent audio bytes: ${totalSentAudioBytes}`);
+    console.log(`Total sent video bytes: ${totalSentVideoBytes}`);
+    console.log(`Total received audio bytes: ${totalReceivedAudioBytes}`);
+    console.log(`Total received video bytes: ${totalReceivedVideoBytes}`);
+    console.log(`Total data channel bytes sent: ${totalDataChannelBytesSent}`);
+    console.log(`Total data channel bytes received: ${totalDataChannelBytesReceived}`);
+
+    console.log(`Lost Inbound packets since last collecting: ${deltaInboundPacketsLost}`);
+    console.log(`Received Inbound packets since last collecting: ${deltaInboundPacketsReceived}`);
+    console.log(`Lost Outbound packets since last collecting: ${deltaOutboundPacketsLost}`);
+    console.log(`Received Outbound packets since last collecting: ${deltaOutboundPacketsReceived}`);
+    console.log(`Sent Outbound packets since last collecting: ${deltaOutboundPacketsSent}`);
+    console.log(`Sent audio bytes since last collecting: ${deltaSentAudioBytes}`);
+    console.log(`Sent video bytes since last collecting: ${deltaSentVideoBytes}`);
+    console.log(`Received audio bytes since last collecting: ${deltaReceivedAudioBytes}`);
+    console.log(`Received video bytes since last collecting: ${deltaReceivedVideoBytes}`);
+    console.log(`Data channel bytes sent since last collecting: ${deltaDataChannelBytesSent}`);
+    console.log(`Data channel bytes received since last collecting: ${deltaDataChannelBytesReceived}`);
+
+    console.log(`Average RTT: ${avgRttInS}`);
+    console.log(`Sending audio bitrate: ${sendingAudioBitrate}`);
+    console.log(`Sending video bitrate: ${sendingVideoBitrate}`);
+    console.log(`Receiving audio bitrate: ${receivingAudioBitrate}`);
+    console.log(`Receiving video bitrate: ${receivingVideoBitrate}`);
+    
 });
+
 ```
 
-### PeerConnection Updates
+As mentioned above, the `ClientMonitor` instance stores entries, and each entry has a `stats` property that contains the raw stats collected from the WebRTC API. The `ClientMonitor` also stores calculated updates for each entry, which are derived from the raw stats. These calculated updates are accessible from the `ClientMonitor` instance and are updated every time the `stats-collected` event is emitted.
 
+### PeerConnection Entry
+
+**Accessing Stats**:
 ```javascript
-import { createClientMonitor } from "client-monitor-js";
+// from monitor
+monitor.peerConnections.forEach(pc => console.log(`PeerConnection: ${pc.statsId}`, pc.stats));
 
-// Create a ClientMonitor instance
-const monitor = createClientMonitor({
-    collectingPeriodInMs: 2000,
-});
+// or from storage
+[...monitor.storage.peerConnections()].forEach(pc => console.log(`PeerConnection: ${pc.statsId}`, pc.stats));
+```
 
-monitor.on("stats-collected", () => {
-    for (const peerConnection of monitor.peerConnections) {
-        console.log("average RTT in seconds", peerConnection.avgRttInS);
-        console.log("Sending audio bitrate on PC", peerConnection.sendingAudioBitrate);
-        console.log("Sending video bitrate on PC", peerConnection.sendingVideoBitrate);
-        console.log("Receiving audio bitrate on PC", peerConnection.receivingAudioBitrate);
-        console.log("Receiving video bitrate on PC", peerConnection.receivingVideoBitrate);
+**Accessing Calculated Updates**:
+```javascript
+
+monitor.on('stats-collected', () => {
+    for (const pc of monitor.peerConnections) {
+        console.log(`Between this and last collecting, the following stats were calculated for PeerConnection`, [
+            `Received bytes through data channel ${pc.deltaDataChannelBytesReceived}`,
+            `Sent bytes through data channel ${pc.deltaDataChannelBytesSent}`,
+            `Received bytes through inbound rtps ${pc.deltaInboundPacketsReceived}`,
+            `Sent bytes through outbound rtps ${pc.deltaOutboundPacketsSent}`,
+            `Lost packets on inbound rtps ${pc.deltaInboundPacketsReceived}`,
+            `Lost packets on outbound rtps ${pc.deltaOutboundPacketsSent}`,
+            `Outbound audio bitrate${pc.sendingAudioBitrate}`,
+            `Outbound video bitrate${pc.sendingVideoBitrate}`,
+            `Inbound audio bitrate${pc.receivingAudioBitrate}`,
+            `Inbound video bitrate${pc.receivingVideoBitrate}`,
+            `Received bytes on all audio tracks ${pc.deltaReceivedAudioBytes}`,
+            `Received bytes on all video tracks ${pc.deltaReceivedVideoBytes}`,
+            `Sent bytes on all audio tracks ${pc.deltaSentAudioBytes}`,
+            `Sent bytes on all video tracks ${pc.deltaSentVideoBytes}`,
+        ].join('\n'));
     }
 });
 ```
 
-### Inbound RTP stats updates
+**Accessing related entries**:
 
 ```javascript
-import { createClientMonitor } from "client-monitor-js";
+    const pc = monitor.getPeerConnectionStats(peerConnectionId);
+    if (pc) {
+        [...pc.inboundRtps()].forEach((inboundRtp) => void 0);
+        [...pc.outboundRtps()].forEach((outboundRtp) => void 0);
 
-// Create a ClientMonitor instance
-const monitor = createClientMonitor({
-    collectingPeriodInMs: 2000,
+        [...pc.localCandidates()].forEach((localICECandidate) => void 0);
+        [...pc.remoteCandidates()].forEach((remoteICECandidate) => void 0);
+        [...pc.iceCandidatePairs()].forEach((iceCandidatePair) => void 0);
+
+        [...pc.sctpTransports()].forEach((sctpTransport) => void 0);
+        [...pc.transceivers()].forEach((transceiver) => void 0);
+        [...pc.senders()].forEach((sender) => void 0);
+        [...pc.receivers()].forEach((receiver) => void 0);
+        [...pc.transports()].forEach((transport) => void 0);
+        [...pc.certificates()].forEach((certificate) => void 0);
+        [...pc.iceServers()].forEach((iceServer) => void 0);
+        
+    }
+```
+
+### MediaStreamTrack Entry
+
+
+**Collected tracks**:
+```javascript
+monitor.on('stats-collected', () => {
+    for (const track of monitor.tracks) {
+        console.log(`Track ${track.trackId} is ${track.kind}`);
+    }
 });
+```
 
-monitor.on("stats-collected", () => {
+**Accessing Calculated Updates**:
+```javascript
+monitor.on('stats-collected', () => {
+    for (const track of monitor.tracks) {
+        if (track?.direction === 'outbound') {
+            console.log(`Stats belongs to Track ${track.trackId} `);
+            console.log(`Lost packets reported by remote endpoint: ${track.remoteLostPackets}`);
+            console.log(`Received packets reported by remote endpoint: ${track.remoteReceivedPackets}`);
+            console.log(`Sent packets reported by local endpoint: ${track.sentPackets}`);
+            console.log(`Sending bitrate ${track.sendingBitrate}`);
+            console.log(`Associated sfu stream id: ${track.sfuStreamId}`);
+        }
+
+        if (trackStats?.direction === 'inbound') {
+            console.log(`Stats belongs to Track ${track.trackId} `);
+            console.log(`Lost packets reported by local endpoint: ${track.lostPackets}`);
+            console.log(`Received packets reported by local endpoint: ${track.receivedPackets}`);
+            console.log(`Received bitrate ${track.receivingBitrate}`);
+            console.log(`Associated sfu stream id: ${track.sfuStreamId}`);
+            console.log(`Associated sfu sink id: ${track.sfuSinkId}`);
+        }
+    }
+});
+```
+
+**Accessing related entries**
+```javascript
+monitor.on('stats-collected', () => {
+    for (const track of monitor.tracks) {
+        console.log(`Track ${track.trackId} is ${track.kind}`);
+        if (track.direction === 'outbound') {
+            [...track.outboundRtps()].forEach(outboundRtp => {
+                console.log(`Outbound RTP ${outboundRtp.getSsrc()} has ${outboundRtp.sentPackets} sent packets`);
+            });
+        }
+
+        if (track.direction === 'inbound') {
+            [...track.inboundRtps()].forEach(inboundRtp => {
+                console.log(`Inbound RTP ${inboundRtp.getSsrc()} has ${inboundRtp.receivedPackets} received packets`);
+            });
+        }
+    }
+});
+```
+
+### InboundRTP Entry
+
+**Accessing Stats**:
+
+```javascript
+monitor.on('stats-collected', () => {
     for (const inboundRtp of monitor.inboundRtps) {
-        console.log("mean opinion score for inbound-rtp", inboundRtp.score);
+        console.log(`InboundRtp ${inboundRtp.statsId} collected stats`, inboundRtp.stats);
+    }
+});
+```
+**Accessing Calculated Updates**:
+```javascript
+monitor.on('stats-collected', () => {
+    for (const inboundRtp of monitor.inboundRtps) {
+        console.log(`InboundRtp ${inboundRtp.getSsrc()} `);
+        console.log(`Received packets since last collecting: ${inboundRtp.receivedBytes}`);
+        console.log(`Received bitrate since last collecting: ${inboundRtp.receivingBitrate}`);
+        console.log(`Received packets since last collecting: ${inboundRtp.receivedPackets}`);
+        console.log(`Received frames since last collecting: ${inboundRtp.receivedFrames}`);
+        console.log(`Lost packets since last collecting: ${inboundRtp.lostPackets}`);
+        console.log(`Average jitter buffer delay since last collecting: ${inboundRtp.avgJitterBufferDelayInMs}`);
+        console.log(`Average RTT since last collecting: ${inboundRtp.avgRttInS}s`);
 
-        console.log("receiving bitrate", inboundRtp.receivingBitrate);
-        console.log("lost packets since last stats-collected", inboundRtp.lostPackets);
-        console.log("received packets since last stats-collected", inboundRtp.receivedPackets);
-        console.log("decoded frames since last stats-collected", inboundRtp.decodedFrames);
+        console.log(`Associated sfu stream id: ${inboundRtp.sfuStreamId}`);
+        console.log(`Associated sfu sink id: ${inboundRtp.sfuSinkId}`);
+        
     }
 });
 ```
 
-### Outbound RTP stats updates
+**Accessing related entries**:
+```javascript
+monitor.on('stats-collected', () => {
+    for (const inboundRtp of monitor.inboundRtps) {
+        
+        console.log(`inbound RTP associated with SSRC ${inboundRtp.getSsrc()} uses codec ${inboundRtp.getCodec()?.stats.mimeType}`);
+        console.log(`inbound RTP associated with SSRC ${inboundRtp.getSsrc()} remote endpoint sent ${inboundRtp.getRemoteOutboundRtp()?.stats.packetsSent} packets`);
+
+        inboundRtp.kind ==='audio' && console.log(`inbound RTP associated with SSRC ${inboundRtp.getSsrc()} has played out ${inboundRtp.getAudioPlayout()?.stats.totalSamplesCount} audio samples`);
+
+        const audioPlayout = inboundRtp.getAudioPlayout(); // The AudioPlayoutEntry associated with the inboundRtp
+        const peerConnection = inboundRtp.getPeerConnection(); // The PeerConnectionEntry associated with the inboundRtp
+        const trackId = inboundRtp.getTrackId(); // The trackId associated with the inboundRtp
+    }
+})
+```
+
+### OutboundRTP Entry
+
+**Accessing Stats**:
 
 ```javascript
-import { createClientMonitor } from "client-monitor-js";
-
-// Create a ClientMonitor instance
-const monitor = createClientMonitor({
-    collectingPeriodInMs: 2000,
-});
-
-monitor.on("stats-collected", () => {
+monitor.on('stats-collected', () => {
     for (const outboundRtp of monitor.outboundRtps) {
-        console.log("stability score outbound-rtp", outboundRtp.score);
-
-        console.log("sending bitrate", outboundRtp.sendingBitrate);
-        console.log("sent packets since last stats-collected", outboundRtp.sentPackets);
-
-        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp();
-        console.log(
-            "Received packets on remote inbound-rtp belongs to this outbound-rtp",
-            remoteInboundRtp?.receivedPackets
-        );
+        console.log(`OutboundRtp ${outboundRtp.statsId} collected stats`, outboundRtp.stats);
     }
 });
 ```
+
+**Accessing Calculated Updates**:
+```javascript
+monitor.on('stats-collected', () => {
+    for (const outboundRtp of monitor.outboundRtps) {
+        console.log(`OutboundRtp ${outboundRtp.getSsrc()} `);
+        console.log(`Sent packets since last collecting: ${outboundRtp.sentPackets}`);
+        console.log(`Sending bitrate since last collecting: ${outboundRtp.sendingBitrate}`);
+        console.log(`Sent bytes since last collecting: ${outboundRtp.sentBytes}`);
+        console.log(`Associated sfu stream id: ${outboundRtp.sfuStreamId}`);
+    }
+});
+```
+
+**Accessing related entries**:
+```javascript
+monitor.on('stats-collected', () => {
+    for (const outboundRtp of monitor.outboundRtps) {
+        console.log(`outbound RTP associated with SSRC ${outboundRtp.getSsrc()} uses codec ${outboundRtp.getCodec()?.stats.mimeType}`);
+        console.log(`outbound RTP associated with SSRC ${outboundRtp.getSsrc()} remote endpoint received ${outboundRtp.getRemoteInboundRtp()?.stats.packetsReceived} packets`);
+
+        const remoteInboundRtp = outboundRtp.getRemoteInboundRtp(); // The RemoteInboundRtpEntry associated with the outboundRtp
+        const peerConnection = outboundRtp.getPeerConnection(); // The PeerConnectionEntry associated with the outboundRtp
+        const trackId = outboundRtp.getTrackId(); // The trackId associated with the outboundRtp
+    }
+})
+```
+
 
 ## Detectors and Alerts
 

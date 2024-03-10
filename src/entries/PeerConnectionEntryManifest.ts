@@ -660,6 +660,9 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 }
                 return this._audioPlayouts.get(result.stats.playoutId);
             },
+            get kind() {
+                return result.stats.kind;
+            }
         }
         return result;
     }
@@ -717,6 +720,9 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 }
                 return remoteInboundRtps[0];
             },
+            get kind() {
+                return result.stats.kind;
+            },
 
             updateStabilityScore: (currentRttInS: number) => {
                 const remoteInb = result.getRemoteInboundRtp();
@@ -743,7 +749,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                     totalScore += weight * score;
                 }
                 result.score = totalScore / counter;
-            }
+            },
         }
         return result;
     }
