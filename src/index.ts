@@ -8,10 +8,9 @@ export type {
     ClientMonitorEvents,
 } from "./ClientMonitor";
 
-export type { CongestionDetectorConfig } from './detectors/CongestionDetector';
+export type { CongestionDetector } from './detectors/CongestionDetector';
 export type { CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
-export type { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
-export type { Detectors } from './Detectors';
+export type { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 export type { Collectors } from './Collectors';
 
 export type {

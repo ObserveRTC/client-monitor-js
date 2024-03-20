@@ -67,7 +67,7 @@ export function createCpuPerformanceDetector(config: CpuPerformanceDetectorConfi
 	const previousAlertState = alertState;
 	alertState = inboundIsOk && outboundIsOk ? 'off' : 'on';
 	if (previousAlertState !== alertState) {
-		clientMonitor.emit('cpu-performance-alert', alertState);
+		// clientMonitor.emit('cpu-performance-alert', alertState);
 	}
 	return {
 		id: 'cpu-issue-detector',

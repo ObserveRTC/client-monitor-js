@@ -5,6 +5,7 @@ export class TypedEventEmitter<T> extends EventEmitter {
 	public constructor(
 	) {
 		super();
+		this.setMaxListeners(Infinity);
 	}
 
 	public on<U extends Exclude<keyof T, number>>(type: U, listener: (data: T[U]) => void): this {
