@@ -1,4 +1,6 @@
+import EventEmitter from "events";
 import { AlertState, ClientMonitor } from "../ClientMonitor";
+import { InboundRtpEntry } from "../entries/StatsEntryInterfaces";
 
 /**
  * Configuration object for the AudioDesyncDetector function.
@@ -22,93 +24,94 @@ export type AudioDesyncDetectorConfig = {
 	fractionalCorrectionAlertOffThreshold: number;
 };
 
-export type AudioDesyncDetectorContext = AudioDesyncDetectorConfig & {
-	clientMonitor: ClientMonitor,
+export type AudioDesyncDetectorEvents = {
+	desync: [string],
+	sync: [string],
+	close: [],
 }
 
-export type AudioDesyncDetector = ReturnType<typeof createAudioDesyncDetector>;
+type AudioSyncTrace = {
+	correctedSamples: number,
+	prevCorrectedSamples: number,
+	desync: boolean,
+	visited: boolean,
+	inboundRtp: InboundRtpEntry,
+}
 
-/**
- * Creates an audio desynchronization detector process.
- * @param emitter The event emitter used to emit audio desynchronization events.
- * @param config The configuration for the audio desynchronization detector.
- * @returns The evaluator process function.
- */
-export function createAudioDesyncDetector(
-	context: AudioDesyncDetectorContext
-) {
-	type AudioSyncTrace = {
-		correctedSamples: number,
-		prevCorrectedSamples: number,
-		visited: boolean,
+export declare interface AudioDesyncDetector {
+	on<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
+	off<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
+	once<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
+	emit<K extends keyof AudioDesyncDetectorEvents>(event: K, ...events: AudioDesyncDetectorEvents[K]): boolean;
+}
+
+export class AudioDesyncDetector extends EventEmitter {
+	private _closed = false;
+	private readonly _states = new Map<number, AudioSyncTrace>();
+
+	public constructor(
+		private readonly config: AudioDesyncDetectorConfig
+	) {
+		super();
+		this.setMaxListeners(Infinity);
+		
 	}
-	const {
-		clientMonitor
-	} = context;
-	const audioSyncTraces = new Map<string, AudioSyncTrace>();
-	const id = 'audio-desync-detector';
-	let alertState: AlertState	= 'off';
-	const desyncedTrackIds = new Set<string>();
-	async function update() {
-		for (const inboundRtp of clientMonitor.storage.inboundRtps()) {
+
+	public close() {
+		if (this._closed) return;
+		this._closed = true;
+
+		this._states.clear();
+		this.emit('close');
+	}
+
+	public update(inboundRtps: IterableIterator<InboundRtpEntry>) {
+		for (const inboundRtp of inboundRtps) {
 			const stats = inboundRtp.stats;
+			const ssrc = stats.ssrc;
 			if (stats.kind !== 'audio' || inboundRtp.getTrackId() === undefined) {
 				continue;
 			}
-			const trackId = inboundRtp.getTrackId();
-			if (!trackId) {
-				continue;
-			}
-			let trace = audioSyncTraces.get(trackId);
-			if (!trace) {
-				trace = {
+
+			let state = this._states.get(ssrc);
+			if (!state) {
+				state = {
 					correctedSamples: 0,
 					prevCorrectedSamples: 0,
 					visited: false,
+					desync: false,
+					inboundRtp,
 				};
-				audioSyncTraces.set(trackId, trace);
+				this._states.set(ssrc, state);
 			}
 
-			trace.visited = true;
-			trace.correctedSamples = (stats.insertedSamplesForDeceleration ?? 0) + (stats.removedSamplesForAcceleration ?? 0);
-			const dCorrectedSamples = trace.correctedSamples - trace.prevCorrectedSamples;
+			state.visited = true;
+			state.correctedSamples = (stats.insertedSamplesForDeceleration ?? 0) + (stats.removedSamplesForAcceleration ?? 0);
+			const dCorrectedSamples = state.correctedSamples - state.prevCorrectedSamples;
 			if (dCorrectedSamples < 1 || (inboundRtp.receivedSamples ?? 0) < 1) {
 				continue;
 			}
+			const wasDesync = state.desync;
 			const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + (inboundRtp.receivedSamples ?? 0));
 
-			if (desyncedTrackIds.has(trackId)) {
-				// it is on for this track
-				if (context.fractionalCorrectionAlertOffThreshold < fractionalCorrection) {
-					desyncedTrackIds.add(trackId)
-				}
-			} else if (context.fractionalCorrectionAlertOnThreshold < fractionalCorrection) {
-				desyncedTrackIds.add(trackId)
+			if (wasDesync) {
+				state.desync = this.config.fractionalCorrectionAlertOffThreshold < fractionalCorrection;
+			} else {
+				state.desync = this.config.fractionalCorrectionAlertOnThreshold < fractionalCorrection;
 			}
-			
+
+			if (wasDesync !== state.desync) {
+				const trackId = inboundRtp.getTrackId();
+				trackId && this.emit(state.desync ? 'desync' : 'sync', trackId);
+			}
 		}
 
-		for (const [trackId, trace] of Array.from(audioSyncTraces.entries())) {
-			if (trace.visited === false) {
-				audioSyncTraces.delete(trackId);
-				continue;
+		for (const state of this._states.values()) {
+			if (state.visited === false) {
+				this._states.delete(state.inboundRtp.stats.ssrc);
 			}
-			trace.prevCorrectedSamples = trace.correctedSamples;
-			trace.visited = false;
+			state.prevCorrectedSamples = state.correctedSamples;
+			state.visited = false;
 		}
-		const prevAlertState = alertState;
-		alertState = 0 < desyncedTrackIds.size ? 'on' : 'off';
-		if (prevAlertState !== alertState) {
-			clientMonitor.emit('audio-desync-alert', alertState);
-		}
-	}
-
-	return {
-		id,
-		update,
-		desyncedTrackIds,
-		get alert() {
-			return alertState;
-		},
 	}
 }
