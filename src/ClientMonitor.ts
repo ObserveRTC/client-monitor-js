@@ -9,7 +9,7 @@ import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
 import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces';
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
-import { CongestionDetector } from './detectors/CongestionDetector';
+import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
 
 const logger = createLogger('ClientMonitor');
 
@@ -46,6 +46,12 @@ export interface ClientMonitorEvents {
         elapsedSinceLastSampleInMs: number,
         clientSample: ClientSample,
     },
+    'congestion': {
+        incomingBitrateAfterCongestion: number | undefined;
+        incomingBitrateBeforeCongestion: number | undefined;
+        outgoingBitrateAfterCongestion: number | undefined;
+        outgoingBitrateBeforeCongestion: number | undefined;
+    }
 }
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
@@ -243,12 +249,43 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         const detector = new CongestionDetector();
         const onUpdate = () => detector.update(this.storage.peerConnections());
+        const onCongestion = (...event: CongestionDetectorEvents['congestion']) => {
+            const [
+                peerConnectionStates
+            ] = event;
+            let incomingBitrateAfterCongestion: number | undefined;
+            let incomingBitrateBeforeCongestion: number | undefined;
+            let outgoingBitrateAfterCongestion: number | undefined;
+            let outgoingBitrateBeforeCongestion: number | undefined;
+            for (const state of peerConnectionStates) {
+                if (state.incomingBitrateAfterCongestion) {
+                    incomingBitrateAfterCongestion = (incomingBitrateAfterCongestion ?? 0) + state.incomingBitrateAfterCongestion;
+                }
+                if (state.incomingBitrateBeforeCongestion) {
+                    incomingBitrateBeforeCongestion = (incomingBitrateBeforeCongestion ?? 0) + state.incomingBitrateBeforeCongestion;
+                }
+                if (state.outgoingBitrateAfterCongestion) {
+                    outgoingBitrateAfterCongestion = (outgoingBitrateAfterCongestion ?? 0) + state.outgoingBitrateAfterCongestion;
+                }
+                if (state.outgoingBitrateBeforeCongestion) {
+                    outgoingBitrateBeforeCongestion = (outgoingBitrateBeforeCongestion ?? 0) + state.outgoingBitrateBeforeCongestion;
+                }
+            }
+            this.emit('congestion', {
+                incomingBitrateAfterCongestion,
+                incomingBitrateBeforeCongestion,
+                outgoingBitrateAfterCongestion,
+                outgoingBitrateBeforeCongestion,
+            });
+        }
 
         detector.once('close', () => {
             this.off('stats-collected', onUpdate);
+            detector.off('congestion', onCongestion);
             this._detectors.delete(CongestionDetector.name);
         });
         this.on('stats-collected', onUpdate);
+        detector.on('congestion', onCongestion);
         this._detectors.set(CongestionDetector.name, detector);
 
         return detector;
