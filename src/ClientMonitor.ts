@@ -105,6 +105,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         adapterMiddlewares.forEach((middleware) => {
             this.collectors.processor.addMiddleware(middleware);
         });
+
+        this.createCongestionDetector();
     }
 
     public get closed() {
