@@ -1,240 +1,113 @@
-import { AlertState, ClientMonitor, ClientMonitorEvents } from "../ClientMonitor";
-import { PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
+import EventEmitter from "events";
+import { IceCandidatePairEntry, PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
 
-/**
- * Configuration object for the CongestionDetector function.
- */
-export type CongestionDetectorConfig = {
-	/**
-	 * The minimum deviation threshold for Round-Trip Time (RTT) in milliseconds.
-	 * A higher value indicates a higher threshold for detecting congestion based on RTT deviation.
-	 */
-	minRTTDeviationThresholdInMs: number;
-
-	/**
-	 * The minimum duration threshold in milliseconds.
-	 * If congestion is detected, this is the minimum duration before a reevaluation takes place.
-	 */
-	minDurationThresholdInMs: number;
-	
-	/**
-	 * The deviation fold threshold. 
-	 * This value is used as a multiplier with the standard deviation to compare against the deviation in RTT.
-	 */
-	deviationFoldThreshold: number;
-
-	/**
-	 * The fraction loss threshold for packet loss.
-	 * If the fraction of packets lost is greater than this threshold, it is considered as congestion.
-	 */
-	fractionLossThreshold?: number;
-
-	/**
-	 * The window for measuring the RTT in milliseconds.
-	 */
-	measurementsWindowInMs: number;
-
-	/**
-	 * The minimum length of measurements in milliseconds. 
-	 * This determines the minimum duration for which measurements should be taken before considering them for congestion detection.
-	 */
-	minMeasurementsLengthInMs: number;
-
-	/**
-	 * The minimum number of consecutive ticks required to consider a connection as congested. 
-	 * A tick represents a deviation above the deviation fold threshold.
- 	*/
-	minConsecutiveTickThreshold: number;
-
+type PeerConnectionState = {
+	congested: boolean;
+	outgoingBitrateBeforeCongestion?: number;
+	outgoingBitrateAfterCongestion?: number;
+	incomingBitrateBeforeCongestion?: number;
+	incomingBitrateAfterCongestion?: number;		
 }
 
-export function createCongestionDetector(config: CongestionDetectorConfig & {
-	clientMonitor: ClientMonitor
-}) {
-	const {
-		clientMonitor,
-	}	= config;
+export type CongestionDetectorEvents = {
+	congestion: [PeerConnectionState[]];
+	close: [];
+}
 
-	type PeerConnectionState = {
-		measurements: { added: number, RttInMs: number }[],
-		sum: number,
-		sumSquares: number,
-		congested?: number,
-		visited: boolean,
-		ticks: number,
+export declare interface CongestionDetector {
+	on<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
+	off<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
+	once<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
+	emit<K extends keyof CongestionDetectorEvents>(event: K, ...events: CongestionDetectorEvents[K]): boolean;
+}
+
+export class CongestionDetector extends EventEmitter {
+	private _closed = false;
+	private _states = new Map<string, PeerConnectionState>();
+
+	public constructor(
+	) {
+		super();
+		this.setMaxListeners(Infinity);
+
 	}
-	let alertState: AlertState	= 'off';
-	const congestedPeerConnectionIds = new Set<string>();
-	const peerConnectionStates = new Map<string, PeerConnectionState>();
-	const isCongested = (now: number, state: PeerConnectionState, peerConnection: PeerConnectionEntry): boolean => {
-		const {
-			deltaInboundPacketsLost: totalInboundPacketsLost = 0,
-			deltaInboundPacketsReceived: totalInboundPacketsReceived = 0,
-			avgRttInS = -1,
-			deltaOutboundPacketsSent: totalOutboundPacketsSent = 0,
-			deltaOutboundPacketsLost: totalOutboundPacketsLost = 0,
-		} = peerConnection;
-		
-		if (state.congested !== undefined && (now - state.congested) < config.minDurationThresholdInMs) {
-			return true;
-		}
 
-		let inbFL = -1;
-		let outbFL = -1;
+	public update(peerConnections: IterableIterator<PeerConnectionEntry>) {
+		const visitedPeerConnectionIds = new Set<string>();
+		let gotCongested = false;
 
-		if (0 <= totalInboundPacketsLost && 0 < totalInboundPacketsReceived) {
-			inbFL = totalInboundPacketsLost / (totalInboundPacketsReceived + totalInboundPacketsLost);
-		}
-		if (0 <= totalOutboundPacketsLost && 0 < totalOutboundPacketsSent) {
-			outbFL = totalOutboundPacketsLost / (totalOutboundPacketsSent + totalOutboundPacketsLost);
-		}
-		const maxFL = Math.max(inbFL, outbFL);
-		if (config.fractionLossThreshold !== undefined && config.fractionLossThreshold < maxFL) {
-			return true;
-		}
+		for (const peerConnection of peerConnections) {
+			const { peerConnectionId } = peerConnection;
+			let state = this._states.get(peerConnectionId);
 
-		if (avgRttInS < 0 || config.measurementsWindowInMs < 1) {
-			return false;
-		}
-		const value = avgRttInS * 1000;
+			visitedPeerConnectionIds.add(peerConnectionId);
 
-		state.sum += value;
-		state.sumSquares += value * value;
-		state.measurements.push({
-			added: now,
-			RttInMs: value,
-		});
-		for (let check = true; check && 0 < state.measurements.length; ) {
-			const elapsedInMs = now - state.measurements[0].added;
-			if (elapsedInMs < config.measurementsWindowInMs) {
-				check = false;
-				continue;
-			}
-			const removedValue = state.measurements.shift()!.RttInMs;
-			state.sum -= removedValue;
-			state.sumSquares -= removedValue * removedValue;
-		}
-		if (state.measurements.length < 1 || (now - state.measurements[0].added) < config.minMeasurementsLengthInMs) {
-			return false;
-		}
-		
-		const mean = state.sum / state.measurements.length;
-		const variance = (state.sumSquares / state.measurements.length) - (mean * mean);
-		const stdDev = Math.sqrt(variance);
-		const deviation = Math.abs(value - mean);
-		if (deviation < config.minRTTDeviationThresholdInMs) {
-			return false;
-		}
-		if (config.deviationFoldThreshold * stdDev < deviation) {
-			++state.ticks;
-		} else {
-			state.ticks = 0;
-		}
-		return Math.max(0, config.minConsecutiveTickThreshold) < state.ticks;
-	}
-	let highestSeenSendingBitrate = 0
-	let highestSeenReceivingBitrate = 0
-	let highestSeenAvailableOutgoingBitrate = 0;
-	let highestSeenAvailableIncomingBitrate = 0;
-
-	async function update() {
-		const { storage } = clientMonitor;
-		const now = Date.now();
-		const congestedPeerConnectionIds = new Set<string>();
-		const trackIds: string[] = [];
-		for (const peerConnection of storage.peerConnections()) {
-			const { 
-				peerConnectionId 
-			} = peerConnection;
-			let state = peerConnectionStates.get(peerConnectionId);
 			if (!state) {
 				state = {
-					measurements: [],
-					sum: 0,
-					sumSquares: 0,
-					visited: false,
-					ticks: 0,
+					congested: false,
+					// outgoingBitrateBeforeCongestion: 0,
+					// outgoingBitrateAfterCongestion: 0,
+					// incomingBitrateBeforeCongestion: 0,
+					// incomingBitrateAfterCongestion: 0,
 				};
-				peerConnectionStates.set(peerConnectionId, state);
+				this._states.set(peerConnectionId, state);
 			}
-			state.visited = true;
+			const wasCongested = state.congested;
+			let isCongested = false;
 			
-			const wasCongested = state.congested !== undefined;
-			const congested = isCongested(now, state, peerConnection);
-			if (wasCongested && congested) {
-				// no change
-				continue;
-			}
-			if (!wasCongested && congested) {
-				// it become congested now
-				state.congested = now;
-				congestedPeerConnectionIds.add(peerConnectionId);
-				continue;
-			}
-			if (wasCongested && !congested) {
-				state.congested = undefined;
-				congestedPeerConnectionIds.delete(peerConnectionId);
-				continue;
+			for (const outboundRtp of peerConnection.outboundRtps()) {
+				isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
 			}
 
-			// it was not congested, and has not become congested
-			highestSeenSendingBitrate = Math.max(
-				highestSeenSendingBitrate, 
-				(storage.sendingAudioBitrate ?? 0) + (storage.sendingVideoBitrate ?? 0)
-			);
-			highestSeenReceivingBitrate = Math.max(
-				highestSeenReceivingBitrate, 
-				(storage.receivingAudioBitrate ?? 0) + (storage.receivingVideoBitrate ?? 0)
-			);
-			highestSeenAvailableOutgoingBitrate = Math.max(
-				highestSeenAvailableOutgoingBitrate, 
-				(storage.totalAvailableOutgoingBitrate ?? 0)
-			);
-			highestSeenAvailableIncomingBitrate = Math.max(
-				highestSeenAvailableIncomingBitrate, 
-				(storage.totalAvailableIncomingBitrate ?? 0)
-			);
-		}
+			let selectedCandidatePair: IceCandidatePairEntry | undefined;
+			for (const transport of peerConnection.transports()) {
+				selectedCandidatePair = transport.getSelectedIceCandidatePair();
+				if (selectedCandidatePair) break;
+			}
 
-		for (const [pcId, state] of Array.from(peerConnectionStates)) {
-			if (state.visited) {
-				state.visited = false;
+			if (!selectedCandidatePair) {
+				selectedCandidatePair = Array.from(peerConnection.iceCandidatePairs()).find(pair => pair.stats.nominated === true);
+			}
+
+			selectedCandidatePair?.stats.availableIncomingBitrate;
+			selectedCandidatePair?.stats.availableOutgoingBitrate;
+
+			if (isCongested) {
+				state.incomingBitrateAfterCongestion = selectedCandidatePair?.stats.availableIncomingBitrate ?? state.incomingBitrateAfterCongestion;
+				state.outgoingBitrateAfterCongestion = selectedCandidatePair?.stats.availableOutgoingBitrate ?? state.outgoingBitrateAfterCongestion;
+				state.congested = true;
 			} else {
-				peerConnectionStates.delete(pcId);
+				state.incomingBitrateBeforeCongestion = selectedCandidatePair?.stats.availableIncomingBitrate ?? state.incomingBitrateBeforeCongestion;
+				state.outgoingBitrateBeforeCongestion = selectedCandidatePair?.stats.availableOutgoingBitrate ?? state.outgoingBitrateBeforeCongestion;
+				state.congested = false;
+			}
+			
+			if (wasCongested === isCongested) {
+				if (isCongested) {
+					state.incomingBitrateBeforeCongestion = undefined;
+					state.outgoingBitrateBeforeCongestion = undefined;
+				} else {
+					state.incomingBitrateAfterCongestion = undefined;
+					state.outgoingBitrateAfterCongestion = undefined;
+				}
+			} else if (!wasCongested && isCongested) {
+				gotCongested = true;
 			}
 		}
-		const prevState = alertState;
-		alertState = congestedPeerConnectionIds.size < 1 ? 'off' : 'on';
-		if (prevState !== alertState) {
-			clientMonitor.emit('congestion-alert', alertState);
-			if (alertState === 'off') {
-				highestSeenSendingBitrate = 0;
-				highestSeenReceivingBitrate = 0;
-				highestSeenAvailableOutgoingBitrate = 0;
-				highestSeenAvailableIncomingBitrate = 0;
+
+		gotCongested && this.emit('congestion', Array.from(this._states.values()));
+
+		for (const [peerConnectionId] of Array.from(this._states)) {
+			if (!visitedPeerConnectionIds.has(peerConnectionId)) {
+				this._states.delete(peerConnectionId);
 			}
 		}
 	}
-	return {
-		id: 'congestion-detector',
-		get alert() {
-			return alertState;
-		},
-		get congestedPeerConnectionIds() {
-			return congestedPeerConnectionIds;
-		},
-		get highestSeenAvailableIncomingBitrate() {
-			return highestSeenAvailableIncomingBitrate;
-		},
-		get highestSeenAvailableOutgoingBitrate() {
-			return highestSeenAvailableOutgoingBitrate;
-		},
-		get highestSeenReceivingBitrate() {
-			return highestSeenReceivingBitrate;
-		},
-		get highestSeenSendingBitrate() {
-			return highestSeenSendingBitrate;
-		},
-		update,
-	};
+
+	public close() {
+		if (this._closed) return;
+		this._closed = true;
+
+		this.emit('close');
+	}
 }

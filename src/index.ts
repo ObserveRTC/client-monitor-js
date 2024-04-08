@@ -3,15 +3,15 @@ export type { StatsProvider } from "./collectors/StatsProvider";
 export type { MediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
 export type { PeerConnectionStatsCollector } from "./collectors/PeerConnectionStatsCollector";
 export type {
+    ClientIssue,
     ClientMonitor,
     ClientMonitorConfig,
     ClientMonitorEvents,
 } from "./ClientMonitor";
 
-export type { CongestionDetectorConfig } from './detectors/CongestionDetector';
+export type { CongestionDetector } from './detectors/CongestionDetector';
 export type { CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
-export type { AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
-export type { Detectors } from './Detectors';
+export type { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 export type { Collectors } from './Collectors';
 
 export type {
