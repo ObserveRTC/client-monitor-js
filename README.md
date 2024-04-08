@@ -13,7 +13,7 @@ Table of Contents:
     -   [MediaStreamTrack Entry](#mediastreamtrack-entry)
     -   [InboundRTP Entry](#inboundrtp-entry)
     -   [OutboundRTP Entry](#outboundrtp-entry)
--   [Detectors and Issues](#issues-and-detectors)
+-   [Detectors and Issues](#detectors-and-issues)
     -   [Congestion Detector](#congestion-detector)
     -   [Audio Desync Detector](#audio-desync-detector)
     -   [CPU Performance Detector](#cpu-performance-detector)
