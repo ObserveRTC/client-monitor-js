@@ -3,6 +3,7 @@ export type { StatsProvider } from "./collectors/StatsProvider";
 export type { MediasoupStatsCollector } from "./collectors/MediasoupStatsCollector";
 export type { PeerConnectionStatsCollector } from "./collectors/PeerConnectionStatsCollector";
 export type {
+    ClientIssue,
     ClientMonitor,
     ClientMonitorConfig,
     ClientMonitorEvents,

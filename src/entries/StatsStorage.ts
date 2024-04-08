@@ -56,6 +56,8 @@ export class StatsStorage {
     public totalSentVideoBytes = 0;
     public totalReceivedAudioBytes = 0;
     public totalReceivedVideoBytes = 0;
+    public totalAvailableIncomingBitrate?: number;
+    public totalAvailableOutgoingBitrate?: number;
 
     public deltaInboundPacketsLost?: number;
     public deltaInboundPacketsReceived?: number;
@@ -68,8 +70,7 @@ export class StatsStorage {
     public deltaSentVideoBytes?: number;
     public deltaReceivedAudioBytes?: number;
     public deltaReceivedVideoBytes?: number;
-    public totalAvailableIncomingBitrate?: number;
-    public totalAvailableOutgoingBitrate?: number;
+
     public avgRttInS?: number;
 
     public highestSeenSendingBitrate?: number;

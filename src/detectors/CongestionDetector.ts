@@ -1,5 +1,4 @@
 import EventEmitter from "events";
-import { ClientMonitor } from "../ClientMonitor";
 import { IceCandidatePairEntry, PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
 
 type PeerConnectionState = {
@@ -30,7 +29,7 @@ export class CongestionDetector extends EventEmitter {
 	) {
 		super();
 		this.setMaxListeners(Infinity);
-		
+
 	}
 
 	public update(peerConnections: IterableIterator<PeerConnectionEntry>) {

@@ -13,7 +13,8 @@ Table of Contents:
     -   [MediaStreamTrack Entry](#mediastreamtrack-entry)
     -   [InboundRTP Entry](#inboundrtp-entry)
     -   [OutboundRTP Entry](#outboundrtp-entry)
--   [Detectors and Alerts](#detectors-and-alerts)
+-   [Detectors and Issues](#issues-and-detectors)
+    -   [Congestion Detector](#congestion-detector)
     -   [Audio Desync Detector](#audio-desync-detector)
     -   [CPU Performance Detector](#cpu-performance-detector)
 -   [Configurations](#configurations)
@@ -149,6 +150,11 @@ monitor.on('stats-collected', () => {
         sendingVideoBitrate,
         receivingAudioBitrate,
         receivingVideoBitrate,
+
+        highestSeenSendingBitrate,
+        highestSeenReceivingBitrate,
+        highestSeenAvailableOutgoingBitrate,
+        highestSeenAvailableIncomingBitrate,
     } = monitor.storage
 
     console.log(`Total inbound packets lost: ${totalInboundPacketsLost}`);
@@ -180,6 +186,11 @@ monitor.on('stats-collected', () => {
     console.log(`Sending video bitrate: ${sendingVideoBitrate}`);
     console.log(`Receiving audio bitrate: ${receivingAudioBitrate}`);
     console.log(`Receiving video bitrate: ${receivingVideoBitrate}`);
+
+    console.log(`Highest seen sending bitrate: ${highestSeenSendingBitrate}`);
+    console.log(`Highest seen receiving bitrate: ${highestSeenReceivingBitrate}`);
+    console.log(`Highest seen available outgoing bitrate: ${highestSeenAvailableOutgoingBitrate}`);
+    console.log(`Highest seen available incoming bitrate: ${highestSeenAvailableIncomingBitrate}`);
     
 });
 
@@ -391,83 +402,136 @@ monitor.on('stats-collected', () => {
 ```
 
 
-## Detectors and Alerts
+## Detectors and Issues
 
-Detectors and alerts provide events of tracking and responding to anomalies or performance issues based on the polled stats. Detectors are components that continuously monitor for specific conditions in the polled stats, and set an alert if certain thresholds are hit. You can subscribe to alerts of an instantiated client-monitor-js and configure detectors via initial configurations.
+ClientMonitor comes with Detectors detect various issues and anomalies in the collected stats. These detectors are continuously monitoring the stats and set an alert if certain thresholds are hit. You can create detectors and subscribe to alerts of an instantiated client-monitor-js.
 
-List of built-in alerts:
+For example: 
 
--   `audio-desync-alert`: triggered when for an audio track several acceleration and deceleration is detected in a short amount of time indicating that the controlling system tries compensate discrepancies.
--   `cpu-performance-alert`: triggered whenever a browser detects quality limitation becasue of CPU, or the number of decoded frames per sec hit a certain threshold
+```javascript
+const detector = monitor.createCongestionDetector();
+
+detector.on('congestion', event => {
+    console.log('Congestion ', event);
+});
+
+// Once the detector is created, you can subscribe to the monitor congestion event
+
+monitor.on('congestion', event => {
+   // same as above
+});
+```
+
+Detector can be created to add issue to the monitor whenever a certain condition is met.
+    
+```javascript
+const detector = monitor.createCongestionDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    },
+});
+```
+
+Issues can be added through the client monitor instance. For example:
+
+```javascript
+monitor.addIssue({
+    severity: 'critical',
+    description: 'Media device is crashed',
+    timestamp: Date.now(),
+    attachments: {
+        clientId,
+        reason,
+    },
+});
+```
+
+The severity of the issue can be one of the following values: `critical`, `major`, `minor`.
+
+As mentioned above, if a detector is created with an option to create an issue on detection, the detector will automatically add an issue to the monitor whenever the condition is met.
+
+Currently the following Detectors are added to ClientMonitor:
+
+### Congestion Detector
+
+```javascript
+const detector = monitor.createCongestionDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    }
+});
+
+const onCongestion = (event) => {
+    console.log('congestion detected on media streaming');
+    console.log("Available incoming bitrate before congestion", event.incomingBitrateBeforeCongestion);
+    console.log("Available outgoing bitrate before congestion", event.outgoingBitrateBeforeCongestion);
+    console.log("Available incoming bitrate after congestion", event.incomingBitrateAfterCongestion);
+    console.log("Available outgoing bitrate after congestion", event.outgoingBitrateAfterCongestion);
+};
+
+detector.once('close', () => {
+    console.log('congestion detector is closed');
+    detector.off('congestion', onCongestion);
+})
+detector.on('congestion', onCongestion);
+
+setTimeout(() => {
+    detector.close();
+}, 10000);
+```
 
 ### Audio Desync Detector
 
 ```javascript
-import { createClientMonitor } from 'client-monitor-js';
-
-// Create a ClientMonitor instance
-const monitor = createClientMonitor({
-    collectingPeriodInMs: 2000,
-});
-
-monitor.detectors.addAudioDesyncDetector({
-    /**
-     * The fractional threshold used to determine if the audio desynchronization
-     * correction is considered significant or not.
-     * It represents the minimum required ratio of corrected samples to total samples.
-     * For example, a value of 0.1 means that if the corrected samples ratio
-     * exceeds 0.1, it will be considered a significant audio desynchronization issue.
-     */
-    fractionalCorrectionAlertOnThreshold: 0.1;
-    /**
-     * The fractional threshold used to determine if the audio desynchronization
-     * correction is considered negligible and the alert should be turned off.
-     * It represents the maximum allowed ratio of corrected samples to total samples.
-     * For example, a value of 0.05 means that if the corrected samples ratio
-     * falls below 0.05, the audio desynchronization alert will be turned off.
-     */
-    fractionalCorrectionAlertOffThreshold: 0.2;
-});
-
-monitor.on('audio-desync-alert', (alertState) => {
-    if (alertState === 'on') {
-        console.log('Audio is desynced from video');
-    } else if (alertState === 'off') {
-        console.log('Audio is synced back');
+const detector = monitor.createAudioDesyncDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
     }
 });
+
+const onDesync = (trackId) => {
+    console.log('Audio desync detected on track', trackId);
+}
+
+detector.once('close', () => {
+    detector.off('desync', onDesync);
+});
+detector.on('desync', onDesync);
+
 ```
 
 ### CPU Performance Detector
 
+
 ```javascript
-monitor.detectors.addCpuPerformanceDetector({
-    /**
-     * The fractional threshold used to determine if the incoming frames
-     * dropped fraction is considered significant or not.
-     * It represents the maximum allowed ratio of dropped frames to received frames.
-     * For example, a value of 0.1 means that if the dropped frames fraction
-     * exceeds 0.1, it will be considered a significant issue.
-     */
-    droppedIncomingFramesFractionAlertOn: 0.5;
-    /**
-     * The fractional threshold used to determine if the incoming frames
-     * dropped fraction is considered negligible and the alert should be turned off.
-     * It represents the maximum allowed ratio of dropped frames to received frames.
-     * For example, a value of 0.05 means that if the dropped frames fraction
-     * falls below 0.05, the CPU issue alert will be turned off.
-     */
-    droppedIncomingFramesFractionAlertOff: 0.8;
-})
 
-
-monitor.on('cpu-performance-alert', alertState => {
-    if (alertState === 'on') {
-        console.log('CPU performance problem is detected');
-    } else if (alertState === 'off') {
-        console.log('CPU performance problem is gone');
+const detector = monitor.createCpuPerformanceIssueDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
     }
-})
+});
+
+const onStateChanged = (state) => {
+   console.log('CPU performance state changed', state);
+};
+
+detector.once('close', () => {
+    detector.off('statechanged', onStateChanged);
+});
+detector.on('statechanged', onStateChanged);
+
 ```
 
 ## Configurations

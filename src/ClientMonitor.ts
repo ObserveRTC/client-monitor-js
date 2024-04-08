@@ -10,6 +10,7 @@ import * as validators from './utils/validators';
 import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces';
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
+import { CpuPerformanceDetector, CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
 
 const logger = createLogger('ClientMonitor');
 
@@ -33,6 +34,15 @@ export type ClientMonitorConfig = {
     samplingTick?: number;
 };
 
+export type ClientIssue = {
+    severity: 'critical' | 'major' | 'minor';
+    timestamp?: number,
+    description?: string,
+    peerConnectionId?: string,
+    mediaTrackId?: string,
+    attachments?: Record<string, unknown>,
+}
+
 export type AlertState = 'on' | 'off';
 
 export interface ClientMonitorEvents {
@@ -51,7 +61,10 @@ export interface ClientMonitorEvents {
         incomingBitrateBeforeCongestion: number | undefined;
         outgoingBitrateAfterCongestion: number | undefined;
         outgoingBitrateBeforeCongestion: number | undefined;
-    }
+    },
+    'cpulimitation': AlertState,
+    'audio-desync': AlertState,
+    'issue': ClientIssue,
 }
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
@@ -105,8 +118,6 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         adapterMiddlewares.forEach((middleware) => {
             this.collectors.processor.addMiddleware(middleware);
         });
-
-        this.createCongestionDetector();
     }
 
     public get closed() {
@@ -234,6 +245,20 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._sampler.addLocalSDP(localSDP);
     }
 
+    public addIssue(issue: ClientIssue) {
+        this._sampler.addCustomCallEvent({
+            name: 'CLIENT_ISSUE',
+            value: issue.severity,
+            peerConnectionId: issue.peerConnectionId,
+            mediaTrackId: issue.mediaTrackId,
+            message: issue.description,
+            timestamp: issue.timestamp ?? Date.now(),
+            attachments: issue.attachments ? JSON.stringify(issue.attachments): undefined,
+        });
+
+        this.emit('issue', issue);
+    }
+
     public setCollectingPeriod(collectingPeriodInMs: number): void {
         this._config.collectingPeriodInMs = collectingPeriodInMs;
         this._setupTimer();
@@ -244,10 +269,18 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._setupTimer();
     }
 
-    public createCongestionDetector(): CongestionDetector {
-        const exxistingDetector = this._detectors.get(CongestionDetector.name);
+    public createCongestionDetector(options?: { 
+        createIssueOnDetection?: {
+            attachments?: Record<string, unknown>,
+            severity: 'critical' | 'major' | 'minor',
+        },
+    }): CongestionDetector {
+        const existingDetector = this._detectors.get(CongestionDetector.name);
+        const {
+            createIssueOnDetection,
+        } = options ?? {};
 
-        if (exxistingDetector) return exxistingDetector as CongestionDetector;
+        if (existingDetector) return existingDetector as CongestionDetector;
 
         const detector = new CongestionDetector();
         const onUpdate = () => detector.update(this.storage.peerConnections());
@@ -279,6 +312,22 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                 outgoingBitrateAfterCongestion,
                 outgoingBitrateBeforeCongestion,
             });
+
+            if (createIssueOnDetection) {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: 'Congestion detected',
+                    timestamp: Date.now(),
+                    attachments: {
+                        ...(createIssueOnDetection.attachments ?? {}),
+                        incomingBitrateAfterCongestion,
+                        incomingBitrateBeforeCongestion,
+                        outgoingBitrateAfterCongestion,
+                        outgoingBitrateBeforeCongestion,
+                        
+                    },
+                })
+            }
         }
 
         detector.once('close', () => {
@@ -293,23 +342,95 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return detector;
     }
 
-    public createAudioDesyncDetector(config?: AudioDesyncDetectorConfig): AudioDesyncDetector {
-        const exxistingDetector = this._detectors.get(AudioDesyncDetector.name);
+    public createAudioDesyncDetector(config?: AudioDesyncDetectorConfig & { 
+        createIssueOnDetection?: {
+            attachments?: Record<string, unknown>,
+            severity: 'critical' | 'major' | 'minor',
+        },
+    }): AudioDesyncDetector {
+        const existingDetector = this._detectors.get(AudioDesyncDetector.name);
 
-        if (exxistingDetector) return exxistingDetector as AudioDesyncDetector;
+        if (existingDetector) return existingDetector as AudioDesyncDetector;
 
         const detector = new AudioDesyncDetector({
             fractionalCorrectionAlertOnThreshold: config?.fractionalCorrectionAlertOnThreshold ?? 0.1,
             fractionalCorrectionAlertOffThreshold: config?.fractionalCorrectionAlertOffThreshold ?? 0.05,
         });
         const onUpdate = () => detector.update(this.storage.inboundRtps());
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onDesync = (trackId: string) => {
+            this.emit('audio-desync', 'on');
+            if (!createIssueOnDetection) return;
+
+            this.addIssue({
+                severity: createIssueOnDetection.severity,
+                description: 'Audio desync detected',
+                timestamp: Date.now(),
+                peerConnectionId: this.storage.getTrack(trackId)?.getPeerConnection()?.peerConnectionId,
+                mediaTrackId: trackId,
+                attachments: createIssueOnDetection.attachments,
+            });
+        };
+        const onSync = () => {
+            this.emit('audio-desync', 'off');
+        }
 
         detector.once('close', () => {
             this.off('stats-collected', onUpdate);
+            detector.off('desync', onDesync);
+            detector.off('sync', onSync);
             this._detectors.delete(AudioDesyncDetector.name);
         });
         this.on('stats-collected', onUpdate);
+        detector.on('desync', onDesync);
+        detector.on('sync', onSync);
+
         this._detectors.set(AudioDesyncDetector.name, detector);
+
+        return detector;
+    }
+
+    public createCpuPerformanceIssueDetector(config?: CpuPerformanceDetectorConfig & { 
+        createIssueOnDetection?: {
+            attachments?: Record<string, unknown>,
+            severity: 'critical' | 'major' | 'minor',
+        },
+    }): CpuPerformanceDetector {
+        const existingDetector = this._detectors.get(CpuPerformanceDetector.name);
+
+        if (existingDetector) return existingDetector as CpuPerformanceDetector;
+
+        const detector = new CpuPerformanceDetector(config ?? {});
+        const onUpdate = () => detector.update(this.storage.peerConnections());
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onStateChanged = (state: AlertState) => {
+            this.emit('cpulimitation', state);
+            
+            if (!createIssueOnDetection || state !== 'on') return;
+
+            this.addIssue({
+                severity: createIssueOnDetection.severity,
+                description: 'Audio desync detected',
+                timestamp: Date.now(),
+                attachments: createIssueOnDetection.attachments,
+            });
+        };
+
+        detector.once('close', () => {
+            this.off('stats-collected', onUpdate);
+            detector.off('statechanged', onStateChanged);
+            this._detectors.delete(CpuPerformanceDetector.name);
+        });
+        this.on('stats-collected', onUpdate);
+        detector.on('statechanged', onStateChanged);
+
+        this._detectors.set(CpuPerformanceDetector.name, detector);
 
         return detector;
     }
@@ -401,6 +522,138 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     public get tracks() {
         return [...this.storage.tracks()];
+    }
+
+    public get sendingAudioBitrate() {
+        return this.storage.sendingAudioBitrate;
+    }
+
+    public get sendingVideoBitrate() {
+        return this.storage.sendingVideoBitrate;
+    }
+
+    public get receivingAudioBitrate() {
+        return this.storage.receivingAudioBitrate;
+    }
+
+    public get receivingVideoBitrate() {
+        return this.storage.receivingVideoBitrate;
+    }
+
+    public get totalInboundPacketsLost() {
+        return this.storage.totalInboundPacketsLost;
+    }
+
+    public get totalInboundPacketsReceived() {
+        return this.storage.totalInboundPacketsReceived;
+    }
+
+    public get totalOutboundPacketsSent() {
+        return this.storage.totalOutboundPacketsSent;
+    }
+
+    public get totalOutboundPacketsReceived() {
+        return this.storage.totalOutboundPacketsReceived;
+    }
+
+    public get totalOutboundPacketsLost() {
+        return this.storage.totalOutboundPacketsLost;
+    }
+
+    public get totalDataChannelBytesSent() {
+        return this.storage.totalDataChannelBytesSent;
+    }
+
+    public get totalDataChannelBytesReceived() {
+        return this.storage.totalDataChannelBytesReceived;
+    }
+
+    public get totalSentAudioBytes() {
+        return this.storage.totalSentAudioBytes;
+    }
+
+    public get totalSentVideoBytes() {
+        return this.storage.totalSentVideoBytes;
+    }
+
+    public get totalReceivedAudioBytes() {
+        return this.storage.totalReceivedAudioBytes;
+    }
+
+    public get totalReceivedVideoBytes() {
+        return this.storage.totalReceivedVideoBytes;
+    }
+
+    public get totalAvailableIncomingBitrate() {
+        return this.storage.totalAvailableIncomingBitrate;
+    }
+
+    public get totalAvailableOutgoingBitrate() {
+        return this.storage.totalAvailableOutgoingBitrate;
+    }
+
+    public get deltaInboundPacketsLost() {
+        return this.storage.deltaInboundPacketsLost;
+    }
+
+    public get deltaInboundPacketsReceived() {
+        return this.storage.deltaInboundPacketsReceived;
+    }
+
+    public get deltaOutboundPacketsSent() {
+        return this.storage.deltaOutboundPacketsSent;
+    }
+
+    public get deltaOutboundPacketsReceived() {
+        return this.storage.deltaOutboundPacketsReceived;
+    }
+
+    public get deltaOutboundPacketsLost() {
+        return this.storage.deltaOutboundPacketsLost;
+    }
+
+    public get deltaDataChannelBytesSent() {
+        return this.storage.deltaDataChannelBytesSent;
+    }
+
+    public get deltaDataChannelBytesReceived() {
+        return this.storage.deltaDataChannelBytesReceived;
+    }
+
+    public get deltaSentAudioBytes() {
+        return this.storage.deltaSentAudioBytes;
+    }
+
+    public get deltaSentVideoBytes() {
+        return this.storage.deltaSentVideoBytes;
+    }
+
+    public get deltaReceivedAudioBytes() {
+        return this.storage.deltaReceivedAudioBytes;
+    }
+
+    public get deltaReceivedVideoBytes() {
+        return this.storage.deltaReceivedVideoBytes;
+    }
+
+    public get avgRttInSec() {
+        return this.storage.avgRttInS;
+    }
+
+    public get highestSeenSendingBitrate() {
+        return this.storage.highestSeenSendingBitrate;
+    }
+
+    public get highestSeenReceivingBitrate() {
+        return this.storage.highestSeenReceivingBitrate;
+    }
+
+    public get highestSeenAvailableOutgoingBitrate() {
+        return this.storage.highestSeenAvailableOutgoingBitrate;
+    }
+
+    public get highestSeenAvailableIncomingBitrate() {
+        return this.storage.highestSeenAvailableIncomingBitrate;
     }
 
     private _setupTimer(): void {
