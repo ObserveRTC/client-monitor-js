@@ -30,7 +30,7 @@ Table of Contents:
 -   [Getting Involved](#getting-involved)
 -   [License](#license)
 
-## Qucik Start
+## Quick Start
 
 Install it from [npm](https://www.npmjs.com/package/@observertc/client-monitor-js) package repository.
 
