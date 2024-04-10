@@ -105,7 +105,7 @@ export class Sampler {
         this._marker = value;
     }
 
-    public setUser(userId?: string) {
+    public setUserId(userId?: string) {
         this._userId = userId;
     }
 

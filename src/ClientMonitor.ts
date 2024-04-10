@@ -207,8 +207,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._sampler.setMarker(value);
     }
 
-    public setUser(userId?: string) {
-        this._sampler.setUser(userId);
+    public setUserId(userId?: string) {
+        this._sampler.setUserId(userId);
     }
 
     public setMediaDevices(...devices: MediaDevice[]): void {
