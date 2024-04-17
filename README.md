@@ -534,6 +534,33 @@ detector.on('statechanged', onStateChanged);
 
 ```
 
+### Video Freeze Detector
+
+```javascript
+const detector = monitor.createVideoFreezesDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    }
+});
+detector.on('freezedVideoStarted', event => {
+    console.log('Freezed video started');
+    console.log('TrackId', event.trackId);
+    console.log('PeerConnectionId', event.peerConnectionId);
+    console.log('SSRC:', event.ssrc);
+});
+
+detector.on('freezedVideoEnded', event => {
+    console.log('Freezed video ended');
+    console.log('TrackId', event.trackId);
+    console.log('Freeze duration in Seconds', event.durationInS);
+    console.log('PeerConnectionId', event.peerConnectionId);
+    console.log('SSRC:', event.ssrc);
+});
+```
+
 ## Configurations
 
 ```javascript

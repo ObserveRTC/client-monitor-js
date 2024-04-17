@@ -452,6 +452,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             detector.off('freezedVideoEnded', onFreezeEnded);
             this._detectors.delete(VideoFreezesDetector.name);
         });
+        detector.on('freezedVideoStarted', onFreezeStarted);
+        detector.on('freezedVideoEnded', onFreezeEnded);
 
         this._detectors.set(VideoFreezesDetector.name, detector);
 
