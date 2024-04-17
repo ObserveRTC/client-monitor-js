@@ -11,6 +11,12 @@ import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces'
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
 import { CpuPerformanceDetector, CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
+import  {
+    VideoFreezesDetector,
+    VideoFreezesDetectorConfig,
+    FreezedVideoStartedEvent,
+    FreezedVideoEndedEvent,
+} from './detectors/VideoFreezesDetector';
 
 const logger = createLogger('ClientMonitor');
 
@@ -64,6 +70,10 @@ export interface ClientMonitorEvents {
     },
     'cpulimitation': AlertState,
     'audio-desync': AlertState,
+    'freezed-video': {
+        trackId: string,
+        peerConnectionId: string | undefined,
+    },
     'issue': ClientIssue,
 }
 
@@ -393,6 +403,57 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         detector.on('sync', onSync);
 
         this._detectors.set(AudioDesyncDetector.name, detector);
+
+        return detector;
+    }
+
+    public createVideoFreezesDetector(config?: VideoFreezesDetectorConfig & { 
+        createIssueOnDetection?: {
+            attachments?: Record<string, unknown>,
+            severity: 'critical' | 'major' | 'minor',
+        },
+    }): VideoFreezesDetector {
+        const existingDetector = this._detectors.get(VideoFreezesDetector.name);
+
+        if (existingDetector) return existingDetector as VideoFreezesDetector;
+
+        const detector = new VideoFreezesDetector({
+        });
+        const onUpdate = () => detector.update(this.storage.inboundRtps());
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onFreezeStarted = (event: FreezedVideoStartedEvent) => {
+            this.emit('freezed-video', {
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+            });
+        };
+        const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
+            if (createIssueOnDetection) {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: 'Video Freeze detected',
+                    timestamp: Date.now(),
+                    peerConnectionId: event.peerConnectionId,
+                    mediaTrackId: event.trackId,
+                    attachments: {
+                        durationInS: event.durationInS,
+                        ...(createIssueOnDetection.attachments ?? {})
+                    },
+                });
+            }
+        }
+
+        detector.once('close', () => {
+            this.off('stats-collected', onUpdate);
+            detector.off('freezedVideoStarted', onFreezeStarted);
+            detector.off('freezedVideoEnded', onFreezeEnded);
+            this._detectors.delete(VideoFreezesDetector.name);
+        });
+
+        this._detectors.set(VideoFreezesDetector.name, detector);
 
         return detector;
     }
