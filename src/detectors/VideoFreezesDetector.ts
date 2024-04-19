@@ -26,7 +26,7 @@ export type VideoFreezesDetectorEvents = {
 type InboundRtpStatsTrace = {
 	ssrc: number,
 	lastFreezeCount: number,
-	freezedStartedDuration: number,
+	freezedStartedDuration?: number,
 	freezed: boolean,
 	visited: boolean,
 }
@@ -93,9 +93,9 @@ export class VideoFreezesDetector extends EventEmitter {
 					ssrc,
 				})
 			} else if (wasFreezed && !trace.freezed) {
-				const durationInS = Math.max(0,  (stats.totalFreezesDuration ?? 0) - trace.freezedStartedDuration);
+				const durationInS = Math.max(0,  (stats.totalFreezesDuration ?? 0) - (trace.freezedStartedDuration ?? 0));
 
-				trace.freezedStartedDuration = 0;
+				trace.freezedStartedDuration = undefined;
 
 				0 < durationInS && this.emit('freezedVideoEnded', {
 					peerConnectionId: inboundRtp.getPeerConnection()?.peerConnectionId,
