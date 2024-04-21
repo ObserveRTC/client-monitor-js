@@ -389,6 +389,8 @@ export class StatsStorage {
             }
         }
         this.avgRttInS = avgRttInS;
+        this.sendingFractionLost = Math.round(this.sendingFractionLost * 100) / 100;
+        this.receivingFractionLost = Math.round(this.receivingFractionLost * 100) / 100;
     }
 
     private _updateTracks() {
