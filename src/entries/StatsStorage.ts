@@ -42,8 +42,11 @@ export class StatsStorage {
     
     public sendingAudioBitrate?: number;
     public sendingVideoBitrate?: number;
+    public sendingFractionLost?: number; 
+
     public receivingAudioBitrate?: number;
     public receivingVideoBitrate?: number;
+    public receivingFractionLost?: number;
 
     public totalInboundPacketsLost = 0;
     public totalInboundPacketsReceived = 0;
@@ -298,8 +301,11 @@ export class StatsStorage {
     private _updateMetrics() {
         this.sendingAudioBitrate = 0;
         this.sendingVideoBitrate = 0;
+        this.sendingFractionLost = 0.0;
+
         this.receivingAudioBitrate = 0;
         this.receivingVideoBitrate = 0;
+        this.receivingFractionLost = 0.0;
 
         this.deltaInboundPacketsLost = 0;
         this.deltaInboundPacketsReceived = 0;
@@ -314,6 +320,7 @@ export class StatsStorage {
         this.deltaReceivedVideoBytes = 0;
         this.totalAvailableIncomingBitrate = 0;
         this.totalAvailableOutgoingBitrate = 0;
+        
         for (const peerConnectionEntry of this._peerConnections.values()) {
 
             for (const transport of peerConnectionEntry.transports()) {
@@ -337,6 +344,9 @@ export class StatsStorage {
             this.deltaSentVideoBytes += peerConnectionEntry.deltaSentVideoBytes ?? 0;
             this.deltaReceivedAudioBytes += peerConnectionEntry.deltaReceivedAudioBytes ?? 0;
             this.deltaReceivedVideoBytes += peerConnectionEntry.deltaReceivedVideoBytes ?? 0;
+
+            this.sendingFractionLost += peerConnectionEntry.sendingFractionLost ?? 0.0;
+            this.receivingFractionLost += peerConnectionEntry.receivingFractionLost ?? 0.0;
         }
         this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
         this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;

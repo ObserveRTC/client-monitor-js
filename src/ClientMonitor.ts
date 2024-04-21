@@ -739,6 +739,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return this.storage.highestSeenAvailableIncomingBitrate;
     }
 
+    public get sendingFractionLost() {
+        return this.storage.sendingFractionLost;
+    }
+
+    public get receivingFractionLost() {
+        return this.storage.receivingFractionLost;
+    }
+
     private _setupTimer(): void {
         this._timer && clearInterval(this._timer);
         this._timer = undefined;
