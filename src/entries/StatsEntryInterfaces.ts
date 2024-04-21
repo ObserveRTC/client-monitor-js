@@ -328,6 +328,8 @@ export interface PeerConnectionEntry {
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
 
+    readonly usingTURN: boolean;
+
     readonly totalInboundPacketsLost: number;
     readonly totalInboundPacketsReceived: number;
     readonly totalOutboundPacketsLost: number;

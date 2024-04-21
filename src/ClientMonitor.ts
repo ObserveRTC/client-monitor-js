@@ -75,6 +75,7 @@ export interface ClientMonitorEvents {
         trackId: string,
         peerConnectionId: string | undefined,
     },
+    'using-turn': boolean,
     'issue': ClientIssue,
 }
 
@@ -156,18 +157,27 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     
     public async collect(): Promise<CollectedStats> {
         if (this._closed) throw new Error('ClientMonitor is closed');
-
+        const wasUsingTURN = this.peerConnections.some(pc => pc.usingTURN);
         const collectedStats = await this.collectors.collect();
         this.storage.update(collectedStats);
         const timestamp = Date.now();
+        
         this.emit('stats-collected', {
             collectedStats,
             elapsedSinceLastCollectedInMs: timestamp - this._lastCollectedAt,
         });
+        
         this._lastCollectedAt = timestamp;
+        
         if (this._config.samplingTick && this._config.samplingTick <= ++this._actualCollectingTick ) {
             this._actualCollectingTick = 0;
             this.sample();
+        }
+        
+        const isUsingTURN = this.peerConnections.some(pc => pc.usingTURN);
+        
+        if (wasUsingTURN !== isUsingTURN) {
+            this.emit('using-turn', isUsingTURN);
         }
         return collectedStats;
     }

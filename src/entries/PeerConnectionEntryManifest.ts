@@ -157,6 +157,10 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         return this._emitter;
     }
 
+    public get usingTURN(): boolean {
+        return this.getSelectedIceCandidatePair()?.getRemoteCandidate()?.stats.candidateType === 'relay';
+    }
+
     public update(statsMap: StatsMap) {
         for (const statsValue of statsMap) {
             this._visit(statsValue);
@@ -564,6 +568,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
+        
         const avgRttInS = (roundTripTimesInS.length < 1 ? this.avgRttInS : Math.max(0, roundTripTimesInS.reduce((acc, rtt) => acc + rtt, 0) / roundTripTimesInS.length));
         
         for (const outboundRtpEntry of this._outboundRtps.values()) {
