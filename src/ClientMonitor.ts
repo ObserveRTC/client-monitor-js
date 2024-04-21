@@ -68,6 +68,7 @@ export interface ClientMonitorEvents {
         outgoingBitrateAfterCongestion: number | undefined;
         outgoingBitrateBeforeCongestion: number | undefined;
     },
+    'usermediaerror': string,
     'cpulimitation': AlertState,
     'audio-desync': AlertState,
     'freezed-video': {
@@ -236,7 +237,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public addUserMediaError(err: unknown): void {
-        this._sampler.addUserMediaError(`${err}`);
+        const message = `${err}`;
+        
+        if(0 < (this._config.samplingTick ?? 0))
+            this._sampler.addUserMediaError(message);
+
+        this.emit('usermediaerror', message);
     }
 
     public setMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
