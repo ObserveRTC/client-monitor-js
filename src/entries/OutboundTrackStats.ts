@@ -12,7 +12,12 @@ export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, tr
 				}
 			}
 		}
+		
+
 		const outboundRtps = Array.from(iterator());
+		const layers = outboundRtps.filter(rtp => rtp.getSsrc() !== undefined && rtp.stats.rid !== undefined && rtp.sendingBitrate !== undefined)
+			.map(rtp => ({ ssrc: rtp.getSsrc()!, rid: rtp.stats.rid!, sendingBitrate: rtp.sendingBitrate! }));
+
 		let sfuStreamId = outboundRtps.find(outboundRtp => outboundRtp.sfuStreamId !== undefined)?.sfuStreamId;
 		const result = {
 			direction: 'outbound',
@@ -24,8 +29,9 @@ export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, tr
 			set sfuStreamId(value: string | undefined) {
 				sfuStreamId = value;
 			},
-			
-			sendingBitrate: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.sendingBitrate ?? 0), 0),
+
+			layers,
+			sendingBitrate:layers.reduce((acc, layer) => acc + (layer.sendingBitrate ?? 0), 0),
 			sentPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.sentPackets ?? 0), 0),
 			remoteLostPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.getRemoteInboundRtp()?.lostPackets ?? 0), 0),
 			remoteReceivedPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.getRemoteInboundRtp()?.receivedPackets ?? 0), 0),
@@ -39,14 +45,22 @@ export function createOutboundTrackStats(peerConnection: PeerConnectionEntry, tr
 				result.sentPackets = 0;
 				result.remoteLostPackets = 0;
 				result.remoteReceivedPackets = 0;
+				result.layers = [];
 
 				for (const outboundRtp of iterator()) {
+					const ssrc = outboundRtp.getSsrc();
+					const rid = outboundRtp.stats.rid;
+					const sendingBitrate = outboundRtp.sendingBitrate;
+
 					outboundRtp.sfuStreamId = sfuStreamId;
-					result.sendingBitrate += outboundRtp.sendingBitrate ?? 0;
+					result.sendingBitrate += sendingBitrate ?? 0;
 					result.sentPackets += outboundRtp.sentPackets ?? 0;
 					result.remoteLostPackets += outboundRtp.getRemoteInboundRtp()?.lostPackets ?? 0;
 					result.remoteReceivedPackets += outboundRtp.getRemoteInboundRtp()?.receivedPackets ?? 0;
 
+					if (ssrc !== undefined && rid !== undefined && sendingBitrate !== undefined) {
+						result.layers.push({ ssrc, rid, sendingBitrate });
+					}
 				}
 			}
 		};

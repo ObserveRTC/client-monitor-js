@@ -13,7 +13,7 @@ Table of Contents:
     -   [MediaStreamTrack Entry](#mediastreamtrack-entry)
     -   [InboundRTP Entry](#inboundrtp-entry)
     -   [OutboundRTP Entry](#outboundrtp-entry)
--   [Detectors and Issues](#issues-and-detectors)
+-   [Detectors and Issues](#detectors-and-issues)
     -   [Congestion Detector](#congestion-detector)
     -   [Audio Desync Detector](#audio-desync-detector)
     -   [CPU Performance Detector](#cpu-performance-detector)
@@ -30,7 +30,7 @@ Table of Contents:
 -   [Getting Involved](#getting-involved)
 -   [License](#license)
 
-## Qucik Start
+## Quick Start
 
 Install it from [npm](https://www.npmjs.com/package/@observertc/client-monitor-js) package repository.
 
@@ -532,6 +532,33 @@ detector.once('close', () => {
 });
 detector.on('statechanged', onStateChanged);
 
+```
+
+### Video Freeze Detector
+
+```javascript
+const detector = monitor.createVideoFreezesDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    }
+});
+detector.on('freezedVideoStarted', event => {
+    console.log('Freezed video started');
+    console.log('TrackId', event.trackId);
+    console.log('PeerConnectionId', event.peerConnectionId);
+    console.log('SSRC:', event.ssrc);
+});
+
+detector.on('freezedVideoEnded', event => {
+    console.log('Freezed video ended');
+    console.log('TrackId', event.trackId);
+    console.log('Freeze duration in Seconds', event.durationInS);
+    console.log('PeerConnectionId', event.peerConnectionId);
+    console.log('SSRC:', event.ssrc);
+});
 ```
 
 ## Configurations

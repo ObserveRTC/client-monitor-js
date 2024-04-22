@@ -42,6 +42,7 @@ export class Sampler {
     private _localSDP?: string[];
     private _marker?: string;
     private _sampleSeq = 0;
+    private _userId?: string;
     private readonly _timezoneOffset: number = new Date().getTimezoneOffset();
     
     public constructor(
@@ -104,6 +105,10 @@ export class Sampler {
         this._marker = value;
     }
 
+    public setUserId(userId?: string) {
+        this._userId = userId;
+    }
+
     public clear() {
         this._engine = undefined;
         this._platform = undefined;
@@ -124,8 +129,8 @@ export class Sampler {
             callId: 'NULL',
             clientId: 'NULL',
             roomId: 'NULL',
-            userId: 'NULL',
-
+            
+            userId: this._userId,
             marker: this._marker,
             sampleSeq: this._sampleSeq,
             timeZoneOffsetInHours: this._timezoneOffset,

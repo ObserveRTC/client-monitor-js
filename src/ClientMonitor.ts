@@ -11,6 +11,12 @@ import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces'
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
 import { CpuPerformanceDetector, CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
+import  {
+    VideoFreezesDetector,
+    VideoFreezesDetectorConfig,
+    FreezedVideoStartedEvent,
+    FreezedVideoEndedEvent,
+} from './detectors/VideoFreezesDetector';
 
 const logger = createLogger('ClientMonitor');
 
@@ -62,8 +68,14 @@ export interface ClientMonitorEvents {
         outgoingBitrateAfterCongestion: number | undefined;
         outgoingBitrateBeforeCongestion: number | undefined;
     },
+    'usermediaerror': string,
     'cpulimitation': AlertState,
     'audio-desync': AlertState,
+    'freezed-video': {
+        trackId: string,
+        peerConnectionId: string | undefined,
+    },
+    'using-turn': boolean,
     'issue': ClientIssue,
 }
 
@@ -145,18 +157,27 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     
     public async collect(): Promise<CollectedStats> {
         if (this._closed) throw new Error('ClientMonitor is closed');
-
+        const wasUsingTURN = this.peerConnections.some(pc => pc.usingTURN);
         const collectedStats = await this.collectors.collect();
         this.storage.update(collectedStats);
         const timestamp = Date.now();
+        
         this.emit('stats-collected', {
             collectedStats,
             elapsedSinceLastCollectedInMs: timestamp - this._lastCollectedAt,
         });
+        
         this._lastCollectedAt = timestamp;
+        
         if (this._config.samplingTick && this._config.samplingTick <= ++this._actualCollectingTick ) {
             this._actualCollectingTick = 0;
             this.sample();
+        }
+        
+        const isUsingTURN = this.peerConnections.some(pc => pc.usingTURN);
+        
+        if (wasUsingTURN !== isUsingTURN) {
+            this.emit('using-turn', isUsingTURN);
         }
         return collectedStats;
     }
@@ -207,6 +228,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._sampler.setMarker(value);
     }
 
+    public setUserId(userId?: string) {
+        this._sampler.setUserId(userId);
+    }
+
     public setMediaDevices(...devices: MediaDevice[]): void {
         if (!devices) return;
         this.meta.mediaDevices = devices;
@@ -222,7 +247,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public addUserMediaError(err: unknown): void {
-        this._sampler.addUserMediaError(`${err}`);
+        const message = `${err}`;
+        
+        if(0 < (this._config.samplingTick ?? 0))
+            this._sampler.addUserMediaError(message);
+
+        this.emit('usermediaerror', message);
     }
 
     public setMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
@@ -389,6 +419,59 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         detector.on('sync', onSync);
 
         this._detectors.set(AudioDesyncDetector.name, detector);
+
+        return detector;
+    }
+
+    public createVideoFreezesDetector(config?: VideoFreezesDetectorConfig & { 
+        createIssueOnDetection?: {
+            attachments?: Record<string, unknown>,
+            severity: 'critical' | 'major' | 'minor',
+        },
+    }): VideoFreezesDetector {
+        const existingDetector = this._detectors.get(VideoFreezesDetector.name);
+
+        if (existingDetector) return existingDetector as VideoFreezesDetector;
+
+        const detector = new VideoFreezesDetector({
+        });
+        const onUpdate = () => detector.update(this.storage.inboundRtps());
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onFreezeStarted = (event: FreezedVideoStartedEvent) => {
+            this.emit('freezed-video', {
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+            });
+        };
+        const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
+            if (createIssueOnDetection) {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: 'Video Freeze detected',
+                    timestamp: Date.now(),
+                    peerConnectionId: event.peerConnectionId,
+                    mediaTrackId: event.trackId,
+                    attachments: {
+                        durationInS: event.durationInS,
+                        ...(createIssueOnDetection.attachments ?? {})
+                    },
+                });
+            }
+        }
+
+        detector.once('close', () => {
+            this.off('stats-collected', onUpdate);
+            detector.off('freezedVideoStarted', onFreezeStarted);
+            detector.off('freezedVideoEnded', onFreezeEnded);
+            this._detectors.delete(VideoFreezesDetector.name);
+        });
+        detector.on('freezedVideoStarted', onFreezeStarted);
+        detector.on('freezedVideoEnded', onFreezeEnded);
+
+        this._detectors.set(VideoFreezesDetector.name, detector);
 
         return detector;
     }
@@ -654,6 +737,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     public get highestSeenAvailableIncomingBitrate() {
         return this.storage.highestSeenAvailableIncomingBitrate;
+    }
+
+    public get sendingFractionLost() {
+        return this.storage.sendingFractionLost;
+    }
+
+    public get receivingFractionLost() {
+        return this.storage.receivingFractionLost;
     }
 
     private _setupTimer(): void {

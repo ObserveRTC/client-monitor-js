@@ -2,6 +2,7 @@ import EventEmitter from "events";
 import { IceCandidatePairEntry, PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
 
 type PeerConnectionState = {
+	peerConnectionId: string;
 	congested: boolean;
 	outgoingBitrateBeforeCongestion?: number;
 	outgoingBitrateAfterCongestion?: number;
@@ -32,6 +33,10 @@ export class CongestionDetector extends EventEmitter {
 
 	}
 
+	public get states(): ReadonlyMap<string, PeerConnectionState> {
+		return this._states;
+	}
+
 	public update(peerConnections: IterableIterator<PeerConnectionEntry>) {
 		const visitedPeerConnectionIds = new Set<string>();
 		let gotCongested = false;
@@ -44,6 +49,7 @@ export class CongestionDetector extends EventEmitter {
 
 			if (!state) {
 				state = {
+					peerConnectionId,
 					congested: false,
 					// outgoingBitrateBeforeCongestion: 0,
 					// outgoingBitrateAfterCongestion: 0,

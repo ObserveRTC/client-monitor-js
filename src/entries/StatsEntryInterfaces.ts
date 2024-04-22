@@ -328,6 +328,8 @@ export interface PeerConnectionEntry {
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
 
+    readonly usingTURN: boolean;
+
     readonly totalInboundPacketsLost: number;
     readonly totalInboundPacketsReceived: number;
     readonly totalOutboundPacketsLost: number;
@@ -355,8 +357,11 @@ export interface PeerConnectionEntry {
     readonly avgRttInS?: number;
     readonly sendingAudioBitrate?: number;
     readonly sendingVideoBitrate?: number;
+    readonly sendingFractionalLoss?: number;
+
     readonly receivingAudioBitrate?: number;
     readonly receivingVideoBitrate?: number;
+    readonly receivingFractionalLoss?: number;
 
     getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     codecs(): IterableIterator<CodecEntry>;

@@ -218,13 +218,13 @@ type RtcInboundRtpStreamStats = {
     framesDropped?: number; // only video
     frameWidth?: number; // only video
     frameHeight?: number; // only video
-    framesPerSecond?: number; // only vidoe
+    framesPerSecond?: number; // only video
     qpSum?: number; // only video
     totalDecodeTime?: number; // only video
     totalInterFrameDelay?: number; // only video
     totalSquaredInterFrameDelay?: number; // only video
 
-    pauseCaount?: number;
+    pauseCount?: number;
     totalPausesDuration?: number;
     freezeCount?: number;
     totalFreezesDuration?: number;

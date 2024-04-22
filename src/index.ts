@@ -9,9 +9,21 @@ export type {
     ClientMonitorEvents,
 } from "./ClientMonitor";
 
+export type {
+    VideoFreezesDetector,
+    VideoFreezesDetectorConfig,
+    FreezedVideoStartedEvent,
+    FreezedVideoEndedEvent,
+} from './detectors/VideoFreezesDetector';
 export type { CongestionDetector } from './detectors/CongestionDetector';
-export type { CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
-export type { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
+export type { 
+    CpuPerformanceDetector, 
+    CpuPerformanceDetectorConfig 
+} from './detectors/CpuPerformanceDetector';
+export type { 
+    AudioDesyncDetector, 
+    AudioDesyncDetectorConfig 
+} from './detectors/AudioDesyncDetector';
 export type { Collectors } from './Collectors';
 
 export type {
@@ -93,6 +105,7 @@ export function createClientMonitor(config?: ClientMonitorConfig & {
         }),
     });
 }
+
 
 export { 
     createLogger, 

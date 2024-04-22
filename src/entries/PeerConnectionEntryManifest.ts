@@ -66,8 +66,11 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public avgRttInS?: number;
     public sendingAudioBitrate?: number;
     public sendingVideoBitrate?: number;
+    public sendingFractionLost?: number;
+
     public receivingAudioBitrate?: number;
     public receivingVideoBitrate?: number;
+    public receivingFractionLost?: number;
 
     public readonly config: {
         outbStabilityScoresLength: number;
@@ -155,6 +158,10 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
 
     public get events(): TypedEvents<PeerConnectionEntryEvents> {
         return this._emitter;
+    }
+
+    public get usingTURN(): boolean {
+        return this.getSelectedIceCandidatePair()?.getRemoteCandidate()?.stats.candidateType === 'relay';
     }
 
     public update(statsMap: StatsMap) {
@@ -564,6 +571,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 roundTripTimesInS.push(currentRoundTripTime)
             }
         }
+        
         const avgRttInS = (roundTripTimesInS.length < 1 ? this.avgRttInS : Math.max(0, roundTripTimesInS.reduce((acc, rtt) => acc + rtt, 0) / roundTripTimesInS.length));
         
         for (const outboundRtpEntry of this._outboundRtps.values()) {
@@ -588,6 +596,14 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
         this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
         this.avgRttInS = avgRttInS;
+
+        if (0 < this.deltaOutboundPacketsLost + this.deltaOutboundPacketsReceived) {
+            this.sendingFractionLost = this.deltaOutboundPacketsLost / (this.deltaOutboundPacketsLost + this.deltaOutboundPacketsReceived);
+        }
+
+        if (0 < this.deltaInboundPacketsLost + this.deltaInboundPacketsReceived) {
+            this.receivingFractionLost = this.deltaInboundPacketsLost / (this.deltaInboundPacketsLost + this.deltaInboundPacketsReceived);
+        }
     }
 
     private _createCodecEntry(stats: W3C.CodecStats): CodecEntry {
