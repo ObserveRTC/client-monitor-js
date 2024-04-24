@@ -114,19 +114,30 @@ export interface ClientMonitorEvents {
         elapsedSinceLastSampleInMs: number,
         clientSample: ClientSample,
     },
-    // 'congestion': {
-    //     incomingBitrateAfterCongestion: number | undefined;
-    //     incomingBitrateBeforeCongestion: number | undefined;
-    //     outgoingBitrateAfterCongestion: number | undefined;
-    //     outgoingBitrateBeforeCongestion: number | undefined;
-    // },
+    'congestion': {
+        incomingBitrateAfterCongestion: number | undefined;
+        incomingBitrateBeforeCongestion: number | undefined;
+        outgoingBitrateAfterCongestion: number | undefined;
+        outgoingBitrateBeforeCongestion: number | undefined;
+    },
     'usermediaerror': string,
-    // 'cpulimitation': AlertState,
-    // 'audio-desync': AlertState,
-    // 'freezed-video': {
-    //     trackId: string,
-    //     peerConnectionId: string | undefined,
-    // },
+    'cpulimitation': AlertState,
+    'audio-desync': AlertState,
+    'freezed-video': {
+        state: 'started' | 'ended',
+        peerConnectionId: string | undefined,
+        trackId: string, 
+        ssrc: number,
+        durationInS?: number,
+    },
+    'stucked-inbound-track': {
+        peerConnectionId: string,
+        trackId: string, 
+        ssrc: number,
+    },
+    'too-long-pc-connection-establishment': {
+        peerConnectionId: string,
+    }
     'peerconnection-state-updated': PeerConnectionStateUpdated & {
         peerConnectionId: string,
     },
@@ -477,12 +488,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     outgoingBitrateBeforeCongestion = (outgoingBitrateBeforeCongestion ?? 0) + state.outgoingBitrateBeforeCongestion;
                 }
             }
-            // this.emit('congestion', {
-            //     incomingBitrateAfterCongestion,
-            //     incomingBitrateBeforeCongestion,
-            //     outgoingBitrateAfterCongestion,
-            //     outgoingBitrateBeforeCongestion,
-            // });
+            this.emit('congestion', {
+                incomingBitrateAfterCongestion,
+                incomingBitrateBeforeCongestion,
+                outgoingBitrateAfterCongestion,
+                outgoingBitrateBeforeCongestion,
+            });
 
             if (createIssueOnDetection) {
                 this.addIssue({
@@ -576,10 +587,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onFreezeStarted = (event: FreezedVideoStartedEvent) => {
-            // this.emit('freezed-video', {
-            //     peerConnectionId: event.peerConnectionId,
-            //     trackId: event.trackId,
-            // });
+            this.emit('freezed-video', {
+                state: 'started',
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                ssrc: event.ssrc,
+            });
         };
         const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
             if (createIssueOnDetection) {
@@ -595,6 +608,13 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     },
                 });
             }
+            this.emit('freezed-video', {
+                state: 'ended',
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                durationInS: event.durationInS,
+                ssrc: event.ssrc,
+            });
         }
 
         detector.once('close', () => {
@@ -625,16 +645,16 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onStateChanged = (state: AlertState) => {
-            // this.emit('cpulimitation', state);
+            this.emit('cpulimitation', state);
             
-            if (!createIssueOnDetection || state !== 'on') return;
-
-            this.addIssue({
-                severity: createIssueOnDetection.severity,
-                description: createIssueOnDetection.description ?? 'Audio desync detected',
-                timestamp: Date.now(),
-                attachments: createIssueOnDetection.attachments,
-            });
+            if (createIssueOnDetection && state !== 'on') {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: createIssueOnDetection.description ?? 'Audio desync detected',
+                    timestamp: Date.now(),
+                    attachments: createIssueOnDetection.attachments,
+                });
+            }
         };
 
         detector.once('close', () => {
@@ -679,6 +699,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     },
                 });
             }
+            this.emit('stucked-inbound-track', {
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                ssrc: event.ssrc,
+            });
         }
 
         detector.once('close', () => {
@@ -719,6 +744,9 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     attachments: createIssueOnDetection.attachments,
                 });
             }
+            this.emit('too-long-pc-connection-establishment', {
+                peerConnectionId: event.peerConnectionId,
+            });
         }
 
         detector.once('close', () => {

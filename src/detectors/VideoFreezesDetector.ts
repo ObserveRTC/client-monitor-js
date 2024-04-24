@@ -14,6 +14,7 @@ export type FreezedVideoStartedEvent = {
 export type FreezedVideoEndedEvent = {
 	peerConnectionId: string,
 	trackId: string,
+	ssrc: number,
 	durationInS: number,
 }
 
@@ -101,6 +102,7 @@ export class VideoFreezesDetector extends EventEmitter {
 					peerConnectionId: inboundRtp.getPeerConnection()?.peerConnectionId,
 					trackId,
 					durationInS,
+					ssrc,
 				})
 			}
 		}
