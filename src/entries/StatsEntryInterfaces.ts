@@ -305,6 +305,12 @@ export interface AudioPlayoutEntry extends StatsEntryAbs {
     stats: W3C.MediaPlayoutStats;
 }
 
+export type PeerConnectionStateUpdated = {
+    iceState?: W3C.RtcIceTransportState,
+    usingTURN: boolean,
+    usingTCP: boolean,
+}
+
 export type PeerConnectionEntryEvents = {
     'inbound-rtp-added': InboundRtpEntry,
     'inbound-rtp-removed': InboundRtpEntry,
@@ -314,6 +320,7 @@ export type PeerConnectionEntryEvents = {
     'remote-inbound-rtp-removed': RemoteInboundRtpEntry,
     'remote-outbound-rtp-added': RemoteOutboundRtpEntry,
     'remote-outbound-rtp-removed': RemoteOutboundRtpEntry,
+    'state-updated': PeerConnectionStateUpdated,
     'close': undefined,
 }
 
@@ -328,6 +335,7 @@ export interface PeerConnectionEntry {
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
 
+    readonly usingTCP: boolean;
     readonly usingTURN: boolean;
 
     readonly totalInboundPacketsLost: number;
@@ -362,6 +370,8 @@ export interface PeerConnectionEntry {
     readonly receivingAudioBitrate?: number;
     readonly receivingVideoBitrate?: number;
     readonly receivingFractionalLoss?: number;
+
+    connectionEstablishedDurationInMs?: number;
 
     getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;
     codecs(): IterableIterator<CodecEntry>;

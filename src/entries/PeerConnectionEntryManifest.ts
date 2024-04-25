@@ -72,6 +72,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public receivingVideoBitrate?: number;
     public receivingFractionLost?: number;
 
+    public connectionEstablishedDurationInMs?: number;
+
     public readonly config: {
         outbStabilityScoresLength: number;
     };
@@ -160,17 +162,42 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         return this._emitter;
     }
 
+    public get usingTCP(): boolean {
+        return this.getSelectedIceCandidatePair()?.getLocalCandidate()?.stats.protocol === 'tcp';
+    }
+
     public get usingTURN(): boolean {
-        return this.getSelectedIceCandidatePair()?.getRemoteCandidate()?.stats.candidateType === 'relay';
+        return (this.getSelectedIceCandidatePair()?.getLocalCandidate()?.stats.candidateType === 'relay' ?? false) &&
+            (this.getSelectedIceCandidatePair()?.getRemoteCandidate()?.stats.url?.startsWith('turn:') ?? false);
+    }
+
+    public get iceState() {
+        return this.getSelectedIceCandidatePair()?.getTransport()?.stats.iceState;
+    }
+
+    private _getStateSummaryString() {
+        return `${this.iceState}-${this.usingTCP}-${this.usingTURN}`;
     }
 
     public update(statsMap: StatsMap) {
+        const oldStateSummary = this._getStateSummaryString();
+
         for (const statsValue of statsMap) {
             this._visit(statsValue);
         }
+
+        const newStateSummary = this._getStateSummaryString();
         
         this._trimEntries();
         this._updateMetrics();
+
+        if (oldStateSummary !== newStateSummary) {
+            this._emitter.emit('state-updated', {
+                iceState: this.iceState,
+                usingTCP: this.usingTCP,
+                usingTURN: this.usingTURN,
+            });
+        }
     }
 
     public close() {

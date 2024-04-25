@@ -1,3 +1,4 @@
+import { StatsStorage } from "../entries/StatsStorage";
 import { CustomCallEvent } from "../schema/Samples";
 import { createPeerConnectionStateChangedEvent, createIceGatheringStateChangedEvent, createPeerConnectionClosedEvent, createPeerConnectionOpenedEvent, createIceConnectionStateChangedEvent } from "../utils/callEvents";
 import { listenDataChannelEvents, listenTrackEvents } from "./utils";
@@ -9,6 +10,7 @@ export type PeerConnectionStatsCollectorConfig = {
     peerConnection: RTCPeerConnection,
     peerConnectionLabel?: string,
     emitCallEvent: ((event: CustomCallEvent) => void);
+    storage: StatsStorage,
 }
 
 export function createPeerConnectionCollector(config: PeerConnectionStatsCollectorConfig)  {
@@ -25,8 +27,24 @@ export function createPeerConnectionCollector(config: PeerConnectionStatsCollect
     async function getStats(): Promise<RTCStatsReport> {
         return peerConnection.getStats();
     }
+    let connectingStartedAt: number | undefined;
 
     const connectionStateChangeListener = () => {
+        switch (peerConnection.connectionState) {
+            case 'connecting':
+                connectingStartedAt = Date.now();
+                break;
+            case 'connected': {
+                const peerConnectionEntry = config.storage.getPeerConnection(peerConnectionId);
+
+                if (peerConnectionEntry && connectingStartedAt) {
+                    peerConnectionEntry.connectionEstablishedDurationInMs = Date.now() - connectingStartedAt;
+
+                    connectingStartedAt = undefined;
+                }
+                break;
+            }
+        }
         emitCallEvent(
             createPeerConnectionStateChangedEvent({
                 peerConnectionId,

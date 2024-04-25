@@ -256,11 +256,29 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
                 label: transport.direction,
             })
         }
+        let connectingStartedAt: number | undefined;
+
         const addProducerListener = createAddProducerListener(transport.id);
         const addConsumerListener = createAddConsumerListener(transport.id);
         const addDataProducerListener = createAddDataProducerListener(transport.id);
         const addDataConsumerListener = createAddDataConsumerListener(transport.id);
         const peerConnectionStateChangeListener = (peerConnectionState: RTCPeerConnectionState) => {
+            switch (peerConnectionState) {
+                case 'connecting':
+                    connectingStartedAt = Date.now();
+                    break;
+                case 'connected': {
+                    const peerConnectionEntry = storage.getPeerConnection(transport.id);
+
+                    if (peerConnectionEntry && connectingStartedAt) {
+                        peerConnectionEntry.connectionEstablishedDurationInMs = Date.now() - connectingStartedAt;
+
+                        connectingStartedAt = undefined;
+                    }
+                    break;
+                }
+            }
+
             emitCallEvent(
                 createPeerConnectionStateChangedEvent({
                     ...eventBase,
