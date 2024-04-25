@@ -137,7 +137,8 @@ export function createCollectors(config: {
             peerConnectionLabel,
             emitCallEvent: (event: CustomCallEvent) => {
                 emitter.emit('custom-call-event', event);
-            }
+            },
+            storage: config.storage,
         });
         statsCollector.onclose = () => {
             statsCollectors.delete(statsCollector.id);
@@ -147,6 +148,7 @@ export function createCollectors(config: {
         statsCollectors.set(statsCollector.id, statsCollector);
         emitter.emit('added-stats-collector', statsCollector)
         addStatsProvider(statsCollector);
+        
         return statsCollector;
     }
 

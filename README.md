@@ -13,10 +13,13 @@ Table of Contents:
     -   [MediaStreamTrack Entry](#mediastreamtrack-entry)
     -   [InboundRTP Entry](#inboundrtp-entry)
     -   [OutboundRTP Entry](#outboundrtp-entry)
--   [Detectors and Issues](#detectors-and-issues)
+-   [Detectors](#detectors)
     -   [Congestion Detector](#congestion-detector)
     -   [Audio Desync Detector](#audio-desync-detector)
     -   [CPU Performance Detector](#cpu-performance-detector)
+    -   [Video Freeze Detector](#video-freeze-detector)
+    -   [Stucked Inbound Track Detector](#stucked-inbound-track-detector)
+-   [Issues](#issues)
 -   [Configurations](#configurations)
 -   [Events](#events)
     -   [CLIENT_JOINED Event](#client_joined-event)
@@ -402,149 +405,104 @@ monitor.on('stats-collected', () => {
 ```
 
 
-## Detectors and Issues
+## Detectors
 
-ClientMonitor comes with Detectors detect various issues and anomalies in the collected stats. These detectors are continuously monitoring the stats and set an alert if certain thresholds are hit. You can create detectors and subscribe to alerts of an instantiated client-monitor-js.
+ClientMonitor can create detectors to detect various issues and anomalies in the collected stats. These detectors are updated when stats are polled, monitoring the stats and setting an alert if certain thresholds are hit. You can create detectors and subscribe to alerts using an instantiated client-monitor-js.
 
-For example: 
+Currently, the following detectors are available in ClientMonitor:
+
+### Congestion Detector
+
+The Congestion Detector identifies congestion issues in media streaming. When congestion is detected, it triggers an event providing insights into the available incoming and outgoing bitrates before and after congestion.
 
 ```javascript
 const detector = monitor.createCongestionDetector();
 
-detector.on('congestion', event => {
-    console.log('Congestion ', event);
-});
-
-// Once the detector is created, you can subscribe to the monitor congestion event
-
-monitor.on('congestion', event => {
-   // same as above
-});
-```
-
-Detector can be created to add issue to the monitor whenever a certain condition is met.
-    
-```javascript
-const detector = monitor.createCongestionDetector({
-    createIssueOnDetection: {
-        severity: 'major',
-        attachments: {
-            // various custom data
-        },
-    },
-});
-```
-
-Issues can be added through the client monitor instance. For example:
-
-```javascript
-monitor.addIssue({
-    severity: 'critical',
-    description: 'Media device is crashed',
-    timestamp: Date.now(),
-    attachments: {
-        clientId,
-        reason,
-    },
-});
-```
-
-The severity of the issue can be one of the following values: `critical`, `major`, `minor`.
-
-As mentioned above, if a detector is created with an option to create an issue on detection, the detector will automatically add an issue to the monitor whenever the condition is met.
-
-Currently the following Detectors are added to ClientMonitor:
-
-### Congestion Detector
-
-```javascript
-const detector = monitor.createCongestionDetector({
-    createIssueOnDetection: {
-        severity: 'major',
-        attachments: {
-            // various custom data
-        },
-    }
-});
-
-const onCongestion = (event) => {
+detector.on('congestion', (event) => {
     console.log('congestion detected on media streaming');
     console.log("Available incoming bitrate before congestion", event.incomingBitrateBeforeCongestion);
     console.log("Available outgoing bitrate before congestion", event.outgoingBitrateBeforeCongestion);
     console.log("Available incoming bitrate after congestion", event.incomingBitrateAfterCongestion);
     console.log("Available outgoing bitrate after congestion", event.outgoingBitrateAfterCongestion);
-};
-
-detector.once('close', () => {
-    console.log('congestion detector is closed');
-    detector.off('congestion', onCongestion);
-})
-detector.on('congestion', onCongestion);
-
-setTimeout(() => {
-    detector.close();
-}, 10000);
+});
 ```
 
 ### Audio Desync Detector
 
 ```javascript
+const detector = monitor.createAudioDesyncDetector();
+
+detector.on('statechanged', event => {
+    console.log(`Audio is ${event.state} for track ${event.trackId}`);
+});
+```
+
+#### Audio Desync Detector Configuration
+
+```javascript
 const detector = monitor.createAudioDesyncDetector({
+    // Indicate if we want to create an issue automatically upon detection.
+    // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
+    // automatically added to the sample.
     createIssueOnDetection: {
         severity: 'major',
         attachments: {
             // various custom data
         },
-    }
+    },
+    /**
+	 * The fractional threshold used to determine if the audio desynchronization
+	 * correction is considered significant or not.
+	 * It represents the minimum required ratio of corrected samples to total samples.
+	 * For example, a value of 0.1 means that if the corrected samples ratio
+	 * exceeds 0.1, it will be considered a significant audio desynchronization issue.
+	 */
+	fractionalCorrectionAlertOnThreshold: 0.1,
+	/**
+	 * The fractional threshold used to determine if the audio desynchronization
+	 * correction is considered negligible and the alert should be turned off.
+	 * It represents the maximum allowed ratio of corrected samples to total samples.
+	 * For example, a value of 0.05 means that if the corrected samples ratio
+	 * falls below 0.05, the audio desynchronization alert will be turned off.
+	 */
+	fractionalCorrectionAlertOffThreshold: 0.05,
 });
-
-const onDesync = (trackId) => {
-    console.log('Audio desync detected on track', trackId);
-}
-
-detector.once('close', () => {
-    detector.off('desync', onDesync);
-});
-detector.on('desync', onDesync);
-
 ```
 
 ### CPU Performance Detector
 
+The CPU Performance Detector is designed to monitor and detect issues related to CPU performance that may impact the functionality and efficiency of your application.
 
 ```javascript
 
+const detector = monitor.createCpuPerformanceIssueDetector();
+
+detector.on('statechanged', (state) => {
+   console.log('CPU limitation state changed', state);
+});
+```
+
+#### CPU Performance Detector Configuration
+
+```javascript
 const detector = monitor.createCpuPerformanceIssueDetector({
+    // Indicate if we want to create an issue automatically upon detection.
+    // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
+    // automatically added to the sample.
     createIssueOnDetection: {
         severity: 'major',
         attachments: {
             // various custom data
         },
-    }
+    },
 });
-
-const onStateChanged = (state) => {
-   console.log('CPU performance state changed', state);
-};
-
-detector.once('close', () => {
-    detector.off('statechanged', onStateChanged);
-});
-detector.on('statechanged', onStateChanged);
-
 ```
 
 ### Video Freeze Detector
 
 ```javascript
-const detector = monitor.createVideoFreezesDetector({
-    createIssueOnDetection: {
-        severity: 'major',
-        attachments: {
-            // various custom data
-        },
-    }
-});
+const detector = monitor.createVideoFreezesDetector();
+
 detector.on('freezedVideoStarted', event => {
     console.log('Freezed video started');
     console.log('TrackId', event.trackId);
@@ -558,6 +516,100 @@ detector.on('freezedVideoEnded', event => {
     console.log('Freeze duration in Seconds', event.durationInS);
     console.log('PeerConnectionId', event.peerConnectionId);
     console.log('SSRC:', event.ssrc);
+});
+```
+
+#### Video Freeze Detector Configuration
+
+```javascript
+const detector = monitor.createVideoFreezesDetector({
+    // Indicate if we want to create an issue automatically upon detection.
+    // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
+    // automatically added to the sample.
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    },
+});
+```
+
+### Stucked Inbound Track Detector
+
+The Stucked Inbound Track Detector is designed to identify tracks that are experiencing a complete lack of traffic since their creation. These tracks, termed "stucked inbound tracks," are characterized by the absence of any packet reception from the moment of their creation. In essence, stucked inbound tracks refer to tracks that have not received any data packets since their inception.
+
+```javascript
+const detector = monitor.createStuckedInboundTrackDetector();
+
+detector.on('stuckedtrack', event => {
+    console.log('Stucked inbound track detected');
+    console.log('TrackId', event.trackId);
+    console.log('PeerConnectionId', event.peerConnectionId);
+    console.log('SSRC:', event.ssrc);
+});
+```
+
+#### Stucked Inbound Track Detector Configuration
+
+```javascript
+const detector = monitor.createStuckedInboundTrackDetector({
+    // Indicate if we want to create an issue automatically upon detection.
+    // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
+    // automatically added to the sample.
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    },
+    // Minimum duration in milliseconds for a track to be considered stuck
+    minStuckedDurationInMs: 5000,
+});
+```
+
+
+### Issues
+
+Issues encountered during monitoring sessions are categorized by severity, which can be one of the following values: critical, major, or minor.
+
+When a detector is configured to create an issue upon detection, it automatically adds the issue to the monitor instance once the specified condition is met.
+
+Issues can be added to the monitor instance using the addIssue method. For instance:
+
+```javascript
+monitor.addIssue({
+    severity: 'critical',
+    description: 'Media device is crashed',
+    timestamp: Date.now(),
+    attachments: {
+        clientId,
+        reason,
+    },
+});
+```
+
+Furthermore, events related to issues are dispatched through the monitor. For example:
+
+```javascript
+monitor.on('issue', (issue) => {
+    console.log('An issue is detected', issue);
+});
+```
+
+Each issue detected is included in the subsequent sample created by the monitor, provided that `samplingTick > 0` in the monitor configuration.
+
+Additionally, each detector can be configured to automatically create an issue upon detection. For instance:
+
+
+```javascript
+const detector = monitor.createCongestionDetector({
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    },
 });
 ```
 

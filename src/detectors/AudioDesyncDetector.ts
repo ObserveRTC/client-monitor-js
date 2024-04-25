@@ -27,6 +27,7 @@ export type AudioDesyncDetectorConfig = {
 export type AudioDesyncDetectorEvents = {
 	desync: [string],
 	sync: [string],
+	statechanged: [{ trackId: string, state: 'sync' | 'desync' }],
 	close: [],
 }
 
@@ -102,7 +103,11 @@ export class AudioDesyncDetector extends EventEmitter {
 
 			if (wasDesync !== state.desync) {
 				const trackId = inboundRtp.getTrackId();
-				trackId && this.emit(state.desync ? 'desync' : 'sync', trackId);
+				if (trackId) {
+					const actualState = state.desync ? 'desync' : 'sync';
+					this.emit(actualState, trackId);
+					this.emit('statechanged', { trackId, state: actualState });
+				}
 			}
 		}
 

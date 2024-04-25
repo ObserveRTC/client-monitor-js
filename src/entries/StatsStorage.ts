@@ -125,6 +125,7 @@ export class StatsStorage {
             this._peerConnections.delete(peerConnectionId);
             this._emitter.emit('peer-connection-removed', pcEntry);
         });
+        this._emitter.emit('peer-connection-added', pcEntry);
     }
 
     public removePeerConnection(peerConnectionId: string): boolean {

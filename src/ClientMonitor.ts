@@ -7,7 +7,7 @@ import { TypedEventEmitter } from './utils/TypedEmitter';
 import { Sampler } from './Sampler';
 import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
-import { PeerConnectionEntry, TrackStats } from './entries/StatsEntryInterfaces';
+import { PeerConnectionEntry, PeerConnectionStateUpdated, TrackStats } from './entries/StatsEntryInterfaces';
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
 import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
 import { CpuPerformanceDetector, CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
@@ -17,6 +17,7 @@ import  {
     FreezedVideoStartedEvent,
     FreezedVideoEndedEvent,
 } from './detectors/VideoFreezesDetector';
+import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
 
 const logger = createLogger('ClientMonitor');
 
@@ -62,18 +63,21 @@ export interface ClientMonitorEvents {
         elapsedSinceLastSampleInMs: number,
         clientSample: ClientSample,
     },
-    'congestion': {
-        incomingBitrateAfterCongestion: number | undefined;
-        incomingBitrateBeforeCongestion: number | undefined;
-        outgoingBitrateAfterCongestion: number | undefined;
-        outgoingBitrateBeforeCongestion: number | undefined;
-    },
+    // 'congestion': {
+    //     incomingBitrateAfterCongestion: number | undefined;
+    //     incomingBitrateBeforeCongestion: number | undefined;
+    //     outgoingBitrateAfterCongestion: number | undefined;
+    //     outgoingBitrateBeforeCongestion: number | undefined;
+    // },
     'usermediaerror': string,
-    'cpulimitation': AlertState,
-    'audio-desync': AlertState,
-    'freezed-video': {
-        trackId: string,
-        peerConnectionId: string | undefined,
+    // 'cpulimitation': AlertState,
+    // 'audio-desync': AlertState,
+    // 'freezed-video': {
+    //     trackId: string,
+    //     peerConnectionId: string | undefined,
+    // },
+    'peerconnection-state-updated': PeerConnectionStateUpdated & {
+        peerConnectionId: string,
     },
     'using-turn': boolean,
     'issue': ClientIssue,
@@ -120,13 +124,28 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         const onCallEventListener = (event: CustomCallEvent) => {
             this.addCustomCallEvent(event);
         };
+        const onPeerConnectionAdded = (peerConnectionEntry: PeerConnectionEntry) => {
+            const onStateUpdated = (event: PeerConnectionStateUpdated) => {
+                this.emit('peerconnection-state-updated', {
+                    ...event,
+                    peerConnectionId: peerConnectionEntry.peerConnectionId,
+                })
+            }
+            peerConnectionEntry.events.once('close', () => {
+                peerConnectionEntry.events.off('state-updated', onStateUpdated);
+            });
+            peerConnectionEntry.events.on('state-updated', onStateUpdated);
+        };
+
         this.once('close', () => {
             this.collectors.off('custom-call-event', onCallEventListener);
+            this.storage.events.off('peer-connection-added', onPeerConnectionAdded);
             adapterMiddlewares.forEach((middleware) => {
                 this.collectors.processor.removeMiddleware(middleware);
             });
         });
         this.collectors.on('custom-call-event', onCallEventListener);
+        this.storage.events.on('peer-connection-added', onPeerConnectionAdded);
         adapterMiddlewares.forEach((middleware) => {
             this.collectors.processor.addMiddleware(middleware);
         });
@@ -336,12 +355,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     outgoingBitrateBeforeCongestion = (outgoingBitrateBeforeCongestion ?? 0) + state.outgoingBitrateBeforeCongestion;
                 }
             }
-            this.emit('congestion', {
-                incomingBitrateAfterCongestion,
-                incomingBitrateBeforeCongestion,
-                outgoingBitrateAfterCongestion,
-                outgoingBitrateBeforeCongestion,
-            });
+            // this.emit('congestion', {
+            //     incomingBitrateAfterCongestion,
+            //     incomingBitrateBeforeCongestion,
+            //     outgoingBitrateAfterCongestion,
+            //     outgoingBitrateBeforeCongestion,
+            // });
 
             if (createIssueOnDetection) {
                 this.addIssue({
@@ -392,7 +411,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onDesync = (trackId: string) => {
-            this.emit('audio-desync', 'on');
+            // this.emit('audio-desync', 'on');
             if (!createIssueOnDetection) return;
 
             this.addIssue({
@@ -405,7 +424,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             });
         };
         const onSync = () => {
-            this.emit('audio-desync', 'off');
+            // this.emit('audio-desync', 'off');
         }
 
         detector.once('close', () => {
@@ -441,10 +460,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onFreezeStarted = (event: FreezedVideoStartedEvent) => {
-            this.emit('freezed-video', {
-                peerConnectionId: event.peerConnectionId,
-                trackId: event.trackId,
-            });
+            // this.emit('freezed-video', {
+            //     peerConnectionId: event.peerConnectionId,
+            //     trackId: event.trackId,
+            // });
         };
         const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
             if (createIssueOnDetection) {
@@ -493,7 +512,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onStateChanged = (state: AlertState) => {
-            this.emit('cpulimitation', state);
+            // this.emit('cpulimitation', state);
             
             if (!createIssueOnDetection || state !== 'on') return;
 
@@ -518,6 +537,52 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return detector;
     }
 
+    public createStuckedInboundTrackDetector(config?: StuckedInboundTrackDetectorConfig & {
+        createIssueOnDetection?: {
+            attachments?: Record<string, unknown>,
+            severity: 'critical' | 'major' | 'minor',
+        },
+    }): StuckedInboundTrackDetector {
+        const existingDetector = this._detectors.get(StuckedInboundTrackDetector.name);
+
+        if (existingDetector) return existingDetector as StuckedInboundTrackDetector;
+
+        const detector = new StuckedInboundTrackDetector(config ?? {
+            minStuckedDurationInMs: 5000,
+        });
+        const onUpdate = () => detector.update(this.storage.inboundRtps());
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onStuckedTrack = (event: { peerConnectionId: string, trackId: string, ssrc: number }) => {
+            if (createIssueOnDetection) {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: 'Stucked track detected',
+                    timestamp: Date.now(),
+                    peerConnectionId: event.peerConnectionId,
+                    mediaTrackId: event.trackId,
+                    attachments: {
+                        ssrc: event.ssrc,
+                        ...(createIssueOnDetection.attachments ?? {})
+                    },
+                });
+            }
+        }
+
+        detector.once('close', () => {
+            this.off('stats-collected', onUpdate);
+            detector.off('stuckedtrack', onStuckedTrack);
+            this._detectors.delete('StuckedInboundTrack');
+        });
+        this.on('stats-collected', onUpdate);
+        detector.on('stuckedtrack', onStuckedTrack);
+
+        this._detectors.set('StuckedInboundTrack', detector);
+
+        return detector;
+    }
 
     public getTrackStats(trackId: string): TrackStats | undefined {
         return this.storage.getTrack(trackId);
