@@ -32,21 +32,16 @@ export declare interface StuckedInboundTrackDetector {
 export class StuckedInboundTrackDetector extends EventEmitter {
 	private _closed = false;
 	private readonly _traces = new Map<string, InboundRtpStatsTrace>();
-	private readonly _remotePausedTracks = new Set<string>();
+	public readonly ignoredTrackIds = new Set<string>([
+		// mediasoup probator track id
+		'probator'
+	]);
 
 	public constructor(
 		public readonly config: StuckedInboundTrackDetectorConfig,
 	) {
 		super();
 		this.setMaxListeners(Infinity);
-	}
-
-	public remotePaused(trackId: string) {
-		this._remotePausedTracks.add(trackId);
-	}
-
-	public remoteResumed(trackId: string) {
-		this._remotePausedTracks.delete(trackId);
 	}
 
 	public update(inboundRtps: IterableIterator<InboundRtpEntry>) {
@@ -56,7 +51,7 @@ export class StuckedInboundTrackDetector extends EventEmitter {
 		for (const inboundRtp of inboundRtps) {
 			const peerConnectionId = inboundRtp.getPeerConnection()?.peerConnectionId;
 			const trackId = inboundRtp.getTrackId();
-			if (!peerConnectionId || !trackId || this._remotePausedTracks.has(trackId)) {
+			if (!peerConnectionId || !trackId || this.ignoredTrackIds.has(trackId)) {
 				continue;
 			}
 
