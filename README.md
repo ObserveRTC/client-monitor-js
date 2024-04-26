@@ -550,6 +550,13 @@ detector.on('stuckedtrack', event => {
 });
 ```
 
+If an inbound track is paused by remote (the outbound track is muted or the it is known that the SFU does not forward traffic),
+you can add the trackId to the ignoredTrackIds of this detector to avoid false positive detections.
+
+```javascript
+detector.ignoredTrackIds.add(trackId);
+```
+
 #### Stucked Inbound Track Detector Configuration
 
 ```javascript
