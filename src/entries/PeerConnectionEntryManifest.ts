@@ -72,7 +72,9 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public receivingVideoBitrate?: number;
     public receivingFractionLost?: number;
 
-    public connectionEstablishedDurationInMs?: number;
+    private _connectionState: W3C.RtcPeerConnectionState = 'new';
+    public _connectingStartedAt?: number;
+    public _connectionEstablihedDurationInMs?: number;
 
     public readonly config: {
         outbStabilityScoresLength: number;
@@ -175,8 +177,45 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         return this.getSelectedIceCandidatePair()?.getTransport()?.stats.iceState;
     }
 
+    public get connectionEstablihedDurationInMs() {
+        return this._connectionEstablihedDurationInMs;
+    }
+
+    public get connectionState(): W3C.RtcPeerConnectionState {
+        return this._connectionState;
+    }
+
+    public set connectionState(state: W3C.RtcPeerConnectionState) {
+        const oldState = this._connectionState;
+        switch (state) {
+            case 'connecting':
+                this._connectionEstablihedDurationInMs = undefined;
+                this._connectingStartedAt = Date.now();
+                break;
+            case 'connected':
+                if (this._connectingStartedAt !== undefined) {
+                    this._connectionEstablihedDurationInMs = Date.now() - this._connectingStartedAt 
+                }
+                break;
+        }
+        this._connectionState = state;
+
+        if (oldState !== state) {
+            this._emitState();
+        }
+    }
+
     private _getStateSummaryString() {
         return `${this.iceState}-${this.usingTCP}-${this.usingTURN}`;
+    }
+
+    private _emitState() {
+        this._emitter.emit('state-updated', {
+            pcConnectionState: this.connectionState,
+            iceState: this.iceState,
+            usingTCP: this.usingTCP,
+            usingTURN: this.usingTURN,
+        });
     }
 
     public update(statsMap: StatsMap) {
@@ -192,11 +231,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         this._updateMetrics();
 
         if (oldStateSummary !== newStateSummary) {
-            this._emitter.emit('state-updated', {
-                iceState: this.iceState,
-                usingTCP: this.usingTCP,
-                usingTURN: this.usingTURN,
-            });
+            this._emitState();
         }
     }
 

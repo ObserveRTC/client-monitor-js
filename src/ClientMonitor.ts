@@ -18,8 +18,15 @@ import  {
     FreezedVideoEndedEvent,
 } from './detectors/VideoFreezesDetector';
 import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
+import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
 
 const logger = createLogger('ClientMonitor');
+
+type ClientDetectorIssueDetectionExtension = {
+    severity: 'critical' | 'major' | 'minor',
+    description?: string,
+    attachments?: Record<string, unknown>,
+}
 
 export type ClientMonitorConfig = {
 
@@ -39,6 +46,41 @@ export type ClientMonitorConfig = {
      * DEFAULT: undefined
      */
     samplingTick?: number;
+
+    /**
+     * Configuration for detecting issues.
+     */
+    detectIssues?: {
+        /**
+         * Configuration for detecting congestion issues.
+         */
+        congestion?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting audio desynchronization issues.
+         */
+        audioDesync?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting frozen video issues.
+         */
+        freezedVideo?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting CPU limitation issues.
+         */
+        cpuLimitation?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting stucked inbound track issues.
+         */
+        stuckedInboundTrack?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+
+        /**
+         * Configuration for detecting long peer connection establishment issues.
+         */
+        longPcConnectionEstablishment?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+    }
 };
 
 export type ClientIssue = {
@@ -130,7 +172,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     ...event,
                     peerConnectionId: peerConnectionEntry.peerConnectionId,
                 })
-            }
+            };
             peerConnectionEntry.events.once('close', () => {
                 peerConnectionEntry.events.off('state-updated', onStateUpdated);
             });
@@ -149,6 +191,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         adapterMiddlewares.forEach((middleware) => {
             this.collectors.processor.addMiddleware(middleware);
         });
+
+        if (this._config.detectIssues) {
+            this._setupDetectors(this._config.detectIssues);
+        }
+    }
+
+    public get processor() {
+        return this.storage.processor;
     }
 
     public get closed() {
@@ -319,10 +369,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createCongestionDetector(options?: { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): CongestionDetector {
         const existingDetector = this._detectors.get(CongestionDetector.name);
         const {
@@ -365,7 +412,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             if (createIssueOnDetection) {
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: 'Congestion detected',
+                    description: createIssueOnDetection.description ?? 'Congestion detected',
                     timestamp: Date.now(),
                     attachments: {
                         ...(createIssueOnDetection.attachments ?? {}),
@@ -392,10 +439,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createAudioDesyncDetector(config?: AudioDesyncDetectorConfig & { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): AudioDesyncDetector {
         const existingDetector = this._detectors.get(AudioDesyncDetector.name);
 
@@ -416,7 +460,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
             this.addIssue({
                 severity: createIssueOnDetection.severity,
-                description: 'Audio desync detected',
+                description: createIssueOnDetection.description ?? 'Audio desync detected',
                 timestamp: Date.now(),
                 peerConnectionId: this.storage.getTrack(trackId)?.getPeerConnection()?.peerConnectionId,
                 mediaTrackId: trackId,
@@ -443,10 +487,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createVideoFreezesDetector(config?: VideoFreezesDetectorConfig & { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): VideoFreezesDetector {
         const existingDetector = this._detectors.get(VideoFreezesDetector.name);
 
@@ -469,7 +510,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             if (createIssueOnDetection) {
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: 'Video Freeze detected',
+                    description: createIssueOnDetection.description ?? 'Video Freeze detected',
                     timestamp: Date.now(),
                     peerConnectionId: event.peerConnectionId,
                     mediaTrackId: event.trackId,
@@ -496,10 +537,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createCpuPerformanceIssueDetector(config?: CpuPerformanceDetectorConfig & { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): CpuPerformanceDetector {
         const existingDetector = this._detectors.get(CpuPerformanceDetector.name);
 
@@ -518,7 +556,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
             this.addIssue({
                 severity: createIssueOnDetection.severity,
-                description: 'Audio desync detected',
+                description: createIssueOnDetection.description ?? 'Audio desync detected',
                 timestamp: Date.now(),
                 attachments: createIssueOnDetection.attachments,
             });
@@ -538,10 +576,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createStuckedInboundTrackDetector(config?: StuckedInboundTrackDetectorConfig & {
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): StuckedInboundTrackDetector {
         const existingDetector = this._detectors.get(StuckedInboundTrackDetector.name);
 
@@ -559,7 +594,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             if (createIssueOnDetection) {
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: 'Stucked track detected',
+                    description: createIssueOnDetection.description ?? 'Stucked track detected',
                     timestamp: Date.now(),
                     peerConnectionId: event.peerConnectionId,
                     mediaTrackId: event.trackId,
@@ -580,6 +615,41 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         detector.on('stuckedtrack', onStuckedTrack);
 
         this._detectors.set('StuckedInboundTrack', detector);
+
+        return detector;
+    }
+
+    public createLongPcConnectionEstablishmentDetector(config?: LongPcConnectionEstablishmentDetectorConfig & {
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
+    }): LongPcConnectionEstablishmentDetector {
+        const existingDetector = this._detectors.get(LongPcConnectionEstablishmentDetector.name);
+
+        if (existingDetector) return existingDetector as LongPcConnectionEstablishmentDetector;
+
+        const detector = new LongPcConnectionEstablishmentDetector(config ?? {
+            thresholdInMs: 3000,
+        }, this);
+
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onLongConnection = (event: { peerConnectionId: string }) => {
+            if (createIssueOnDetection) {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: createIssueOnDetection.description ?? 'Long peer connection establishment detected',
+                    timestamp: Date.now(),
+                    peerConnectionId: event.peerConnectionId,
+                    attachments: createIssueOnDetection.attachments,
+                });
+            }
+        }
+
+        detector.once('close', () => {
+            detector.off('too-long-connection-establishment', onLongConnection);
+        });
+        detector.on('too-long-connection-establishment', onLongConnection);
 
         return detector;
     }
@@ -810,6 +880,62 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     public get receivingFractionLost() {
         return this.storage.receivingFractionLost;
+    }
+
+    private _setupDetectors(settings: ClientMonitorConfig['detectIssues']): void {
+        if (!settings) return;
+
+        if (settings.congestion) {
+            this.createCongestionDetector({
+                createIssueOnDetection: typeof settings.congestion === 'string' ? {
+                    severity: settings.congestion
+                } : settings.congestion,
+            });
+        }
+
+        if (settings.audioDesync) {
+            this.createAudioDesyncDetector({
+                fractionalCorrectionAlertOffThreshold: 0.05,
+                fractionalCorrectionAlertOnThreshold: 0.1,
+                createIssueOnDetection: typeof settings.audioDesync === 'string' ? {
+                    severity: settings.audioDesync
+                } : settings.audioDesync,
+            });
+        }
+
+        if (settings.freezedVideo) {
+            this.createVideoFreezesDetector({
+                createIssueOnDetection: typeof settings.freezedVideo === 'string' ? {
+                    severity: settings.freezedVideo
+                } : settings.freezedVideo,
+            });
+        }
+
+        if (settings.cpuLimitation) {
+            this.createCpuPerformanceIssueDetector({
+                createIssueOnDetection: typeof settings.cpuLimitation === 'string' ? {
+                    severity: settings.cpuLimitation
+                } : settings.cpuLimitation,
+            });
+        }
+
+        if (settings.stuckedInboundTrack) {
+            this.createStuckedInboundTrackDetector({
+                minStuckedDurationInMs: 5000,
+                createIssueOnDetection: typeof settings.stuckedInboundTrack === 'string' ? {
+                    severity: settings.stuckedInboundTrack
+                } : settings.stuckedInboundTrack,
+            });
+        }
+
+        if (settings.longPcConnectionEstablishment) {
+            this.createLongPcConnectionEstablishmentDetector({
+                thresholdInMs: 3000,
+                createIssueOnDetection: typeof settings.longPcConnectionEstablishment === 'string' ? {
+                    severity: settings.longPcConnectionEstablishment
+                } : settings.longPcConnectionEstablishment,
+            });
+        }
     }
 
     private _setupTimer(): void {

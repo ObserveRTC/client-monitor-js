@@ -96,12 +96,21 @@ export function createClientMonitor(config?: ClientMonitorConfig & {
         loggerSet = true;
     }
     
-    if (config && !config.samplingTick) config.samplingTick = 1;
+    // we need to create samples to not let the memory grow indefinitely with issues and events
+    if (config && (config.samplingTick === undefined || config.samplingTick < 1)) config.samplingTick = 1;
 
     return new ClientMonitor({
         ...(config ?? {
             collectingPeriodInMs: 5000,
             samplingTick: 1,
+            detectIssues: {
+                freezedVideo: 'minor',
+                audioDesync: 'minor',
+                congestion: 'major',
+                cpuLimitation: 'major',
+                stuckedInboundTrack: 'major',
+                longPcConnectionEstablishment: 'major',
+            }
         }),
     });
 }

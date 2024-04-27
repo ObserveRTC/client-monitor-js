@@ -27,24 +27,11 @@ export function createPeerConnectionCollector(config: PeerConnectionStatsCollect
     async function getStats(): Promise<RTCStatsReport> {
         return peerConnection.getStats();
     }
-    let connectingStartedAt: number | undefined;
-
     const connectionStateChangeListener = () => {
-        switch (peerConnection.connectionState) {
-            case 'connecting':
-                connectingStartedAt = Date.now();
-                break;
-            case 'connected': {
-                const peerConnectionEntry = config.storage.getPeerConnection(peerConnectionId);
+        const peerConnectionEntry = config.storage.getPeerConnection(peerConnectionId);
 
-                if (peerConnectionEntry && connectingStartedAt) {
-                    peerConnectionEntry.connectionEstablishedDurationInMs = Date.now() - connectingStartedAt;
+        if (peerConnectionEntry) peerConnectionEntry.connectionState = peerConnection.connectionState;
 
-                    connectingStartedAt = undefined;
-                }
-                break;
-            }
-        }
         emitCallEvent(
             createPeerConnectionStateChangedEvent({
                 peerConnectionId,

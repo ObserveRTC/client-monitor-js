@@ -306,6 +306,7 @@ export interface AudioPlayoutEntry extends StatsEntryAbs {
 }
 
 export type PeerConnectionStateUpdated = {
+    pcConnectionState: W3C.RtcPeerConnectionState,
     iceState?: W3C.RtcIceTransportState,
     usingTURN: boolean,
     usingTCP: boolean,
@@ -321,6 +322,8 @@ export type PeerConnectionEntryEvents = {
     'remote-outbound-rtp-added': RemoteOutboundRtpEntry,
     'remote-outbound-rtp-removed': RemoteOutboundRtpEntry,
     'state-updated': PeerConnectionStateUpdated,
+    // 'connecting': void,
+    // 'connected': void,
     'close': undefined,
 }
 
@@ -370,7 +373,8 @@ export interface PeerConnectionEntry {
     readonly receivingAudioBitrate?: number;
     readonly receivingVideoBitrate?: number;
     readonly receivingFractionalLoss?: number;
-
+    
+    connectionState: W3C.RtcPeerConnectionState;
     connectionEstablishedDurationInMs?: number;
 
     getSelectedIceCandidatePair(): IceCandidatePairEntry | undefined;

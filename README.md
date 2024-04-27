@@ -575,6 +575,36 @@ const detector = monitor.createStuckedInboundTrackDetector({
 });
 ```
 
+### Long Peer Connection Establishment Detector
+
+The Long Peer Connection Establishment Detector is designed to identify peer connections that take an unusually long time to establish. This detector is particularly useful for detecting peer connections that are stuck in the process of establishing a connection.
+
+```javascript
+const detector = monitor.createLongPeerConnectionEstablishmentDetector();
+
+detector.on('too-long-connection-establishment', event => {
+    console.log('Long peer connection establishment detected');
+    console.log('PeerConnectionId', event.peerConnectionId);
+});
+```
+
+#### Long Peer Connection Establishment Detector Configuration
+
+```javascript
+const detector = monitor.createLongPeerConnectionEstablishmentDetector({
+    // Indicate if we want to create an issue automatically upon detection.
+    // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
+    // automatically added to the sample.
+    createIssueOnDetection: {
+        severity: 'major',
+        attachments: {
+            // various custom data
+        },
+    },
+    // Minimum duration in milliseconds for a peer connection to be considered stuck
+    thresholdInMs: 5000,
+});
+```
 
 ### Issues
 
@@ -641,6 +671,45 @@ const config = {
      * DEFAULT: 1
      */
     samplingTick: 1,
+
+    /**
+     * Configuration for detecting issues.
+     * 
+     * By default, all detectors are enabled.
+     */
+    detectIssues: {
+        /**
+         * Configuration for detecting congestion issues.
+         * 
+         * DEFAULT: 'major'
+         */
+        congestion: 'major',
+        
+        /**
+         * Configuration for detecting audio desynchronization issues.
+         */
+        audioDesync: 'minor',
+        
+        /**
+         * Configuration for detecting frozen video issues.
+         */
+        freezedVideo: 'minor',
+        
+        /**
+         * Configuration for detecting CPU limitation issues.
+         */
+        cpuLimitation: 'major',
+        
+        /**
+         * Configuration for detecting stucked inbound track issues.
+         */
+        stuckedInboundTrack: 'major',
+
+        /**
+         * Configuration for detecting long peer connection establishment issues.
+         */
+        longPcConnectionEstablishment: 'major',
+    }
 };
 ```
 
