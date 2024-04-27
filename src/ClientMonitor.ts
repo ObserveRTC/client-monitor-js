@@ -1,7 +1,6 @@
-import { MediaDevice, CustomCallEvent, ExtensionStat, ClientSample } from './schema/Samples';
+import { CustomCallEvent, ExtensionStat, ClientSample, Browser, OperationSystem, Engine, Platform } from './schema/Samples';
 import { CollectedStats, createCollectors } from "./Collectors";
 import { createLogger } from "./utils/logger";
-import { ClientMetaData } from './ClientMetaData';
 import { StatsStorage } from './entries/StatsStorage';
 import { TypedEventEmitter } from './utils/TypedEmitter';
 import { Sampler } from './Sampler';
@@ -19,6 +18,7 @@ import  {
 } from './detectors/VideoFreezesDetector';
 import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
 import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
+import * as Bowser from 'bowser';
 
 const logger = createLogger('ClientMonitor');
 
@@ -34,23 +34,30 @@ export type ClientMonitorConfig = {
      * By setting this, the observer calls the added statsCollectors periodically
      * and pulls the stats.
      *
-     * DEFAULT: undefined
+     * DEFAULT: 2000
      */
-    collectingPeriodInMs?: number;
+    collectingPeriodInMs: number;
 
     /**
      * By setting this, the observer makes samples after n number or collected stats.
      * 
      * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
      *
-     * DEFAULT: undefined
+     * DEFAULT: 3
      */
-    samplingTick?: number;
+    samplingTick: number;
+
+    /**
+     * If true, the monitor integrate the navigator.mediaDevices (patch the getUserMedia and subscribe to ondevicechange event)
+     * 
+     * DEFAULT: true
+     */
+    integrateNavigatorMediaDevices: boolean;
 
     /**
      * Configuration for detecting issues.
      */
-    detectIssues?: {
+    detectIssues: {
         /**
          * Configuration for detecting congestion issues.
          */
@@ -127,13 +134,17 @@ export interface ClientMonitorEvents {
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public readonly created = Date.now();
-    public readonly meta: ClientMetaData;
     public readonly storage = new StatsStorage();
     public readonly collectors = createCollectors({
         storage: this.storage,
     });
-    private readonly _detectors = new Map<string, { close: () => void, once: (e: 'close', l: () => void) => void }>();
 
+    public browser?: Browser;
+    public engine?: Engine;
+    public operationSystem?: OperationSystem;
+    public platform?: Platform;
+
+    private readonly _detectors = new Map<string, { close: () => void, once: (e: 'close', l: () => void) => void }>();
     private readonly _sampler = new Sampler(this.storage);
     private _timer?: ReturnType<typeof setInterval>;
     
@@ -149,18 +160,15 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     ) {
         super();
         this.setMaxListeners(Infinity);
-
-        this.meta = new ClientMetaData();
-        this._sampler.addBrowser(this.meta.browser);
-        this._sampler.addEngine(this.meta.engine);
-        this._sampler.addOperationSystem(this.meta.operationSystem);
-        this._sampler.addPlatform(this.meta.platform);
+        
         this._setupTimer();
+        
+        ClientMonitor._fetchNavigatorData(this);
 
         // connect components
         const adapterMiddlewares = createAdapterMiddlewares({
-            browserType: this.meta.browser.name ?? 'Unknown',
-            browserVersion: this.meta.browser.version ?? 'Unknown',
+            browserType: this.browser?.name ?? 'Unknown',
+            browserVersion: this.browser?.version ?? 'Unknown',
         });
 
         const onCallEventListener = (event: CustomCallEvent) => {
@@ -194,6 +202,9 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         if (this._config.detectIssues) {
             this._setupDetectors(this._config.detectIssues);
+        }
+        if (this._config.integrateNavigatorMediaDevices) {
+            ClientMonitor._integrateNavigatorMediaDevices(this);
         }
     }
 
@@ -292,27 +303,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         });
     }
 
-
     public setMarker(value?: string) {
         this._sampler.setMarker(value);
     }
 
     public setUserId(userId?: string) {
         this._sampler.setUserId(userId);
-    }
-
-    public setMediaDevices(...devices: MediaDevice[]): void {
-        if (!devices) return;
-        this.meta.mediaDevices = devices;
-        const storedDevices = [
-            ...Array.from(this.meta.audioInputs()),
-            ...Array.from(this.meta.audioOutputs()),
-            ...Array.from(this.meta.videoInputs()),
-        ];
-        for (const device of storedDevices) {
-            if (device.sampled) continue;
-            this._sampler.addMediaDevice(device);
-        }
     }
 
     public addUserMediaError(err: unknown): void {
@@ -322,6 +318,72 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this._sampler.addUserMediaError(message);
 
         this.emit('usermediaerror', message);
+
+        if (!err || typeof err !== 'object') return;
+			
+        const error = err as Error;
+
+        switch (error.name) {
+            case 'NotAllowedError': {
+                this.addIssue({
+                    severity: 'critical',
+                    description: 'User denied access to camera/microphone',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'NotFoundError': {
+                this.addIssue({
+                    severity: 'major',
+                    description: 'Requested device not found',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'NotReadableError': {
+                this.addIssue({
+                    severity: 'critical',
+                    description: 'Cannot read the media device',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'OverconstrainedError': {
+                this.addIssue({
+                    severity: 'major',
+                    description: 'Overconstrainted media device request',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'AbortError': {
+                this.addIssue({
+                    severity: 'major',
+                    description: 'Media device request aborted',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            default: {
+                this.addIssue({
+                    severity: 'critical',
+                    description: 'Unknown error occurred during media device request',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+            }
+        }
     }
 
     public setMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
@@ -947,5 +1009,93 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._timer = setInterval(() => {
             this.collect().catch(err => logger.error(err));
         }, this._config.collectingPeriodInMs);
+    }
+
+    private static _fetchNavigatorData(monitor: ClientMonitor) {
+        try {
+            /* eslint-disable @typescript-eslint/no-explicit-any */
+            let outerNavigator: any = undefined;
+            if (navigator !== undefined) outerNavigator = navigator;
+            else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
+            else throw new Error(`navigator is not available`);
+            
+            const parsedResult = Bowser.parse(outerNavigator.userAgent);
+            monitor.browser = parsedResult.browser;
+            monitor.engine = parsedResult.engine;
+            monitor.operationSystem = parsedResult.os;
+            monitor.platform = parsedResult.platform;
+
+            if (monitor.browser.name) monitor._sampler.addBrowser(monitor.browser);
+            if (monitor.engine.name) monitor._sampler.addEngine(monitor.engine);
+            if (monitor.operationSystem.name) monitor._sampler.addOperationSystem(monitor.operationSystem);
+            if (monitor.platform.type) monitor._sampler.addPlatform(monitor.platform);
+
+        } catch (err) {
+
+            logger.warn(`Cannot collect media devices and navigator data, because an error occurred`, err);
+
+            monitor.operationSystem = undefined;
+            monitor.browser = undefined;
+            monitor.platform = undefined;
+            monitor.engine = undefined;
+        }
+    }
+
+    private static _integrateNavigatorMediaDevices(monitor: ClientMonitor) {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        let outerNavigator: typeof navigator | undefined = undefined;
+        if (navigator !== undefined) outerNavigator = navigator;
+        else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
+        else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+
+        const mediaDevices: MediaDevices = outerNavigator.mediaDevices;
+        const originalGetUserMedia = mediaDevices.getUserMedia;
+        
+        mediaDevices.getUserMedia = async (constraints?: MediaStreamConstraints): Promise<MediaStream> => {
+            try {
+                const result = await originalGetUserMedia(constraints);
+
+                return result;
+            } catch (err) {
+                monitor.addUserMediaError(err);
+                throw err;
+            }
+        };
+
+        try {
+            const supportedConstraints = mediaDevices.getSupportedConstraints();
+    
+            monitor._sampler.addMediaConstraints(JSON.stringify(supportedConstraints));
+        } catch (err) {
+            logger.warn('Cannot get supported constraints', err);
+        }
+        
+        const reportedDeviceIds = new Set<string>();
+        const onDeviceChange = async () => {
+            try {
+                const enumeratedMediaDevices = await mediaDevices.enumerateDevices();
+    
+                for (const mediaDevice of enumeratedMediaDevices) {
+                    const deviceId = `${mediaDevice.groupId}-${mediaDevice.deviceId}-${mediaDevice.kind}-${mediaDevice.label}`;
+                    if (reportedDeviceIds.has(deviceId)) continue;
+                    
+                    monitor._sampler.addMediaDevice(mediaDevice);
+
+                    reportedDeviceIds.add(deviceId);
+                }
+            } catch (err) {
+                logger.error('Cannot enumerate media devices', err);
+            }
+        };
+        
+        monitor.once('close', () => {
+            mediaDevices.getUserMedia = originalGetUserMedia;
+            mediaDevices.removeEventListener('devicechange', onDeviceChange);
+        });
+        mediaDevices.addEventListener('devicechange', onDeviceChange);
+
+        onDeviceChange().catch((err) => {
+            logger.warn('Cannot enumerate media devices', err);
+        });
     }
 }

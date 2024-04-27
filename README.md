@@ -49,30 +49,27 @@ Add `@observertc/client-monitor-js` to your WebRTC app.
 
 ```javascript
 import { createClientMonitor } from "@observertc/client-monitor-js";
-// see full config in Configuration section
-const config = {
-    collectingPeriodInMs: 5000,
-};
-const monitor = createClientMonitor(config);
+const monitor = createClientMonitor();
 const collector = monitor.collectors.addRTCPeerConnection(peerConnection);
 
 monitor.on("stats-collected", () => {
-    for (const inboundRtp of monitor.inboundRtps) {
-        const trackId = inboundRtp.getTrackId();
-        const remoteOutboundRtp = inboundRtp.getRemoteOutboundRtp();
-        console.log(trackId, inboundRtp.stats, remoteOutboundRtp.stats);
-    }
+    console.log(`Sending audio bitrate: ${monitor.sendingAudioBitrate}`);
+    console.log(`Sending video bitrate: ${monitor.sendingVideoBitrate}`);
+    console.log(`Receiving audio bitrate: ${monitor.receivingAudioBitrate}`);
+    console.log(`Receiving video bitrate: ${monitor.receivingVideoBitrate}`);
 });
-// if you want to stop collecting from the peerConnection, then:
-collector.close();
 ```
 
 The above example do as follows:
 
-1.  create a client monitor, which collect stats every 5s
-2.  setup a stats collector from a peer connection
-3.  register an event called after stats are collected
-4.  print out the inbound rtps and then close the stats collector we registered in step 3.
+1.  Create a client monitor, which collect stats every (by default in every 5s)
+2.  Setup a collector collect stats from a peer connection
+3.  Register an event called after stats are collected
+
+
+**NOTE**: `createClientMonitor()` method creates a monitor instance with default configurations. 
+You can pass a configuration object to the `createClientMonitor(config: ClientMonitorConfig)` method to customize the monitor instance.
+See the full list of configurations [here](#configurations).
 
 ## Integrations
 
@@ -83,22 +80,14 @@ import { createClientMonitor } from "@observertc/client-monitor-js";
 import mediasoup from "mediaousp-client";
 
 const mediasoupDevice = new mediasoup.Device();
-const config = {
-    collectingPeriodInMs: 5000,
-};
-const monitor = createClientMonitor(config);
+const monitor = createClientMonitor();
 const collector = monitor.collectors.addMediasoupDevice(mediasoupDevice);
 
-collector.onclose = () => {
-    console.log(`mediasoup collector ${collector.id} is closed`);
-}
-
 monitor.on("stats-collected", () => {
-    // do your stuff
-
-    // you can close detach mediasoup
-    // collector by calling the close
-    collector.close();
+    console.log(`Sending audio bitrate: ${monitor.sendingAudioBitrate}`);
+    console.log(`Sending video bitrate: ${monitor.sendingVideoBitrate}`);
+    console.log(`Receiving audio bitrate: ${monitor.receivingAudioBitrate}`);
+    console.log(`Receiving video bitrate: ${monitor.receivingVideoBitrate}`);
 });
 ```
 
@@ -663,7 +652,7 @@ const config = {
     collectingPeriodInMs: 5000,
 
     /**
-     * By setting this, the observer makes samples after n number or collected stats.
+     * By setting this, the monitor makes samples after n number or collected stats.
      *
      * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
      * if the value is less or equal than 0
@@ -671,6 +660,13 @@ const config = {
      * DEFAULT: 1
      */
     samplingTick: 1,
+
+    /**
+     * By setting this to true monitor will 
+     *
+     * DEFAULT: 0
+     */
+    integrateNavigatorMediaDevices: true,
 
     /**
      * Configuration for detecting issues.
@@ -716,6 +712,7 @@ const config = {
 ## Events
 
 In the context of our monitoring library, events play a crucial role in enabling real-time insights and interactions. These events are emitted by the monitor to signal various occurrences, such as the creation of a peer connection, media track, or ICE connections. Below, we detail the events detected by the monitor.
+
  * `CLIENT_JOINED`: A client has joined
  * `CLIENT_LEFT`: A client has left
  * `PEER_CONNECTION_OPENED`: A peer connection is opened
@@ -732,6 +729,7 @@ In the context of our monitoring library, events play a crucial role in enabling
  * `DATA_CHANNEL_ERROR`: A data channel error occurred
 
 For Mediasoup integration the following events are detected:
+
  * `PRODUCER_ADDED`: A producer is added
  * `PRODUCER_REMOVED`: A producer is removed
  * `PRODUCER_PAUSED`: A producer is paused
