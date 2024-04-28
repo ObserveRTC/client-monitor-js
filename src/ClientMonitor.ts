@@ -227,9 +227,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         let lastSample: ClientSample | undefined;
 
+        if (!this._joined) this.join();
         if (!this._left) this.leave();
         if (0 < (this._config.samplingTick)) {
-            lastSample = this.sample();
+            // has to call sample to create the last sample 
+            // if the samplingTick is set
+            // otherwise the last sample will not be emitted with the leabe event
+            // becasue the this.sample() will return as the monitor is already closed
+            lastSample =  this._sampler.createClientSample();
         }
         
         this.storage.clear();
