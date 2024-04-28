@@ -61,32 +61,32 @@ export type ClientMonitorConfig = {
         /**
          * Configuration for detecting congestion issues.
          */
-        congestion?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        congestion?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
         
         /**
          * Configuration for detecting audio desynchronization issues.
          */
-        audioDesync?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        audioDesync?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
         
         /**
          * Configuration for detecting frozen video issues.
          */
-        freezedVideo?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        freezedVideo?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
         
         /**
          * Configuration for detecting CPU limitation issues.
          */
-        cpuLimitation?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        cpuLimitation?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
         
         /**
          * Configuration for detecting stucked inbound track issues.
          */
-        stuckedInboundTrack?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        stuckedInboundTrack?:  boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
 
         /**
          * Configuration for detecting long peer connection establishment issues.
          */
-        longPcConnectionEstablishment?: ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        longPcConnectionEstablishment?:  boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
     }
 };
 
@@ -103,7 +103,9 @@ export type AlertState = 'on' | 'off';
 
 export interface ClientMonitorEvents {
     'error': Error,
-    'close': undefined,
+    'close': {
+        lastSample?: ClientSample,
+    },
     'stats-collected': {
         elapsedSinceLastCollectedInMs: number,
         collectedStats: CollectedStats,
@@ -223,9 +225,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._closed = true;
         clearInterval(this._timer);
 
+        let lastSample: ClientSample | undefined;
+
         if (!this._left) this.leave();
-        if (0 < (this._config.samplingTick ?? 0)) {
-            this.sample();
+        if (0 < (this._config.samplingTick)) {
+            lastSample = this.sample();
         }
         
         this.storage.clear();
@@ -233,6 +237,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._sampler.clear();
 
         this._timer = undefined;
+
+        this.emit('close', {
+            lastSample,
+        });
     }
     
     public async collect(): Promise<CollectedStats> {
@@ -947,11 +955,20 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     private _setupDetectors(settings: ClientMonitorConfig['detectIssues']): void {
         if (!settings) return;
 
+        let createIssueOnDetection: ClientDetectorIssueDetectionExtension | undefined;
+        const getCreateIssueOnDetection = (key: keyof ClientMonitorConfig['detectIssues']) => {
+            if (typeof settings[key] === 'object') {
+                return settings[key] as ClientDetectorIssueDetectionExtension;
+            } else if (typeof settings[key] === 'string') {
+                return {
+                    severity: settings[key] as 'critical' | 'major' | 'minor',
+                };
+            } else return undefined;
+        }
+
         if (settings.congestion) {
             this.createCongestionDetector({
-                createIssueOnDetection: typeof settings.congestion === 'string' ? {
-                    severity: settings.congestion
-                } : settings.congestion,
+                createIssueOnDetection: getCreateIssueOnDetection('congestion'),
             });
         }
 
@@ -959,43 +976,33 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this.createAudioDesyncDetector({
                 fractionalCorrectionAlertOffThreshold: 0.05,
                 fractionalCorrectionAlertOnThreshold: 0.1,
-                createIssueOnDetection: typeof settings.audioDesync === 'string' ? {
-                    severity: settings.audioDesync
-                } : settings.audioDesync,
+                createIssueOnDetection: getCreateIssueOnDetection('audioDesync'),
             });
         }
 
         if (settings.freezedVideo) {
             this.createVideoFreezesDetector({
-                createIssueOnDetection: typeof settings.freezedVideo === 'string' ? {
-                    severity: settings.freezedVideo
-                } : settings.freezedVideo,
+                createIssueOnDetection: getCreateIssueOnDetection('freezedVideo'),
             });
         }
 
         if (settings.cpuLimitation) {
             this.createCpuPerformanceIssueDetector({
-                createIssueOnDetection: typeof settings.cpuLimitation === 'string' ? {
-                    severity: settings.cpuLimitation
-                } : settings.cpuLimitation,
+                createIssueOnDetection: getCreateIssueOnDetection('cpuLimitation'),
             });
         }
 
         if (settings.stuckedInboundTrack) {
             this.createStuckedInboundTrackDetector({
                 minStuckedDurationInMs: 5000,
-                createIssueOnDetection: typeof settings.stuckedInboundTrack === 'string' ? {
-                    severity: settings.stuckedInboundTrack
-                } : settings.stuckedInboundTrack,
+                createIssueOnDetection: getCreateIssueOnDetection('stuckedInboundTrack'),
             });
         }
 
         if (settings.longPcConnectionEstablishment) {
             this.createLongPcConnectionEstablishmentDetector({
                 thresholdInMs: 3000,
-                createIssueOnDetection: typeof settings.longPcConnectionEstablishment === 'string' ? {
-                    severity: settings.longPcConnectionEstablishment
-                } : settings.longPcConnectionEstablishment,
+                createIssueOnDetection: getCreateIssueOnDetection('longPcConnectionEstablishment'),
             });
         }
     }

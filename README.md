@@ -647,9 +647,9 @@ const config = {
      * By setting it, the monitor calls the added statsCollectors periodically
      * and pulls the stats.
      *
-     * DEFAULT: 5000
+     * DEFAULT: 2000
      */
-    collectingPeriodInMs: 5000,
+    collectingPeriodInMs: 2000,
 
     /**
      * By setting this, the monitor makes samples after n number or collected stats.
@@ -657,9 +657,9 @@ const config = {
      * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
      * if the value is less or equal than 0
      *
-     * DEFAULT: 1
+     * DEFAULT: 3
      */
-    samplingTick: 1,
+    samplingTick: 3,
 
     /**
      * By setting this to true monitor will 
