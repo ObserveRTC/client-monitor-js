@@ -55,6 +55,14 @@ export type ClientMonitorConfig = {
     integrateNavigatorMediaDevices: boolean;
 
     /**
+     * If true, the monitor creates a CLIENT_JOINED event when the monitor is created.
+     */
+    createClientJoinedEvent?: boolean | {
+        message?: string,
+        attachments?: Record<string, unknown>,
+    }
+
+    /**
      * Configuration for detecting issues.
      */
     detectIssues: {
@@ -219,6 +227,9 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         if (this._config.integrateNavigatorMediaDevices) {
             ClientMonitor._integrateNavigatorMediaDevices(this);
         }
+        if (this._config.createClientJoinedEvent) {
+            this.join(this._config.createClientJoinedEvent === true ? undefined : this._config.createClientJoinedEvent);
+        }
     }
 
     public get processor() {
@@ -303,15 +314,22 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return clientSample;
     }
 
-    public join(settings?: Pick<CustomCallEvent, 'attachments' | 'timestamp' | 'message'>): void {
+    public join(settings?: { timestamp?: number, message?: string, attachments?: Record<string, unknown>}): void {
         if (this._joined) return;
         this._joined = true;
+
+        let attachments: string | undefined;
+        try {
+            attachments = settings?.attachments ? JSON.stringify(settings.attachments) : undefined;
+        } catch (err) {
+            logger.error('Error while creating attachments for CLIENT_JOINED event', err);
+        }
 
         this._sampler.addCustomCallEvent({
             name: 'CLIENT_JOINED',
             message: settings?.message ?? 'Client joined',
             timestamp: settings?.timestamp ?? this.created,
-            attachments: settings?.attachments,
+            attachments,
         })
     }
 

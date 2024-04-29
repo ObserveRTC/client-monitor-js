@@ -102,6 +102,7 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
         collectingPeriodInMs: 2000,
         samplingTick: 3,
         integrateNavigatorMediaDevices: true,
+        createClientJoinedEvent: true,
         detectIssues: {
             freezedVideo: 'minor',
             audioDesync: 'minor',

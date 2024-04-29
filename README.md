@@ -40,7 +40,9 @@ Install it from [npm](https://www.npmjs.com/package/@observertc/client-monitor-j
 ```
 npm i @observertc/client-monitor-js
 ```
+
 or
+
 ```
 yarn add @observertc/client-monitor-js
 ```
@@ -66,8 +68,7 @@ The above example do as follows:
 2.  Setup a collector collect stats from a peer connection
 3.  Register an event called after stats are collected
 
-
-**NOTE**: `createClientMonitor()` method creates a monitor instance with default configurations. 
+**NOTE**: `createClientMonitor()` method creates a monitor instance with default configurations.
 You can pass a configuration object to the `createClientMonitor(config: ClientMonitorConfig)` method to customize the monitor instance.
 See the full list of configurations [here](#configurations).
 
@@ -102,7 +103,6 @@ const myTransport = collector.addTransport(myTransport); // your transport creat
 Collecting WebRTC Metrics is either done periodically according to the `collectingPeriodInMs` configuration or manually by calling the `monitor.collect()` method. The collected metrics are stored in the `ClientMonitor` instance and assigned to Entries.
 Each entry in clientMonitor represents a WebRTC component such as `RTCPeerConnection`, `MediaStreamTrack`, etc. Entries can relate to each other and from one entry you can navigate to a correspondent entry. For example, from an `InboundRTP` entry you can navigate to the correspondent `RemoteOutboundRtp` entry, and reverse. Additionally entries are exposing basic derivatives calculated from the collected metrics.
 
-
 ### Calculated Updates
 
 Calculated updates allow you to observe metrics derived from polled WebRTC stats captured by the library. These calculated updates provide a richer, more nuanced understanding of your application's client-side behavior, offering valuable insights beyond what raw stats metrics can provide.
@@ -110,8 +110,7 @@ Calculated updates allow you to observe metrics derived from polled WebRTC stats
 For example by accessing `storage` you can get the following calculated updates:
 
 ```javascript
-
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     const {
         totalInboundPacketsLost,
         totalInboundPacketsReceived,
@@ -124,7 +123,7 @@ monitor.on('stats-collected', () => {
         totalReceivedVideoBytes,
         totalDataChannelBytesSent,
         totalDataChannelBytesReceived,
-    
+
         deltaInboundPacketsLost,
         deltaInboundPacketsReceived,
         deltaOutboundPacketsLost,
@@ -136,7 +135,7 @@ monitor.on('stats-collected', () => {
         deltaReceivedVideoBytes,
         deltaDataChannelBytesSent,
         deltaDataChannelBytesReceived,
-    
+
         avgRttInS,
         sendingAudioBitrate,
         sendingVideoBitrate,
@@ -147,7 +146,7 @@ monitor.on('stats-collected', () => {
         highestSeenReceivingBitrate,
         highestSeenAvailableOutgoingBitrate,
         highestSeenAvailableIncomingBitrate,
-    } = monitor.storage
+    } = monitor.storage;
 
     console.log(`Total inbound packets lost: ${totalInboundPacketsLost}`);
     console.log(`Total inbound packets received: ${totalInboundPacketsReceived}`);
@@ -183,9 +182,7 @@ monitor.on('stats-collected', () => {
     console.log(`Highest seen receiving bitrate: ${highestSeenReceivingBitrate}`);
     console.log(`Highest seen available outgoing bitrate: ${highestSeenAvailableOutgoingBitrate}`);
     console.log(`Highest seen available incoming bitrate: ${highestSeenAvailableIncomingBitrate}`);
-    
 });
-
 ```
 
 As mentioned above, the `ClientMonitor` instance stores entries, and each entry has a `stats` property that contains the raw stats collected from the WebRTC API. The `ClientMonitor` also stores calculated updates for each entry, which are derived from the raw stats. These calculated updates are accessible from the `ClientMonitor` instance and are updated every time the `stats-collected` event is emitted.
@@ -193,35 +190,39 @@ As mentioned above, the `ClientMonitor` instance stores entries, and each entry 
 ### PeerConnection Entry
 
 **Accessing Stats**:
+
 ```javascript
 // from monitor
-monitor.peerConnections.forEach(pc => console.log(`PeerConnection: ${pc.statsId}`, pc.stats));
+monitor.peerConnections.forEach((pc) => console.log(`PeerConnection: ${pc.statsId}`, pc.stats));
 
 // or from storage
-[...monitor.storage.peerConnections()].forEach(pc => console.log(`PeerConnection: ${pc.statsId}`, pc.stats));
+[...monitor.storage.peerConnections()].forEach((pc) => console.log(`PeerConnection: ${pc.statsId}`, pc.stats));
 ```
 
 **Accessing Calculated Updates**:
-```javascript
 
-monitor.on('stats-collected', () => {
+```javascript
+monitor.on("stats-collected", () => {
     for (const pc of monitor.peerConnections) {
-        console.log(`Between this and last collecting, the following stats were calculated for PeerConnection`, [
-            `Received bytes through data channel ${pc.deltaDataChannelBytesReceived}`,
-            `Sent bytes through data channel ${pc.deltaDataChannelBytesSent}`,
-            `Received bytes through inbound rtps ${pc.deltaInboundPacketsReceived}`,
-            `Sent bytes through outbound rtps ${pc.deltaOutboundPacketsSent}`,
-            `Lost packets on inbound rtps ${pc.deltaInboundPacketsReceived}`,
-            `Lost packets on outbound rtps ${pc.deltaOutboundPacketsSent}`,
-            `Outbound audio bitrate${pc.sendingAudioBitrate}`,
-            `Outbound video bitrate${pc.sendingVideoBitrate}`,
-            `Inbound audio bitrate${pc.receivingAudioBitrate}`,
-            `Inbound video bitrate${pc.receivingVideoBitrate}`,
-            `Received bytes on all audio tracks ${pc.deltaReceivedAudioBytes}`,
-            `Received bytes on all video tracks ${pc.deltaReceivedVideoBytes}`,
-            `Sent bytes on all audio tracks ${pc.deltaSentAudioBytes}`,
-            `Sent bytes on all video tracks ${pc.deltaSentVideoBytes}`,
-        ].join('\n'));
+        console.log(
+            `Between this and last collecting, the following stats were calculated for PeerConnection`,
+            [
+                `Received bytes through data channel ${pc.deltaDataChannelBytesReceived}`,
+                `Sent bytes through data channel ${pc.deltaDataChannelBytesSent}`,
+                `Received bytes through inbound rtps ${pc.deltaInboundPacketsReceived}`,
+                `Sent bytes through outbound rtps ${pc.deltaOutboundPacketsSent}`,
+                `Lost packets on inbound rtps ${pc.deltaInboundPacketsReceived}`,
+                `Lost packets on outbound rtps ${pc.deltaOutboundPacketsSent}`,
+                `Outbound audio bitrate${pc.sendingAudioBitrate}`,
+                `Outbound video bitrate${pc.sendingVideoBitrate}`,
+                `Inbound audio bitrate${pc.receivingAudioBitrate}`,
+                `Inbound video bitrate${pc.receivingVideoBitrate}`,
+                `Received bytes on all audio tracks ${pc.deltaReceivedAudioBytes}`,
+                `Received bytes on all video tracks ${pc.deltaReceivedVideoBytes}`,
+                `Sent bytes on all audio tracks ${pc.deltaSentAudioBytes}`,
+                `Sent bytes on all video tracks ${pc.deltaSentVideoBytes}`,
+            ].join("\n")
+        );
     }
 });
 ```
@@ -229,32 +230,31 @@ monitor.on('stats-collected', () => {
 **Accessing related entries**:
 
 ```javascript
-    const pc = monitor.getPeerConnectionStats(peerConnectionId);
-    if (pc) {
-        [...pc.inboundRtps()].forEach((inboundRtp) => void 0);
-        [...pc.outboundRtps()].forEach((outboundRtp) => void 0);
+const pc = monitor.getPeerConnectionStats(peerConnectionId);
+if (pc) {
+    [...pc.inboundRtps()].forEach((inboundRtp) => void 0);
+    [...pc.outboundRtps()].forEach((outboundRtp) => void 0);
 
-        [...pc.localCandidates()].forEach((localICECandidate) => void 0);
-        [...pc.remoteCandidates()].forEach((remoteICECandidate) => void 0);
-        [...pc.iceCandidatePairs()].forEach((iceCandidatePair) => void 0);
+    [...pc.localCandidates()].forEach((localICECandidate) => void 0);
+    [...pc.remoteCandidates()].forEach((remoteICECandidate) => void 0);
+    [...pc.iceCandidatePairs()].forEach((iceCandidatePair) => void 0);
 
-        [...pc.sctpTransports()].forEach((sctpTransport) => void 0);
-        [...pc.transceivers()].forEach((transceiver) => void 0);
-        [...pc.senders()].forEach((sender) => void 0);
-        [...pc.receivers()].forEach((receiver) => void 0);
-        [...pc.transports()].forEach((transport) => void 0);
-        [...pc.certificates()].forEach((certificate) => void 0);
-        [...pc.iceServers()].forEach((iceServer) => void 0);
-        
-    }
+    [...pc.sctpTransports()].forEach((sctpTransport) => void 0);
+    [...pc.transceivers()].forEach((transceiver) => void 0);
+    [...pc.senders()].forEach((sender) => void 0);
+    [...pc.receivers()].forEach((receiver) => void 0);
+    [...pc.transports()].forEach((transport) => void 0);
+    [...pc.certificates()].forEach((certificate) => void 0);
+    [...pc.iceServers()].forEach((iceServer) => void 0);
+}
 ```
 
 ### MediaStreamTrack Entry
 
-
 **Collected tracks**:
+
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const track of monitor.tracks) {
         console.log(`Track ${track.trackId} is ${track.kind}`);
     }
@@ -262,10 +262,11 @@ monitor.on('stats-collected', () => {
 ```
 
 **Accessing Calculated Updates**:
+
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const track of monitor.tracks) {
-        if (track?.direction === 'outbound') {
+        if (track?.direction === "outbound") {
             console.log(`Stats belongs to Track ${track.trackId} `);
             console.log(`Lost packets reported by remote endpoint: ${track.remoteLostPackets}`);
             console.log(`Received packets reported by remote endpoint: ${track.remoteReceivedPackets}`);
@@ -274,7 +275,7 @@ monitor.on('stats-collected', () => {
             console.log(`Associated sfu stream id: ${track.sfuStreamId}`);
         }
 
-        if (trackStats?.direction === 'inbound') {
+        if (trackStats?.direction === "inbound") {
             console.log(`Stats belongs to Track ${track.trackId} `);
             console.log(`Lost packets reported by local endpoint: ${track.lostPackets}`);
             console.log(`Received packets reported by local endpoint: ${track.receivedPackets}`);
@@ -287,18 +288,19 @@ monitor.on('stats-collected', () => {
 ```
 
 **Accessing related entries**
+
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const track of monitor.tracks) {
         console.log(`Track ${track.trackId} is ${track.kind}`);
-        if (track.direction === 'outbound') {
-            [...track.outboundRtps()].forEach(outboundRtp => {
+        if (track.direction === "outbound") {
+            [...track.outboundRtps()].forEach((outboundRtp) => {
                 console.log(`Outbound RTP ${outboundRtp.getSsrc()} has ${outboundRtp.sentPackets} sent packets`);
             });
         }
 
-        if (track.direction === 'inbound') {
-            [...track.inboundRtps()].forEach(inboundRtp => {
+        if (track.direction === "inbound") {
+            [...track.inboundRtps()].forEach((inboundRtp) => {
                 console.log(`Inbound RTP ${inboundRtp.getSsrc()} has ${inboundRtp.receivedPackets} received packets`);
             });
         }
@@ -311,15 +313,17 @@ monitor.on('stats-collected', () => {
 **Accessing Stats**:
 
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const inboundRtp of monitor.inboundRtps) {
         console.log(`InboundRtp ${inboundRtp.statsId} collected stats`, inboundRtp.stats);
     }
 });
 ```
+
 **Accessing Calculated Updates**:
+
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const inboundRtp of monitor.inboundRtps) {
         console.log(`InboundRtp ${inboundRtp.getSsrc()} `);
         console.log(`Received packets since last collecting: ${inboundRtp.receivedBytes}`);
@@ -332,26 +336,38 @@ monitor.on('stats-collected', () => {
 
         console.log(`Associated sfu stream id: ${inboundRtp.sfuStreamId}`);
         console.log(`Associated sfu sink id: ${inboundRtp.sfuSinkId}`);
-        
     }
 });
 ```
 
 **Accessing related entries**:
-```javascript
-monitor.on('stats-collected', () => {
-    for (const inboundRtp of monitor.inboundRtps) {
-        
-        console.log(`inbound RTP associated with SSRC ${inboundRtp.getSsrc()} uses codec ${inboundRtp.getCodec()?.stats.mimeType}`);
-        console.log(`inbound RTP associated with SSRC ${inboundRtp.getSsrc()} remote endpoint sent ${inboundRtp.getRemoteOutboundRtp()?.stats.packetsSent} packets`);
 
-        inboundRtp.kind ==='audio' && console.log(`inbound RTP associated with SSRC ${inboundRtp.getSsrc()} has played out ${inboundRtp.getAudioPlayout()?.stats.totalSamplesCount} audio samples`);
+```javascript
+monitor.on("stats-collected", () => {
+    for (const inboundRtp of monitor.inboundRtps) {
+        console.log(
+            `inbound RTP associated with SSRC ${inboundRtp.getSsrc()} uses codec ${
+                inboundRtp.getCodec()?.stats.mimeType
+            }`
+        );
+        console.log(
+            `inbound RTP associated with SSRC ${inboundRtp.getSsrc()} remote endpoint sent ${
+                inboundRtp.getRemoteOutboundRtp()?.stats.packetsSent
+            } packets`
+        );
+
+        inboundRtp.kind === "audio" &&
+            console.log(
+                `inbound RTP associated with SSRC ${inboundRtp.getSsrc()} has played out ${
+                    inboundRtp.getAudioPlayout()?.stats.totalSamplesCount
+                } audio samples`
+            );
 
         const audioPlayout = inboundRtp.getAudioPlayout(); // The AudioPlayoutEntry associated with the inboundRtp
         const peerConnection = inboundRtp.getPeerConnection(); // The PeerConnectionEntry associated with the inboundRtp
         const trackId = inboundRtp.getTrackId(); // The trackId associated with the inboundRtp
     }
-})
+});
 ```
 
 ### OutboundRTP Entry
@@ -359,7 +375,7 @@ monitor.on('stats-collected', () => {
 **Accessing Stats**:
 
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const outboundRtp of monitor.outboundRtps) {
         console.log(`OutboundRtp ${outboundRtp.statsId} collected stats`, outboundRtp.stats);
     }
@@ -367,8 +383,9 @@ monitor.on('stats-collected', () => {
 ```
 
 **Accessing Calculated Updates**:
+
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const outboundRtp of monitor.outboundRtps) {
         console.log(`OutboundRtp ${outboundRtp.getSsrc()} `);
         console.log(`Sent packets since last collecting: ${outboundRtp.sentPackets}`);
@@ -380,19 +397,27 @@ monitor.on('stats-collected', () => {
 ```
 
 **Accessing related entries**:
+
 ```javascript
-monitor.on('stats-collected', () => {
+monitor.on("stats-collected", () => {
     for (const outboundRtp of monitor.outboundRtps) {
-        console.log(`outbound RTP associated with SSRC ${outboundRtp.getSsrc()} uses codec ${outboundRtp.getCodec()?.stats.mimeType}`);
-        console.log(`outbound RTP associated with SSRC ${outboundRtp.getSsrc()} remote endpoint received ${outboundRtp.getRemoteInboundRtp()?.stats.packetsReceived} packets`);
+        console.log(
+            `outbound RTP associated with SSRC ${outboundRtp.getSsrc()} uses codec ${
+                outboundRtp.getCodec()?.stats.mimeType
+            }`
+        );
+        console.log(
+            `outbound RTP associated with SSRC ${outboundRtp.getSsrc()} remote endpoint received ${
+                outboundRtp.getRemoteInboundRtp()?.stats.packetsReceived
+            } packets`
+        );
 
         const remoteInboundRtp = outboundRtp.getRemoteInboundRtp(); // The RemoteInboundRtpEntry associated with the outboundRtp
         const peerConnection = outboundRtp.getPeerConnection(); // The PeerConnectionEntry associated with the outboundRtp
         const trackId = outboundRtp.getTrackId(); // The trackId associated with the outboundRtp
     }
-})
+});
 ```
-
 
 ## Detectors
 
@@ -407,8 +432,8 @@ The Congestion Detector identifies congestion issues in media streaming. When co
 ```javascript
 const detector = monitor.createCongestionDetector();
 
-detector.on('congestion', (event) => {
-    console.log('congestion detected on media streaming');
+detector.on("congestion", (event) => {
+    console.log("congestion detected on media streaming");
     console.log("Available incoming bitrate before congestion", event.incomingBitrateBeforeCongestion);
     console.log("Available outgoing bitrate before congestion", event.outgoingBitrateBeforeCongestion);
     console.log("Available incoming bitrate after congestion", event.incomingBitrateAfterCongestion);
@@ -421,7 +446,7 @@ detector.on('congestion', (event) => {
 ```javascript
 const detector = monitor.createAudioDesyncDetector();
 
-detector.on('statechanged', event => {
+detector.on("statechanged", (event) => {
     console.log(`Audio is ${event.state} for track ${event.trackId}`);
 });
 ```
@@ -434,27 +459,27 @@ const detector = monitor.createAudioDesyncDetector({
     // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
     // automatically added to the sample.
     createIssueOnDetection: {
-        severity: 'major',
+        severity: "major",
         attachments: {
             // various custom data
         },
     },
     /**
-	 * The fractional threshold used to determine if the audio desynchronization
-	 * correction is considered significant or not.
-	 * It represents the minimum required ratio of corrected samples to total samples.
-	 * For example, a value of 0.1 means that if the corrected samples ratio
-	 * exceeds 0.1, it will be considered a significant audio desynchronization issue.
-	 */
-	fractionalCorrectionAlertOnThreshold: 0.1,
-	/**
-	 * The fractional threshold used to determine if the audio desynchronization
-	 * correction is considered negligible and the alert should be turned off.
-	 * It represents the maximum allowed ratio of corrected samples to total samples.
-	 * For example, a value of 0.05 means that if the corrected samples ratio
-	 * falls below 0.05, the audio desynchronization alert will be turned off.
-	 */
-	fractionalCorrectionAlertOffThreshold: 0.05,
+     * The fractional threshold used to determine if the audio desynchronization
+     * correction is considered significant or not.
+     * It represents the minimum required ratio of corrected samples to total samples.
+     * For example, a value of 0.1 means that if the corrected samples ratio
+     * exceeds 0.1, it will be considered a significant audio desynchronization issue.
+     */
+    fractionalCorrectionAlertOnThreshold: 0.1,
+    /**
+     * The fractional threshold used to determine if the audio desynchronization
+     * correction is considered negligible and the alert should be turned off.
+     * It represents the maximum allowed ratio of corrected samples to total samples.
+     * For example, a value of 0.05 means that if the corrected samples ratio
+     * falls below 0.05, the audio desynchronization alert will be turned off.
+     */
+    fractionalCorrectionAlertOffThreshold: 0.05,
 });
 ```
 
@@ -463,11 +488,10 @@ const detector = monitor.createAudioDesyncDetector({
 The CPU Performance Detector is designed to monitor and detect issues related to CPU performance that may impact the functionality and efficiency of your application.
 
 ```javascript
-
 const detector = monitor.createCpuPerformanceIssueDetector();
 
-detector.on('statechanged', (state) => {
-   console.log('CPU limitation state changed', state);
+detector.on("statechanged", (state) => {
+    console.log("CPU limitation state changed", state);
 });
 ```
 
@@ -479,7 +503,7 @@ const detector = monitor.createCpuPerformanceIssueDetector({
     // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
     // automatically added to the sample.
     createIssueOnDetection: {
-        severity: 'major',
+        severity: "major",
         attachments: {
             // various custom data
         },
@@ -492,19 +516,19 @@ const detector = monitor.createCpuPerformanceIssueDetector({
 ```javascript
 const detector = monitor.createVideoFreezesDetector();
 
-detector.on('freezedVideoStarted', event => {
-    console.log('Freezed video started');
-    console.log('TrackId', event.trackId);
-    console.log('PeerConnectionId', event.peerConnectionId);
-    console.log('SSRC:', event.ssrc);
+detector.on("freezedVideoStarted", (event) => {
+    console.log("Freezed video started");
+    console.log("TrackId", event.trackId);
+    console.log("PeerConnectionId", event.peerConnectionId);
+    console.log("SSRC:", event.ssrc);
 });
 
-detector.on('freezedVideoEnded', event => {
-    console.log('Freezed video ended');
-    console.log('TrackId', event.trackId);
-    console.log('Freeze duration in Seconds', event.durationInS);
-    console.log('PeerConnectionId', event.peerConnectionId);
-    console.log('SSRC:', event.ssrc);
+detector.on("freezedVideoEnded", (event) => {
+    console.log("Freezed video ended");
+    console.log("TrackId", event.trackId);
+    console.log("Freeze duration in Seconds", event.durationInS);
+    console.log("PeerConnectionId", event.peerConnectionId);
+    console.log("SSRC:", event.ssrc);
 });
 ```
 
@@ -516,7 +540,7 @@ const detector = monitor.createVideoFreezesDetector({
     // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
     // automatically added to the sample.
     createIssueOnDetection: {
-        severity: 'major',
+        severity: "major",
         attachments: {
             // various custom data
         },
@@ -531,11 +555,11 @@ The Stucked Inbound Track Detector is designed to identify tracks that are exper
 ```javascript
 const detector = monitor.createStuckedInboundTrackDetector();
 
-detector.on('stuckedtrack', event => {
-    console.log('Stucked inbound track detected');
-    console.log('TrackId', event.trackId);
-    console.log('PeerConnectionId', event.peerConnectionId);
-    console.log('SSRC:', event.ssrc);
+detector.on("stuckedtrack", (event) => {
+    console.log("Stucked inbound track detected");
+    console.log("TrackId", event.trackId);
+    console.log("PeerConnectionId", event.peerConnectionId);
+    console.log("SSRC:", event.ssrc);
 });
 ```
 
@@ -554,7 +578,7 @@ const detector = monitor.createStuckedInboundTrackDetector({
     // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
     // automatically added to the sample.
     createIssueOnDetection: {
-        severity: 'major',
+        severity: "major",
         attachments: {
             // various custom data
         },
@@ -571,9 +595,9 @@ The Long Peer Connection Establishment Detector is designed to identify peer con
 ```javascript
 const detector = monitor.createLongPeerConnectionEstablishmentDetector();
 
-detector.on('too-long-connection-establishment', event => {
-    console.log('Long peer connection establishment detected');
-    console.log('PeerConnectionId', event.peerConnectionId);
+detector.on("too-long-connection-establishment", (event) => {
+    console.log("Long peer connection establishment detected");
+    console.log("PeerConnectionId", event.peerConnectionId);
 });
 ```
 
@@ -585,7 +609,7 @@ const detector = monitor.createLongPeerConnectionEstablishmentDetector({
     // Issues created by the monitor can be caught by monitor.on('issue', (issue) => {}), and
     // automatically added to the sample.
     createIssueOnDetection: {
-        severity: 'major',
+        severity: "major",
         attachments: {
             // various custom data
         },
@@ -605,8 +629,8 @@ Issues can be added to the monitor instance using the addIssue method. For insta
 
 ```javascript
 monitor.addIssue({
-    severity: 'critical',
-    description: 'Media device is crashed',
+    severity: "critical",
+    description: "Media device is crashed",
     timestamp: Date.now(),
     attachments: {
         clientId,
@@ -618,8 +642,8 @@ monitor.addIssue({
 Furthermore, events related to issues are dispatched through the monitor. For example:
 
 ```javascript
-monitor.on('issue', (issue) => {
-    console.log('An issue is detected', issue);
+monitor.on("issue", (issue) => {
+    console.log("An issue is detected", issue);
 });
 ```
 
@@ -627,11 +651,10 @@ Each issue detected is included in the subsequent sample created by the monitor,
 
 Additionally, each detector can be configured to automatically create an issue upon detection. For instance:
 
-
 ```javascript
 const detector = monitor.createCongestionDetector({
     createIssueOnDetection: {
-        severity: 'major',
+        severity: "major",
         attachments: {
             // various custom data
         },
@@ -662,40 +685,52 @@ const config = {
     samplingTick: 3,
 
     /**
-     * By setting this to true monitor will 
+     * By setting this to true monitor will
      *
      * DEFAULT: 0
      */
     integrateNavigatorMediaDevices: true,
-
+    /**
+     * If true, the monitor creates a CLIENT_JOINED event when the monitor is created.
+     *
+     * additionally you can add attachments to the join event by setting it to:
+     * {
+     *   attachments: {
+     *     my_custom_id: 'customId',
+     *   }
+     * }
+     *
+     * DEFAULT: true
+     */
+    createClientJoinedEvent: true
     /**
      * Configuration for detecting issues.
-     * 
+     *
      * By default, all detectors are enabled.
      */
     detectIssues: {
         /**
          * Configuration for detecting congestion issues.
-         * 
+         *
          * DEFAULT: 'major'
          */
         congestion: 'major',
-        
+
         /**
          * Configuration for detecting audio desynchronization issues.
          */
         audioDesync: 'minor',
-        
+
         /**
          * Configuration for detecting frozen video issues.
          */
         freezedVideo: 'minor',
-        
+
         /**
          * Configuration for detecting CPU limitation issues.
          */
         cpuLimitation: 'major',
-        
+
         /**
          * Configuration for detecting stucked inbound track issues.
          */
@@ -713,41 +748,41 @@ const config = {
 
 In the context of our monitoring library, events play a crucial role in enabling real-time insights and interactions. These events are emitted by the monitor to signal various occurrences, such as the creation of a peer connection, media track, or ICE connections. Below, we detail the events detected by the monitor.
 
- * `CLIENT_JOINED`: A client has joined
- * `CLIENT_LEFT`: A client has left
- * `PEER_CONNECTION_OPENED`: A peer connection is opened
- * `PEER_CONNECTION_CLOSED`: A peer connection is closed
- * `MEDIA_TRACK_ADDED`: A media track is added
- * `MEDIA_TRACK_REMOVED`: A media track is removed
- * `MEDIA_TRACK_MUTED`: A media track is muted
- * `MEDIA_TRACK_UNMUTED`: A media track is unmuted
- * `ICE_GATHERING_STATE_CHANGED`: The ICE gathering state has changed
- * `PEER_CONNECTION_STATE_CHANGED`: The peer connection state has changed
- * `ICE_CONNECTION_STATE_CHANGED`: The ICE connection state has changed
- * `DATA_CHANNEL_OPEN`: A data channel is opened
- * `DATA_CHANNEL_CLOSED`: A data channel is closed
- * `DATA_CHANNEL_ERROR`: A data channel error occurred
+-   `CLIENT_JOINED`: A client has joined
+-   `CLIENT_LEFT`: A client has left
+-   `PEER_CONNECTION_OPENED`: A peer connection is opened
+-   `PEER_CONNECTION_CLOSED`: A peer connection is closed
+-   `MEDIA_TRACK_ADDED`: A media track is added
+-   `MEDIA_TRACK_REMOVED`: A media track is removed
+-   `MEDIA_TRACK_MUTED`: A media track is muted
+-   `MEDIA_TRACK_UNMUTED`: A media track is unmuted
+-   `ICE_GATHERING_STATE_CHANGED`: The ICE gathering state has changed
+-   `PEER_CONNECTION_STATE_CHANGED`: The peer connection state has changed
+-   `ICE_CONNECTION_STATE_CHANGED`: The ICE connection state has changed
+-   `DATA_CHANNEL_OPEN`: A data channel is opened
+-   `DATA_CHANNEL_CLOSED`: A data channel is closed
+-   `DATA_CHANNEL_ERROR`: A data channel error occurred
 
 For Mediasoup integration the following events are detected:
 
- * `PRODUCER_ADDED`: A producer is added
- * `PRODUCER_REMOVED`: A producer is removed
- * `PRODUCER_PAUSED`: A producer is paused
- * `PRODUCER_RESUMED`: A producer is resumed
- * `CONSUMER_ADDED`: A consumer is added
- * `CONSUMER_REMOVED`: A consumer is removed
- * `CONSUMER_PAUSED`: A consumer is paused
- * `CONSUMER_RESUMED`: A consumer is resumed
- * `DATA_PRODUCER_ADDED`: A data producer is added
- * `DATA_PRODUCER_REMOVED`: A data producer is removed
- * `DATA_CONSUMER_ADDED`: A data consumer is added
- * `DATA_CONSUMER_REMOVED`: A data consumer is removed
+-   `PRODUCER_ADDED`: A producer is added
+-   `PRODUCER_REMOVED`: A producer is removed
+-   `PRODUCER_PAUSED`: A producer is paused
+-   `PRODUCER_RESUMED`: A producer is resumed
+-   `CONSUMER_ADDED`: A consumer is added
+-   `CONSUMER_REMOVED`: A consumer is removed
+-   `CONSUMER_PAUSED`: A consumer is paused
+-   `CONSUMER_RESUMED`: A consumer is resumed
+-   `DATA_PRODUCER_ADDED`: A data producer is added
+-   `DATA_PRODUCER_REMOVED`: A data producer is removed
+-   `DATA_CONSUMER_ADDED`: A data consumer is added
+-   `DATA_CONSUMER_REMOVED`: A data consumer is removed
 
 ### CLIENT_JOINED Event
 
-A client event is automatically generated when the first sample is created, and 
+A client event is automatically generated when the first sample is created, and
 the joined timestamp is set to the time of the monitor creation. However, you can
-manually set the event by calling the `monitor.join()` method. 
+manually set the event by calling the `monitor.join()` method.
 
 **Important Note**: The `monitor.join()` method is called only once, and in case of manual setup it should be called before the first sample is created.
 
@@ -769,24 +804,22 @@ monitor.leave({
 });
 ```
 
-
 ### Custom Call Event
 
 You can create a custom event by calling the `monitor.addCustomCallEvent()` method. The method takes an object with the following properties:
 
 ```javascript
 monitor.addCustomCallEvent({
-    name: 'MY CUSTOM EVENT', // mandatory
+    name: "MY CUSTOM EVENT", // mandatory
 
-    message: 'my custom message', // optional;
+    message: "my custom message", // optional;
     attachments: JSON.stringify({
-        value: 'my custom value',
+        value: "my custom value",
     }), // optional
-	timestamp: Date.now(), // optional
-	value: `simple string value`, // optional
-	peerConnectionId: 'peer-connection-id', // optional;
-	mediaTrackId: 'media-track-id', // optional;
-	
+    timestamp: Date.now(), // optional
+    value: `simple string value`, // optional
+    peerConnectionId: "peer-connection-id", // optional;
+    mediaTrackId: "media-track-id", // optional;
 });
 ```
 
@@ -796,36 +829,31 @@ You can create an extension state event by calling the `monitor.addExtensionStat
 
 ```javascript
 monitor.addExtensionStats({
-    type: 'CLIENT_CPU_STATS',
+    type: "CLIENT_CPU_STATS",
     payload: {
         cpuUsage: 0.5,
         memoryUsage: 0.3,
-    }
+    },
 });
 ```
 
 As a rule of thumb for when to use `addCustomCallEvent` and `addExtensionStateEvent`:
-- Use `addCustomCallEvent` for events that are related to the call itself, such as user clicked a button.
-- Use `addExtensionStats` for events that are related to the client's environment, such as CPU usage and collected periodically.
 
+-   Use `addCustomCallEvent` for events that are related to the call itself, such as user clicked a button.
+-   Use `addExtensionStats` for events that are related to the client's environment, such as CPU usage and collected periodically.
 
 ## Sampling
 
 The monitor generates samples by invoking the `monitor.sample()` method. The monitor will automatically call the `sample()` method unless `samplingTick` is set to a value less than or equal to 0. The ClientMonitor creates a `ClientSample`, a compound object that contains all observed stats and created events. The ClientSample object is emitted, and an event listener can listen to it by subscribing to the `sample-created` event:
 
 ```javascript
-monitor.on('sample-created', ({
-    clientSample,
-    elapsedSinceLastSampleInMs,
-}) => {
-    console.log('The created client sample is:', clientSample);
-    console.log('Elapsed time in milliseconds since the last sample was created:', elapsedSinceLastSampleInMs);
-})
+monitor.on("sample-created", ({ clientSample, elapsedSinceLastSampleInMs }) => {
+    console.log("The created client sample is:", clientSample);
+    console.log("Elapsed time in milliseconds since the last sample was created:", elapsedSinceLastSampleInMs);
+});
 ```
 
 The ClientSample can be forwarded to a backend service, where the samples can be further processed (e.g., saved into a database or used for anomaly detection). To facilitate this, we have developed the [observer-js](https://github.com/ObserveRTC/observer-js) library, which you can use to process the samples.
-
-
 
 ## NPM package
 
