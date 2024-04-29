@@ -1071,7 +1071,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     private static _fetchNavigatorData(monitor: ClientMonitor) {
         try {
-            const parser = new UAParser("user-agent");
+            let outerNavigator: typeof navigator | undefined = undefined;
+            if (navigator !== undefined) outerNavigator = navigator;
+            else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
+            else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+            
+            const parser = new UAParser(outerNavigator.userAgent);
             const result = parser.getResult();
             
             monitor.browser = result.browser;
