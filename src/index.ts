@@ -79,33 +79,47 @@ export type {
 
 import { ClientMonitor, ClientMonitorConfig } from "./ClientMonitor";
 import { LogLevel, addLoggerProcess, createConsoleLogger } from "./utils/logger";
-let loggerSet = false;
+
+let loggerIsConfigured = false;
 /**
  * Create ClientObserver
  *
  * @param config the given config to setup the observer
  */
-export function createClientMonitor(config?: ClientMonitorConfig & {
+export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
     /**
      * Set the loglevel for the client-monitor module
      */
     logLevel?: LogLevel,
 }): ClientMonitor {
-    if (!loggerSet && config?.logLevel) {
+
+    if (!loggerIsConfigured && config?.logLevel) {
         addLoggerProcess(createConsoleLogger(config.logLevel));
-        loggerSet = true;
+        loggerIsConfigured = true;
     }
-    
-    if (config && !config.samplingTick) config.samplingTick = 1;
 
-    return new ClientMonitor({
-        ...(config ?? {
-            collectingPeriodInMs: 5000,
-            samplingTick: 1,
-        }),
-    });
+    const appliedConfig: ClientMonitorConfig = Object.assign({
+        collectingPeriodInMs: 2000,
+        samplingTick: 3,
+        integrateNavigatorMediaDevices: true,
+        createClientJoinedEvent: true,
+        detectIssues: {
+            freezedVideo: 'minor',
+            audioDesync: 'minor',
+            congestion: 'major',
+            cpuLimitation: 'major',
+            stuckedInboundTrack: 'major',
+            longPcConnectionEstablishment: 'major',
+        }
+    }, config ?? {})
+
+    // we need to create samples to not let the memory grow indefinitely with issues and events
+    if (appliedConfig.samplingTick) {
+        appliedConfig.samplingTick = 1;
+    }
+
+    return new ClientMonitor(appliedConfig);
 }
-
 
 export { 
     createLogger, 

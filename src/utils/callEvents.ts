@@ -1,4 +1,5 @@
 import { CustomCallEvent } from "../schema/Samples";
+import { CallEventType } from "./CallEventType";
 import { RequiredBy } from "./common";
 
 type PartialCallEvent = Omit<CustomCallEvent, 'name' | 'message'>;
@@ -8,7 +9,7 @@ export function createClientJoinedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'CLIENT_JOINED',
+		name: CallEventType.CLIENT_JOINED,
 		message: 'Client joined the call',
 		timestamp: event.timestamp ?? Date.now(),
 	}
@@ -19,7 +20,7 @@ export function createClientLeftEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'CLIENT_LEFT',
+		name: CallEventType.CLIENT_LEFT,
 		message: 'Client joined the call',
 		timestamp: event.timestamp ?? Date.now(),
 	}
@@ -30,7 +31,7 @@ export function createPeerConnectionOpenedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'PEER_CONNECTION_OPENED',
+		name: CallEventType.PEER_CONNECTION_OPENED,
 		peerConnectionId: event.peerConnectionId,
 		message: 'Peer connection is opened',
 		timestamp: event.timestamp ?? Date.now(),
@@ -42,7 +43,7 @@ export function createPeerConnectionClosedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'PEER_CONNECTION_CLOSED',
+		name: CallEventType.PEER_CONNECTION_CLOSED,
 		peerConnectionId: event.peerConnectionId,
 		message: 'Peer connection is closed',
 		timestamp: event.timestamp ?? Date.now(),
@@ -54,7 +55,7 @@ export function createMediaTrackAddedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'MEDIA_TRACK_ADDED',
+		name: CallEventType.MEDIA_TRACK_ADDED,
 		peerConnectionId: event.peerConnectionId,
 		mediaTrackId: event.mediaTrackId,
 		message: 'Media track is added',
@@ -67,7 +68,7 @@ export function createMediaTrackRemovedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'MEDIA_TRACK_REMOVED',
+		name: CallEventType.MEDIA_TRACK_REMOVED,
 		peerConnectionId: event.peerConnectionId,
 		mediaTrackId: event.mediaTrackId,
 		message: 'Media track is removed',
@@ -80,7 +81,7 @@ export function createMediaTrackResumedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'MEDIA_TRACK_RESUMED',
+		name: CallEventType.MEDIA_TRACK_RESUMED,
 		peerConnectionId: event.peerConnectionId,
 		mediaTrackId: event.mediaTrackId,
 		message: 'Media track is resumed',
@@ -93,7 +94,7 @@ export function createMediaTrackMutedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'MEDIA_TRACK_MUTED',
+		name: CallEventType.MEDIA_TRACK_MUTED,
 		peerConnectionId: event.peerConnectionId,
 		mediaTrackId: event.mediaTrackId,
 		message: 'Media track is muted',
@@ -106,7 +107,7 @@ export function createMediaTrackUnmutedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'MEDIA_TRACK_UNMUTED',
+		name: CallEventType.MEDIA_TRACK_UNMUTED,
 		peerConnectionId: event.peerConnectionId,
 		mediaTrackId: event.mediaTrackId,
 		message: 'Media track is unmuted',
@@ -121,7 +122,7 @@ export function createIceGatheringStateChangedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'ICE_GATHERING_STATE_CHANGED',
+		name: CallEventType.ICE_GATHERING_STATE_CHANGED,
 		peerConnectionId: event.peerConnectionId,
 		message: `ICE gathering state is changed to ${event.iceGatheringState}`,
 		timestamp: event.timestamp ?? Date.now(),
@@ -138,7 +139,7 @@ export function createPeerConnectionStateChangedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'PEER_CONNECTION_STATE_CHANGED',
+		name: CallEventType.PEER_CONNECTION_STATE_CHANGED,
 		peerConnectionId: event.peerConnectionId,
 		message: `Peer connection state is changed to ${event.peerConnectionState}`,
 		timestamp: event.timestamp ?? Date.now(),
@@ -155,7 +156,7 @@ export function createIceConnectionStateChangedEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'ICE_CONNECTION_STATE_CHANGED',
+		name: CallEventType.ICE_CONNECTION_STATE_CHANGED,
 		peerConnectionId: event.peerConnectionId,
 		message: `ICE connection state is changed to ${event.iceConnectionState}`,
 		timestamp: event.timestamp ?? Date.now(),
@@ -170,7 +171,7 @@ export function createDataChannelOpenEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'DATA_CHANNEL_OPEN',
+		name: CallEventType.DATA_CHANNEL_OPEN,
 		peerConnectionId: event.peerConnectionId,
 		message: 'Data channel is opened',
 		timestamp: event.timestamp ?? Date.now(),
@@ -182,7 +183,7 @@ export function createDataChannelCloseEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'DATA_CHANNEL_CLOSED',
+		name: CallEventType.DATA_CHANNEL_CLOSED,
 		peerConnectionId: event.peerConnectionId,
 		message: 'Data channel is closed',
 		timestamp: event.timestamp ?? Date.now(),
@@ -194,7 +195,7 @@ export function createDataChannelErrorEvent(
 ): CustomCallEvent {
 	return {
 		...event,
-		name: 'DATA_CHANNEL_ERROR',
+		name: CallEventType.DATA_CHANNEL_ERROR,
 		peerConnectionId: event.peerConnectionId,
 		message: 'Data channel error',
 		timestamp: event.timestamp ?? Date.now(),

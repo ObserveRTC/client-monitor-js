@@ -1,7 +1,6 @@
-import { MediaDevice, CustomCallEvent, ExtensionStat, ClientSample } from './schema/Samples';
+import { CustomCallEvent, ExtensionStat, ClientSample, Browser, OperationSystem, Engine, Platform } from './schema/Samples';
 import { CollectedStats, createCollectors } from "./Collectors";
 import { createLogger } from "./utils/logger";
-import { ClientMetaData } from './ClientMetaData';
 import { StatsStorage } from './entries/StatsStorage';
 import { TypedEventEmitter } from './utils/TypedEmitter';
 import { Sampler } from './Sampler';
@@ -18,8 +17,16 @@ import  {
     FreezedVideoEndedEvent,
 } from './detectors/VideoFreezesDetector';
 import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
+import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
+import UAParser from 'ua-parser-js';
 
 const logger = createLogger('ClientMonitor');
+
+type ClientDetectorIssueDetectionExtension = {
+    severity: 'critical' | 'major' | 'minor',
+    description?: string,
+    attachments?: Record<string, unknown>,
+}
 
 export type ClientMonitorConfig = {
 
@@ -27,18 +34,68 @@ export type ClientMonitorConfig = {
      * By setting this, the observer calls the added statsCollectors periodically
      * and pulls the stats.
      *
-     * DEFAULT: undefined
+     * DEFAULT: 2000
      */
-    collectingPeriodInMs?: number;
+    collectingPeriodInMs: number;
 
     /**
      * By setting this, the observer makes samples after n number or collected stats.
      * 
      * For example if the value is 10, the observer makes a sample after 10 collected stats (in every 10 collectingPeriodInMs).
      *
-     * DEFAULT: undefined
+     * DEFAULT: 3
      */
-    samplingTick?: number;
+    samplingTick: number;
+
+    /**
+     * If true, the monitor integrate the navigator.mediaDevices (patch the getUserMedia and subscribe to ondevicechange event)
+     * 
+     * DEFAULT: true
+     */
+    integrateNavigatorMediaDevices: boolean;
+
+    /**
+     * If true, the monitor creates a CLIENT_JOINED event when the monitor is created.
+     */
+    createClientJoinedEvent?: boolean | {
+        message?: string,
+        attachments?: Record<string, unknown>,
+    }
+
+    /**
+     * Configuration for detecting issues.
+     */
+    detectIssues: {
+        /**
+         * Configuration for detecting congestion issues.
+         */
+        congestion?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting audio desynchronization issues.
+         */
+        audioDesync?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting frozen video issues.
+         */
+        freezedVideo?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting CPU limitation issues.
+         */
+        cpuLimitation?: boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+        
+        /**
+         * Configuration for detecting stucked inbound track issues.
+         */
+        stuckedInboundTrack?:  boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+
+        /**
+         * Configuration for detecting long peer connection establishment issues.
+         */
+        longPcConnectionEstablishment?:  boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+    }
 };
 
 export type ClientIssue = {
@@ -54,7 +111,9 @@ export type AlertState = 'on' | 'off';
 
 export interface ClientMonitorEvents {
     'error': Error,
-    'close': undefined,
+    'close': {
+        lastSample?: ClientSample,
+    },
     'stats-collected': {
         elapsedSinceLastCollectedInMs: number,
         collectedStats: CollectedStats,
@@ -63,19 +122,30 @@ export interface ClientMonitorEvents {
         elapsedSinceLastSampleInMs: number,
         clientSample: ClientSample,
     },
-    // 'congestion': {
-    //     incomingBitrateAfterCongestion: number | undefined;
-    //     incomingBitrateBeforeCongestion: number | undefined;
-    //     outgoingBitrateAfterCongestion: number | undefined;
-    //     outgoingBitrateBeforeCongestion: number | undefined;
-    // },
+    'congestion': {
+        incomingBitrateAfterCongestion: number | undefined;
+        incomingBitrateBeforeCongestion: number | undefined;
+        outgoingBitrateAfterCongestion: number | undefined;
+        outgoingBitrateBeforeCongestion: number | undefined;
+    },
     'usermediaerror': string,
-    // 'cpulimitation': AlertState,
-    // 'audio-desync': AlertState,
-    // 'freezed-video': {
-    //     trackId: string,
-    //     peerConnectionId: string | undefined,
-    // },
+    'cpulimitation': AlertState,
+    'audio-desync': AlertState,
+    'freezed-video': {
+        state: 'started' | 'ended',
+        peerConnectionId: string | undefined,
+        trackId: string, 
+        ssrc: number,
+        durationInS?: number,
+    },
+    'stucked-inbound-track': {
+        peerConnectionId: string,
+        trackId: string, 
+        ssrc: number,
+    },
+    'too-long-pc-connection-establishment': {
+        peerConnectionId: string,
+    }
     'peerconnection-state-updated': PeerConnectionStateUpdated & {
         peerConnectionId: string,
     },
@@ -85,13 +155,17 @@ export interface ClientMonitorEvents {
 
 export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public readonly created = Date.now();
-    public readonly meta: ClientMetaData;
     public readonly storage = new StatsStorage();
     public readonly collectors = createCollectors({
         storage: this.storage,
     });
-    private readonly _detectors = new Map<string, { close: () => void, once: (e: 'close', l: () => void) => void }>();
 
+    public browser?: Browser;
+    public engine?: Engine;
+    public operationSystem?: OperationSystem;
+    public platform?: Platform;
+
+    private readonly _detectors = new Map<string, { close: () => void, once: (e: 'close', l: () => void) => void }>();
     private readonly _sampler = new Sampler(this.storage);
     private _timer?: ReturnType<typeof setInterval>;
     
@@ -107,18 +181,15 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     ) {
         super();
         this.setMaxListeners(Infinity);
-
-        this.meta = new ClientMetaData();
-        this._sampler.addBrowser(this.meta.browser);
-        this._sampler.addEngine(this.meta.engine);
-        this._sampler.addOperationSystem(this.meta.operationSystem);
-        this._sampler.addPlatform(this.meta.platform);
+        
         this._setupTimer();
+        
+        ClientMonitor._fetchNavigatorData(this);
 
         // connect components
         const adapterMiddlewares = createAdapterMiddlewares({
-            browserType: this.meta.browser.name ?? 'Unknown',
-            browserVersion: this.meta.browser.version ?? 'Unknown',
+            browserType: this.browser?.name ?? 'Unknown',
+            browserVersion: this.browser?.version ?? 'Unknown',
         });
 
         const onCallEventListener = (event: CustomCallEvent) => {
@@ -130,7 +201,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     ...event,
                     peerConnectionId: peerConnectionEntry.peerConnectionId,
                 })
-            }
+            };
             peerConnectionEntry.events.once('close', () => {
                 peerConnectionEntry.events.off('state-updated', onStateUpdated);
             });
@@ -149,6 +220,20 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         adapterMiddlewares.forEach((middleware) => {
             this.collectors.processor.addMiddleware(middleware);
         });
+
+        if (this._config.detectIssues) {
+            this._setupDetectors(this._config.detectIssues);
+        }
+        if (this._config.integrateNavigatorMediaDevices) {
+            ClientMonitor.integrateNavigatorMediaDevices(this);
+        }
+        if (this._config.createClientJoinedEvent) {
+            this.join(this._config.createClientJoinedEvent === true ? undefined : this._config.createClientJoinedEvent);
+        }
+    }
+
+    public get processor() {
+        return this.storage.processor;
     }
 
     public get closed() {
@@ -162,9 +247,16 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._closed = true;
         clearInterval(this._timer);
 
+        let lastSample: ClientSample | undefined;
+
+        if (!this._joined) this.join();
         if (!this._left) this.leave();
-        if (0 < (this._config.samplingTick ?? 0)) {
-            this.sample();
+        if (0 < (this._config.samplingTick)) {
+            // has to call sample to create the last sample 
+            // if the samplingTick is set
+            // otherwise the last sample will not be emitted with the leabe event
+            // becasue the this.sample() will return as the monitor is already closed
+            lastSample =  this._sampler.createClientSample();
         }
         
         this.storage.clear();
@@ -172,6 +264,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._sampler.clear();
 
         this._timer = undefined;
+
+        this.emit('close', {
+            lastSample,
+        });
     }
     
     public async collect(): Promise<CollectedStats> {
@@ -218,15 +314,22 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return clientSample;
     }
 
-    public join(settings?: Pick<CustomCallEvent, 'attachments' | 'timestamp' | 'message'>): void {
+    public join(settings?: { timestamp?: number, message?: string, attachments?: Record<string, unknown>}): void {
         if (this._joined) return;
         this._joined = true;
+
+        let attachments: string | undefined;
+        try {
+            attachments = settings?.attachments ? JSON.stringify(settings.attachments) : undefined;
+        } catch (err) {
+            logger.error('Error while creating attachments for CLIENT_JOINED event', err);
+        }
 
         this._sampler.addCustomCallEvent({
             name: 'CLIENT_JOINED',
             message: settings?.message ?? 'Client joined',
             timestamp: settings?.timestamp ?? this.created,
-            attachments: settings?.attachments,
+            attachments,
         })
     }
 
@@ -242,27 +345,12 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         });
     }
 
-
     public setMarker(value?: string) {
         this._sampler.setMarker(value);
     }
 
     public setUserId(userId?: string) {
         this._sampler.setUserId(userId);
-    }
-
-    public setMediaDevices(...devices: MediaDevice[]): void {
-        if (!devices) return;
-        this.meta.mediaDevices = devices;
-        const storedDevices = [
-            ...Array.from(this.meta.audioInputs()),
-            ...Array.from(this.meta.audioOutputs()),
-            ...Array.from(this.meta.videoInputs()),
-        ];
-        for (const device of storedDevices) {
-            if (device.sampled) continue;
-            this._sampler.addMediaDevice(device);
-        }
     }
 
     public addUserMediaError(err: unknown): void {
@@ -272,6 +360,72 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this._sampler.addUserMediaError(message);
 
         this.emit('usermediaerror', message);
+
+        if (!err || typeof err !== 'object') return;
+			
+        const error = err as Error;
+
+        switch (error.name) {
+            case 'NotAllowedError': {
+                this.addIssue({
+                    severity: 'critical',
+                    description: 'User denied access to camera/microphone',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'NotFoundError': {
+                this.addIssue({
+                    severity: 'major',
+                    description: 'Requested device not found',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'NotReadableError': {
+                this.addIssue({
+                    severity: 'critical',
+                    description: 'Cannot read the media device',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'OverconstrainedError': {
+                this.addIssue({
+                    severity: 'major',
+                    description: 'Overconstrainted media device request',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            case 'AbortError': {
+                this.addIssue({
+                    severity: 'major',
+                    description: 'Media device request aborted',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+                break;
+            }
+            default: {
+                this.addIssue({
+                    severity: 'critical',
+                    description: 'Unknown error occurred during media device request',
+                    attachments: {
+                        error: `${error}`
+                    }
+                });
+            }
+        }
     }
 
     public setMediaConstraints(constrains: MediaStreamConstraints | MediaTrackConstraints): void {
@@ -319,10 +473,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createCongestionDetector(options?: { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): CongestionDetector {
         const existingDetector = this._detectors.get(CongestionDetector.name);
         const {
@@ -355,17 +506,17 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     outgoingBitrateBeforeCongestion = (outgoingBitrateBeforeCongestion ?? 0) + state.outgoingBitrateBeforeCongestion;
                 }
             }
-            // this.emit('congestion', {
-            //     incomingBitrateAfterCongestion,
-            //     incomingBitrateBeforeCongestion,
-            //     outgoingBitrateAfterCongestion,
-            //     outgoingBitrateBeforeCongestion,
-            // });
+            this.emit('congestion', {
+                incomingBitrateAfterCongestion,
+                incomingBitrateBeforeCongestion,
+                outgoingBitrateAfterCongestion,
+                outgoingBitrateBeforeCongestion,
+            });
 
             if (createIssueOnDetection) {
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: 'Congestion detected',
+                    description: createIssueOnDetection.description ?? 'Congestion detected',
                     timestamp: Date.now(),
                     attachments: {
                         ...(createIssueOnDetection.attachments ?? {}),
@@ -392,10 +543,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createAudioDesyncDetector(config?: AudioDesyncDetectorConfig & { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): AudioDesyncDetector {
         const existingDetector = this._detectors.get(AudioDesyncDetector.name);
 
@@ -416,7 +564,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
             this.addIssue({
                 severity: createIssueOnDetection.severity,
-                description: 'Audio desync detected',
+                description: createIssueOnDetection.description ?? 'Audio desync detected',
                 timestamp: Date.now(),
                 peerConnectionId: this.storage.getTrack(trackId)?.getPeerConnection()?.peerConnectionId,
                 mediaTrackId: trackId,
@@ -443,10 +591,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createVideoFreezesDetector(config?: VideoFreezesDetectorConfig & { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): VideoFreezesDetector {
         const existingDetector = this._detectors.get(VideoFreezesDetector.name);
 
@@ -460,16 +605,18 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onFreezeStarted = (event: FreezedVideoStartedEvent) => {
-            // this.emit('freezed-video', {
-            //     peerConnectionId: event.peerConnectionId,
-            //     trackId: event.trackId,
-            // });
+            this.emit('freezed-video', {
+                state: 'started',
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                ssrc: event.ssrc,
+            });
         };
         const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
             if (createIssueOnDetection) {
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: 'Video Freeze detected',
+                    description: createIssueOnDetection.description ?? 'Video Freeze detected',
                     timestamp: Date.now(),
                     peerConnectionId: event.peerConnectionId,
                     mediaTrackId: event.trackId,
@@ -479,6 +626,13 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     },
                 });
             }
+            this.emit('freezed-video', {
+                state: 'ended',
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                durationInS: event.durationInS,
+                ssrc: event.ssrc,
+            });
         }
 
         detector.once('close', () => {
@@ -496,10 +650,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createCpuPerformanceIssueDetector(config?: CpuPerformanceDetectorConfig & { 
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): CpuPerformanceDetector {
         const existingDetector = this._detectors.get(CpuPerformanceDetector.name);
 
@@ -512,16 +663,16 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         } = config ?? {};
 
         const onStateChanged = (state: AlertState) => {
-            // this.emit('cpulimitation', state);
+            this.emit('cpulimitation', state);
             
-            if (!createIssueOnDetection || state !== 'on') return;
-
-            this.addIssue({
-                severity: createIssueOnDetection.severity,
-                description: 'Audio desync detected',
-                timestamp: Date.now(),
-                attachments: createIssueOnDetection.attachments,
-            });
+            if (createIssueOnDetection && state !== 'on') {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: createIssueOnDetection.description ?? 'Audio desync detected',
+                    timestamp: Date.now(),
+                    attachments: createIssueOnDetection.attachments,
+                });
+            }
         };
 
         detector.once('close', () => {
@@ -538,10 +689,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }
 
     public createStuckedInboundTrackDetector(config?: StuckedInboundTrackDetectorConfig & {
-        createIssueOnDetection?: {
-            attachments?: Record<string, unknown>,
-            severity: 'critical' | 'major' | 'minor',
-        },
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): StuckedInboundTrackDetector {
         const existingDetector = this._detectors.get(StuckedInboundTrackDetector.name);
 
@@ -559,7 +707,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             if (createIssueOnDetection) {
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: 'Stucked track detected',
+                    description: createIssueOnDetection.description ?? 'Stucked track detected',
                     timestamp: Date.now(),
                     peerConnectionId: event.peerConnectionId,
                     mediaTrackId: event.trackId,
@@ -569,6 +717,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     },
                 });
             }
+            this.emit('stucked-inbound-track', {
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                ssrc: event.ssrc,
+            });
         }
 
         detector.once('close', () => {
@@ -580,6 +733,44 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         detector.on('stuckedtrack', onStuckedTrack);
 
         this._detectors.set('StuckedInboundTrack', detector);
+
+        return detector;
+    }
+
+    public createLongPcConnectionEstablishmentDetector(config?: LongPcConnectionEstablishmentDetectorConfig & {
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
+    }): LongPcConnectionEstablishmentDetector {
+        const existingDetector = this._detectors.get(LongPcConnectionEstablishmentDetector.name);
+
+        if (existingDetector) return existingDetector as LongPcConnectionEstablishmentDetector;
+
+        const detector = new LongPcConnectionEstablishmentDetector(config ?? {
+            thresholdInMs: 3000,
+        }, this);
+
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onLongConnection = (event: { peerConnectionId: string }) => {
+            if (createIssueOnDetection) {
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: createIssueOnDetection.description ?? 'Long peer connection establishment detected',
+                    timestamp: Date.now(),
+                    peerConnectionId: event.peerConnectionId,
+                    attachments: createIssueOnDetection.attachments,
+                });
+            }
+            this.emit('too-long-pc-connection-establishment', {
+                peerConnectionId: event.peerConnectionId,
+            });
+        }
+
+        detector.once('close', () => {
+            detector.off('too-long-connection-establishment', onLongConnection);
+        });
+        detector.on('too-long-connection-establishment', onLongConnection);
 
         return detector;
     }
@@ -812,6 +1003,61 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return this.storage.receivingFractionLost;
     }
 
+    private _setupDetectors(settings: ClientMonitorConfig['detectIssues']): void {
+        if (!settings) return;
+
+        let createIssueOnDetection: ClientDetectorIssueDetectionExtension | undefined;
+        const getCreateIssueOnDetection = (key: keyof ClientMonitorConfig['detectIssues']) => {
+            if (typeof settings[key] === 'object') {
+                return settings[key] as ClientDetectorIssueDetectionExtension;
+            } else if (typeof settings[key] === 'string') {
+                return {
+                    severity: settings[key] as 'critical' | 'major' | 'minor',
+                };
+            } else return undefined;
+        }
+
+        if (settings.congestion) {
+            this.createCongestionDetector({
+                createIssueOnDetection: getCreateIssueOnDetection('congestion'),
+            });
+        }
+
+        if (settings.audioDesync) {
+            this.createAudioDesyncDetector({
+                fractionalCorrectionAlertOffThreshold: 0.05,
+                fractionalCorrectionAlertOnThreshold: 0.1,
+                createIssueOnDetection: getCreateIssueOnDetection('audioDesync'),
+            });
+        }
+
+        if (settings.freezedVideo) {
+            this.createVideoFreezesDetector({
+                createIssueOnDetection: getCreateIssueOnDetection('freezedVideo'),
+            });
+        }
+
+        if (settings.cpuLimitation) {
+            this.createCpuPerformanceIssueDetector({
+                createIssueOnDetection: getCreateIssueOnDetection('cpuLimitation'),
+            });
+        }
+
+        if (settings.stuckedInboundTrack) {
+            this.createStuckedInboundTrackDetector({
+                minStuckedDurationInMs: 5000,
+                createIssueOnDetection: getCreateIssueOnDetection('stuckedInboundTrack'),
+            });
+        }
+
+        if (settings.longPcConnectionEstablishment) {
+            this.createLongPcConnectionEstablishmentDetector({
+                thresholdInMs: 3000,
+                createIssueOnDetection: getCreateIssueOnDetection('longPcConnectionEstablishment'),
+            });
+        }
+    }
+
     private _setupTimer(): void {
         this._timer && clearInterval(this._timer);
         this._timer = undefined;
@@ -821,5 +1067,104 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._timer = setInterval(() => {
             this.collect().catch(err => logger.error(err));
         }, this._config.collectingPeriodInMs);
+    }
+
+    private static _fetchNavigatorData(monitor: ClientMonitor) {
+        try {
+            let outerNavigator: typeof navigator | undefined = undefined;
+            if (navigator !== undefined) outerNavigator = navigator;
+            else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
+            else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+            
+            const parser = new UAParser(outerNavigator.userAgent);
+            const result = parser.getResult();
+            
+            monitor.browser = result.browser;
+            monitor.engine = result.engine;
+            monitor.operationSystem = result.os;
+            monitor.platform = result.device;
+            
+            try {
+                result.cpu && result.cpu.architecture && monitor._sampler.addCustomObserverEvent({
+                    name: 'CALL_META_DATA',
+                    message: 'CPU_INFO',
+                    attachments: JSON.stringify(result.cpu),
+                });
+            } catch (err) {
+                logger.warn('Cannot add CPU_INFO to the sampler', err);
+            }
+
+            if (monitor.browser.name) monitor._sampler.addBrowser(monitor.browser);
+            if (monitor.engine.name) monitor._sampler.addEngine(monitor.engine);
+            if (monitor.operationSystem.name) monitor._sampler.addOperationSystem(monitor.operationSystem);
+            if (monitor.platform.type) monitor._sampler.addPlatform(monitor.platform);
+
+        } catch (err) {
+
+            logger.warn(`Cannot collect media devices and navigator data, because an error occurred`, err);
+
+            monitor.operationSystem = undefined;
+            monitor.browser = undefined;
+            monitor.platform = undefined;
+            monitor.engine = undefined;
+        }
+    }
+
+    public static integrateNavigatorMediaDevices(monitor: ClientMonitor) {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        let outerNavigator: typeof navigator | undefined = undefined;
+        if (navigator !== undefined) outerNavigator = navigator;
+        else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
+        else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+
+        const mediaDevices: MediaDevices = outerNavigator.mediaDevices;
+        const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
+        
+        mediaDevices.getUserMedia = async (constraints?: MediaStreamConstraints): Promise<MediaStream> => {
+            try {
+                const result = await originalGetUserMedia(constraints);
+
+                return result;
+            } catch (err) {
+                monitor.addUserMediaError(err);
+                throw err;
+            }
+        };
+
+        try {
+            const supportedConstraints = mediaDevices.getSupportedConstraints();
+    
+            monitor._sampler.addMediaConstraints(JSON.stringify(supportedConstraints));
+        } catch (err) {
+            logger.warn('Cannot get supported constraints', err);
+        }
+        
+        const reportedDeviceIds = new Set<string>();
+        const onDeviceChange = async () => {
+            try {
+                const enumeratedMediaDevices = await mediaDevices.enumerateDevices();
+    
+                for (const mediaDevice of enumeratedMediaDevices) {
+                    const deviceId = `${mediaDevice.groupId}-${mediaDevice.deviceId}-${mediaDevice.kind}-${mediaDevice.label}`;
+                    if (reportedDeviceIds.has(deviceId)) continue;
+                    
+                    monitor._sampler.addMediaDevice(mediaDevice);
+
+                    reportedDeviceIds.add(deviceId);
+                }
+            } catch (err) {
+                logger.error('Cannot enumerate media devices', err);
+            }
+        };
+        
+        monitor.once('close', () => {
+            mediaDevices.getUserMedia = originalGetUserMedia;
+            mediaDevices.removeEventListener('devicechange', onDeviceChange);
+        });
+        mediaDevices.addEventListener('devicechange', onDeviceChange);
+
+        onDeviceChange().catch((err) => {
+            logger.warn('Cannot enumerate media devices', err);
+        });
     }
 }

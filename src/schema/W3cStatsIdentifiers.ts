@@ -136,6 +136,7 @@ export type TrackStats = RtcStats & Record<string, unknown> & {
     type: 'track';
 }
 
+export type RtcPeerConnectionState = "new" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
 export type RtcMediaKind = "audio" | "video";
 export type RtcQualityLimitationReason = "none" | "cpu" | "bandwidth" | "other";
 export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";

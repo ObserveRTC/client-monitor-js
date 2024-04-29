@@ -145,6 +145,7 @@ export class Sampler {
             extensionStats: this._extensionStats,
             customCallEvents: this._customCallEvents,
             mediaDevices: this._mediaDevices,
+            customObserverEvents: this._customObservedEvents,
             timestamp: Date.now(),
         };
         ++this._sampleSeq;
@@ -156,6 +157,7 @@ export class Sampler {
         this._userMediaErrors = undefined;
         this._extensionStats = undefined;
         this._customCallEvents = undefined;
+        this._customObservedEvents = undefined;
         this._mediaDevices = undefined;
         this._localSDP = undefined;
         
