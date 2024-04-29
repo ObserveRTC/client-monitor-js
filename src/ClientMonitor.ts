@@ -18,7 +18,7 @@ import  {
 } from './detectors/VideoFreezesDetector';
 import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
 import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
-import * as Bowser from 'bowser';
+import UAParser from 'ua-parser-js';
 
 const logger = createLogger('ClientMonitor');
 
@@ -1071,17 +1071,23 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
     private static _fetchNavigatorData(monitor: ClientMonitor) {
         try {
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            let outerNavigator: any = undefined;
-            if (navigator !== undefined) outerNavigator = navigator;
-            else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
-            else throw new Error(`navigator is not available`);
+            const parser = new UAParser("user-agent");
+            const result = parser.getResult();
             
-            const parsedResult = Bowser.parse(outerNavigator.userAgent);
-            monitor.browser = parsedResult.browser;
-            monitor.engine = parsedResult.engine;
-            monitor.operationSystem = parsedResult.os;
-            monitor.platform = parsedResult.platform;
+            monitor.browser = result.browser;
+            monitor.engine = result.engine;
+            monitor.operationSystem = result.os;
+            monitor.platform = result.device;
+            
+            try {
+                result.cpu && monitor._sampler.addCustomObserverEvent({
+                    name: 'CALL_META_DATA',
+                    message: 'CPU_INFO',
+                    attachments: JSON.stringify(result.cpu),
+                });
+            } catch (err) {
+                logger.warn('Cannot add CPU_INFO to the sampler', err);
+            }
 
             if (monitor.browser.name) monitor._sampler.addBrowser(monitor.browser);
             if (monitor.engine.name) monitor._sampler.addEngine(monitor.engine);
