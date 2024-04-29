@@ -1085,7 +1085,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             monitor.platform = result.device;
             
             try {
-                result.cpu && monitor._sampler.addCustomObserverEvent({
+                result.cpu && result.cpu.architecture && monitor._sampler.addCustomObserverEvent({
                     name: 'CALL_META_DATA',
                     message: 'CPU_INFO',
                     attachments: JSON.stringify(result.cpu),
