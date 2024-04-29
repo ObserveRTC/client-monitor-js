@@ -225,7 +225,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this._setupDetectors(this._config.detectIssues);
         }
         if (this._config.integrateNavigatorMediaDevices) {
-            ClientMonitor._integrateNavigatorMediaDevices(this);
+            ClientMonitor.integrateNavigatorMediaDevices(this);
         }
         if (this._config.createClientJoinedEvent) {
             this.join(this._config.createClientJoinedEvent === true ? undefined : this._config.createClientJoinedEvent);
@@ -1099,7 +1099,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         }
     }
 
-    private static _integrateNavigatorMediaDevices(monitor: ClientMonitor) {
+    public static integrateNavigatorMediaDevices(monitor: ClientMonitor) {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         let outerNavigator: typeof navigator | undefined = undefined;
         if (navigator !== undefined) outerNavigator = navigator;
@@ -1107,7 +1107,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
 
         const mediaDevices: MediaDevices = outerNavigator.mediaDevices;
-        const originalGetUserMedia = mediaDevices.getUserMedia;
+        const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
         
         mediaDevices.getUserMedia = async (constraints?: MediaStreamConstraints): Promise<MediaStream> => {
             try {
