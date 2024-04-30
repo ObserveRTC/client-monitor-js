@@ -45,14 +45,14 @@ export type ClientMonitorConfig = {
      *
      * DEFAULT: 3
      */
-    samplingTick: number;
+    samplingTick?: number;
 
     /**
      * If true, the monitor integrate the navigator.mediaDevices (patch the getUserMedia and subscribe to ondevicechange event)
      * 
      * DEFAULT: true
      */
-    integrateNavigatorMediaDevices: boolean;
+    integrateNavigatorMediaDevices?: boolean | MediaDevices;
 
     /**
      * If true, the monitor creates a CLIENT_JOINED event when the monitor is created.
@@ -65,7 +65,7 @@ export type ClientMonitorConfig = {
     /**
      * Configuration for detecting issues.
      */
-    detectIssues: {
+    detectIssues?: {
         /**
          * Configuration for detecting congestion issues.
          */
@@ -225,7 +225,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this._setupDetectors(this._config.detectIssues);
         }
         if (this._config.integrateNavigatorMediaDevices) {
-            ClientMonitor.integrateNavigatorMediaDevices(this);
+            ClientMonitor.integrateNavigatorMediaDevices(
+                this,
+                this._config.integrateNavigatorMediaDevices === true ? undefined : this._config.integrateNavigatorMediaDevices
+            );
         }
         if (this._config.createClientJoinedEvent) {
             this.join(this._config.createClientJoinedEvent === true ? undefined : this._config.createClientJoinedEvent);
@@ -251,7 +254,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         if (!this._joined) this.join();
         if (!this._left) this.leave();
-        if (0 < (this._config.samplingTick)) {
+        if (0 < (this._config.samplingTick ?? 0)) {
             // has to call sample to create the last sample 
             // if the samplingTick is set
             // otherwise the last sample will not be emitted with the leabe event
@@ -1006,8 +1009,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     private _setupDetectors(settings: ClientMonitorConfig['detectIssues']): void {
         if (!settings) return;
 
-        let createIssueOnDetection: ClientDetectorIssueDetectionExtension | undefined;
-        const getCreateIssueOnDetection = (key: keyof ClientMonitorConfig['detectIssues']) => {
+        type DetectIssuesConfig = (Required<ClientMonitorConfig> & {
+            detectIssues: Required<ClientMonitorConfig['detectIssues']>
+        })['detectIssues'];
+
+        const getCreateIssueOnDetection = (key: keyof DetectIssuesConfig) => {
             if (typeof settings[key] === 'object') {
                 return settings[key] as ClientDetectorIssueDetectionExtension;
             } else if (typeof settings[key] === 'string') {
@@ -1110,14 +1116,26 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         }
     }
 
-    public static integrateNavigatorMediaDevices(monitor: ClientMonitor) {
+    public static integrateNavigatorMediaDevices(monitor: ClientMonitor, browsermediaDevice?: MediaDevices) {
         /* eslint-disable @typescript-eslint/no-explicit-any */
-        let outerNavigator: typeof navigator | undefined = undefined;
-        if (navigator !== undefined) outerNavigator = navigator;
-        else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
-        else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+        if (!browsermediaDevice) {
+            let outerNavigator: typeof navigator | undefined = undefined;
+            if (navigator !== undefined) outerNavigator = navigator;
+            else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
+            else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+    
+            browsermediaDevice = outerNavigator.mediaDevices;
 
-        const mediaDevices: MediaDevices = outerNavigator.mediaDevices;
+            if (!browsermediaDevice) {
+                return logger.error('Cannot integrate navigator.mediaDevices, because navigator.mediaDevices is not available');
+            }
+        }
+
+        if (browsermediaDevice.getUserMedia === undefined || typeof browsermediaDevice.getUserMedia !== 'function') {
+            return logger.error('Cannot integrate navigator.mediaDevices.getUserMedia, because getUserMedia is not a function');
+        }
+        
+        const mediaDevices = browsermediaDevice as MediaDevices;
         const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
         
         mediaDevices.getUserMedia = async (constraints?: MediaStreamConstraints): Promise<MediaStream> => {

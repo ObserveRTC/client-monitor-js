@@ -93,17 +93,13 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
     logLevel?: LogLevel,
 }): ClientMonitor {
 
-    if (!loggerIsConfigured && config?.logLevel) {
-        addLoggerProcess(createConsoleLogger(config.logLevel));
-        loggerIsConfigured = true;
-    }
-
-    const appliedConfig: ClientMonitorConfig = Object.assign({
-        collectingPeriodInMs: 2000,
-        samplingTick: 3,
-        integrateNavigatorMediaDevices: true,
-        createClientJoinedEvent: true,
-        detectIssues: {
+    const {
+        logLevel,
+        collectingPeriodInMs = 2000,
+        samplingTick = 3,
+        integrateNavigatorMediaDevices = true,
+        createClientJoinedEvent = true,
+        detectIssues = {
             freezedVideo: 'minor',
             audioDesync: 'minor',
             congestion: 'major',
@@ -111,14 +107,20 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
             stuckedInboundTrack: 'major',
             longPcConnectionEstablishment: 'major',
         }
-    }, config ?? {})
+    } = config ?? {};
 
-    // we need to create samples to not let the memory grow indefinitely with issues and events
-    if (appliedConfig.samplingTick) {
-        appliedConfig.samplingTick = 1;
+    if (!loggerIsConfigured && logLevel) {
+        addLoggerProcess(createConsoleLogger(logLevel));
+        loggerIsConfigured = true;
     }
 
-    return new ClientMonitor(appliedConfig);
+    return new ClientMonitor({
+        collectingPeriodInMs,
+        samplingTick,
+        integrateNavigatorMediaDevices,
+        createClientJoinedEvent,
+        detectIssues,
+    });
 }
 
 export { 
