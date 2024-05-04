@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import { InboundRtpEntry } from "../entries/StatsEntryInterfaces";
+import { AlertState } from "../ClientMonitor";
 
 export type StuckedInboundTrackDetectorConfig = {
 	// Minimum duration in milliseconds for a track to be considered stuck
@@ -14,6 +15,7 @@ export type InboundRtpStatsTrace = {
 }
 
 export type InboundRtpStuckedEvent = {
+	'alert-state': [AlertState],
 	stuckedtrack: [{
 		peerConnectionId: string,
 		trackId: string,
@@ -31,6 +33,7 @@ export declare interface StuckedInboundTrackDetector {
 
 export class StuckedInboundTrackDetector extends EventEmitter {
 	private _closed = false;
+	private _stuckedTracks = new Set<string>();
 	private readonly _traces = new Map<string, InboundRtpStatsTrace>();
 	public readonly ignoredTrackIds = new Set<string>([
 		// mediasoup probator track id
@@ -62,6 +65,11 @@ export class StuckedInboundTrackDetector extends EventEmitter {
 			
 			if (inboundRtp.stats.bytesReceived !== 0) {
 				this._traces.delete(traceId);
+				const countBefore = this._stuckedTracks.size;
+				this._stuckedTracks.delete(traceId);
+				if (countBefore === 1 && this._stuckedTracks.size === 0) {
+					this.emit('alert-state', 'off');
+				}
 				continue;
 			}
 
@@ -84,6 +92,11 @@ export class StuckedInboundTrackDetector extends EventEmitter {
 						trackId,
 						ssrc,
 					});
+
+					this._stuckedTracks.add(traceId);
+					if (this._stuckedTracks.size === 1) {
+						this.emit('alert-state', 'on');
+					}
 					
 					trace.reported = true;
 				}
@@ -95,6 +108,10 @@ export class StuckedInboundTrackDetector extends EventEmitter {
 				this._traces.delete(traceId);
 			}
 		}
+	}
+
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {

@@ -53,7 +53,9 @@ export function createInboundTrackStats(peerConnection: PeerConnectionEntry, tra
 				}
 			},
 
-
+			bitrate: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.receivingBitrate ?? 0), 0),
+			roundTripTimeInS: -1,
+			// deprecated metric receiving bitrate
 			receivingBitrate: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.receivingBitrate ?? 0), 0),
 			lostPackets: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.lostPackets ?? 0), 0),
 			receivedPackets: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.receivedPackets ?? 0), 0),
@@ -63,13 +65,14 @@ export function createInboundTrackStats(peerConnection: PeerConnectionEntry, tra
 			receivedSamples: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.receivedSamples ?? 0), 0),
 			silentConcealedSamples: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.silentConcealedSamples ?? 0), 0),
 			fractionLoss: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.fractionLoss ?? 0), 0),
-			
+			jitter: inboundRtps.reduce((acc, inboundRtp) => acc + (inboundRtp.stats.jitter ?? 0), 0),
+
 			getPeerConnection: () => peerConnection,
 			inboundRtps(): IterableIterator<InboundRtpEntry> {
 				return iterator();
 			},
 			update: () => {
-				result.receivingBitrate = 0;
+				result.bitrate = 0;
 				result.lostPackets = 0;
 				result.receivedPackets = 0;
 				result.receivedFrames = 0;
@@ -78,12 +81,16 @@ export function createInboundTrackStats(peerConnection: PeerConnectionEntry, tra
 				result.receivedSamples = 0;
 				result.silentConcealedSamples = 0;
 				result.fractionLoss = 0;
+				result.roundTripTimeInS = 0;
+				result.jitter = 0;
 
+				let sumRoundTripTimeInS = 0;
+				let roundTripTimeCount = 0;
 				for (const inboundRtp of iterator()) {
 					inboundRtp.sfuStreamId = result.sfuStreamId;
 					inboundRtp.sfuSinkId = result.sfuSinkId;
 
-					result.receivingBitrate += inboundRtp.receivingBitrate ?? 0;
+					result.bitrate += inboundRtp.receivingBitrate ?? 0;
 					result.lostPackets += inboundRtp.lostPackets ?? 0;
 					result.receivedPackets += inboundRtp.receivedPackets ?? 0;
 					result.receivedFrames += inboundRtp.receivedFrames ?? 0;
@@ -92,7 +99,16 @@ export function createInboundTrackStats(peerConnection: PeerConnectionEntry, tra
 					result.receivedSamples += inboundRtp.receivedSamples ?? 0;
 					result.silentConcealedSamples += inboundRtp.silentConcealedSamples ?? 0;
 					result.fractionLoss += inboundRtp.fractionLoss ?? 0;
+					result.jitter += inboundRtp.stats.jitter ?? 0;
+					
+					const rttInS = inboundRtp.getRemoteOutboundRtp()?.stats.roundTripTime;
+					if (rttInS) {
+						sumRoundTripTimeInS += rttInS;
+						++roundTripTimeCount;
+					}
 				}
+				result.receivingBitrate = result.bitrate;
+				result.roundTripTimeInS = roundTripTimeCount > 0 ? sumRoundTripTimeInS / roundTripTimeCount : 0;
 			}
 		};
 		return result;

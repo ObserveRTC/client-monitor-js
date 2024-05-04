@@ -10,7 +10,12 @@ export interface StatsEntryAbs {
     getPeerConnection(): PeerConnectionEntry;
 }
 
-export type TrackStats = InboundTrackStats | OutboundTrackStats;
+export type TrackStats = (InboundTrackStats | OutboundTrackStats) & {
+    bitrate: number;
+    fractionLoss: number;
+    roundTripTimeInS: number;
+    jitter: number;
+};
 
 /**
  * Wraps the [CodecStats](https://www.w3.org/TR/webrtc-stats/#dom-rtccodecstats) and provide methods
@@ -78,6 +83,7 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     silentConcealedSamples?: number,
     fractionLoss?: number,
     avgRttInS?: number,
+    framesPerSecond?: number,
 
     /**
      * Navigate to the related ReceiverEntry

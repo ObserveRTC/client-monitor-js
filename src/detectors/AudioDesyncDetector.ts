@@ -1,6 +1,7 @@
 import EventEmitter from "events";
 import { AlertState, ClientMonitor } from "../ClientMonitor";
 import { InboundRtpEntry } from "../entries/StatsEntryInterfaces";
+import { Detector } from "./Detector";
 
 /**
  * Configuration object for the AudioDesyncDetector function.
@@ -25,6 +26,7 @@ export type AudioDesyncDetectorConfig = {
 };
 
 export type AudioDesyncDetectorEvents = {
+	'alert-state': [AlertState],
 	desync: [string],
 	sync: [string],
 	statechanged: [{ trackId: string, state: 'sync' | 'desync' }],
@@ -39,7 +41,7 @@ type AudioSyncTrace = {
 	inboundRtp: InboundRtpEntry,
 }
 
-export declare interface AudioDesyncDetector {
+export declare interface AudioDesyncDetector extends Detector {
 	on<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
 	off<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
 	once<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
@@ -56,6 +58,10 @@ export class AudioDesyncDetector extends EventEmitter {
 		super();
 		this.setMaxListeners(Infinity);
 		
+	}
+	
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {
@@ -107,6 +113,7 @@ export class AudioDesyncDetector extends EventEmitter {
 					const actualState = state.desync ? 'desync' : 'sync';
 					this.emit(actualState, trackId);
 					this.emit('statechanged', { trackId, state: actualState });
+					actualState === 'desync' ? this.emit('alert-state', 'on') : this.emit('alert-state', 'off');
 				}
 			}
 		}

@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
-import { ClientMonitor } from "../ClientMonitor";
+import { AlertState, ClientMonitor } from "../ClientMonitor";
+import { Detector } from "./Detector";
 
 export type LongPcConnectionEstablishmentDetectorConfig = {
 	// Minimum duration in milliseconds for a track to be considered stuck
@@ -8,13 +9,14 @@ export type LongPcConnectionEstablishmentDetectorConfig = {
 }
 
 export type LongPcConnectionEstablishmentDetectorEvent = {
+	'alert-state': [AlertState],
 	'too-long-connection-establishment': [{
 		peerConnectionId: string,
 	}],
 	close: [],
 }
 
-export declare interface LongPcConnectionEstablishmentDetector {
+export declare interface LongPcConnectionEstablishmentDetector extends Detector {
 	on<K extends keyof LongPcConnectionEstablishmentDetectorEvent>(event: K, listener: (...events: LongPcConnectionEstablishmentDetectorEvent[K]) => void): this;
 	off<K extends keyof LongPcConnectionEstablishmentDetectorEvent>(event: K, listener: (...events: LongPcConnectionEstablishmentDetectorEvent[K]) => void): this;
 	once<K extends keyof LongPcConnectionEstablishmentDetectorEvent>(event: K, listener: (...events: LongPcConnectionEstablishmentDetectorEvent[K]) => void): this;
@@ -55,6 +57,7 @@ export class LongPcConnectionEstablishmentDetector extends EventEmitter {
 					this.emit('too-long-connection-establishment', {
 						peerConnectionId: peerConnectionEntry.peerConnectionId,
 					});
+					this.emit('alert-state', 'on');
 				}, config.thresholdInMs));
 
 				prevState = state;
@@ -90,6 +93,10 @@ export class LongPcConnectionEstablishmentDetector extends EventEmitter {
 		for (const peerConnectionEntry of monitor.storage.peerConnections()) {
 			onPeerConnectionAdded(peerConnectionEntry);
 		}
+	}
+
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {

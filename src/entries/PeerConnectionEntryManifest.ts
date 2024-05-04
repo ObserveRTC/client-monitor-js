@@ -353,7 +353,6 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             this._emitter.emit('inbound-rtp-added', entry);
         }
         const elapsedTimeInSec = (stats.timestamp - entry.stats.timestamp) / 1000.0;
-        entry.decodedFrames = (stats.framesDecoded ?? 0) - (entry.stats.framesDecoded ?? 0);
         entry.avgJitterBufferDelayInMs = (((stats.jitterBufferDelay ?? 0) - (entry.stats.jitterBufferDelay ?? 0)) / ((Math.max(stats.jitterBufferEmittedCount ?? 1, 1)) - (entry.stats.jitterBufferEmittedCount ?? 0))) * 1000.0;
         entry.receivedPackets = (stats.packetsReceived ?? 0) - (entry.stats.packetsReceived ?? 0);
         entry.receivingBitrate = (((stats.bytesReceived ?? 0) - (entry.stats.bytesReceived ?? 0)) * 8) / elapsedTimeInSec;
@@ -365,7 +364,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
         entry.receivedSamples = (stats.totalSamplesReceived ?? 0) - (entry.stats.totalSamplesReceived ?? 0);
         entry.silentConcealedSamples = (stats.silentConcealedSamples ?? 0) - (entry.stats.silentConcealedSamples ?? 0);
         entry.fractionLoss = entry.lostPackets === 0 && entry.receivedPackets === 0 ? 0 : entry.lostPackets / (entry.lostPackets +  entry.receivedPackets);
-        
+        entry.framesPerSecond = stats.framesPerSecond ?? (entry.receivedFrames ? (entry.receivedFrames / Math.max(1, elapsedTimeInSec)) : 0);
+
         entry.stats = stats;
         entry.visited = true;
 

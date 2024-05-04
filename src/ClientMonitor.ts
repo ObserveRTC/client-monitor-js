@@ -19,6 +19,7 @@ import  {
 import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
 import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
 import UAParser from 'ua-parser-js';
+import { Detector } from './detectors/Detector';
 
 const logger = createLogger('ClientMonitor');
 
@@ -165,7 +166,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public operationSystem?: OperationSystem;
     public platform?: Platform;
 
-    private readonly _detectors = new Map<string, { close: () => void, once: (e: 'close', l: () => void) => void }>();
+    private readonly _detectors = new Map<string, Detector>();
     private readonly _sampler = new Sampler(this.storage);
     private _timer?: ReturnType<typeof setInterval>;
     

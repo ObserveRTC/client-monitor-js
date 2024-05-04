@@ -1,5 +1,7 @@
 import EventEmitter from "events";
 import { IceCandidatePairEntry, PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
+import { Detector } from "./Detector";
+import { AlertState } from "../ClientMonitor";
 
 type PeerConnectionState = {
 	peerConnectionId: string;
@@ -11,11 +13,12 @@ type PeerConnectionState = {
 }
 
 export type CongestionDetectorEvents = {
+	'alert-state': [AlertState];
 	congestion: [PeerConnectionState[]];
 	close: [];
 }
 
-export declare interface CongestionDetector {
+export declare interface CongestionDetector extends Detector {
 	on<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
 	off<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
 	once<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
@@ -30,7 +33,6 @@ export class CongestionDetector extends EventEmitter {
 	) {
 		super();
 		this.setMaxListeners(Infinity);
-
 	}
 
 	public get states(): ReadonlyMap<string, PeerConnectionState> {
@@ -98,6 +100,9 @@ export class CongestionDetector extends EventEmitter {
 				}
 			} else if (!wasCongested && isCongested) {
 				gotCongested = true;
+				this.emit('alert-state', 'on');
+			} else if (wasCongested && !isCongested) {
+				this.emit('alert-state', 'off');
 			}
 		}
 
@@ -108,6 +113,10 @@ export class CongestionDetector extends EventEmitter {
 				this._states.delete(peerConnectionId);
 			}
 		}
+	}
+
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {
