@@ -15,7 +15,10 @@ export type {
     FreezedVideoStartedEvent,
     FreezedVideoEndedEvent,
 } from './detectors/VideoFreezesDetector';
-export type { CongestionDetector } from './detectors/CongestionDetector';
+export type { 
+    CongestionDetector,
+    CongestionDetectorConfig
+} from './detectors/CongestionDetector';
 export type { 
     CpuPerformanceDetector, 
     CpuPerformanceDetectorConfig 
@@ -129,3 +132,15 @@ export {
     removeLoggerProcess,
     createConsoleLogger, 
 } from "./utils/logger";
+
+const monitor = createClientMonitor();
+
+const detector = monitor.createStuckedInboundTrackDetector({
+    minStuckedDurationInMs: 3000
+});
+
+detector.on('stuckedtrack', ({ peerConnectionId, trackId }) => {
+    console.log(`Stucked track detected on peer connection ${peerConnectionId}. trackId: ${trackId}`);
+});
+const pausedTrackId = ''; // local track id consuming rtp stream from a remote paused publisher.
+detector.ignoredTrackIds.add()

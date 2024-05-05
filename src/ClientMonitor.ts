@@ -8,7 +8,7 @@ import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
 import { PeerConnectionEntry, PeerConnectionStateUpdated, TrackStats } from './entries/StatsEntryInterfaces';
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
-import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
+import { CongestionDetector, CongestionDetectorConfig, CongestionDetectorEvents } from './detectors/CongestionDetector';
 import { CpuPerformanceDetector, CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
 import  {
     VideoFreezesDetector,
@@ -476,17 +476,20 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._setupTimer();
     }
 
-    public createCongestionDetector(options?: { 
+    public createCongestionDetector(options?: CongestionDetectorConfig & { 
         createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): CongestionDetector {
         const existingDetector = this._detectors.get(CongestionDetector.name);
         const {
             createIssueOnDetection,
-        } = options ?? {};
+            ...detectorConfig
+        } = options ?? {
+            sensitivity: 'medium',
+        };
 
         if (existingDetector) return existingDetector as CongestionDetector;
 
-        const detector = new CongestionDetector();
+        const detector = new CongestionDetector(detectorConfig);
         const onUpdate = () => detector.update(this.storage.peerConnections());
         const onCongestion = (...event: CongestionDetectorEvents['congestion']) => {
             const [

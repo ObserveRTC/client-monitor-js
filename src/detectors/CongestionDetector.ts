@@ -5,6 +5,9 @@ import { AlertState } from "../ClientMonitor";
 
 type PeerConnectionState = {
 	peerConnectionId: string;
+	ewmaRttInS?: number;
+	ewmaFl?: number;
+
 	congested: boolean;
 	outgoingBitrateBeforeCongestion?: number;
 	outgoingBitrateAfterCongestion?: number;
@@ -16,6 +19,10 @@ export type CongestionDetectorEvents = {
 	'alert-state': [AlertState];
 	congestion: [PeerConnectionState[]];
 	close: [];
+}
+
+export type CongestionDetectorConfig = {
+	sensitivity: 'hiugh' | 'medium' | 'low';
 }
 
 export declare interface CongestionDetector extends Detector {
@@ -30,6 +37,7 @@ export class CongestionDetector extends EventEmitter {
 	private _states = new Map<string, PeerConnectionState>();
 
 	public constructor(
+		public readonly config: CongestionDetectorConfig
 	) {
 		super();
 		this.setMaxListeners(Infinity);
@@ -62,10 +70,50 @@ export class CongestionDetector extends EventEmitter {
 			}
 			const wasCongested = state.congested;
 			let isCongested = false;
+			let hasBwLimitedOutboundRtp = false;
 			
 			for (const outboundRtp of peerConnection.outboundRtps()) {
-				isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
+				hasBwLimitedOutboundRtp ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
+				// isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
 			}
+			
+			let rttDiffInS = 0;
+			if (peerConnection.avgRttInS !== undefined) {
+				if (state.ewmaRttInS === undefined) {
+					state.ewmaRttInS = peerConnection.avgRttInS;
+				} else {
+					state.ewmaRttInS = 0.9 * state.ewmaRttInS + 0.1 * peerConnection.avgRttInS;
+				}
+				rttDiffInS = Math.abs(peerConnection.avgRttInS - state.ewmaRttInS);
+			}
+			
+			
+			switch (this.config.sensitivity) {
+				case 'hiugh':
+					isCongested = hasBwLimitedOutboundRtp;
+					break;
+				case 'medium': {
+					if (!state.ewmaRttInS) break;
+					
+					const rttDiffThreshold = Math.min(0.15, Math.max(0.05, state.ewmaRttInS * 0.33));
+					
+					isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold;
+
+					break;
+				}
+				case 'low': {
+					if (!state.ewmaRttInS || !peerConnection.sendingFractionalLoss) break;
+					if (!state.ewmaRttInS) break;
+					
+					const rttDiffThreshold = Math.min(0.15, Math.max(0.05, state.ewmaRttInS * 0.33));
+					
+					isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold && peerConnection.sendingFractionalLoss > 0.05;
+					break;
+				}
+					
+			}
+
+			peerConnection.sendingFractionalLoss;
 
 			let selectedCandidatePair: IceCandidatePairEntry | undefined;
 			for (const transport of peerConnection.transports()) {
