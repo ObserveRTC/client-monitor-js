@@ -484,35 +484,24 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             createIssueOnDetection,
             ...detectorConfig
         } = options ?? {
-            sensitivity: 'medium',
+            sensitivity: 'high',
         };
 
-        if (existingDetector) return existingDetector as CongestionDetector;
+        if (existingDetector) {
+            logger.warn('CongestionDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new CongestionDetector(detectorConfig);
         const onUpdate = () => detector.update(this.storage.peerConnections());
         const onCongestion = (...event: CongestionDetectorEvents['congestion']) => {
-            const [
-                peerConnectionStates
-            ] = event;
-            let incomingBitrateAfterCongestion: number | undefined;
-            let incomingBitrateBeforeCongestion: number | undefined;
-            let outgoingBitrateAfterCongestion: number | undefined;
-            let outgoingBitrateBeforeCongestion: number | undefined;
-            for (const state of peerConnectionStates) {
-                if (state.incomingBitrateAfterCongestion) {
-                    incomingBitrateAfterCongestion = (incomingBitrateAfterCongestion ?? 0) + state.incomingBitrateAfterCongestion;
-                }
-                if (state.incomingBitrateBeforeCongestion) {
-                    incomingBitrateBeforeCongestion = (incomingBitrateBeforeCongestion ?? 0) + state.incomingBitrateBeforeCongestion;
-                }
-                if (state.outgoingBitrateAfterCongestion) {
-                    outgoingBitrateAfterCongestion = (outgoingBitrateAfterCongestion ?? 0) + state.outgoingBitrateAfterCongestion;
-                }
-                if (state.outgoingBitrateBeforeCongestion) {
-                    outgoingBitrateBeforeCongestion = (outgoingBitrateBeforeCongestion ?? 0) + state.outgoingBitrateBeforeCongestion;
-                }
-            }
+            const {
+                incomingBitrateAfterCongestion,
+                incomingBitrateBeforeCongestion,
+                outgoingBitrateAfterCongestion,
+                outgoingBitrateBeforeCongestion,
+            } = event[0];
+
             this.emit('congestion', {
                 incomingBitrateAfterCongestion,
                 incomingBitrateBeforeCongestion,
@@ -554,7 +543,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): AudioDesyncDetector {
         const existingDetector = this._detectors.get(AudioDesyncDetector.name);
 
-        if (existingDetector) return existingDetector as AudioDesyncDetector;
+        if (existingDetector) {
+            logger.warn('AudioDesyncDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new AudioDesyncDetector({
             fractionalCorrectionAlertOnThreshold: config?.fractionalCorrectionAlertOnThreshold ?? 0.1,
@@ -602,7 +594,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): VideoFreezesDetector {
         const existingDetector = this._detectors.get(VideoFreezesDetector.name);
 
-        if (existingDetector) return existingDetector as VideoFreezesDetector;
+        if (existingDetector) {
+            logger.warn('VideoFreezesDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new VideoFreezesDetector({
         });
@@ -661,7 +656,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): CpuPerformanceDetector {
         const existingDetector = this._detectors.get(CpuPerformanceDetector.name);
 
-        if (existingDetector) return existingDetector as CpuPerformanceDetector;
+        if (existingDetector) {
+            logger.warn('CpuPerformanceDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new CpuPerformanceDetector(config ?? {});
         const onUpdate = () => detector.update(this.storage.peerConnections());
@@ -700,7 +698,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): StuckedInboundTrackDetector {
         const existingDetector = this._detectors.get(StuckedInboundTrackDetector.name);
 
-        if (existingDetector) return existingDetector as StuckedInboundTrackDetector;
+        if (existingDetector) {
+            logger.warn('StuckedInboundTrackDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new StuckedInboundTrackDetector(config ?? {
             minStuckedDurationInMs: 5000,
@@ -749,7 +750,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): LongPcConnectionEstablishmentDetector {
         const existingDetector = this._detectors.get(LongPcConnectionEstablishmentDetector.name);
 
-        if (existingDetector) return existingDetector as LongPcConnectionEstablishmentDetector;
+        if (existingDetector) {
+            logger.warn('LongPcConnectionEstablishmentDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new LongPcConnectionEstablishmentDetector(config ?? {
             thresholdInMs: 3000,
@@ -1029,6 +1033,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         if (settings.congestion) {
             this.createCongestionDetector({
+                sensitivity: 'high',
                 createIssueOnDetection: getCreateIssueOnDetection('congestion'),
             });
         }

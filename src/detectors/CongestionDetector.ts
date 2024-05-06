@@ -17,12 +17,18 @@ type PeerConnectionState = {
 
 export type CongestionDetectorEvents = {
 	'alert-state': [AlertState];
-	congestion: [PeerConnectionState[]];
+	congestion: [{
+		peerConnectionIds: string[],
+		outgoingBitrateBeforeCongestion?: number;
+		outgoingBitrateAfterCongestion?: number;
+		incomingBitrateBeforeCongestion?: number;
+		incomingBitrateAfterCongestion?: number;
+	}];
 	close: [];
 }
 
 export type CongestionDetectorConfig = {
-	sensitivity: 'hiugh' | 'medium' | 'low';
+	sensitivity: 'high' | 'medium' | 'low';
 }
 
 export declare interface CongestionDetector extends Detector {
@@ -69,7 +75,6 @@ export class CongestionDetector extends EventEmitter {
 				this._states.set(peerConnectionId, state);
 			}
 			const wasCongested = state.congested;
-			let isCongested = false;
 			let hasBwLimitedOutboundRtp = false;
 			
 			for (const outboundRtp of peerConnection.outboundRtps()) {
@@ -84,12 +89,12 @@ export class CongestionDetector extends EventEmitter {
 				} else {
 					state.ewmaRttInS = 0.9 * state.ewmaRttInS + 0.1 * peerConnection.avgRttInS;
 				}
-				rttDiffInS = Math.abs(peerConnection.avgRttInS - state.ewmaRttInS);
+				rttDiffInS = peerConnection.avgRttInS - state.ewmaRttInS;
 			}
 			
-			
+			let isCongested = false;
 			switch (this.config.sensitivity) {
-				case 'hiugh':
+				case 'high':
 					isCongested = hasBwLimitedOutboundRtp;
 					break;
 				case 'medium': {
@@ -103,11 +108,8 @@ export class CongestionDetector extends EventEmitter {
 				}
 				case 'low': {
 					if (!state.ewmaRttInS || !peerConnection.sendingFractionalLoss) break;
-					if (!state.ewmaRttInS) break;
 					
-					const rttDiffThreshold = Math.min(0.15, Math.max(0.05, state.ewmaRttInS * 0.33));
-					
-					isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold && peerConnection.sendingFractionalLoss > 0.05;
+					isCongested = hasBwLimitedOutboundRtp && peerConnection.sendingFractionalLoss > 0.05;
 					break;
 				}
 					
@@ -154,7 +156,16 @@ export class CongestionDetector extends EventEmitter {
 			}
 		}
 
-		gotCongested && this.emit('congestion', Array.from(this._states.values()));
+		if (gotCongested) {
+			this.emit('congestion', {
+				peerConnectionIds: Array.from(this._states.values()).filter(s => s.congested).map(s => s.peerConnectionId),
+				incomingBitrateAfterCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.incomingBitrateAfterCongestion ?? 0), 0),
+				outgoingBitrateAfterCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.outgoingBitrateAfterCongestion ?? 0), 0),
+				incomingBitrateBeforeCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.incomingBitrateBeforeCongestion ?? 0), 0),
+				outgoingBitrateBeforeCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.outgoingBitrateBeforeCongestion ?? 0), 0),
+			});
+		}
+		// gotCongested && this.emit('congestion', Array.from(this._states.values()));
 
 		for (const [peerConnectionId] of Array.from(this._states)) {
 			if (!visitedPeerConnectionIds.has(peerConnectionId)) {
