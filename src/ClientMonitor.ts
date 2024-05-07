@@ -26,7 +26,7 @@ const logger = createLogger('ClientMonitor');
 type ClientDetectorIssueDetectionExtension = {
     severity: 'critical' | 'major' | 'minor',
     description?: string,
-    attachments?: Record<string, unknown>,
+    attachments?: Record<string, unknown> | (() => Record<string, unknown>)
 }
 
 export type ClientMonitorConfig = {
@@ -510,12 +510,17 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             });
 
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Congestion detected',
                     timestamp: Date.now(),
                     attachments: {
-                        ...(createIssueOnDetection.attachments ?? {}),
+                        ...attachments,
                         incomingBitrateAfterCongestion,
                         incomingBitrateBeforeCongestion,
                         outgoingBitrateAfterCongestion,
@@ -560,6 +565,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         const onDesync = (trackId: string) => {
             // this.emit('audio-desync', 'on');
             if (!createIssueOnDetection) return;
+            
+            const attachments = typeof createIssueOnDetection.attachments === 'function' 
+                ? createIssueOnDetection.attachments() 
+                : createIssueOnDetection.attachments
+            ;
 
             this.addIssue({
                 severity: createIssueOnDetection.severity,
@@ -567,7 +577,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                 timestamp: Date.now(),
                 peerConnectionId: this.storage.getTrack(trackId)?.getPeerConnection()?.peerConnectionId,
                 mediaTrackId: trackId,
-                attachments: createIssueOnDetection.attachments,
+                attachments,
             });
         };
         const onSync = () => {
@@ -616,6 +626,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         };
         const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+                
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Video Freeze detected',
@@ -624,7 +639,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     mediaTrackId: event.trackId,
                     attachments: {
                         durationInS: event.durationInS,
-                        ...(createIssueOnDetection.attachments ?? {})
+                        ...attachments
                     },
                 });
             }
@@ -671,11 +686,16 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this.emit('cpulimitation', state);
             
             if (createIssueOnDetection && state !== 'on') {
+                const attachments = typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments
+                ;
+
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Audio desync detected',
                     timestamp: Date.now(),
-                    attachments: createIssueOnDetection.attachments,
+                    attachments,
                 });
             }
         };
@@ -713,6 +733,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         const onStuckedTrack = (event: { peerConnectionId: string, trackId: string, ssrc: number }) => {
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+                
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Stucked track detected',
@@ -721,7 +746,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     mediaTrackId: event.trackId,
                     attachments: {
                         ssrc: event.ssrc,
-                        ...(createIssueOnDetection.attachments ?? {})
+                        ...attachments,
                     },
                 });
             }
@@ -765,12 +790,17 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         const onLongConnection = (event: { peerConnectionId: string }) => {
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments)
+                ;
+
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Long peer connection establishment detected',
                     timestamp: Date.now(),
                     peerConnectionId: event.peerConnectionId,
-                    attachments: createIssueOnDetection.attachments,
+                    attachments,
                 });
             }
             this.emit('too-long-pc-connection-establishment', {
