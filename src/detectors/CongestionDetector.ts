@@ -89,7 +89,7 @@ export class CongestionDetector extends EventEmitter {
 				} else {
 					state.ewmaRttInS = 0.9 * state.ewmaRttInS + 0.1 * peerConnection.avgRttInS;
 				}
-				rttDiffInS = peerConnection.avgRttInS - state.ewmaRttInS;
+				rttDiffInS = Math.abs(peerConnection.avgRttInS - state.ewmaRttInS);
 			}
 			
 			let isCongested = false;
