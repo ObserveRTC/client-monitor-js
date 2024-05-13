@@ -1,17 +1,19 @@
 import EventEmitter from "events";
 import { AlertState } from "../ClientMonitor";
 import { PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
+import { Detector } from "./Detector";
 
 export type CpuPerformanceDetectorConfig = {
 	// empty
 }
 
 export type CpuPerformanceDetectorEvents = {
+	'alert-state': [AlertState],
 	statechanged: [AlertState],
 	close: [],
 }
 
-export declare interface CpuPerformanceDetector {
+export declare interface CpuPerformanceDetector extends Detector {
 	on<K extends keyof CpuPerformanceDetectorEvents>(event: K, listener: (...events: CpuPerformanceDetectorEvents[K]) => void): this;
 	off<K extends keyof CpuPerformanceDetectorEvents>(event: K, listener: (...events: CpuPerformanceDetectorEvents[K]) => void): this;
 	once<K extends keyof CpuPerformanceDetectorEvents>(event: K, listener: (...events: CpuPerformanceDetectorEvents[K]) => void): this;
@@ -29,6 +31,7 @@ export class CpuPerformanceDetector extends EventEmitter {
 		this.setMaxListeners(Infinity);
 	}
 
+
 	public update(peerConnections: IterableIterator<PeerConnectionEntry>) {
 		let gotLimited = false;
 
@@ -43,7 +46,12 @@ export class CpuPerformanceDetector extends EventEmitter {
 
 		if (wasLimited !== gotLimited) {
 			this.emit('statechanged', this._alertState);
+			this.emit('alert-state', this._alertState);
 		}
+	}
+
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {

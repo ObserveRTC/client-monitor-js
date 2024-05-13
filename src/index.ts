@@ -15,7 +15,10 @@ export type {
     FreezedVideoStartedEvent,
     FreezedVideoEndedEvent,
 } from './detectors/VideoFreezesDetector';
-export type { CongestionDetector } from './detectors/CongestionDetector';
+export type { 
+    CongestionDetector,
+    CongestionDetectorConfig
+} from './detectors/CongestionDetector';
 export type { 
     CpuPerformanceDetector, 
     CpuPerformanceDetectorConfig 
@@ -129,3 +132,4 @@ export {
     removeLoggerProcess,
     createConsoleLogger, 
 } from "./utils/logger";
+

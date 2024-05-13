@@ -8,7 +8,7 @@ import { createAdapterMiddlewares } from './collectors/Adapter';
 import * as validators from './utils/validators';
 import { PeerConnectionEntry, PeerConnectionStateUpdated, TrackStats } from './entries/StatsEntryInterfaces';
 import { AudioDesyncDetector, AudioDesyncDetectorConfig } from './detectors/AudioDesyncDetector';
-import { CongestionDetector, CongestionDetectorEvents } from './detectors/CongestionDetector';
+import { CongestionDetector, CongestionDetectorConfig, CongestionDetectorEvents } from './detectors/CongestionDetector';
 import { CpuPerformanceDetector, CpuPerformanceDetectorConfig } from './detectors/CpuPerformanceDetector';
 import  {
     VideoFreezesDetector,
@@ -19,13 +19,14 @@ import  {
 import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from './detectors/StuckedInboundTrack';
 import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
 import UAParser from 'ua-parser-js';
+import { Detector } from './detectors/Detector';
 
 const logger = createLogger('ClientMonitor');
 
 type ClientDetectorIssueDetectionExtension = {
     severity: 'critical' | 'major' | 'minor',
     description?: string,
-    attachments?: Record<string, unknown>,
+    attachments?: Record<string, unknown> | (() => Record<string, unknown>)
 }
 
 export type ClientMonitorConfig = {
@@ -165,7 +166,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     public operationSystem?: OperationSystem;
     public platform?: Platform;
 
-    private readonly _detectors = new Map<string, { close: () => void, once: (e: 'close', l: () => void) => void }>();
+    private readonly _detectors = new Map<string, Detector>();
     private readonly _sampler = new Sampler(this.storage);
     private _timer?: ReturnType<typeof setInterval>;
     
@@ -475,40 +476,32 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this._setupTimer();
     }
 
-    public createCongestionDetector(options?: { 
+    public createCongestionDetector(options?: CongestionDetectorConfig & { 
         createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): CongestionDetector {
         const existingDetector = this._detectors.get(CongestionDetector.name);
         const {
             createIssueOnDetection,
-        } = options ?? {};
+            ...detectorConfig
+        } = options ?? {
+            sensitivity: 'high',
+        };
 
-        if (existingDetector) return existingDetector as CongestionDetector;
+        if (existingDetector) {
+            logger.warn('CongestionDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
-        const detector = new CongestionDetector();
+        const detector = new CongestionDetector(detectorConfig);
         const onUpdate = () => detector.update(this.storage.peerConnections());
         const onCongestion = (...event: CongestionDetectorEvents['congestion']) => {
-            const [
-                peerConnectionStates
-            ] = event;
-            let incomingBitrateAfterCongestion: number | undefined;
-            let incomingBitrateBeforeCongestion: number | undefined;
-            let outgoingBitrateAfterCongestion: number | undefined;
-            let outgoingBitrateBeforeCongestion: number | undefined;
-            for (const state of peerConnectionStates) {
-                if (state.incomingBitrateAfterCongestion) {
-                    incomingBitrateAfterCongestion = (incomingBitrateAfterCongestion ?? 0) + state.incomingBitrateAfterCongestion;
-                }
-                if (state.incomingBitrateBeforeCongestion) {
-                    incomingBitrateBeforeCongestion = (incomingBitrateBeforeCongestion ?? 0) + state.incomingBitrateBeforeCongestion;
-                }
-                if (state.outgoingBitrateAfterCongestion) {
-                    outgoingBitrateAfterCongestion = (outgoingBitrateAfterCongestion ?? 0) + state.outgoingBitrateAfterCongestion;
-                }
-                if (state.outgoingBitrateBeforeCongestion) {
-                    outgoingBitrateBeforeCongestion = (outgoingBitrateBeforeCongestion ?? 0) + state.outgoingBitrateBeforeCongestion;
-                }
-            }
+            const {
+                incomingBitrateAfterCongestion,
+                incomingBitrateBeforeCongestion,
+                outgoingBitrateAfterCongestion,
+                outgoingBitrateBeforeCongestion,
+            } = event[0];
+
             this.emit('congestion', {
                 incomingBitrateAfterCongestion,
                 incomingBitrateBeforeCongestion,
@@ -517,12 +510,17 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             });
 
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Congestion detected',
                     timestamp: Date.now(),
                     attachments: {
-                        ...(createIssueOnDetection.attachments ?? {}),
+                        ...attachments,
                         incomingBitrateAfterCongestion,
                         incomingBitrateBeforeCongestion,
                         outgoingBitrateAfterCongestion,
@@ -550,7 +548,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): AudioDesyncDetector {
         const existingDetector = this._detectors.get(AudioDesyncDetector.name);
 
-        if (existingDetector) return existingDetector as AudioDesyncDetector;
+        if (existingDetector) {
+            logger.warn('AudioDesyncDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new AudioDesyncDetector({
             fractionalCorrectionAlertOnThreshold: config?.fractionalCorrectionAlertOnThreshold ?? 0.1,
@@ -564,6 +565,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         const onDesync = (trackId: string) => {
             // this.emit('audio-desync', 'on');
             if (!createIssueOnDetection) return;
+            
+            const attachments = typeof createIssueOnDetection.attachments === 'function' 
+                ? createIssueOnDetection.attachments() 
+                : createIssueOnDetection.attachments
+            ;
 
             this.addIssue({
                 severity: createIssueOnDetection.severity,
@@ -571,7 +577,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                 timestamp: Date.now(),
                 peerConnectionId: this.storage.getTrack(trackId)?.getPeerConnection()?.peerConnectionId,
                 mediaTrackId: trackId,
-                attachments: createIssueOnDetection.attachments,
+                attachments,
             });
         };
         const onSync = () => {
@@ -598,7 +604,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): VideoFreezesDetector {
         const existingDetector = this._detectors.get(VideoFreezesDetector.name);
 
-        if (existingDetector) return existingDetector as VideoFreezesDetector;
+        if (existingDetector) {
+            logger.warn('VideoFreezesDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new VideoFreezesDetector({
         });
@@ -617,6 +626,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         };
         const onFreezeEnded = (event: FreezedVideoEndedEvent) => {
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+                
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Video Freeze detected',
@@ -625,7 +639,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     mediaTrackId: event.trackId,
                     attachments: {
                         durationInS: event.durationInS,
-                        ...(createIssueOnDetection.attachments ?? {})
+                        ...attachments
                     },
                 });
             }
@@ -657,7 +671,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): CpuPerformanceDetector {
         const existingDetector = this._detectors.get(CpuPerformanceDetector.name);
 
-        if (existingDetector) return existingDetector as CpuPerformanceDetector;
+        if (existingDetector) {
+            logger.warn('CpuPerformanceDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new CpuPerformanceDetector(config ?? {});
         const onUpdate = () => detector.update(this.storage.peerConnections());
@@ -669,11 +686,16 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             this.emit('cpulimitation', state);
             
             if (createIssueOnDetection && state !== 'on') {
+                const attachments = typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments
+                ;
+
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Audio desync detected',
                     timestamp: Date.now(),
-                    attachments: createIssueOnDetection.attachments,
+                    attachments,
                 });
             }
         };
@@ -696,7 +718,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): StuckedInboundTrackDetector {
         const existingDetector = this._detectors.get(StuckedInboundTrackDetector.name);
 
-        if (existingDetector) return existingDetector as StuckedInboundTrackDetector;
+        if (existingDetector) {
+            logger.warn('StuckedInboundTrackDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new StuckedInboundTrackDetector(config ?? {
             minStuckedDurationInMs: 5000,
@@ -708,6 +733,11 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         const onStuckedTrack = (event: { peerConnectionId: string, trackId: string, ssrc: number }) => {
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+                
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Stucked track detected',
@@ -716,7 +746,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                     mediaTrackId: event.trackId,
                     attachments: {
                         ssrc: event.ssrc,
-                        ...(createIssueOnDetection.attachments ?? {})
+                        ...attachments,
                     },
                 });
             }
@@ -745,7 +775,10 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     }): LongPcConnectionEstablishmentDetector {
         const existingDetector = this._detectors.get(LongPcConnectionEstablishmentDetector.name);
 
-        if (existingDetector) return existingDetector as LongPcConnectionEstablishmentDetector;
+        if (existingDetector) {
+            logger.warn('LongPcConnectionEstablishmentDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
 
         const detector = new LongPcConnectionEstablishmentDetector(config ?? {
             thresholdInMs: 3000,
@@ -757,12 +790,17 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         const onLongConnection = (event: { peerConnectionId: string }) => {
             if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments)
+                ;
+
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
                     description: createIssueOnDetection.description ?? 'Long peer connection establishment detected',
                     timestamp: Date.now(),
                     peerConnectionId: event.peerConnectionId,
-                    attachments: createIssueOnDetection.attachments,
+                    attachments,
                 });
             }
             this.emit('too-long-pc-connection-establishment', {
@@ -1025,6 +1063,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         if (settings.congestion) {
             this.createCongestionDetector({
+                sensitivity: 'high',
                 createIssueOnDetection: getCreateIssueOnDetection('congestion'),
             });
         }

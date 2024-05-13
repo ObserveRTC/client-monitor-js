@@ -1,5 +1,7 @@
 import EventEmitter from "events";
 import { InboundRtpEntry } from "../entries/StatsEntryInterfaces";
+import { AlertState } from "../ClientMonitor";
+import { Detector } from "./Detector";
 
 export type VideoFreezesDetectorConfig = {
 	// empty
@@ -19,6 +21,7 @@ export type FreezedVideoEndedEvent = {
 }
 
 export type VideoFreezesDetectorEvents = {
+	'alert-state': [AlertState];
 	freezedVideoStarted: [FreezedVideoStartedEvent],
 	freezedVideoEnded: [FreezedVideoEndedEvent],
 	close: [],
@@ -32,7 +35,7 @@ type InboundRtpStatsTrace = {
 	visited: boolean,
 }
 
-export declare interface VideoFreezesDetector {
+export declare interface VideoFreezesDetector extends Detector {
 	on<K extends keyof VideoFreezesDetectorEvents>(event: K, listener: (...events: VideoFreezesDetectorEvents[K]) => void): this;
 	off<K extends keyof VideoFreezesDetectorEvents>(event: K, listener: (...events: VideoFreezesDetectorEvents[K]) => void): this;
 	once<K extends keyof VideoFreezesDetectorEvents>(event: K, listener: (...events: VideoFreezesDetectorEvents[K]) => void): this;
@@ -42,6 +45,7 @@ export declare interface VideoFreezesDetector {
 export class VideoFreezesDetector extends EventEmitter {
 	private _closed = false;
 	private readonly _traces = new Map<number, InboundRtpStatsTrace>();
+	private _freezedTracks = new Set<string>();
 
 	public constructor(
 		public readonly config: VideoFreezesDetectorConfig,
@@ -49,6 +53,10 @@ export class VideoFreezesDetector extends EventEmitter {
 		super();
 		this.setMaxListeners(Infinity);
 		
+	}
+
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {
@@ -92,7 +100,12 @@ export class VideoFreezesDetector extends EventEmitter {
 					peerConnectionId: inboundRtp.getPeerConnection()?.peerConnectionId,
 					trackId,
 					ssrc,
-				})
+				});
+				this._freezedTracks.add(trackId);
+				if (this._freezedTracks.size === 1) {
+					this.emit('alert-state', 'on');
+				}
+
 			} else if (wasFreezed && !trace.freezed) {
 				const durationInS = Math.max(0,  (stats.totalFreezesDuration ?? 0) - (trace.freezedStartedDuration ?? 0));
 
@@ -103,7 +116,13 @@ export class VideoFreezesDetector extends EventEmitter {
 					trackId,
 					durationInS,
 					ssrc,
-				})
+				});
+
+				const countBefore = this._freezedTracks.size;
+				this._freezedTracks.delete(trackId);
+				if (countBefore === 1 && this._freezedTracks.size === 0) {
+					this.emit('alert-state', 'off');
+				}
 			}
 		}
 

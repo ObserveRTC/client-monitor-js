@@ -1,8 +1,13 @@
 import EventEmitter from "events";
 import { IceCandidatePairEntry, PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
+import { Detector } from "./Detector";
+import { AlertState } from "../ClientMonitor";
 
 type PeerConnectionState = {
 	peerConnectionId: string;
+	ewmaRttInS?: number;
+	ewmaFl?: number;
+
 	congested: boolean;
 	outgoingBitrateBeforeCongestion?: number;
 	outgoingBitrateAfterCongestion?: number;
@@ -11,11 +16,22 @@ type PeerConnectionState = {
 }
 
 export type CongestionDetectorEvents = {
-	congestion: [PeerConnectionState[]];
+	'alert-state': [AlertState];
+	congestion: [{
+		peerConnectionIds: string[],
+		outgoingBitrateBeforeCongestion?: number;
+		outgoingBitrateAfterCongestion?: number;
+		incomingBitrateBeforeCongestion?: number;
+		incomingBitrateAfterCongestion?: number;
+	}];
 	close: [];
 }
 
-export declare interface CongestionDetector {
+export type CongestionDetectorConfig = {
+	sensitivity: 'high' | 'medium' | 'low';
+}
+
+export declare interface CongestionDetector extends Detector {
 	on<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
 	off<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
 	once<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
@@ -27,10 +43,10 @@ export class CongestionDetector extends EventEmitter {
 	private _states = new Map<string, PeerConnectionState>();
 
 	public constructor(
+		public readonly config: CongestionDetectorConfig
 	) {
 		super();
 		this.setMaxListeners(Infinity);
-
 	}
 
 	public get states(): ReadonlyMap<string, PeerConnectionState> {
@@ -59,11 +75,47 @@ export class CongestionDetector extends EventEmitter {
 				this._states.set(peerConnectionId, state);
 			}
 			const wasCongested = state.congested;
-			let isCongested = false;
+			let hasBwLimitedOutboundRtp = false;
 			
 			for (const outboundRtp of peerConnection.outboundRtps()) {
-				isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
+				hasBwLimitedOutboundRtp ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
+				// isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
 			}
+			
+			let rttDiffInS = 0;
+			if (peerConnection.avgRttInS !== undefined) {
+				if (state.ewmaRttInS === undefined) {
+					state.ewmaRttInS = peerConnection.avgRttInS;
+				} else {
+					state.ewmaRttInS = 0.9 * state.ewmaRttInS + 0.1 * peerConnection.avgRttInS;
+				}
+				rttDiffInS = Math.abs(peerConnection.avgRttInS - state.ewmaRttInS);
+			}
+			
+			let isCongested = false;
+			switch (this.config.sensitivity) {
+				case 'high':
+					isCongested = hasBwLimitedOutboundRtp;
+					break;
+				case 'medium': {
+					if (!state.ewmaRttInS) break;
+					
+					const rttDiffThreshold = Math.min(0.15, Math.max(0.05, state.ewmaRttInS * 0.33));
+					
+					isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold;
+
+					break;
+				}
+				case 'low': {
+					if (!state.ewmaRttInS || !peerConnection.sendingFractionalLoss) break;
+					
+					isCongested = hasBwLimitedOutboundRtp && peerConnection.sendingFractionalLoss > 0.05;
+					break;
+				}
+					
+			}
+
+			peerConnection.sendingFractionalLoss;
 
 			let selectedCandidatePair: IceCandidatePairEntry | undefined;
 			for (const transport of peerConnection.transports()) {
@@ -98,16 +150,32 @@ export class CongestionDetector extends EventEmitter {
 				}
 			} else if (!wasCongested && isCongested) {
 				gotCongested = true;
+				this.emit('alert-state', 'on');
+			} else if (wasCongested && !isCongested) {
+				this.emit('alert-state', 'off');
 			}
 		}
 
-		gotCongested && this.emit('congestion', Array.from(this._states.values()));
+		if (gotCongested) {
+			this.emit('congestion', {
+				peerConnectionIds: Array.from(this._states.values()).filter(s => s.congested).map(s => s.peerConnectionId),
+				incomingBitrateAfterCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.incomingBitrateAfterCongestion ?? 0), 0),
+				outgoingBitrateAfterCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.outgoingBitrateAfterCongestion ?? 0), 0),
+				incomingBitrateBeforeCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.incomingBitrateBeforeCongestion ?? 0), 0),
+				outgoingBitrateBeforeCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.outgoingBitrateBeforeCongestion ?? 0), 0),
+			});
+		}
+		// gotCongested && this.emit('congestion', Array.from(this._states.values()));
 
 		for (const [peerConnectionId] of Array.from(this._states)) {
 			if (!visitedPeerConnectionIds.has(peerConnectionId)) {
 				this._states.delete(peerConnectionId);
 			}
 		}
+	}
+
+	public get closed() {
+		return this._closed;
 	}
 
 	public close() {
