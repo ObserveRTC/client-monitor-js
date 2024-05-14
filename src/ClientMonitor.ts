@@ -693,7 +693,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: createIssueOnDetection.description ?? 'Audio desync detected',
+                    description: createIssueOnDetection.description ?? 'CPU performance issue detected',
                     timestamp: Date.now(),
                     attachments,
                 });
