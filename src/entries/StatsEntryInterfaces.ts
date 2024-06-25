@@ -84,7 +84,13 @@ export interface InboundRtpEntry extends ReceivedRtpStreamEntry, StatsEntryAbs {
     fractionLoss?: number,
     avgRttInS?: number,
     framesPerSecond?: number,
-
+    
+    /**
+     * a number between 0 and 1 that indicates the volatility of the decoded frames per sec
+     */
+    fpsVolatility?: number,
+    avgFramesPerSec?: number,
+    lastNFramesPerSec: number[],
     /**
      * Navigate to the related ReceiverEntry
      */
