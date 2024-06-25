@@ -126,10 +126,13 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
     });
 }
 
+export function integrateNavigatorMediaDevices(monitor: ClientMonitor) {
+    ClientMonitor.integrateNavigatorMediaDevices(monitor);
+}
+
 export { 
     createLogger, 
     addLoggerProcess, 
     removeLoggerProcess,
     createConsoleLogger, 
 } from "./utils/logger";
-
