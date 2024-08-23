@@ -4,7 +4,18 @@ import { PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
 import { Detector } from "./Detector";
 
 export type CpuPerformanceDetectorConfig = {
-	// empty
+	// fpsVolatilityHighWatermarkThreshold: number;
+	// fpsVolatilityLowWatermarkThreshold: number;
+	fpsVolatilityThresholds?: {
+		lowWatermark: number,
+		highWatermark: number,
+	},
+	durationOfCollectingStatsThreshold?: {
+		lowWatermark: number,
+		highWatermark: number,
+	}
+	// durationOfCollectingStatsHighWatermarkThresholdInMs?: number;
+	// durationOfCollectingStatsLowWatermarkThresholdInMs?: number;
 }
 
 export type CpuPerformanceDetectorEvents = {
@@ -32,19 +43,49 @@ export class CpuPerformanceDetector extends EventEmitter {
 	}
 
 
-	public update(peerConnections: IterableIterator<PeerConnectionEntry>) {
+	public update(peerConnections: IterableIterator<PeerConnectionEntry>, durationOfCollectingStatsInMs: number) {
+		const isLimited = this._alertState === 'on';
 		let gotLimited = false;
-
-		for (const peerConnection of peerConnections) {
-			for (const outboundRtp of peerConnection.outboundRtps()) {
-				gotLimited ||= outboundRtp.stats.qualityLimitationReason === 'cpu';
+		const { lowWatermark: lowFpsVolatility, highWatermark: highFpsVolatility } = this.config.fpsVolatilityThresholds ?? {};
+		
+		if (this.config.durationOfCollectingStatsThreshold) {
+			const { lowWatermark, highWatermark } = this.config.durationOfCollectingStatsThreshold;
+			
+			if (isLimited) {
+				gotLimited = lowWatermark < durationOfCollectingStatsInMs;
+			} else {
+				if (highWatermark < durationOfCollectingStatsInMs) {
+					gotLimited = true;
+				}
 			}
 		}
 
-		const wasLimited = this._alertState === 'on';
+		if (!gotLimited) for (const peerConnection of peerConnections) {
+			for (const outboundRtp of peerConnection.outboundRtps()) {
+				gotLimited ||= outboundRtp.stats.qualityLimitationReason === 'cpu';
+
+				outboundRtp.stats.framesEncoded
+			}
+
+			if (lowFpsVolatility && highFpsVolatility) for (const inboundRtp of peerConnection.inboundRtps()) {
+				if (gotLimited) continue;
+				if (!inboundRtp.fpsVolatility) continue;
+				if (!inboundRtp.avgFramesPerSec || inboundRtp.avgFramesPerSec < 10) continue;
+				if (isLimited) {
+					gotLimited = lowFpsVolatility < inboundRtp.fpsVolatility;
+				} else {
+					if (highFpsVolatility < inboundRtp.fpsVolatility) {
+						gotLimited = true;
+					}
+				}
+				
+			}
+		}
+
+		
 		this._alertState = gotLimited ? 'on' : 'off';
 
-		if (wasLimited !== gotLimited) {
+		if (isLimited !== gotLimited) {
 			this.emit('statechanged', this._alertState);
 			this.emit('alert-state', this._alertState);
 		}

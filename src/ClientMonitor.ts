@@ -116,6 +116,7 @@ export interface ClientMonitorEvents {
         lastSample?: ClientSample,
     },
     'stats-collected': {
+        durationOfCollectingStatsInMs: number,
         elapsedSinceLastCollectedInMs: number,
         collectedStats: CollectedStats,
     },
@@ -276,6 +277,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
     
     public async collect(): Promise<CollectedStats> {
         if (this._closed) throw new Error('ClientMonitor is closed');
+        const started = Date.now();
         const wasUsingTURN = this.peerConnections.some(pc => pc.usingTURN);
         const collectedStats = await this.collectors.collect();
         this.storage.update(collectedStats);
@@ -284,6 +286,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         this.emit('stats-collected', {
             collectedStats,
             elapsedSinceLastCollectedInMs: timestamp - this._lastCollectedAt,
+            durationOfCollectingStatsInMs: timestamp - started,
         });
         
         this._lastCollectedAt = timestamp;
@@ -484,7 +487,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             createIssueOnDetection,
             ...detectorConfig
         } = options ?? {
-            sensitivity: 'high',
+            sensitivity: 'medium',
         };
 
         if (existingDetector) {
@@ -554,8 +557,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         }
 
         const detector = new AudioDesyncDetector({
-            fractionalCorrectionAlertOnThreshold: config?.fractionalCorrectionAlertOnThreshold ?? 0.1,
-            fractionalCorrectionAlertOffThreshold: config?.fractionalCorrectionAlertOffThreshold ?? 0.05,
+            fractionalCorrectionAlertOnThreshold: config?.fractionalCorrectionAlertOnThreshold ?? 0.3,
+            fractionalCorrectionAlertOffThreshold: config?.fractionalCorrectionAlertOffThreshold ?? 0.15,
         });
         const onUpdate = () => detector.update(this.storage.inboundRtps());
         const {
@@ -676,8 +679,17 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             existingDetector.close();
         }
 
-        const detector = new CpuPerformanceDetector(config ?? {});
-        const onUpdate = () => detector.update(this.storage.peerConnections());
+        const detector = new CpuPerformanceDetector(config ?? {
+            fpsVolatilityThresholds: {
+                lowWatermark: 0.08,
+                highWatermark: 0.15,
+            },
+            durationOfCollectingStatsThreshold: this._config.collectingPeriodInMs ? {
+                lowWatermark: this._config.collectingPeriodInMs * 0.5,
+                highWatermark: this._config.collectingPeriodInMs,
+            } : undefined,
+        });
+        const onUpdate = ({ durationOfCollectingStatsInMs }: { durationOfCollectingStatsInMs: number}) => detector.update(this.storage.peerConnections(), durationOfCollectingStatsInMs);
         const {
             createIssueOnDetection,
         } = config ?? {};
@@ -693,7 +705,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
                 this.addIssue({
                     severity: createIssueOnDetection.severity,
-                    description: createIssueOnDetection.description ?? 'Audio desync detected',
+                    description: createIssueOnDetection.description ?? 'CPU performance issue detected',
                     timestamp: Date.now(),
                     attachments,
                 });
@@ -705,6 +717,7 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
             detector.off('statechanged', onStateChanged);
             this._detectors.delete(CpuPerformanceDetector.name);
         });
+
         this.on('stats-collected', onUpdate);
         detector.on('statechanged', onStateChanged);
 
@@ -1070,8 +1083,8 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         if (settings.audioDesync) {
             this.createAudioDesyncDetector({
-                fractionalCorrectionAlertOffThreshold: 0.05,
-                fractionalCorrectionAlertOnThreshold: 0.1,
+                fractionalCorrectionAlertOffThreshold: 0.15,
+                fractionalCorrectionAlertOnThreshold: 0.3,
                 createIssueOnDetection: getCreateIssueOnDetection('audioDesync'),
             });
         }
@@ -1084,6 +1097,14 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
 
         if (settings.cpuLimitation) {
             this.createCpuPerformanceIssueDetector({
+                fpsVolatilityThresholds: {
+                    lowWatermark: 0.08,
+                    highWatermark: 0.15,
+                },
+                durationOfCollectingStatsThreshold: this._config.collectingPeriodInMs ? {
+                    lowWatermark: this._config.collectingPeriodInMs * 0.5,
+                    highWatermark: this._config.collectingPeriodInMs,
+                } : undefined,
                 createIssueOnDetection: getCreateIssueOnDetection('cpuLimitation'),
             });
         }

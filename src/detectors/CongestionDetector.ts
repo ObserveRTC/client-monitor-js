@@ -86,8 +86,6 @@ export class CongestionDetector extends EventEmitter {
 			if (peerConnection.avgRttInS !== undefined) {
 				if (state.ewmaRttInS === undefined) {
 					state.ewmaRttInS = peerConnection.avgRttInS;
-				} else {
-					state.ewmaRttInS = 0.9 * state.ewmaRttInS + 0.1 * peerConnection.avgRttInS;
 				}
 				rttDiffInS = Math.abs(peerConnection.avgRttInS - state.ewmaRttInS);
 			}
@@ -112,7 +110,12 @@ export class CongestionDetector extends EventEmitter {
 					isCongested = hasBwLimitedOutboundRtp && peerConnection.sendingFractionalLoss > 0.05;
 					break;
 				}
-					
+			}
+
+			if (peerConnection.avgRttInS && state.ewmaRttInS) {
+				const alpha = isCongested ? 0.02 : 0.1;
+				
+				state.ewmaRttInS = ((1.0 - alpha) * state.ewmaRttInS) + (alpha * peerConnection.avgRttInS);
 			}
 
 			peerConnection.sendingFractionalLoss;
