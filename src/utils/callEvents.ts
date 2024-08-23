@@ -144,7 +144,8 @@ export function createPeerConnectionStateChangedEvent(
 		message: `Peer connection state is changed to ${event.peerConnectionState}`,
 		timestamp: event.timestamp ?? Date.now(),
 		attachments: JSON.stringify({
-			iceConnectionState: event.peerConnectionState,
+			iceConnectionState: event.peerConnectionState, // deprecated
+			pcConnectionState: event.peerConnectionState,
 		}),
 	}
 }

@@ -39,6 +39,7 @@
     "@types/jest": "^29.5.3",
     "@types/ua-parser-js": "^0.7.39",
     "@types/uuid": "^8.3.4",
+    "mediasoup-client": "^3.7.16",
     "@typescript-eslint/eslint-plugin": "^5.38.0",
     "@typescript-eslint/parser": "^5.38.0",
     "bufferutil": "^4.0.6",

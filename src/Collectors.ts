@@ -152,10 +152,10 @@ export function createCollectors(config: {
         return statsCollector;
     }
 
-    function addMediasoupDevice(device: MediaosupDeviceSurrogate, collectorId?: string) {
+    function addMediasoupDevice(device: unknown, collectorId?: string) {
         logger.trace(`addMediasoupDevice(): mediasoupDevice: `, device);
         const statsCollector = createMediasoupStatsCollector({
-            device,
+            device: device as MediaosupDeviceSurrogate,
             collectorId,
 
             storage,

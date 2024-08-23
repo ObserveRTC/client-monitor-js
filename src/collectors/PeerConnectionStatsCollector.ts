@@ -83,6 +83,7 @@ export function createPeerConnectionCollector(config: PeerConnectionStatsCollect
         if (!track) {
             return;
         }
+        
         listenTrackEvents({
             track,
             peerConnectionId,

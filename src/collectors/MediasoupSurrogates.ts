@@ -1,14 +1,29 @@
-export type MediasoupProducerObserverEvents = {
-    'close': undefined,
-    'pause': undefined,
-    'resume': undefined,
-    'trackended': undefined,
+import { EventEmitter } from "events";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Events = Record<string, any[]>;
+export type Listener = (...args: any[]) => void;
+export interface MediasoupEnhancedEventEmitter<E extends Events = Events> extends EventEmitter {
+    emit<K extends keyof E & string>(eventName: K, ...args: E[K]): boolean;
+    safeEmit<K extends keyof E & string>(eventName: K, ...args: E[K]): boolean;
+    on<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    off<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    addListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    prependListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    once<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    prependOnceListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    removeListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
+    removeAllListeners<K extends keyof E & string>(eventName?: K): this;
+    listenerCount<K extends keyof E & string>(eventName: K): number;
+    listeners<K extends keyof E & string>(eventName: K): Listener[];
+    rawListeners<K extends keyof E & string>(eventName: K): Listener[];
 }
 
-export interface MediasoupProducerObserverSurrogate {
-    on<K extends keyof MediasoupProducerObserverEvents>(type: K, listener: (event: MediasoupProducerObserverEvents[K]) => void): this;
-    once<K extends keyof MediasoupProducerObserverEvents>(type: K, listener: (event: MediasoupProducerObserverEvents[K]) => void): this;
-    off<K extends keyof MediasoupProducerObserverEvents>(type: K, listener: (event: MediasoupProducerObserverEvents[K]) => void): this;
+export type MediasoupProducerObserverEvents = {
+    'close': [],
+    'pause': [],
+    'resume': [],
+    'trackended': []
 }
 
 export type MediasoupRtpParametersEncoding = {
@@ -22,7 +37,7 @@ export type MediasoupRtpParameters = {
 export interface MediasoupProducerSurrogate {
     readonly id: string;
     readonly closed: boolean;
-    readonly observer: MediasoupProducerObserverSurrogate;   
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupProducerObserverEvents>;   
     readonly track?: MediaStreamTrack;
     readonly kind: "audio" | "video";
     readonly rtpParameters: MediasoupRtpParameters;
@@ -30,23 +45,17 @@ export interface MediasoupProducerSurrogate {
 }
 
 export type MediasoupConsumerObserverEvents = {
-    'close': undefined,
-    'pause': undefined,
-    'resume': undefined,
-    'trackended': undefined,
+    'close': [],
+    'pause': [],
+    'resume': [],
+    'trackended': [],
 }
 
-
-export interface MediasoupConsumerObserverSurrogate {
-    on<K extends keyof MediasoupConsumerObserverEvents>(type: K, listener: (event: MediasoupConsumerObserverEvents[K]) => void): this;
-    once<K extends keyof MediasoupConsumerObserverEvents>(type: K, listener: (event: MediasoupConsumerObserverEvents[K]) => void): this;
-    off<K extends keyof MediasoupConsumerObserverEvents>(type: K, listener: (event: MediasoupConsumerObserverEvents[K]) => void): this;
-}
 
 export interface MediasoupConsumerSurrogate {
     readonly id: string;
     readonly producerId: string;
-    readonly observer: MediasoupConsumerObserverSurrogate;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupConsumerObserverEvents>;
     readonly track: MediaStreamTrack;
     readonly kind: "audio" | "video";
     readonly rtpParameters: MediasoupRtpParameters;
@@ -55,77 +64,56 @@ export interface MediasoupConsumerSurrogate {
 
 
 export type MediasoupDataProducerObserverEvents = {
-    'close': undefined,
-}
-
-export interface MediasoupDataProducerObserverSurrogate {
-    on<K extends keyof MediasoupDataProducerObserverEvents>(type: K, listener: (event: MediasoupDataProducerObserverEvents[K]) => void): this;
-    once<K extends keyof MediasoupDataProducerObserverEvents>(type: K, listener: (event: MediasoupDataProducerObserverEvents[K]) => void): this;
-    off<K extends keyof MediasoupDataProducerObserverEvents>(type: K, listener: (event: MediasoupDataProducerObserverEvents[K]) => void): this;
+    'close': [],
 }
 
 export interface MediasoupDataProducerSurrogate {
     readonly id: string;
-    readonly observer: MediasoupDataProducerObserverSurrogate;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupDataProducerObserverEvents>;
 }
 
 
 export type MediasoupDataConsumerObserverEvents = {
-    'close': undefined,
-}
-
-export interface MediasoupDataConsumerObserverSurrogate {
-    on<K extends keyof MediasoupDataConsumerObserverEvents>(type: K, listener: (event: MediasoupDataConsumerObserverEvents[K]) => void): this;
-    once<K extends keyof MediasoupDataConsumerObserverEvents>(type: K, listener: (event: MediasoupDataConsumerObserverEvents[K]) => void): this;
-    off<K extends keyof MediasoupDataConsumerObserverEvents>(type: K, listener: (event: MediasoupDataConsumerObserverEvents[K]) => void): this;
+    'close': [],
 }
 
 export interface MediasoupDataConsumerSurrogate {
     readonly id: string;
     readonly dataProducerId: string;
-    readonly observer: MediasoupDataConsumerObserverSurrogate;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupDataConsumerObserverEvents>;
 }
 
 export type MediasoupTransportObserverEvents = {
-    'close': undefined,
-    'newproducer': MediasoupProducerSurrogate,
-    'newconsumer': MediasoupConsumerSurrogate,
-    'newdataproducer': MediasoupDataProducerSurrogate,
-    'newdataconsumer': MediasoupDataConsumerSurrogate,
+    'close': [],
+    'newproducer': [MediasoupProducerSurrogate],
+    'newconsumer': [MediasoupConsumerSurrogate],
+    'newdataproducer': [MediasoupDataProducerSurrogate],
+    'newdataconsumer': [MediasoupDataConsumerSurrogate],
 }
-
-export interface MediasoupTransportObserver {
-    on<K extends keyof MediasoupTransportObserverEvents>(type: K, listener: (event: MediasoupTransportObserverEvents[K]) => void): this;
-    once<K extends keyof MediasoupTransportObserverEvents>(type: K, listener: (event: MediasoupTransportObserverEvents[K]) => void): this;
-    off<K extends keyof MediasoupTransportObserverEvents>(type: K, listener: (event: MediasoupTransportObserverEvents[K]) => void): this;
-}
-
 
 export type MediasoupTransportEvents = {
-    'connect': undefined,
-    'connectionstatechange': RTCPeerConnectionState,
-    'icegatheringstatechange': RTCIceGatheringState,
-    'produce': undefined,
+    'connect': [],
+    'connectionstatechange': [RTCPeerConnectionState],
+    'icegatheringstatechange': [RTCIceGatheringState],
+    'produce': [],
 }
 
 export interface MediasoupTransportSurrogate {
-    readonly id: string;
-    readonly direction: 'send' | 'recv';
-    readonly observer: MediasoupTransportObserver;
-    on<K extends keyof MediasoupTransportEvents>(type: K, listener: (event: MediasoupTransportEvents[K]) => void): this;
-    off<K extends keyof MediasoupTransportEvents>(type: K, listener: (event: MediasoupTransportEvents[K]) => void): this;
+    id: string;
+    direction: 'send' | 'recv';
+    on<K extends keyof MediasoupTransportEvents & string>(eventName: K, listener: (...args: MediasoupTransportEvents[K]) => void): this;
+    off<K extends keyof MediasoupTransportEvents & string>(eventName: K, listener: (...args: MediasoupTransportEvents[K]) => void): this;
+    once<K extends keyof MediasoupTransportEvents & string>(eventName: K, listener: (...args: MediasoupTransportEvents[K]) => void): this;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupTransportObserverEvents>;
     getStats(): Promise<RTCStatsReport>;
 }
 
 export type MediaosupDeviceObserverEvents = {
-    'newtransport': MediasoupTransportSurrogate,
-}
-
-export interface MediasoupDeviceObserver {
-    on<K extends keyof MediaosupDeviceObserverEvents>(type: K, listener: (event: MediaosupDeviceObserverEvents[K]) => void): this;
-    off<K extends keyof MediaosupDeviceObserverEvents>(type: K, listener: (event: MediaosupDeviceObserverEvents[K]) => void): this;
+    // 'newtransport': [MediasoupTransportSurrogate],
+    'newtransport': [any],
 }
 
 export interface MediaosupDeviceSurrogate {
-    readonly observer: MediasoupDeviceObserver;
+    readonly observer: MediasoupEnhancedEventEmitter<MediaosupDeviceObserverEvents>;
 }
+
