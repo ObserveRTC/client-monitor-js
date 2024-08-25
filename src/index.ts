@@ -8,6 +8,9 @@ export type {
     ClientMonitorConfig,
     ClientMonitorEvents,
 } from "./ClientMonitor";
+export type {
+    MediasoupStatsCollectorDeviceInterface,
+} from "./collectors/MediasoupSurrogates";
 
 export type {
     VideoFreezesDetector,

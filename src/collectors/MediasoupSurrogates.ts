@@ -1,50 +1,47 @@
-import { EventEmitter } from "events";
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Events = Record<string, any[]>;
-export type Listener = (...args: any[]) => void;
-export interface MediasoupEnhancedEventEmitter<E extends Events = Events> extends EventEmitter {
-    emit<K extends keyof E & string>(eventName: K, ...args: E[K]): boolean;
-    safeEmit<K extends keyof E & string>(eventName: K, ...args: E[K]): boolean;
-    on<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    off<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    addListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    prependListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    once<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    prependOnceListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    removeListener<K extends keyof E & string>(eventName: K, listener: (...args: E[K]) => void): this;
-    removeAllListeners<K extends keyof E & string>(eventName?: K): this;
-    listenerCount<K extends keyof E & string>(eventName: K): number;
-    listeners<K extends keyof E & string>(eventName: K): Listener[];
-    rawListeners<K extends keyof E & string>(eventName: K): Listener[];
+type MediasoupEvents = Record<string, any[]>;
+type TypeRestriction = string | number;
+interface MediasoupEnhancedEventEmitter<E extends MediasoupEvents = MediasoupEvents> {
+    on<K extends keyof E & TypeRestriction>(eventName: K, listener: (...args: E[K]) => void): this;
+    off<K extends keyof E & TypeRestriction>(eventName: K, listener: (...args: E[K]) => void): this;
+    once<K extends keyof E & TypeRestriction>(eventName: K, listener: (...args: E[K]) => void): this;
 }
 
-export type MediasoupProducerObserverEvents = {
+type ClientMonitorMediasoupProducerObserverEvents = {
     'close': [],
     'pause': [],
     'resume': [],
     'trackended': []
 }
 
-export type MediasoupRtpParametersEncoding = {
+type ClientMonitorMediasoupRtpParametersEncoding = {
     ssrc?: number;
 }
 
-export type MediasoupRtpParameters = {
-    encodings?: MediasoupRtpParametersEncoding[],
+type ClientMonitorMediasoupRtpParameters = {
+    encodings?: ClientMonitorMediasoupRtpParametersEncoding[],
 }
 
-export interface MediasoupProducerSurrogate {
+export interface MediasoupStatsCollectorProducerInterface {
     readonly id: string;
     readonly closed: boolean;
-    readonly observer: MediasoupEnhancedEventEmitter<MediasoupProducerObserverEvents>;   
-    readonly track?: MediaStreamTrack;
+    readonly observer: MediasoupEnhancedEventEmitter<ClientMonitorMediasoupProducerObserverEvents>;   
+    
+    // undefined for compatibility reason (older version than 3.16)
+    readonly track: MediaStreamTrack | null | undefined; 
     readonly kind: "audio" | "video";
-    readonly rtpParameters: MediasoupRtpParameters;
+    readonly rtpParameters: ClientMonitorMediasoupRtpParameters;
     getStats(): Promise<any>;
+
+
+    // ----------------------
+    // used when checking compatibility with older versions
+    // readonly observer: MediasoupEnhancedEventEmitter<any>;   
+    // readonly rtpParameters: any;
 }
 
-export type MediasoupConsumerObserverEvents = {
+type MediasoupStatsCollectorConsumerObserverEvents = {
     'close': [],
     'pause': [],
     'resume': [],
@@ -52,68 +49,94 @@ export type MediasoupConsumerObserverEvents = {
 }
 
 
-export interface MediasoupConsumerSurrogate {
+export interface MediasoupStatsCollectorConsumerInterface {
     readonly id: string;
     readonly producerId: string;
-    readonly observer: MediasoupEnhancedEventEmitter<MediasoupConsumerObserverEvents>;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupStatsCollectorConsumerObserverEvents>;
     readonly track: MediaStreamTrack;
     readonly kind: "audio" | "video";
-    readonly rtpParameters: MediasoupRtpParameters;
+    readonly rtpParameters: ClientMonitorMediasoupRtpParameters;
     getStats(): Promise<RTCStatsReport>;
+
+    // ----------------------
+    // used when checking compatibility with older versions
+    // readonly observer: MediasoupEnhancedEventEmitter<any>;
+    // readonly rtpParameters: any;
+    // getStats(): Promise<any>;
 }
 
 
-export type MediasoupDataProducerObserverEvents = {
+type MediasoupStatsCollectorDataProducerObserverEvents = {
     'close': [],
 }
 
-export interface MediasoupDataProducerSurrogate {
+export interface MediasoupStatsCollectorDataProducerInterface {
     readonly id: string;
-    readonly observer: MediasoupEnhancedEventEmitter<MediasoupDataProducerObserverEvents>;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupStatsCollectorDataProducerObserverEvents>;
+
+    // ----------------------
+    // used when checking compatibility with older versions
+    // readonly observer: MediasoupEnhancedEventEmitter<any>;
 }
 
 
-export type MediasoupDataConsumerObserverEvents = {
+type MediasoupStatsCollectorDataConsumerObserverEvents = {
     'close': [],
 }
 
-export interface MediasoupDataConsumerSurrogate {
+export interface MediasoupStatsCollectorDataConsumerInterface {
     readonly id: string;
     readonly dataProducerId: string;
-    readonly observer: MediasoupEnhancedEventEmitter<MediasoupDataConsumerObserverEvents>;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupStatsCollectorDataConsumerObserverEvents>;
+
+    // ----------------------
+    // used when checking compatibility with older versions
+    // readonly observer: MediasoupEnhancedEventEmitter<any>;
 }
 
-export type MediasoupTransportObserverEvents = {
+type MediasoupStatsCollectorTransportObserverEvents = {
     'close': [],
-    'newproducer': [MediasoupProducerSurrogate],
-    'newconsumer': [MediasoupConsumerSurrogate],
-    'newdataproducer': [MediasoupDataProducerSurrogate],
-    'newdataconsumer': [MediasoupDataConsumerSurrogate],
+    'newproducer': [MediasoupStatsCollectorProducerInterface],
+    'newconsumer': [MediasoupStatsCollectorConsumerInterface],
+    'newdataproducer': [MediasoupStatsCollectorDataProducerInterface],
+    'newdataconsumer': [MediasoupStatsCollectorDataConsumerInterface],
+
+
+    // ----------------------
+    // used when checking compatibility with older versions
+    // 'newproducer': [any],
+    // 'newconsumer': [any],
+    // 'newdataproducer': [any],
+    // 'newdataconsumer': [any],
 }
 
-export type MediasoupTransportEvents = {
-    'connect': [],
+export type MediasoupStatsCollectorTransportEvents = {
     'connectionstatechange': [RTCPeerConnectionState],
     'icegatheringstatechange': [RTCIceGatheringState],
-    'produce': [],
+    
+    // not used in the current version
+    // 'connect': [...args: any[]],
+    // 'produce': [...args: any[]],
 }
 
-export interface MediasoupTransportSurrogate {
+export interface MediasoupStatsCollectorTransportInterface extends MediasoupEnhancedEventEmitter<MediasoupStatsCollectorTransportEvents> {
     id: string;
     direction: 'send' | 'recv';
-    on<K extends keyof MediasoupTransportEvents & string>(eventName: K, listener: (...args: MediasoupTransportEvents[K]) => void): this;
-    off<K extends keyof MediasoupTransportEvents & string>(eventName: K, listener: (...args: MediasoupTransportEvents[K]) => void): this;
-    once<K extends keyof MediasoupTransportEvents & string>(eventName: K, listener: (...args: MediasoupTransportEvents[K]) => void): this;
-    readonly observer: MediasoupEnhancedEventEmitter<MediasoupTransportObserverEvents>;
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupStatsCollectorTransportObserverEvents>;
     getStats(): Promise<RTCStatsReport>;
+    
+    // ----------------------
+    // used when checking compatibility with older versions
+    // readonly observer: any;
+    // getStats(): Promise<any>;
 }
 
-export type MediaosupDeviceObserverEvents = {
+export type MediasoupStatsCollectorDeviceObserverEvents = {
     // 'newtransport': [MediasoupTransportSurrogate],
-    'newtransport': [any],
+    'newtransport': [MediasoupStatsCollectorTransportInterface],
 }
 
-export interface MediaosupDeviceSurrogate {
-    readonly observer: MediasoupEnhancedEventEmitter<MediaosupDeviceObserverEvents>;
+export interface MediasoupStatsCollectorDeviceInterface {
+    readonly observer: MediasoupEnhancedEventEmitter<MediasoupStatsCollectorDeviceObserverEvents>;
 }
 
