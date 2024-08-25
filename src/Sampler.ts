@@ -183,6 +183,7 @@ export class Sampler {
                 const outboundRtpStats = outboundRtp.stats;
                 const remoteInboundRtpStats = outboundRtp.getRemoteInboundRtp()?.stats;
                 const mediaSourceStats = outboundRtp.getMediaSource()?.stats;
+
                 if (outboundRtp.stats.kind === "audio") {
                     if (!outboundAudioTracks) outboundAudioTracks = [];
                     const outboundAudioTrack: OutboundAudioTrack = {
@@ -463,6 +464,7 @@ export class Sampler {
                     clockRate: stats.clockRate,
                     channels: stats.channels,
                     sdpFmtpLine: stats.sdpFmtpLine,
+
                 });
             }
 
@@ -540,6 +542,7 @@ export class Sampler {
                 iceServers.push(stats.url);
             }
         }
+
         clientSample.inboundAudioTracks = inboundAudioTracks;
         clientSample.inboundVideoTracks = inboundVideoTracks;
         clientSample.outboundAudioTracks = outboundAudioTracks;

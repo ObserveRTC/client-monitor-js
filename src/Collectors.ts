@@ -1,7 +1,7 @@
 import { createPeerConnectionCollector } from "./collectors/PeerConnectionStatsCollector";
 import { createLogger } from "./utils/logger";
 import { v4 as uuid } from "uuid";
-import { MediaosupDeviceSurrogate } from "./collectors/MediasoupSurrogates";
+import { MediasoupStatsCollectorDeviceInterface } from "./collectors/MediasoupSurrogates";
 import { StatsMap, collectStatsValuesFromRtcStatsReport, createStatsMap } from "./utils/Stats";
 import { createProcessor } from "./utils/Processor";
 import { TypedEventEmitter } from "./utils/TypedEmitter";
@@ -152,10 +152,10 @@ export function createCollectors(config: {
         return statsCollector;
     }
 
-    function addMediasoupDevice(device: MediaosupDeviceSurrogate, collectorId?: string) {
+    function addMediasoupDevice(device: MediasoupStatsCollectorDeviceInterface, collectorId?: string) {
         logger.trace(`addMediasoupDevice(): mediasoupDevice: `, device);
         const statsCollector = createMediasoupStatsCollector({
-            device,
+            device: device as MediasoupStatsCollectorDeviceInterface,
             collectorId,
 
             storage,

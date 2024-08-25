@@ -8,12 +8,12 @@ import {
     createPeerConnectionStateChangedEvent 
 } from "../utils/callEvents";
 import { 
-    MediaosupDeviceSurrogate, 
-    MediasoupConsumerSurrogate, 
-    MediasoupDataConsumerSurrogate, 
-    MediasoupDataProducerSurrogate, 
-    MediasoupProducerSurrogate, 
-    MediasoupTransportSurrogate 
+    MediasoupStatsCollectorDeviceInterface, 
+    MediasoupStatsCollectorConsumerInterface, 
+    MediasoupStatsCollectorDataConsumerInterface, 
+    MediasoupStatsCollectorDataProducerInterface, 
+    MediasoupStatsCollectorProducerInterface, 
+    MediasoupStatsCollectorTransportInterface 
 } from "./MediasoupSurrogates";
 import { StatsProvider, createStatsProvider } from "./StatsProvider";
 import { createLogger } from "../utils/logger";
@@ -22,7 +22,7 @@ const logger = createLogger("MediasoupStatsCollector");
 
 export type MediasoupStatsCollectorConfig = {
     collectorId?: string,
-    device: MediaosupDeviceSurrogate,
+    device: MediasoupStatsCollectorDeviceInterface,
     storage: StatsStorage
     emitCallEvent: ((event: CustomCallEvent) => void);
     addStatsProvider: ((statsProvider: StatsProvider) => void);
@@ -41,11 +41,11 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
         removeStatsProvider,
     } = config;
     
-    const transports = new Map<string, MediasoupTransportSurrogate>();
+    const transports = new Map<string, MediasoupStatsCollectorTransportInterface>();
     const addedOutboundTrackIds = new Set<string>();
     // const producers = new Map<string, MediasoupProducerSurrogate>();
     // const consumers = new Map<string, MediasoupConsumerSurrogate>();
-    const pendingProducerBindings = new Map<string, { producer: MediasoupProducerSurrogate, peerConnectionId: string }>();
+    const pendingProducerBindings = new Map<string, { producer: MediasoupStatsCollectorProducerInterface, peerConnectionId: string }>();
     const getLastSndTransport = () => {
         const sndTransports = Array.from(transports.values()).filter(transport => transport.direction === 'send');
         return sndTransports.length < 1 ? undefined : sndTransports[sndTransports.length - 1];
@@ -91,7 +91,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     }
     
     function createAddProducerListener(peerConnectionId: string) {
-        return (producer: MediasoupProducerSurrogate) => {
+        return (producer: MediasoupStatsCollectorProducerInterface) => {
             const eventBase = {
                 peerConnectionId,
                 mediaTrackId: producer.track?.id,
@@ -151,7 +151,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     }
 
     function createAddConsumerListener(peerConnectionId: string) {
-        return (consumer: MediasoupConsumerSurrogate) => {
+        return (consumer: MediasoupStatsCollectorConsumerInterface) => {
             const eventBase = {
                     peerConnectionId,
                     mediaTrackId: consumer.track.id,
@@ -204,7 +204,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     }
 
     function createAddDataProducerListener(peerConnectionId: string) {
-        return (dataProducer: MediasoupDataProducerSurrogate) => {
+        return (dataProducer: MediasoupStatsCollectorDataProducerInterface) => {
             const eventBase = {
                 peerConnectionId,
                 attachments: JSON.stringify({
@@ -226,7 +226,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     }
 
     function createAddDataConsumerListener(peerConnectionId: string) {
-        return (dataConsumer: MediasoupDataConsumerSurrogate) => {
+        return (dataConsumer: MediasoupStatsCollectorDataConsumerInterface) => {
             const eventBase = {
                 peerConnectionId,
                 attachments: JSON.stringify({
@@ -249,7 +249,7 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     }
 
 
-    function addTransport(transport: MediasoupTransportSurrogate, timestamp?: number) {
+    function addTransport(transport: MediasoupStatsCollectorTransportInterface, timestamp?: number) {
         const eventBase = {
             peerConnectionId: transport.id,
             attachments: JSON.stringify({
@@ -359,6 +359,9 @@ export function createMediasoupStatsCollector(config: MediasoupStatsCollectorCon
     return {
         get id() {
             return collectorId;
+        },
+        get transports(): ReadonlyMap<string, MediasoupStatsCollectorTransportInterface> {
+            return transports;
         },
         close,
         addTransport,

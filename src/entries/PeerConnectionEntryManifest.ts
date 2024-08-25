@@ -62,7 +62,6 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     public deltaSentAudioBytes?: number;
     public deltaSentVideoBytes?: number;
 
-    
     public avgRttInS?: number;
     public sendingAudioBitrate?: number;
     public sendingVideoBitrate?: number;
@@ -78,6 +77,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
 
     public readonly config: {
         outbStabilityScoresLength: number;
+        framesPerSecWindowLength: number,
     };
 
     private readonly _emitter = new TypedEventEmitter<PeerConnectionEntryEvents>();
@@ -119,6 +119,7 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
     ) {
         this.config = {
             outbStabilityScoresLength: 10,
+            framesPerSecWindowLength: 8,
         }
         this._inboundRtps
             .addIndex(SSRC_INDEX, (entry) => entry.stats.ssrc)
@@ -389,6 +390,19 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
                 entry.stats.framesPerSecond ?? 30,
                 entry.expectedFrameRate ?? 30,
             );
+
+            entry.framesPerSecond && entry.lastNFramesPerSec.push(entry.framesPerSecond);
+            while (this.config.framesPerSecWindowLength < entry.lastNFramesPerSec.length) {
+                entry.lastNFramesPerSec.shift();
+            }
+            if (0 < entry.lastNFramesPerSec.length) {
+                const avgFramesPerSec = entry.lastNFramesPerSec.reduce((acc, fps) => acc + fps, 0) / entry.lastNFramesPerSec.length;
+                const avgDiff = entry.lastNFramesPerSec.reduce((acc, fps) => acc + Math.abs(fps - avgFramesPerSec), 0) / entry.lastNFramesPerSec.length
+
+                entry.avgFramesPerSec = avgFramesPerSec;
+                entry.fpsVolatility = avgDiff / avgFramesPerSec;
+            }
+            
         }
     }
     
@@ -692,6 +706,8 @@ export class PeerConnectionEntryManifest implements PeerConnectionEntry {
             visited: true,
             expectedFrameRate: stats.kind === 'video' ? 30 : undefined,
             
+            lastNFramesPerSec: [],
+
             getPeerConnection: () => {
                 return this;
             },

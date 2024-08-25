@@ -27,9 +27,11 @@ export function listenTrackEvents(context: {
 			sfuStreamId,
 			emitCallEvent,
 	} = context;
+
 	if (!track.id) {
 			return;
 	}
+
 	const attachments = JSON.stringify({
 			kind: track.kind,
 			direction,
