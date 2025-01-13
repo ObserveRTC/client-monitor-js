@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import { AlertState, ClientMonitor } from "../ClientMonitor";
-import { InboundRtpEntry } from "../entries/StatsEntryInterfaces";
+import { InboundRtpEntry } from "../monitors/old/StatsEntryInterfaces";
 import { Detector } from "./Detector";
 
 /**
@@ -41,7 +41,7 @@ type AudioSyncTrace = {
 	inboundRtp: InboundRtpEntry,
 }
 
-export declare interface AudioDesyncDetector extends Detector {
+export declare interface AudioDesyncDetector {
 	on<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
 	off<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
 	once<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
@@ -50,6 +50,7 @@ export declare interface AudioDesyncDetector extends Detector {
 
 export class AudioDesyncDetector extends EventEmitter {
 	private _closed = false;
+	private _enabled = false;
 	private readonly _states = new Map<number, AudioSyncTrace>();
 
 	public constructor(

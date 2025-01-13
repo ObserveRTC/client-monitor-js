@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import { AlertState } from "../ClientMonitor";
-import { OutboundRtpEntry } from "../entries/StatsEntryInterfaces";
+import { OutboundRtpEntry } from "../monitors/old/StatsEntryInterfaces";
 import { Detector } from "./Detector";
 
 export type LayersChangedDetectorConfig = {

@@ -1,7 +1,16 @@
-import { StatsStorage } from "../entries/StatsStorage";
+import { ClientMonitor } from "../ClientMonitor";
+import { StatsStorage } from "../monitors/old/StatsStorage";
 import { CustomCallEvent } from "../schema/Samples";
-import { createPeerConnectionStateChangedEvent, createIceGatheringStateChangedEvent, createPeerConnectionClosedEvent, createPeerConnectionOpenedEvent, createIceConnectionStateChangedEvent } from "../utils/callEvents";
+import { createPeerConnectionStateChangedEvent, createIceGatheringStateChangedEvent, createPeerConnectionClosedEvent, createPeerConnectionOpenedEvent, createIceConnectionStateChangedEvent } from "../utils/events";
 import { listenDataChannelEvents, listenTrackEvents } from "./utils";
+
+export class PeerConnectionStatsCollector {
+    public constructor(
+        public readonly monitor: ClientMonitor
+    ) {
+
+    }
+}
 
 export type PeerConnectionStatsCollector = ReturnType<typeof createPeerConnectionCollector>;
 

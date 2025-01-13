@@ -7,7 +7,7 @@ import {
 	createDataChannelCloseEvent, 
 	createDataChannelErrorEvent, 
 	createDataChannelOpenEvent 
-} from "../utils/callEvents";
+} from "../utils/events";
 
 
 export function listenTrackEvents(context: {

@@ -1,4 +1,4 @@
-import { StatsMap, StatsVisitor, createStatsVisitor } from "../utils/Stats";
+import { StatsMap, StatsVisitor, createStatsVisitor } from "../../utils/stats";
 import {
     CodecEntry,
     ContributingSourceEntry,
@@ -23,10 +23,10 @@ import {
     AudioPlayoutEntry,
     PeerConnectionEntryEvents,
 } from "./StatsEntryInterfaces";
-import * as W3C from '../schema/W3cStatsIdentifiers'
+import * as W3C from '../../schema/W3cStatsIdentifiers'
 import { TypedEventEmitter, TypedEvents } from "../utils/TypedEmitter";
 import { IndexedMap } from "../utils/IndexedMap";
-import { calculateAudioMOS, calculateVideoMOS } from "./UpdateFields";
+import { calculateAudioMOS, calculateVideoMOS } from "../UpdateFields";
 import type { StatsStorage } from "./StatsStorage";
 
 const SSRC_INDEX = 'ssrc';

@@ -1,4 +1,4 @@
-import * as W3C from '../schema/W3cStatsIdentifiers'
+import * as W3C from '../../schema/W3cStatsIdentifiers'
 import { TypedEvents } from '../utils/TypedEmitter';
 import { InboundTrackStats } from './InboundTrackStats';
 import { OutboundTrackStats } from './OutboundTrackStats';
@@ -346,7 +346,6 @@ export type PeerConnectionEntryEvents = {
 export interface PeerConnectionEntry {
     readonly peerConnectionId: string;
     readonly statsId: string | undefined;
-    readonly stats: W3C.PeerConnectionStats | undefined;
     readonly label: string | undefined;
     readonly events: TypedEvents<PeerConnectionEntryEvents>;
 

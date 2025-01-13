@@ -21,7 +21,7 @@ import {
     CustomCallEvent,
     CustomObserverEvent,
 } from './schema/Samples'
-import { StatsStorage } from "./entries/StatsStorage";
+import { StatsStorage } from "./monitors/old/StatsStorage";
 import { createLogger } from "./utils/logger";
 import { roundNumber } from './utils/common';
 

@@ -22,12 +22,12 @@ import {
     TrackStats,
 } from "./StatsEntryInterfaces";
 import { PeerConnectionEntryManifest } from "./PeerConnectionEntryManifest";
-import { createLogger } from "../utils/logger";
+import { createLogger } from "../../utils/logger";
 import { TypedEventEmitter } from "../utils/TypedEmitter";
 import { InboundTrackStats, createInboundTrackStats } from "./InboundTrackStats";
 import { OutboundTrackStats, createOutboundTrackStats } from "./OutboundTrackStats";
-import { StatsMap } from "../utils/Stats";
-import { createProcessor } from "../utils/Processor";
+import { StatsMap } from "../../utils/stats";
+import { createProcessor } from "../../utils/Processor";
 
 const logger = createLogger("StatsStorage");
 

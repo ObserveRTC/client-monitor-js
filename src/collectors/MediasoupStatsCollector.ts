@@ -1,12 +1,12 @@
 import { CustomCallEvent } from "../schema/Samples";
-import { StatsStorage } from "../entries/StatsStorage";
+import { StatsStorage } from "../monitors/old/StatsStorage";
 import { listenTrackEvents } from "./utils";
 import { 
     createIceGatheringStateChangedEvent, 
     createPeerConnectionClosedEvent, 
     createPeerConnectionOpenedEvent, 
     createPeerConnectionStateChangedEvent 
-} from "../utils/callEvents";
+} from "../utils/events";
 import { 
     MediasoupStatsCollectorDeviceInterface, 
     MediasoupStatsCollectorConsumerInterface, 
