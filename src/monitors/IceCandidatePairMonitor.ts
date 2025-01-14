@@ -1,4 +1,5 @@
 import { IceCandidatePairStats } from "../schema/ClientSample";
+import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	private _visited = true;
@@ -30,6 +31,7 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	appData?: Record<string, unknown> | undefined;
 	
 	public constructor(
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: IceCandidatePairStats,
 	) {
 		this.id = options.id;
@@ -53,6 +55,18 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		}
 
 		Object.assign(this, stats);
+	}
+
+	public getIceTransport() {
+		return this.peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
+	}
+
+	public getLocalCandidate() {
+		return this.peerConnection.mappedIceCandidateMonitors.get(this.localCandidateId ?? '');
+	}
+
+	public getRemoteCandidate() {
+		return this.peerConnection.mappedIceCandidateMonitors.get(this.remoteCandidateId ?? '');
 	}
 
 	public createSample(): IceCandidatePairStats {

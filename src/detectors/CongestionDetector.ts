@@ -17,7 +17,7 @@ export class CongestionDetector implements Detector {
 
 	public update() {
 		if (this.config.disabled) return;
-		
+
 		let hasBwLimitedOutboundRtp = false;
 
 		for (const outboundRtp of this.peerConnection.outboundRtps) {
@@ -47,9 +47,9 @@ export class CongestionDetector implements Detector {
 				break;
 			}
 			case 'low': {
-				if (!this.peerConnection.ewmaRttInS || !this.peerConnection.sendingFractionalLoss) break;
+				if (!this.peerConnection.ewmaRttInS || !this.peerConnection.outboundFractionLost) break;
 				
-				isCongested = hasBwLimitedOutboundRtp && this.peerConnection.sendingFractionalLoss > 0.05;
+				isCongested = hasBwLimitedOutboundRtp && this.peerConnection.outboundFractionLost > 0.05;
 				break;
 			}
 		}

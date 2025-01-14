@@ -11,7 +11,7 @@ export class PeerConnectionTransportMonitor implements PeerConnectionTransportSt
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: PeerConnectionTransportStats,
 	) {
 		this.id = options.id;

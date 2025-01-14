@@ -3,20 +3,26 @@ import { fetchUserAgentData } from "./fetchUserAgentData";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { listenRtcPeerConnectionEvents } from "./rtcEventers";
 import { watchMediaDevices } from "./watchMediaDevice";
-import { collectStatsFromRtcPeerConnection } from "../utils/stats";
+import { createStatsFromRTCStatsReportProvider } from "../utils/stats";
 import { createLogger } from "../utils/logger";
+import * as mediasoup from 'mediasoup-client';
+import { listenMediasoupTransport } from "./mediasoupTransportEvents";
 
 const logger = createLogger('Sources');
 
 export class Sources {
 	public userAgentMetaDataSent = false;
-	
+	private _mediasoupDeviceListeners: {
+		device: mediasoup.types.Device,
+		listener: (transport: mediasoup.types.Transport) => void,
+	}[] = [];
+
 	public constructor(
 		public readonly monitor: ClientMonitor
 	) {
 	}
 
-	public addRtcPeerConnection(params: {
+	public addRTCPeerConnection(params: {
 		peerConnectionId?: string,
 		peerConnection: RTCPeerConnection,
 		appData?: Record<string, unknown>,
@@ -30,30 +36,54 @@ export class Sources {
 
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 				peerConnectionId,
-				() => collectStatsFromRtcPeerConnection(peerConnection),
+				createStatsFromRTCStatsReportProvider(peerConnection.getStats),
 				this.monitor,
 		);
 
 		listenRtcPeerConnectionEvents({
-			monitor: this.monitor,
+			monitor: peerConnectionMonitor,
 			peerConnection,
 			peerConnectionId,
 			appData,
 		});
 
-		peerConnectionMonitor.once('close', () => {
-				this.monitor.mappedPeerConnections.delete(peerConnectionId);
+		this._addPeerConnectionMonitor(peerConnectionMonitor);
+
+		return this;
+	}
+
+	public addMediasoupDevice(device: mediasoup.types.Device, clientEventAppData?: Record<string, unknown>) {
+		const newTransportListener = (transport: mediasoup.types.Transport) => {
+			this.addMediasoupTransport(transport, clientEventAppData);
+		}
+		this._mediasoupDeviceListeners.push({ device, listener: newTransportListener });
+		device.observer.on('newtransport', newTransportListener);
+		return this;
+	}
+
+	public removeMediasoupDevice(device: mediasoup.types.Device) {
+		const listener = this._mediasoupDeviceListeners.find((l) => l.device === device);
+		if (!listener) return this;
+		device.observer.off('newtransport', listener.listener);
+		this._mediasoupDeviceListeners = this._mediasoupDeviceListeners.filter((l) => l !== listener);
+		return this;
+	}
+
+	public addMediasoupTransport(transport: mediasoup.types.Transport, clientEventAppData?: Record<string, unknown>) {
+		const peerConnectionMonitor = new PeerConnectionMonitor(
+			transport.id,
+			createStatsFromRTCStatsReportProvider(transport.getStats),
+			this.monitor,
+		);
+
+		listenMediasoupTransport({
+			monitor: peerConnectionMonitor,
+			transport,
+			appData: clientEventAppData,
 		});
-		this.monitor.mappedPeerConnections.set(peerConnectionId, peerConnectionMonitor);
 
-		return this;
-	}
+		this._addPeerConnectionMonitor(peerConnectionMonitor);
 
-	public addMediasoupDevice() {
-		return this;
-	}
-
-	public addMediasoupTransport() {
 		return this;
 	}
 
@@ -94,5 +124,10 @@ export class Sources {
 		return this;
 	}
 
-	
+	private _addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor) {
+		peerConnectionMonitor.once('close', () => {
+			this.monitor.mappedPeerConnections.delete(peerConnectionMonitor.peerConnectionId);
+		});
+		this.monitor.mappedPeerConnections.set(peerConnectionMonitor.peerConnectionId, peerConnectionMonitor);
+	}
 }

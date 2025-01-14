@@ -4,7 +4,7 @@ import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class MediaSourceMonitor implements MediaSourceStats {
 	private _visited = true;
-
+	
 	timestamp: number;
 	id: string;
 	kind: MediaKind;
@@ -21,14 +21,13 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: MediaSourceStats,
 	) {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
 		this.kind = options.kind as MediaKind;
 	}
-	
 	
 
 	public get visited(): boolean {
@@ -39,12 +38,9 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		return result;
 	}
 
-	public getCodec() {
-		const codecId = this.parent.mappedTrackToCodec.get(this.trackIdentifier ?? '');
-		
-		return this.parent.mappedCodecMonitors.get(codecId ?? '');
+	public getTrack() {
+		return this.peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
-
 
 	public accept(stats: Omit<MediaSourceStats, 'appData'>): void {
 		this._visited = true;

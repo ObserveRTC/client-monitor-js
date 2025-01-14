@@ -47,9 +47,10 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 
 	// derived fields
 	bitrate?: number | undefined;
+	packetRate?: number | undefined;
 
 	public constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: OutboundRtpStats,
 	) {
 		this.id = options.id;
@@ -66,8 +67,25 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		return result;
 	}
 
+	public get trackIdentifier() {
+		return this.getMediaSource()?.trackIdentifier;
+	}
+
 	public getRemoteInboundRtp() {
-		return this.parent.mappedRemoteInboundRtpMonitors.get(this.ssrc);
+		return this.peerConnection.mappedRemoteInboundRtpMonitors.get(this.ssrc);
+	}
+
+	public getCodec() {
+		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
+	}
+
+	public getMediaSource() {
+		return this.peerConnection.mappedMediaSourceMonitors.get(this.mediaSourceId ?? '');
+	}
+
+	public getTrack() {
+		return this.getMediaSource()?.getTrack() ?? 
+			this.peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
 	public accept(stats: Omit<OutboundRtpStats, 'appData'>): void {
@@ -76,6 +94,11 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		const elapsedInMs = stats.timestamp - this.timestamp;
 		if (elapsedInMs <= 0) { 
 			return; // logger?
+		}
+		const elapsedInSec = elapsedInMs / 1000;
+
+		if (stats.packetsSent !== undefined && this.packetsSent !== undefined) {
+			this.packetRate = (stats.packetsSent - this.packetsSent) / (elapsedInSec);
 		}
 
 		Object.assign(this, stats);

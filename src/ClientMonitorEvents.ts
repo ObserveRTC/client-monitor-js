@@ -1,4 +1,5 @@
 import { InboundRtpMonitor } from "./monitors/InboundRtpMonitor";
+import { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
 import { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
 import { ClientSample } from "./schema/ClientSample"
 import { RtcStats } from "./schema/W3cStatsIdentifiers";
@@ -43,16 +44,16 @@ export type ClientMonitorEvents = {
 	}],
 	'cpulimitation': [],
 	'audio-desync': [{
-		trackId: string,
+		inboundRtp: InboundRtpMonitor,
 	}],
 	'freezed-video': [{
 		inboundRtp: InboundRtpMonitor,
 	}],
 	'stucked-inbound-track': [{
-		inboundRtp: InboundRtpMonitor,
+		inboundTrack: InboundTrackMonitor,
 	}],
 	'too-long-pc-connection-establishment': [{
-			peerConnection: PeerConnectionMonitor,
+		peerConnection: PeerConnectionMonitor,
 	}]
 	
 }

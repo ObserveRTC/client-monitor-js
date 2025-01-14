@@ -1,5 +1,6 @@
 import { MediaPlayoutStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
+import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	private _visited = true;
@@ -16,6 +17,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: MediaPlayoutStats,
 	) {
 		this.id = options.id;

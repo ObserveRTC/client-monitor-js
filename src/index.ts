@@ -9,15 +9,12 @@ export type {
 } from "./ClientMonitorEvents";
 export type { 
     CongestionDetector,
-    CongestionDetectorConfig
 } from './detectors/CongestionDetector';
 export type { 
     CpuPerformanceDetector, 
-    CpuPerformanceDetectorConfig 
 } from './detectors/CpuPerformanceDetector';
 export type { 
     AudioDesyncDetector, 
-    AudioDesyncDetectorConfig 
 } from './detectors/AudioDesyncDetector';
 
 export type { 
@@ -58,14 +55,27 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
         videoFreezesDetector: config?.videoFreezesDetector ?? {
         },
         stuckedInboundTrackDetector: config?.stuckedInboundTrackDetector ?? {
+            thresholdInMs: 5000,
         },
         audioDesyncDetector: config?.audioDesyncDetector ?? {
+            fractionalCorrectionAlertOffThreshold: 0.1,
+            fractionalCorrectionAlertOnThreshold: 0.05,
         },
         congestionDetector: config?.congestionDetector ?? {
+            sensitivity: 'medium',
         },
         cpuPerformanceDetector: config?.cpuPerformanceDetector ?? {
+            fpsVolatilityThresholds: {
+                lowWatermark: 0.1,
+                highWatermark: 0.3,
+            },
+            durationOfCollectingStatsThreshold: {
+                lowWatermark: 5000,
+                highWatermark: 10000,
+            },
         },
         longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
+            thresholdInMs: 5000,
         },
     }
 

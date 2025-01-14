@@ -44,6 +44,22 @@ export type ClientMonitorConfig = {
 
     audioDesyncDetector: {
         disabled?: boolean,
+        /**
+         * The fractional threshold used to determine if the audio desynchronization
+         * correction is considered significant or not.
+         * It represents the minimum required ratio of corrected samples to total samples.
+         * For example, a value of 0.1 means that if the corrected samples ratio
+         * exceeds 0.1, it will be considered a significant audio desynchronization issue.
+         */
+        fractionalCorrectionAlertOnThreshold: number;
+        /**
+         * The fractional threshold used to determine if the audio desynchronization
+         * correction is considered negligible and the alert should be turned off.
+         * It represents the maximum allowed ratio of corrected samples to total samples.
+         * For example, a value of 0.05 means that if the corrected samples ratio
+         * falls below 0.05, the audio desynchronization alert will be turned off.
+         */
+        fractionalCorrectionAlertOffThreshold: number;
     }
 
     congestionDetector: {

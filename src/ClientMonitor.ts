@@ -5,11 +5,13 @@ import { AcceptedClientEvent, AcceptedClientIssue, AcceptedClientMetaData, Clien
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventType } from './utils/enums';
 import { ClientMonitorConfig } from './ClientMonitorConfig';
-import { StatsAdapters } from './collectors/StatsAdapters';
+import { StatsAdapters } from './adapters/StatsAdapters';
 import { Sources } from './sources/Sources';
 import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
+import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
+import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 
 const logger = createLogger('ClientMonitor');
 
@@ -25,6 +27,8 @@ export class ClientMonitor extends EventEmitter {
     public readonly sources: Sources;
     public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
+    public readonly mappedOutboundTracks = new Map<string, OutboundTrackMonitor>();
+    public readonly mappedInboundTracks = new Map<string, InboundTrackMonitor>();
     public readonly detectors:Detectors;
 
     public clientId?: string;
@@ -300,6 +304,26 @@ export class ClientMonitor extends EventEmitter {
 
     public get certificates() {
         return [ ...this.peerConnections.flatMap(peerConnection => peerConnection.certificates) ];
+    }
+
+    public get tracks() {
+        return [
+            ...this.mappedInboundTracks.values(),
+            ...this.mappedOutboundTracks.values(),
+        ]
+    }
+
+    public getTrackMonitor(trackId: string) {
+        return this.mappedInboundTracks.get(trackId) ?? 
+            this.mappedOutboundTracks.get(trackId);
+    }
+
+    public getInboundTrackMonitor(trackId: string) {
+        return this.mappedInboundTracks.get(trackId);
+    }
+
+    public getOutboundTrackMonitor(trackId: string) {
+        return this.mappedOutboundTracks.get(trackId);
     }
 
 

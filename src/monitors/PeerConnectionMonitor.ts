@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
-import { InboundRtpStats, MediaSourceStats, OutboundRtpStats, PeerConnectionSample, RemoteInboundRtpStats, RemoteOutboundRtpStats } from "../schema/ClientSample";
+import { CertificateStats, CodecStats, DataChannelStats, IceCandidatePairStats, IceCandidateStats, IceTransportStats, InboundRtpStats, MediaPlayoutStats, MediaSourceStats, OutboundRtpStats, PeerConnectionSample, RemoteInboundRtpStats, RemoteOutboundRtpStats } from "../schema/ClientSample";
 import * as W3C from "../schema/W3cStatsIdentifiers";
 import { createLogger } from "../utils/logger";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
@@ -18,11 +18,15 @@ import { IceCandidatePairMonitor } from "./IceCandidatePairMonitor";
 import { CertificateMonitor } from "./CertificateMonitor";
 import { DataChannelMonitor } from "./DataChannelMonitor";
 import { LongPcConnectionEstablishmentDetector } from "../detectors/LongPcConnectionEstablishment";
+import { CongestionDetector } from "../detectors/CongestionDetector";
+import { InboundTrackMonitor } from "./InboundTrackMonitor";
+import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 
 const logger = createLogger('PeerConnectionMonitor');
 
 export type PeerConnectionMonitorEvents = {
 	'close': [],
+	'update': [],
 }
 
 export declare interface PeerConnectionMonitor {
@@ -49,7 +53,9 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public readonly mappedCertificateMonitors = new Map<string, CertificateMonitor>();
 
 	// indexes
-	public readonly mappedTrackToCodec = new Map<string, string>();
+	// public readonly ωindexedCodecIdToInboundRtps = new Map<string, InboundRtpMonitor[]>();
+	// public readonly ωindexedMediaSourceIdToOutboundRtps = new Map<string, OutboundRtpMonitor[]>();
+	
 
 	public closed = false;
 	
@@ -60,8 +66,8 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public receivingAudioBitrate?: number;
 	public receivingVideoBitrate?: number;
 
-	public receivingFractionLost?: number;
-	public sendingFractionalLoss?: number;
+	public outboundFractionLost = -1;
+	public inboundFractionalLost = -1;
 
 	public totalInboundPacketsLost = 0;
 	public totalInboundPacketsReceived = 0;
@@ -102,9 +108,11 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public connectingStartedAt?: number;
 	public connectedAt?: number;
 	private _connectionState?: W3C.RtcPeerConnectionState;
-
+	public iceState?: W3C.RtcIceTransportState;
 	
-
+	public usingTURN?: boolean;
+	public usingTCP?: boolean;
+	
 	public constructor(
 		public readonly peerConnectionId: string,
 		public readonly getStats: () => Promise<W3C.RtcStats[]>,
@@ -113,6 +121,7 @@ export class PeerConnectionMonitor extends EventEmitter{
 		super();
 		this.detectors = new Detectors(
 			new LongPcConnectionEstablishmentDetector(this),
+			new CongestionDetector(this),
 		);
 	}
 
@@ -144,8 +153,8 @@ export class PeerConnectionMonitor extends EventEmitter{
 		this.sendingFractionLost = 0;
 		this.receivingAudioBitrate = 0;
 		this.receivingVideoBitrate = 0;
-		this.receivingFractionLost = 0;
-		this.sendingFractionalLoss = 0;
+		this.outboundFractionLost = 0;
+		this.inboundFractionalLost = 0;
 
 		for (const statsItem of stats) {
 			switch (statsItem.type) {
@@ -210,8 +219,15 @@ export class PeerConnectionMonitor extends EventEmitter{
 		this.highestSeenAvailableOutgoingBitrate = Math.max(this.highestSeenAvailableOutgoingBitrate ?? 0, this.updateTracers.sumOfSelectedIceAvailableOutgoingBitrate);
 		this.highestSeenSendingBitrate = Math.max(this.highestSeenSendingBitrate ?? 0, this.sendingAudioBitrate + this.sendingVideoBitrate);
 		this.highestSeenReceivingBitrate = Math.max(this.highestSeenReceivingBitrate ?? 0, this.receivingAudioBitrate + this.receivingVideoBitrate);
-		
+
+		this.usingTCP = this.selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
+		this.usingTURN = this.selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.candidateType === 'relay') &&
+			this.selectedIceCandidatePairs.some(pair => pair.getRemoteCandidate()?.url?.startsWith('turn:'));
+		this.iceState = this.selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
+
 		this.detectors.update();
+
+		this.emit('update');
 	}
 
 	public createSample(): PeerConnectionSample {
@@ -296,7 +312,7 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public set connectionState(state: W3C.RtcPeerConnectionState | undefined) {
 		if (this._connectionState === state) return;
 		this._connectionState = state;
-
+		
 		if (state === 'connecting') {
 			this.connectingStartedAt = Date.now();
 		} else if (state === 'connected') {
@@ -320,6 +336,10 @@ export class PeerConnectionMonitor extends EventEmitter{
 		for (const [id, monitor] of this.mappedInboundRtpMonitors) {
 			if (monitor.visited) continue;
 			this.mappedInboundRtpMonitors.delete(id);
+
+			if (monitor.trackIdentifier) {
+				this.parent.mappedInboundTracks.delete(monitor.trackIdentifier);
+			}
 		}
 
 		for (const [id, monitor] of this.mappedRemoteOutboundRtpMonitors) {
@@ -330,6 +350,7 @@ export class PeerConnectionMonitor extends EventEmitter{
 		for (const [id, monitor] of this.mappedOutboundRtpMonitors) {
 			if (monitor.visited) continue;
 			this.mappedOutboundRtpMonitors.delete(id);
+			monitor.getTrack()?.mappedOutboundRtp.delete(monitor.ssrc);
 		}
 
 		for (const [id, monitor] of this.mappedRemoteInboundRtpMonitors) {
@@ -340,6 +361,10 @@ export class PeerConnectionMonitor extends EventEmitter{
 		for (const [id, monitor] of this.mappedMediaSourceMonitors) {
 			if (monitor.visited) continue;
 			this.mappedMediaSourceMonitors.delete(id);
+			
+			if (monitor.trackIdentifier) {
+				this.parent.mappedOutboundTracks.delete(monitor.trackIdentifier);
+			}
 		}
 
 		for (const [id, monitor] of this.mappedMediaPlayoutMonitors) {
@@ -382,18 +407,21 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (this.closed) return;
 		this.closed = true;
 
-		this.mappedInboundRtpMonitors.clear();
+		// this will clear up everything since the second time
+		// the visited will be false, hence will delete the monitors
+		this._checkVisited();
+		this._checkVisited();
 
 		this.emit('close');
 	}
 
-	private _updateCodec(input: Partial<CodecMonitor>) {
+	private _updateCodec(input: Partial<CodecStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.payloadType || !input.mimeType) {
 			return logger.warn('Invalid codec stats', input);
 		}
 
-		const stats = input as CodecMonitor;
+		const stats = input as CodecStats;
 		
 		let codecMonitor = this.mappedCodecMonitors.get(stats.id);
 		if (!codecMonitor) {
@@ -416,6 +444,14 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!inboundRtpMonitor) {
 			inboundRtpMonitor = new InboundRtpMonitor(this, stats);
 			this.mappedInboundRtpMonitors.set(stats.ssrc, inboundRtpMonitor);
+
+			if (stats.trackIdentifier) {
+				const constInbMonitor = inboundRtpMonitor;
+
+				this.parent.mappedInboundTracks.set(stats.trackIdentifier, 
+					new InboundTrackMonitor(stats.trackIdentifier, () => constInbMonitor)
+				);
+			}
 		}
 
 		inboundRtpMonitor.accept(stats);
@@ -432,19 +468,22 @@ export class PeerConnectionMonitor extends EventEmitter{
 				break;
 			}
 		}
+		if (inboundRtpMonitor.fractionLost) {
+			this.inboundFractionalLost += inboundRtpMonitor.fractionLost;
+		}
 	}
 
-	private _updateDataChannel(input: Partial<DataChannelMonitor>) {
+	private _updateDataChannel(input: Partial<DataChannelStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.label) {
 			return logger.warn('Invalid dataChannel stats', input);
 		}
 
-		const stats = input as DataChannelMonitor;
+		const stats = input as DataChannelStats;
 		
 		let dataChannelMonitor = this.mappedDataChannelMonitors.get(stats.id);
 		if (!dataChannelMonitor) {
-			dataChannelMonitor = new DataChannelMonitor(stats);
+			dataChannelMonitor = new DataChannelMonitor(this, stats);
 			this.mappedDataChannelMonitors.set(stats.id, dataChannelMonitor);
 		}
 
@@ -480,6 +519,8 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!outboundRtpMonitor) {
 			outboundRtpMonitor = new OutboundRtpMonitor(this, stats);
 			this.mappedOutboundRtpMonitors.set(stats.ssrc, outboundRtpMonitor);
+
+			outboundRtpMonitor.getTrack()?.mappedOutboundRtp.set(stats.ssrc, outboundRtpMonitor);
 		}
 
 		outboundRtpMonitor.accept(stats);
@@ -519,6 +560,10 @@ export class PeerConnectionMonitor extends EventEmitter{
 			this.updateTracers.sumOfRttInS += remoteInboundRtpMonitor.roundTripTime;
 			++this.updateTracers.rttMeasurementsCounter;
 		}
+
+		if (remoteInboundRtpMonitor.fractionLost) {
+			this.outboundFractionLost += remoteInboundRtpMonitor.fractionLost;
+		}
 	}
 
 	private _updateMediaSource(input: Partial<MediaSourceStats>) {
@@ -533,22 +578,34 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!mediaSourceMonitor) {
 			mediaSourceMonitor = new MediaSourceMonitor(this, stats);
 			this.mappedMediaSourceMonitors.set(stats.id, mediaSourceMonitor);
+
+			if (stats.trackIdentifier) {
+				const constMediaSourceMonitor = mediaSourceMonitor;
+				const trackMonitor = new OutboundTrackMonitor(stats.trackIdentifier, () => constMediaSourceMonitor);
+				
+				this.parent.mappedOutboundTracks.set(trackMonitor.trackIdentifier, 
+					trackMonitor
+				);
+				this.outboundRtps
+					.filter(rtp => rtp.mediaSourceId === stats.id)
+					.forEach(outboundRtp => trackMonitor.mappedOutboundRtp.set(outboundRtp.ssrc, outboundRtp));
+			}
 		}
 
 		mediaSourceMonitor.accept(stats);
 	}
 
-	private _updateMediaPlayout(input: Partial<MediaPlayoutMonitor>) {
+	private _updateMediaPlayout(input: Partial<MediaPlayoutStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.kind) {
 			return logger.warn('Invalid mediaPlayout stats', input);
 		}
 
-		const stats = input as MediaPlayoutMonitor;
+		const stats = input as MediaPlayoutStats;
 		
 		let mediaPlayoutMonitor = this.mappedMediaPlayoutMonitors.get(stats.id);
 		if (!mediaPlayoutMonitor) {
-			mediaPlayoutMonitor = new MediaPlayoutMonitor(stats);
+			mediaPlayoutMonitor = new MediaPlayoutMonitor(this, stats);
 			this.mappedMediaPlayoutMonitors.set(stats.id, mediaPlayoutMonitor);
 		}
 
@@ -572,13 +629,13 @@ export class PeerConnectionMonitor extends EventEmitter{
 		peerConnectionTransportMonitor.accept(stats);
 	}
 
-	private _updateIceTransport(input: Partial<IceTransportMonitor>) {
+	private _updateIceTransport(input: Partial<IceTransportStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp) {
 			return logger.warn('Invalid iceTransport stats', input);
 		}
 
-		const stats = input as IceTransportMonitor;
+		const stats = input as IceTransportStats;
 		
 		let iceTransportMonitor = this.mappedIceTransportMonitors.get(stats.id);
 		if (!iceTransportMonitor) {
@@ -599,34 +656,34 @@ export class PeerConnectionMonitor extends EventEmitter{
 		}
 	}
 
-	private _updateIceCandidate(input: Partial<IceCandidateMonitor>) {
+	private _updateIceCandidate(input: Partial<IceCandidateStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.protocol) {
 			return logger.warn('Invalid iceCandidate stats', input);
 		}
 
-		const stats = input as IceCandidateMonitor;
+		const stats = input as IceCandidateStats;
 		
 		let iceCandidateMonitor = this.mappedIceCandidateMonitors.get(stats.id);
 		if (!iceCandidateMonitor) {
-			iceCandidateMonitor = new IceCandidateMonitor(stats);
+			iceCandidateMonitor = new IceCandidateMonitor(this, stats);
 			this.mappedIceCandidateMonitors.set(stats.id, iceCandidateMonitor);
 		}
 
 		iceCandidateMonitor.accept(stats);
 	}
 
-	private _updateIceCandidatePair(input: Partial<IceCandidatePairMonitor>) {
+	private _updateIceCandidatePair(input: Partial<IceCandidatePairStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.state) {
 			return logger.warn('Invalid iceCandidatePair stats', input);
 		}
 
-		const stats = input as IceCandidatePairMonitor;
+		const stats = input as IceCandidatePairStats;
 		
 		let iceCandidatePairMonitor = this.mappedIceCandidatePairMonitors.get(stats.id);
 		if (!iceCandidatePairMonitor) {
-			iceCandidatePairMonitor = new IceCandidatePairMonitor(stats);
+			iceCandidatePairMonitor = new IceCandidatePairMonitor(this, stats);
 			this.mappedIceCandidatePairMonitors.set(stats.id, iceCandidatePairMonitor);
 		}
 
@@ -638,17 +695,17 @@ export class PeerConnectionMonitor extends EventEmitter{
 		}
 	}
 
-	private _updateCertificate(input: Partial<CertificateMonitor>) {
+	private _updateCertificate(input: Partial<CertificateStats>) {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.fingerprint || !input.fingerprintAlgorithm) {
 			return logger.warn('Invalid certificate stats', input);
 		}
 
-		const stats = input as CertificateMonitor;
+		const stats = input as CertificateStats;
 		
 		let certificateMonitor = this.mappedCertificateMonitors.get(stats.id);
 		if (!certificateMonitor) {
-			certificateMonitor = new CertificateMonitor(stats);
+			certificateMonitor = new CertificateMonitor(this, stats);
 			this.mappedCertificateMonitors.set(stats.id, certificateMonitor);
 		}
 

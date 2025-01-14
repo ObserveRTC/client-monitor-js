@@ -1,5 +1,4 @@
 import { IceTransportStats } from "../schema/ClientSample";
-import { IceCandidatePairMonitor } from "./IceCandidatePairMonitor";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class IceTransportMonitor implements IceTransportStats {
@@ -26,7 +25,7 @@ export class IceTransportMonitor implements IceTransportStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: IceTransportStats,
 	) {
 		this.id = options.id;
@@ -42,7 +41,7 @@ export class IceTransportMonitor implements IceTransportStats {
 	}
 
 	public getSelectedCandidatePair() {
-		return this.parent.mappedIceCandidatePairMonitors.get(this.selectedCandidatePairId ?? '');
+		return this.peerConnection.mappedIceCandidatePairMonitors.get(this.selectedCandidatePairId ?? '');
 	}
 
 	public accept(stats: Omit<IceTransportStats, 'appData'>): void {

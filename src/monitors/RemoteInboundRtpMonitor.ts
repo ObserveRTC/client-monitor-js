@@ -21,10 +21,10 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	appData?: Record<string, unknown> | undefined;
 
 	// derived fields
-	bitrate?: number | undefined;
+	packetRate?: number;
 
 	public constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: RemoteInboundRtpStats,
 	) {
 		this.id = options.id;
@@ -43,7 +43,11 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	}
 
 	public getOutboundRtp() {
-		return this.parent.mappedOutboundRtpMonitors.get(this.ssrc);
+		return this.peerConnection.mappedOutboundRtpMonitors.get(this.ssrc);
+	}
+
+	public getCodec() {
+		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}
 
 	public accept(stats: Omit<RemoteInboundRtpStats, 'appData'>): void {
@@ -53,8 +57,14 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		if (elapsedInMs <= 0) { 
 			return; // logger?
 		}
+		const elapsedInSeconds = elapsedInMs / 1000;
+
+		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
+			this.packetRate = (stats.packetsReceived - this.packetsReceived) / elapsedInSeconds;
+		}
 
 		Object.assign(this, stats);
+
 	}
 
 	public createSample(): RemoteInboundRtpStats {

@@ -1,4 +1,5 @@
 import { DataChannelStats } from "../schema/ClientSample";
+import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class DataChannelMonitor implements DataChannelStats {
 	private _visited = true;
@@ -17,6 +18,7 @@ export class DataChannelMonitor implements DataChannelStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: DataChannelStats,
 	) {
 		this.id = options.id;

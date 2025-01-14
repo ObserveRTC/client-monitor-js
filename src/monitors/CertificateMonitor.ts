@@ -1,4 +1,5 @@
 import { CertificateStats } from "../schema/ClientSample";
+import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class CertificateMonitor implements CertificateStats {
 	private _visited = true;
@@ -9,9 +10,11 @@ export class CertificateMonitor implements CertificateStats {
 	fingerprintAlgorithm?: string | undefined;
 	base64Certificate?: string | undefined;
 	issuerCertificateId?: string | undefined;
+	
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: CertificateStats,
 	) {
 		this.id = options.id;

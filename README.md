@@ -7,6 +7,10 @@ Table of Contents:
 -   [Quick Start](#quick-start)
 -   [Integrations](#integrations)
     -   [Mediasoup](#mediasoup)
+-   [Configuration](#configurations)
+-   [Developer Manual](#developer-manual)
+-   [API Manual](#api-manual)
+<!-- 
 -   [Collected Metrics](#collected-metrics)
     -   [Calculated updates](#calculated-updates)
     -   [PeerConnection Entry](#peerconnection-entry)
@@ -20,16 +24,14 @@ Table of Contents:
     -   [Video Freeze Detector](#video-freeze-detector)
     -   [Stucked Inbound Track Detector](#stucked-inbound-track-detector)
 -   [Issues](#issues)
--   [Configurations](#configurations)
+
 -   [Events](#events)
     -   [CLIENT_JOINED Event](#client_joined-event)
     -   [CLIENT_LEFT Event](#client_left-event)
     -   [Custom Call Event](#custom-call-event)
     -   [Extension Stats Event](#extension-stats-event)
--   [Sampling](#sampling)
+-   [Sampling](#sampling) -->
 -   [NPM package](#npm-package)
--   [API docs](#api-docs)
--   [Schemas](#schemas)
 -   [Getting Involved](#getting-involved)
 -   [License](#license)
 
@@ -52,7 +54,7 @@ Add `@observertc/client-monitor-js` to your WebRTC app.
 ```javascript
 import { createClientMonitor } from "@observertc/client-monitor-js";
 const monitor = createClientMonitor();
-const collector = monitor.collectors.addRTCPeerConnection(peerConnection);
+const collector = monitor.sources.addRTCPeerConnection(peerConnection);
 
 monitor.on("stats-collected", () => {
     console.log(`Sending audio bitrate: ${monitor.sendingAudioBitrate}`);

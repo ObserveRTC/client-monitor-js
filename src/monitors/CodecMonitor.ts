@@ -15,7 +15,7 @@ export class CodecMonitor implements CodecStats {
 	appData?: Record<string, unknown> | undefined;
 
 	constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: CodecStats,
 	) {
 		this.id = options.id;
@@ -40,6 +40,10 @@ export class CodecMonitor implements CodecStats {
 		}
 
 		Object.assign(this, stats);
+	}
+
+	public getIceTransport() {
+		return this.peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
 	}
 
 	public createSample(): CodecStats {

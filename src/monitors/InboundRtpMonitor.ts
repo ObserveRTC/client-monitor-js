@@ -1,5 +1,5 @@
+import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
 import { Detectors } from "../detectors/Detectors";
-import { StuckedInboundTrackDetector } from "../detectors/StuckedInboundTrack";
 import { VideoFreezesDetector } from "../detectors/VideoFreezesDetector";
 import { InboundRtpStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
@@ -89,11 +89,13 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	avgFramesPerSec?: number;
 	fpsVolatility?: number;
 	lastNFramesPerSec: number[] = [];
+	receivingAudioSamples?: number;
+	fractionLost?: number;
 
 	public readonly detectors: Detectors;
 
 	public constructor(
-		public readonly parent: PeerConnectionMonitor,
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: InboundRtpStats,
 	) {
 		this.id = options.id;
@@ -104,12 +106,15 @@ export class InboundRtpMonitor implements InboundRtpStats {
 
 		this.detectors = new Detectors(
 			new VideoFreezesDetector(this),
-			new StuckedInboundTrackDetector(this),
 		);
 
 		// for mediasoup probator we don't need to run detectors
 		if (this.trackIdentifier === 'probator') {
 			this.detectors.clear();
+		}
+
+		if (this.kind === 'audio') {
+			this.detectors.addDetector(new AudioDesyncDetector(this));
 		}
 	}
 
@@ -126,7 +131,19 @@ export class InboundRtpMonitor implements InboundRtpStats {
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
 		if (elapsedInMs <= 0) { 
+			Object.assign(this, stats);
+
 			return; // logger?
+		}
+		const elapsedInSec = elapsedInMs / 1000;
+
+		// before we assign let's update delta fields
+		if (this.totalSamplesReceived && stats.totalSamplesReceived) {
+			this.receivingAudioSamples = stats.totalSamplesReceived - this.totalSamplesReceived;
+		}
+		if (this.bytesReceived && stats.bytesReceived) {
+			const bytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.bitrate = Math.max(0, bytesReceived * 8 / (elapsedInSec));
 		}
 
 		Object.assign(this, stats);
@@ -144,14 +161,34 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.avgFramesPerSec = avgFramesPerSec;
 			this.fpsVolatility = avgDiff / avgFramesPerSec;
 		}
-		
+
+		if (this.packetsReceived !== undefined && this.packetsLost !== undefined) {
+			this.fractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
+				? (this.packetsLost) / (this.packetsLost + this.packetsReceived) : 0.0;
+		}
 		
 		// run detectors
 		this.detectors.update();
 	}
 
 	public getRemoteOutboundRtp(): RemoteOutboundRtpMonitor | undefined {
-		return this.parent.mappedRemoteOutboundRtpMonitors.get(this.ssrc);
+		return this.peerConnection.mappedRemoteOutboundRtpMonitors.get(this.ssrc);
+	}
+
+	public getIceTransport() {
+		return this.peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
+	}
+
+	public getCodec() {
+		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
+	}
+
+	public getMediaPlayout() {
+		return this.peerConnection.mappedMediaPlayoutMonitors.get(this.playoutId ?? '');
+	}
+
+	public getTrack() {
+		return this.peerConnection.parent.mappedInboundTracks.get(this.trackIdentifier);
 	}
 
 	public createSample(): InboundRtpStats {

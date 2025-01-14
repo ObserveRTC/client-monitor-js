@@ -69,14 +69,14 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 			...(appData ?? {}),
 		}
 	});
-	const onIceCandidateErrorListener = (event: RTCPeerConnectionIceErrorEvent) => clientMonitor.addEvent({
-		type: ClientEventType.CLIENT_ISSUE,
-		payload: {
-			peerConnectionId,
-			...event,
-			...(appData ?? {}),
-		}
-	});
+	// const onIceCandidateErrorListener = (event: RTCPeerConnectionIceErrorEvent) => clientMonitor.addEvent({
+	// 	type: ClientEventType.CLIENT_ISSUE,
+	// 	payload: {
+	// 		peerConnectionId,
+	// 		...event,
+	// 		...(appData ?? {}),
+	// 	}
+	// });
 	const onTrackListener = (event: RTCTrackEvent) => listenMediaStreamTrackEvents(clientMonitor, event?.track);
 	const onDataChannelListener = (event: RTCDataChannelEvent) => listenRtcDataChannelEvents(clientMonitor, event?.channel);
 
@@ -87,7 +87,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 		peerConnection.removeEventListener('icegatheringstatechange', onIceGatheringStateChangeListener);
 		peerConnection.removeEventListener('negotiationneeded', onNegotiationNeededListener);
 		peerConnection.removeEventListener('signalingstatechange', onSignalingStateChangeListener);
-		peerConnection.removeEventListener('icecandidateerror', onIceCandidateErrorListener);
+		// peerConnection.removeEventListener('icecandidateerror', onIceCandidateErrorListener);
 		peerConnection.removeEventListener('track', onTrackListener);
 		peerConnection.removeEventListener('datachannel', onDataChannelListener);
 
@@ -109,7 +109,8 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	peerConnection.addEventListener('icegatheringstatechange', onIceGatheringStateChangeListener);
 	peerConnection.addEventListener('negotiationneeded', onNegotiationNeededListener);
 	peerConnection.addEventListener('signalingstatechange', onSignalingStateChangeListener);
-	peerConnection.addEventListener('icecandidateerror', onIceCandidateErrorListener);
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	// peerConnection.addEventListener('icecandidateerror', onIceCandidateErrorListener as any);
 	peerConnection.addEventListener('track', onTrackListener);
 	peerConnection.addEventListener('datachannel', onDataChannelListener);
 

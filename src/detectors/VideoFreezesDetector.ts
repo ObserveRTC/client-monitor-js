@@ -11,7 +11,7 @@ export class VideoFreezesDetector  implements Detector {
 	}
 
 	private get _config() {
-		return this.inboundRtp.parent.parent.config.videoFreezesDetector;
+		return this.inboundRtp.peerConnection.parent.config.videoFreezesDetector;
 	}
 
 	private _lastFreezeCount = 0;
@@ -23,7 +23,7 @@ export class VideoFreezesDetector  implements Detector {
 		}
 
 		const wasFreezed = this.inboundRtp.isFreezed;
-		const clientMonitor = this.inboundRtp.parent.parent;
+		const clientMonitor = this.inboundRtp.peerConnection.parent;
 
 		this.inboundRtp.isFreezed = 0 < Math.max(0, this.inboundRtp.freezeCount - this._lastFreezeCount);
 		this._lastFreezeCount = this.inboundRtp.freezeCount;
@@ -39,7 +39,7 @@ export class VideoFreezesDetector  implements Detector {
 			clientMonitor.addIssue({
 				type: 'freezed-video',
 				payload: {
-					peerConnectionId: this.inboundRtp.parent.peerConnectionId,
+					peerConnectionId: this.inboundRtp.peerConnection.peerConnectionId,
 					trackId: this.inboundRtp.trackIdentifier,
 					ssrc: this.inboundRtp.ssrc,
 					duration: Date.now() - this._startedFreezeAt,

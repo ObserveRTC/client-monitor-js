@@ -1,4 +1,5 @@
 import { IceCandidateStats } from "../schema/ClientSample";
+import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class IceCandidateMonitor implements IceCandidateStats {
 	private _visited = true;
@@ -22,6 +23,7 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
+		public readonly peerConnection: PeerConnectionMonitor,
 		options: IceCandidateStats,
 	) {
 		this.id = options.id;
@@ -45,6 +47,10 @@ export class IceCandidateMonitor implements IceCandidateStats {
 		}
 
 		Object.assign(this, stats);
+	}
+
+	public getIceTransport() {
+		return this.peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
 	}
 
 	public createSample(): IceCandidateStats {
