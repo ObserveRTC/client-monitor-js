@@ -1,6 +1,6 @@
 import { RtcStats } from "../schema/W3cStatsIdentifiers";
 
-export function firefox94StatsAdapter(rtcStats: RtcStats[]): void {
+export function firefox94StatsAdapter(rtcStats: RtcStats[]): RtcStats[] {
 	for (const rtcStatValue of rtcStats) {
 		if (!rtcStatValue) continue;
 		const rawType = rtcStatValue.type;
@@ -23,4 +23,6 @@ export function firefox94StatsAdapter(rtcStats: RtcStats[]): void {
 				rawValue.trackIdentifier = rawValue.trackIdentifier.replace("{", "").replace("}", "");
 		}
 	}
+
+	return rtcStats;
 }

@@ -2,7 +2,8 @@ import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 
 export class LongPcConnectionEstablishmentDetector implements Detector{
-
+	public readonly name = 'long-pc-connection-establishment-detector';
+	
 	private get config() {
 		return this.peerConnection.parent.config.longPcConnectionEstablishmentDetector;
 	}
@@ -32,9 +33,7 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 		this._evented = true;
 		const clientMontior = this.peerConnection.parent;
 
-		clientMontior.emit('too-long-pc-connection-establishment', {
-			peerConnection: this.peerConnection,
-		});
+		clientMontior.emit('too-long-pc-connection-establishment', this.peerConnection);
 
 		clientMontior.addIssue({
 			type: 'too-long-pc-connection-establishment',

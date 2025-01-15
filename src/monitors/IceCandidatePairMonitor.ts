@@ -31,7 +31,7 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	appData?: Record<string, unknown> | undefined;
 	
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: IceCandidatePairStats,
 	) {
 		this.id = options.id;
@@ -57,16 +57,20 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		Object.assign(this, stats);
 	}
 
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
 	public getIceTransport() {
-		return this.peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
+		return this._peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
 	}
 
 	public getLocalCandidate() {
-		return this.peerConnection.mappedIceCandidateMonitors.get(this.localCandidateId ?? '');
+		return this._peerConnection.mappedIceCandidateMonitors.get(this.localCandidateId ?? '');
 	}
 
 	public getRemoteCandidate() {
-		return this.peerConnection.mappedIceCandidateMonitors.get(this.remoteCandidateId ?? '');
+		return this._peerConnection.mappedIceCandidateMonitors.get(this.remoteCandidateId ?? '');
 	}
 
 	public createSample(): IceCandidatePairStats {

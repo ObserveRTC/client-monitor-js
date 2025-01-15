@@ -18,13 +18,18 @@ export class DataChannelMonitor implements DataChannelStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: DataChannelStats,
 	) {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
 	}
 	
+
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
 
 	public get visited(): boolean {
 		const result = this._visited;

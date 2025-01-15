@@ -24,7 +24,7 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 	bitrate?: number | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: RemoteOutboundRtpStats,
 	) {
 		this.id = options.id;
@@ -41,12 +41,16 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 		return result;
 	}
 
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
 	public getInboundRtp() {
-		return this.peerConnection.mappedInboundRtpMonitors.get(this.ssrc);
+		return this._peerConnection.mappedInboundRtpMonitors.get(this.ssrc);
 	}
 
 	public getCodec() {
-		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
+		return this._peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}
 
 	public accept(stats: Omit<RemoteOutboundRtpStats, 'appData'>): void {

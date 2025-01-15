@@ -21,12 +21,18 @@ import { LongPcConnectionEstablishmentDetector } from "../detectors/LongPcConnec
 import { CongestionDetector } from "../detectors/CongestionDetector";
 import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
+import { CalculatedScore, getRttScore } from "../scores/CalculatedScore";
 
 const logger = createLogger('PeerConnectionMonitor');
+
+export type CalculatedPeerConnectionScores = CalculatedScore &{
+	lastNScores: number[],
+}
 
 export type PeerConnectionMonitorEvents = {
 	'close': [],
 	'update': [],
+	'stats': [W3C.RtcStats[]],
 }
 
 export declare interface PeerConnectionMonitor {
@@ -56,7 +62,6 @@ export class PeerConnectionMonitor extends EventEmitter{
 	// public readonly ωindexedCodecIdToInboundRtps = new Map<string, InboundRtpMonitor[]>();
 	// public readonly ωindexedMediaSourceIdToOutboundRtps = new Map<string, OutboundRtpMonitor[]>();
 	
-
 	public closed = false;
 	
 	public sendingAudioBitrate?: number;
@@ -103,8 +108,8 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public appData?: Record<string, unknown>;
 
 	public congested = false;
-	public avgRttInS?: number;
-	public ewmaRttInS?: number;
+	public avgRttInSec?: number;
+	public ewmaRttInSec?: number;
 	public connectingStartedAt?: number;
 	public connectedAt?: number;
 	private _connectionState?: W3C.RtcPeerConnectionState;
@@ -112,17 +117,11 @@ export class PeerConnectionMonitor extends EventEmitter{
 	
 	public usingTURN?: boolean;
 	public usingTCP?: boolean;
-	
-	public constructor(
-		public readonly peerConnectionId: string,
-		public readonly getStats: () => Promise<W3C.RtcStats[]>,
-		public readonly parent: ClientMonitor
-	) {
-		super();
-		this.detectors = new Detectors(
-			new LongPcConnectionEstablishmentDetector(this),
-			new CongestionDetector(this),
-		);
+	public calculatedStabilityScore: CalculatedPeerConnectionScores = {
+		weight: 1,
+		value: undefined,
+		remarks: [],
+		lastNScores: [],
 	}
 
 	private updateTracers = {
@@ -134,6 +133,30 @@ export class PeerConnectionMonitor extends EventEmitter{
 		sumOfSendingVideoBitrate: 0,
 		sumOfReceivingAudioBitrate: 0,
 		sumOfReceivingVideoBitrate: 0,
+	}
+
+	public constructor(
+		public readonly peerConnectionId: string,
+		private readonly _getStats: () => Promise<W3C.RtcStats[]>,
+		public readonly parent: ClientMonitor
+	) {
+		super();
+		this.detectors = new Detectors(
+			new LongPcConnectionEstablishmentDetector(this),
+			new CongestionDetector(this),
+		);
+	}
+
+	public get score() {
+		return this.calculatedStabilityScore.value;
+	}
+	
+	public async getStats() {
+		const stats = await this._getStats();
+
+		this.emit('stats', stats);
+
+		return stats;
 	}
 
 	public async accept(stats: W3C.RtcStats[]) {
@@ -206,8 +229,8 @@ export class PeerConnectionMonitor extends EventEmitter{
 		this._checkVisited();
 
 		if (0 < this.updateTracers.rttMeasurementsCounter) {
-			this.avgRttInS = this.updateTracers.sumOfRttInS / this.updateTracers.rttMeasurementsCounter;
-			this.ewmaRttInS = this.ewmaRttInS !== undefined ? (this.avgRttInS * 0.1) + (this.ewmaRttInS * 0.9) : this.avgRttInS;
+			this.avgRttInSec = this.updateTracers.sumOfRttInS / this.updateTracers.rttMeasurementsCounter;
+			this.ewmaRttInSec = this.ewmaRttInSec !== undefined ? (this.avgRttInSec * 0.1) + (this.ewmaRttInSec * 0.9) : this.avgRttInSec;
 		}
 
 		this.sendingAudioBitrate = this.updateTracers.sumOfSendingAudioBitrate;
@@ -711,5 +734,4 @@ export class PeerConnectionMonitor extends EventEmitter{
 
 		certificateMonitor.accept(stats);
 	}
-
 }

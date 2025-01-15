@@ -50,7 +50,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	packetRate?: number | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: OutboundRtpStats,
 	) {
 		this.id = options.id;
@@ -71,21 +71,26 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		return this.getMediaSource()?.trackIdentifier;
 	}
 
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
+
 	public getRemoteInboundRtp() {
-		return this.peerConnection.mappedRemoteInboundRtpMonitors.get(this.ssrc);
+		return this._peerConnection.mappedRemoteInboundRtpMonitors.get(this.ssrc);
 	}
 
 	public getCodec() {
-		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
+		return this._peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}
 
 	public getMediaSource() {
-		return this.peerConnection.mappedMediaSourceMonitors.get(this.mediaSourceId ?? '');
+		return this._peerConnection.mappedMediaSourceMonitors.get(this.mediaSourceId ?? '');
 	}
 
 	public getTrack() {
 		return this.getMediaSource()?.getTrack() ?? 
-			this.peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
+			this._peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
 	public accept(stats: Omit<OutboundRtpStats, 'appData'>): void {

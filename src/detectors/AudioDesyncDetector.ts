@@ -1,9 +1,11 @@
 import { Detector } from "./Detector";
-import { InboundRtpMonitor } from "../monitors/InboundRtpMonitor";
+import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 
 export class AudioDesyncDetector implements Detector {
+	public readonly name = 'audio-desync-detector';
+	
 	public constructor(
-		public readonly inboundRtp: InboundRtpMonitor,
+		public readonly trackMonitor: InboundTrackMonitor,
 	) {
 		
 	}
@@ -11,35 +13,41 @@ export class AudioDesyncDetector implements Detector {
 	private _prevCorrectedSamples = 0;
 	
 	private get config() {
-		return this.inboundRtp.peerConnection.parent.config.audioDesyncDetector;
+		return this.peerConnection.parent.config.audioDesyncDetector;
 	}
 
+	private get peerConnection() {
+		return this.trackMonitor.getPeerConnection();
+	}
+
+
 	public update() {
-		if (this.inboundRtp.kind !== 'audio') return;
+		const inboundRtp = this.trackMonitor.getInboundRtp();
+		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 		if (this.config.disabled) return;
 
-		const correctedSamples = (this.inboundRtp.insertedSamplesForDeceleration ?? 0) + (this.inboundRtp.removedSamplesForAcceleration ?? 0);
+		const correctedSamples = (inboundRtp.insertedSamplesForDeceleration ?? 0) + (inboundRtp.removedSamplesForAcceleration ?? 0);
 		const dCorrectedSamples = correctedSamples - this._prevCorrectedSamples;
 
-		if (dCorrectedSamples < 1 || (this.inboundRtp.receivingAudioSamples ?? 0) < 1) return;
+		if (dCorrectedSamples < 1 || (inboundRtp.receivingAudioSamples ?? 0) < 1) return;
 
-		const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + (this.inboundRtp.receivingAudioSamples ?? 0));
+		const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + (inboundRtp.receivingAudioSamples ?? 0));
 
-		const wasDesync = this.inboundRtp.desync;
-		if (this.inboundRtp.desync) {
-			this.inboundRtp.desync = this.config.fractionalCorrectionAlertOffThreshold < fractionalCorrection;
+		const wasDesync = inboundRtp.desync;
+		if (inboundRtp.desync) {
+			inboundRtp.desync = this.config.fractionalCorrectionAlertOffThreshold < fractionalCorrection;
 		} else {
-			this.inboundRtp.desync = this.config.fractionalCorrectionAlertOnThreshold < fractionalCorrection;
+			inboundRtp.desync = this.config.fractionalCorrectionAlertOnThreshold < fractionalCorrection;
 		}
 
-		if (!this.inboundRtp.desync) {
+		if (!inboundRtp.desync) {
 			if (wasDesync) {
-				this.inboundRtp.peerConnection.parent.addIssue({
+				this.peerConnection.parent.addIssue({
 					type: 'audio-desync',
 					payload: {
-						peerConnectionId: this.inboundRtp.peerConnection.peerConnectionId,
-						trackId: this.inboundRtp.trackIdentifier,
-						ssrc: this.inboundRtp.ssrc,
+						peerConnectionId: this.peerConnection.peerConnectionId,
+						trackId: inboundRtp.trackIdentifier,
+						ssrc: inboundRtp.ssrc,
 						duration: this._startedDesyncAt ? (Date.now() - this._startedDesyncAt) : undefined,
 					}
 				});
@@ -51,8 +59,6 @@ export class AudioDesyncDetector implements Detector {
 		}
 
 		this._startedDesyncAt = Date.now();
-		this.inboundRtp.peerConnection.parent.emit('audio-desync', {
-			inboundRtp: this.inboundRtp,
-		});
+		this.peerConnection.parent.emit('audio-desync-track', this.trackMonitor);
 	}
 }

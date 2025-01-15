@@ -3,21 +3,31 @@ import { Detector } from "./Detector";
 
 
 export class StuckedInboundTrackDetector implements Detector {
+	public readonly name = 'stucked-inbound-track-detector';
+	
 	public constructor(
-		public readonly inboundTrack: InboundTrackMonitor,
+		public readonly trackMonitor: InboundTrackMonitor,
 	) {
 	}
 
 	private _evented = false;
 
+	private get peerConnection() {
+		return this.trackMonitor.getPeerConnection();
+	}
+
+	private get clientMonitor() {
+		return this.peerConnection.parent;
+	}
+
 	private get config() {
-		return this.inboundTrack.peerConnection.parent.config.stuckedInboundTrackDetector;
+		return this.peerConnection.parent.config.stuckedInboundTrackDetector;
 	}
 
 	public update() {
 		if (this._evented || this.config.disabled) return;
-		if (this.inboundTrack.getInboundRtp().bytesReceived !== 0) return;
-		const inboundRtp = this.inboundTrack.getInboundRtp();
+		if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
+		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		const duration = Date.now() - inboundRtp.addedAt;
 
@@ -25,17 +35,15 @@ export class StuckedInboundTrackDetector implements Detector {
 
 		this._evented = true;
 
-		const clientMonitor = inboundRtp.peerConnection.parent;
+		const clientMonitor = this.peerConnection.parent;
 
-		clientMonitor.emit('stucked-inbound-track', {
-			inboundTrack: this.inboundTrack,
-		});
+		clientMonitor.emit('stucked-inbound-track', this.trackMonitor);
 
 		clientMonitor.addIssue({
 			type: 'stucked-inbound-track',
 			payload: {
-				peerConnectionId: inboundRtp.peerConnection.peerConnectionId,
-				trackId: this.inboundTrack.trackIdentifier,
+				peerConnectionId: this.peerConnection.peerConnectionId,
+				trackId: this.trackMonitor.trackIdentifier,
 				ssrc: inboundRtp.ssrc,
 			},
 		});

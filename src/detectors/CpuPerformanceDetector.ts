@@ -1,6 +1,7 @@
 import { ClientMonitor } from "..";
 
 export class CpuPerformanceDetector {
+	public readonly name = 'cpu-performance-detector';
 
 	public constructor(
 		public readonly clientMonitor: ClientMonitor,

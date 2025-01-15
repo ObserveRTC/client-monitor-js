@@ -1,4 +1,4 @@
-import { ExtensionStat, ClientSample, ClientEvent, ClientMetaData, ClientIssue } from './schema/ClientSample';
+import { ExtensionStat, ClientSample, ClientEvent, ClientMetaData, ClientIssue, ClientScore } from './schema/ClientSample';
 import { createLogger } from "./utils/logger";
 import { EventEmitter } from 'events';
 import { AcceptedClientEvent, AcceptedClientIssue, AcceptedClientMetaData, ClientMonitorEvents } from './ClientMonitorEvents';
@@ -12,6 +12,8 @@ import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
 import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
+import { TrackMonitor } from './monitors/TrackMonitor';
+import { DefaultScoreCalculator, ScoreCalculator } from './scores/ScoreCalculator';
 
 const logger = createLogger('ClientMonitor');
 
@@ -23,19 +25,17 @@ export declare interface ClientMonitor {
 }
 
 export class ClientMonitor extends EventEmitter {
-    public readonly config: ClientMonitorConfig;
     public readonly sources: Sources;
     public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly mappedOutboundTracks = new Map<string, OutboundTrackMonitor>();
     public readonly mappedInboundTracks = new Map<string, InboundTrackMonitor>();
-    public readonly detectors:Detectors;
-
-    public clientId?: string;
-    public callId?: string;
-    public appData?: Record<string, unknown>;
+    public readonly detectors: Detectors;
+    
+    public scoreCalculator: ScoreCalculator;
     public bufferingSampleData: boolean;
     public closed = false;
+    public lastSampledAt = 0;
 
     public cpuPerformanceAlertOn = false;
 
@@ -47,51 +47,53 @@ export class ClientMonitor extends EventEmitter {
     public totalAvailableOutgoingBitrate = -1;
 
     public avgRttInSec = -1;
-    public highestSeenSendingBitrate = -1;
-    public highestSeenReceivingBitrate = -1;
-    public highestSeenAvailableOutgoingBitrate = -1;
-    public highestSeenAvailableIncomingBitrate = -1;
-
+    public score = 5.0;
 
     private _timer?: ReturnType<typeof setInterval>;
-    private _lastSampledAt = 0;
     private _samplingTick = 0;
     private _collectingCounter = 0;
     private _clientEvents: ClientEvent[] = [];
     private _clientMetaItems: ClientMetaData[] = [];
     private _clientIssues: ClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
+    private _clientScores: ClientScore[] = [];
     public durationOfCollectingStatsInMs = 0;
 
     public constructor(
-        config: ClientMonitorConfig
+        public readonly config: ClientMonitorConfig
     ) {
         super();
         
         this.sources = new Sources(this);
-
-        if (0 < config.collectingPeriodInMs && config.samplingPeriodInMs !== undefined && 0 < config.samplingPeriodInMs) {
-            if (config.samplingPeriodInMs % config.collectingPeriodInMs !== 0) {
-                throw new Error(`The samplingPeriodInMs (${config.samplingPeriodInMs}) must be a multiple of collectingPeriodInMs (${config.collectingPeriodInMs})`);
-            }
-            this._samplingTick = Math.floor(config.samplingPeriodInMs / config.collectingPeriodInMs);
-            this.bufferingSampleData = true;
-        } else {
-            this.bufferingSampleData = false;
-        }
-
+        this.scoreCalculator = new DefaultScoreCalculator(this);
         this.setMaxListeners(Infinity);
-        this._setupTimer();
-        this.config = Object.freeze(config);
+        this.setCollectingPeriod(config.collectingPeriodInMs);
+        if (config.samplingPeriodInMs) {
+            this.setSamplingPeriod(config.samplingPeriodInMs);
+        }
+        this.bufferingSampleData = 0 < this._samplingTick;
 
         if (this.config.addClientJointEventOnCreated === true) {
             this.addClientJoinEvent();
         }
-
+        if (this.config.integrateNavigatorMediaDevices) {
+            this.sources.watchMediaDevices();
+        }
+        if (this.config.fetchUserAgentData) {
+            this.sources.fetchUserAgentData();
+        }
+        
         this.detectors = new Detectors(
             new CpuPerformanceDetector(this),
-        )
+        );
     }
+
+    public get clientId() { return this.config.clientId; }
+    public set clientId(clientId: string | undefined) { this.config.clientId = clientId; }
+    public get callId() { return this.config.callId; }
+    public set callId(callId: string | undefined) { this.config.callId = callId; }
+    public get appData() { return this.config.appData; }
+    public set appData(appData: Record<string, unknown> | undefined) { this.config.appData = appData; }
 
     public close(): void {
         if (this.closed) {
@@ -121,10 +123,9 @@ export class ClientMonitor extends EventEmitter {
         await Promise.allSettled(this.peerConnections.map(async (peerConnection) => {
             try {
                 const collectedStats = await peerConnection.getStats();
+                const adaptedStats = this.statsAdapters.adapt(collectedStats);
     
-                this.statsAdapters.adapt(collectedStats);
-    
-                peerConnection.accept(collectedStats);
+                peerConnection.accept(adaptedStats);
     
                 result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
             } catch (err) {
@@ -132,14 +133,23 @@ export class ClientMonitor extends EventEmitter {
             }
         }));
 
+        this.sendingAudioBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.sendingAudioBitrate ?? 0), 0);
+        this.sendingVideoBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.sendingVideoBitrate ?? 0), 0);
+        this.receivingAudioBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.receivingAudioBitrate ?? 0), 0);
+        this.receivingVideoBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.receivingVideoBitrate ?? 0), 0);
+        this.totalAvailableIncomingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableIncomingBitrate ?? 0), 0);
+        this.totalAvailableOutgoingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableOutgoingBitrate ?? 0), 0);
+        this.avgRttInSec = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length;
         this.durationOfCollectingStatsInMs = Date.now() - started;
+        
+        this.tracks.forEach(track => track.update());
         this.detectors.update();
+        this.scoreCalculator.update();
+
         this.emit('stats-collected', {
             collectedStats: result,
             durationOfCollectingStatsInMs: this.durationOfCollectingStatsInMs,
         });
-
-        
         
         if (0 < this._samplingTick) {
             const doSample = ++this._collectingCounter % this._samplingTick === 0;
@@ -150,6 +160,19 @@ export class ClientMonitor extends EventEmitter {
         }
         
         return result;
+    }
+
+    public setScore(score: number): void {
+        if (this.closed) return;
+        if (this.bufferingSampleData) {
+            this._clientScores.push({
+                timestamp: Date.now(),
+                value: score,
+            });
+        }
+        
+        this.score = score;
+        this.emit('score', score);
     }
 
     public createSample(): ClientSample | undefined {
@@ -165,18 +188,20 @@ export class ClientMonitor extends EventEmitter {
             clientMetaItems: this._clientMetaItems,
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
+            scores: this._clientScores,
         };
         this._clientEvents = [];
         this._clientMetaItems = [];
         this._clientIssues = [];
         this._extensionStats = [];
+        this._clientScores = [];
 
         const timestamp = Date.now();
         if (!clientSample) {
             return;
         }
         this.emit('sample-created', clientSample);
-        this._lastSampledAt = timestamp;
+        this.lastSampledAt = timestamp;
 
         return clientSample;
     }
@@ -306,35 +331,48 @@ export class ClientMonitor extends EventEmitter {
         return [ ...this.peerConnections.flatMap(peerConnection => peerConnection.certificates) ];
     }
 
-    public get tracks() {
+    public get tracks(): TrackMonitor[] {
         return [
             ...this.mappedInboundTracks.values(),
             ...this.mappedOutboundTracks.values(),
         ]
     }
 
-    public getTrackMonitor(trackId: string) {
+    public getTrackMonitor(trackId: string): TrackMonitor | undefined {
         return this.mappedInboundTracks.get(trackId) ?? 
             this.mappedOutboundTracks.get(trackId);
     }
 
-    public getInboundTrackMonitor(trackId: string) {
+    public getInboundTrackMonitor(trackId: string): InboundTrackMonitor | undefined {
         return this.mappedInboundTracks.get(trackId);
     }
 
-    public getOutboundTrackMonitor(trackId: string) {
+    public getOutboundTrackMonitor(trackId: string): OutboundTrackMonitor | undefined {
         return this.mappedOutboundTracks.get(trackId);
     }
 
-
-    private _setupTimer(): void {
+    public setCollectingPeriod(collectingPeriodInMs: number): void {
         this._timer && clearInterval(this._timer);
         this._timer = undefined;
+        this.config.collectingPeriodInMs = collectingPeriodInMs;
         
         if (!this.config.collectingPeriodInMs) return;
 
         this._timer = setInterval(() => {
             this.collect().catch(err => logger.error(err));
         }, this.config.collectingPeriodInMs);
+    }
+
+    public setSamplingPeriod(samplingPeriodInMs: number): void {
+        this.config.samplingPeriodInMs = samplingPeriodInMs;
+
+        if (0 < this.config.collectingPeriodInMs && this.config.samplingPeriodInMs !== undefined && 0 < this.config.samplingPeriodInMs) {
+            if (this.config.samplingPeriodInMs % this.config.collectingPeriodInMs !== 0) {
+                logger.warn(`The samplingPeriodInMs (${this.config.samplingPeriodInMs}) should be a multiple of collectingPeriodInMs (${this.config.collectingPeriodInMs}), otherwise the sampling will not be accurate`);
+            }
+            this._samplingTick = Math.max(1, 
+                Math.floor(this.config.samplingPeriodInMs / this.config.collectingPeriodInMs)
+            );
+        }
     }
 }

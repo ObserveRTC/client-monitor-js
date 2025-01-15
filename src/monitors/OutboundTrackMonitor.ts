@@ -1,13 +1,23 @@
 import { Detectors } from "../detectors/Detectors";
+import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
-
-export type OutboundTrackMonitor2 = MediaSourceMonitor
 
 export class OutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
 	public readonly mappedOutboundRtp = new Map<number, OutboundRtpMonitor>();
+	public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
+
+	public calculatedScore: CalculatedScore = {
+		weight: 1,
+		value: undefined,
+		remarks: [],
+	};
+
+	public get score() {
+		return this.calculatedScore.value;
+	}
 
 	public constructor(
 		public readonly trackIdentifier: string,
@@ -16,21 +26,20 @@ export class OutboundTrackMonitor {
 		this.detectors = new Detectors();
 	}
 
+
+	public getPeerConnection() {
+		return this.getMediaSource().getPeerConnection();
+	}
+
+	public get kind() {
+		return this.getMediaSource().kind;
+	}
+
 	bitrate?: number;
 	jitter?: number;
 	fractionLost?: number;
 	sendingPacketRate?: number;
 	remoteReceivedPacketRate?: number;
-
-	// bitrate: layers.reduce((acc, layer) => acc + (layer.sendingBitrate ?? 0), 0),
-	// // deprecated metric sending bitrate
-	// sendingBitrate:layers.reduce((acc, layer) => acc + (layer.sendingBitrate ?? 0), 0),
-	// sentPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.sentPackets ?? 0), 0),
-	// remoteLostPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.getRemoteInboundRtp()?.lostPackets ?? 0), 0),
-	// remoteReceivedPackets: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.getRemoteInboundRtp()?.receivedPackets ?? 0), 0),
-	// fractionLoss: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.getRemoteInboundRtp()?.stats.fractionLost ?? 0), 0),
-	// jitter: outboundRtps.reduce((acc, outboundRtp) => acc + (outboundRtp.getRemoteInboundRtp()?.stats.jitter ?? 0), 0),
-
 
 	public update() {
 		this.bitrate = 0;
@@ -46,10 +55,30 @@ export class OutboundTrackMonitor {
 			this.sendingPacketRate += outboundRtp.packetRate ?? 0;
 			this.remoteReceivedPacketRate += outboundRtp.getRemoteInboundRtp()?.packetRate ?? 0;
 		}
-	}                                                                                                                                   
 
+		this.detectors.update();
+	} 
+	
 	public getOutboundRtps() {
 		return Array.from(this.mappedOutboundRtp.values());
 	}
 
+	public getHighestLayer() {
+		const outboundRtps = Array.from(this.mappedOutboundRtp.values());
+
+		if (outboundRtps.length === 0) return undefined;
+		if (outboundRtps.length === 1) return outboundRtps[0];
+
+		let highestLayer: OutboundRtpMonitor | undefined;
+		let highestBitrate = 0;
+
+		for (const outboundRtp of this.mappedOutboundRtp.values()) {
+			if (outboundRtp.bitrate && outboundRtp.bitrate > highestBitrate) {
+				highestLayer = outboundRtp;
+				highestBitrate = outboundRtp.bitrate;
+			}
+		}
+
+		return highestLayer;
+	}
 }

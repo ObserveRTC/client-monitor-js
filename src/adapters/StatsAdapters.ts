@@ -3,7 +3,7 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('StatsAdapter');
 
-export type StatsAdapter = (stats: W3CStats.RtcStats[]) => void;
+export type StatsAdapter = (stats: W3CStats.RtcStats[]) => W3CStats.RtcStats[];
 
 export class StatsAdapters {
 	private readonly _adapters: StatsAdapter[] = [];
@@ -18,13 +18,17 @@ export class StatsAdapters {
 		this._adapters.splice(index, 1);
 	}
 
-	public adapt(stats: W3CStats.RtcStats[]) {
+	public adapt(input: W3CStats.RtcStats[]): W3CStats.RtcStats[] {
+		let result: W3CStats.RtcStats[] = input;
+
 		for (const adapter of this._adapters) {
 			try {
-				adapter(stats);
+				result = adapter(result);
 			} catch (err) {
 				logger.warn('Error adapting stats', err);
 			}
 		}
+
+		return result;
 	}
 }

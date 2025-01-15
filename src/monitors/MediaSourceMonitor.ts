@@ -21,7 +21,7 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: MediaSourceStats,
 	) {
 		this.id = options.id;
@@ -38,8 +38,12 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		return result;
 	}
 
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
 	public getTrack() {
-		return this.peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
+		return this._peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
 	public accept(stats: Omit<MediaSourceStats, 'appData'>): void {

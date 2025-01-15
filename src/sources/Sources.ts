@@ -7,11 +7,16 @@ import { createStatsFromRTCStatsReportProvider } from "../utils/stats";
 import { createLogger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { listenMediasoupTransport } from "./mediasoupTransportEvents";
+import { mediasoupStatsAdapter } from "../adapters/mediasoupAdapter";
 
 const logger = createLogger('Sources');
 
 export class Sources {
+	public mediaDevicesAreWatched = false;
 	public userAgentMetaDataSent = false;
+	public userAgentStatsAdapterAdded = false;
+	public mediasoupStatsAdapterAdded = false;
+
 	private _mediasoupDeviceListeners: {
 		device: mediasoup.types.Device,
 		listener: (transport: mediasoup.types.Transport) => void,
@@ -84,6 +89,13 @@ export class Sources {
 
 		this._addPeerConnectionMonitor(peerConnectionMonitor);
 
+		if (!this.mediasoupStatsAdapterAdded) {
+			this.monitor.statsAdapters.add(
+				mediasoupStatsAdapter
+			);
+			this.mediasoupStatsAdapterAdded = true;
+		}
+
 		return this;
 	}
 
@@ -102,21 +114,29 @@ export class Sources {
 			this.userAgentMetaDataSent = true;
 		}
 
-		if (userAgentData.browser) {
-			// let's add adapter here if we know the browser
-			try {
-				// no-op for now
-			} catch (err) {
-				logger.error('Failed to add adapter', err);
+		if (!this.userAgentStatsAdapterAdded) {
+			this.userAgentStatsAdapterAdded = true;
+			if (userAgentData.browser) {
+				// let's add adapter here if we know the browser
+				try {
+					// no-op
+				} catch (err) {
+					logger.error('Failed to add adapter', err);
+				}
 			}
+			
 		}
+		
 
 		return this;
 	}
 
 	public watchMediaDevices() {
+		if (this.mediaDevicesAreWatched) return this;
+
 		try {
 			watchMediaDevices(this.monitor);
+			this.mediaDevicesAreWatched = true;
 		} catch (err) {
 			logger.error('Failed to watch media devices', err);
 		}

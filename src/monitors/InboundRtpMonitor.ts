@@ -1,6 +1,6 @@
 import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
 import { Detectors } from "../detectors/Detectors";
-import { VideoFreezesDetector } from "../detectors/VideoFreezesDetector";
+import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetector";
 import { InboundRtpStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
@@ -92,10 +92,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	receivingAudioSamples?: number;
 	fractionLost?: number;
 
-	public readonly detectors: Detectors;
+	deltaPacketsLost?: number;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: InboundRtpStats,
 	) {
 		this.id = options.id;
@@ -103,19 +103,6 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.ssrc = options.ssrc;
 		this.kind = options.kind as MediaKind;
 		this.trackIdentifier = options.trackIdentifier;
-
-		this.detectors = new Detectors(
-			new VideoFreezesDetector(this),
-		);
-
-		// for mediasoup probator we don't need to run detectors
-		if (this.trackIdentifier === 'probator') {
-			this.detectors.clear();
-		}
-
-		if (this.kind === 'audio') {
-			this.detectors.addDetector(new AudioDesyncDetector(this));
-		}
 	}
 
 	public get visited(): boolean {
@@ -124,6 +111,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this._visited = false;
 
 		return result;
+	}
+
+	public getPeerConnection() {
+		return this._peerConnection;
 	}
 
 	public accept(stats: Omit<InboundRtpStats, 'appData'>): void {
@@ -144,6 +135,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		if (this.bytesReceived && stats.bytesReceived) {
 			const bytesReceived = stats.bytesReceived - this.bytesReceived;
 			this.bitrate = Math.max(0, bytesReceived * 8 / (elapsedInSec));
+		}
+		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
+			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
 		}
 
 		Object.assign(this, stats);
@@ -166,29 +160,26 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.fractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
 				? (this.packetsLost) / (this.packetsLost + this.packetsReceived) : 0.0;
 		}
-		
-		// run detectors
-		this.detectors.update();
 	}
 
 	public getRemoteOutboundRtp(): RemoteOutboundRtpMonitor | undefined {
-		return this.peerConnection.mappedRemoteOutboundRtpMonitors.get(this.ssrc);
+		return this._peerConnection.mappedRemoteOutboundRtpMonitors.get(this.ssrc);
 	}
 
 	public getIceTransport() {
-		return this.peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
+		return this._peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
 	}
 
 	public getCodec() {
-		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
+		return this._peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}
 
 	public getMediaPlayout() {
-		return this.peerConnection.mappedMediaPlayoutMonitors.get(this.playoutId ?? '');
+		return this._peerConnection.mappedMediaPlayoutMonitors.get(this.playoutId ?? '');
 	}
 
 	public getTrack() {
-		return this.peerConnection.parent.mappedInboundTracks.get(this.trackIdentifier);
+		return this._peerConnection.parent.mappedInboundTracks.get(this.trackIdentifier);
 	}
 
 	public createSample(): InboundRtpStats {

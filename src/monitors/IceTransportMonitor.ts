@@ -25,7 +25,7 @@ export class IceTransportMonitor implements IceTransportStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: IceTransportStats,
 	) {
 		this.id = options.id;
@@ -40,8 +40,12 @@ export class IceTransportMonitor implements IceTransportStats {
 		return result;
 	}
 
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
 	public getSelectedCandidatePair() {
-		return this.peerConnection.mappedIceCandidatePairMonitors.get(this.selectedCandidatePairId ?? '');
+		return this._peerConnection.mappedIceCandidatePairMonitors.get(this.selectedCandidatePairId ?? '');
 	}
 
 	public accept(stats: Omit<IceTransportStats, 'appData'>): void {

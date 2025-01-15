@@ -1,4 +1,17 @@
 
+export function groupBy<T, K>(array: T[], getKey: (value: T) => K): Map<K, T[]> {
+  return array.reduce((map, currentValue) => {
+    const key = getKey(currentValue);
+    const collection = map.get(key);
+    if (!collection) {
+      map.set(key, [currentValue]);
+    } else {
+      collection.push(currentValue);
+    }
+    return map;
+  }, new Map<K, T[]>());
+}
+
 export function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
 }

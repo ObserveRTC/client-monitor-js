@@ -1527,6 +1527,27 @@ export type PeerConnectionSample = {
 }
 
 /**
+* List of scores calculated for the client.
+*/
+export type ClientScore = {
+	/**
+	* The calculated score.
+	*/
+	value?: number;
+
+	/**
+	* Remarks about the score.
+	*/
+	remarks?: string;
+
+	/**
+	* The timestamp in epoch format when the score was calculated.
+	*/
+	timestamp?: number;
+
+}
+
+/**
 * docs
 */
 export type ClientSample = {
@@ -1549,6 +1570,11 @@ export type ClientSample = {
 	* Additional information attached to this sample (e.g.: roomId, userId, displayName, etc...)
 	*/
 	appData?: Record<string, unknown>;
+
+	/**
+	* List of scores calculated for the client.
+	*/
+	scores?: ClientScore[];
 
 	/**
 	* Samples taken PeerConnections

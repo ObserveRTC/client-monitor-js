@@ -22,9 +22,11 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 
 	// derived fields
 	packetRate?: number;
+	
+	deltaPacketsLost?: number;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: RemoteInboundRtpStats,
 	) {
 		this.id = options.id;
@@ -42,12 +44,16 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		return result;
 	}
 
+	public getPeerConnection() {
+		return this._peerConnection;
+	}
+
 	public getOutboundRtp() {
-		return this.peerConnection.mappedOutboundRtpMonitors.get(this.ssrc);
+		return this._peerConnection.mappedOutboundRtpMonitors.get(this.ssrc);
 	}
 
 	public getCodec() {
-		return this.peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
+		return this._peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}
 
 	public accept(stats: Omit<RemoteInboundRtpStats, 'appData'>): void {
@@ -61,6 +67,9 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 
 		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
 			this.packetRate = (stats.packetsReceived - this.packetsReceived) / elapsedInSeconds;
+		}
+		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
+			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
 		}
 
 		Object.assign(this, stats);

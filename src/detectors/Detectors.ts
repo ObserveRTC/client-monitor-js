@@ -10,12 +10,16 @@ export class Detectors {
 		this._detectors = detectors;
 	}
 
-	public addDetector(detector: Detector) {
+	public add(detector: Detector) {
 		this._detectors.push(detector);
 	}
 
-	public removeDetector(detector: Detector) {
+	public remove(detector: Detector) {
 		this._detectors = this._detectors.filter((d) => d !== detector);
+	}
+
+	get listOfNames() {
+		return this._detectors.map((d) => d.name);
 	}
 
 	public update() {

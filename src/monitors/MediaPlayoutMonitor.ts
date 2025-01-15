@@ -17,7 +17,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: MediaPlayoutStats,
 	) {
 		this.id = options.id;
@@ -31,6 +31,10 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		this._visited = false;
 
 		return result;
+	}
+
+	public getPeerConnection() {
+		return this._peerConnection;
 	}
 
 	public accept(stats: Omit<MediaPlayoutStats, 'appData'>): void {

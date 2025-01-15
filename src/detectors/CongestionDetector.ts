@@ -5,7 +5,8 @@ import { ClientMonitorEvents } from "../ClientMonitorEvents";
 export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
 
 export class CongestionDetector implements Detector {
-
+	public readonly name = 'congestion-detector';
+	
 	public constructor(
 		public readonly peerConnection: PeerConnectionMonitor
 	) {
@@ -26,9 +27,9 @@ export class CongestionDetector implements Detector {
 		}
 
 		let rttDiffInS = 0;
-		if (this.peerConnection.avgRttInS !== undefined) {
-			if (this.peerConnection.ewmaRttInS !== undefined) {
-				rttDiffInS = Math.abs(this.peerConnection.avgRttInS - this.peerConnection.ewmaRttInS);
+		if (this.peerConnection.avgRttInSec !== undefined) {
+			if (this.peerConnection.ewmaRttInSec !== undefined) {
+				rttDiffInS = Math.abs(this.peerConnection.avgRttInSec - this.peerConnection.ewmaRttInSec);
 			}
 		}
 
@@ -38,16 +39,16 @@ export class CongestionDetector implements Detector {
 				isCongested = hasBwLimitedOutboundRtp;
 				break;
 			case 'medium': {
-				if (!this.peerConnection.ewmaRttInS) break;
+				if (!this.peerConnection.ewmaRttInSec) break;
 				
-				const rttDiffThreshold = Math.min(0.15, Math.max(0.05, this.peerConnection.ewmaRttInS * 0.33));
+				const rttDiffThreshold = Math.min(0.15, Math.max(0.05, this.peerConnection.ewmaRttInSec * 0.33));
 				
 				isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold;
 
 				break;
 			}
 			case 'low': {
-				if (!this.peerConnection.ewmaRttInS || !this.peerConnection.outboundFractionLost) break;
+				if (!this.peerConnection.ewmaRttInSec || !this.peerConnection.outboundFractionLost) break;
 				
 				isCongested = hasBwLimitedOutboundRtp && this.peerConnection.outboundFractionLost > 0.05;
 				break;
@@ -84,7 +85,7 @@ export class CongestionDetector implements Detector {
 
 		this.peerConnection.parent.emit('congestion', {
 			...eventBase,
-			peerConnection: this.peerConnection,
+			peerConnectionMonitor: this.peerConnection,
 		});
 		this.peerConnection.parent.addIssue({
 			type: 'congestion',

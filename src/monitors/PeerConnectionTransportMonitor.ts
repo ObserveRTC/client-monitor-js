@@ -11,7 +11,7 @@ export class PeerConnectionTransportMonitor implements PeerConnectionTransportSt
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: PeerConnectionTransportStats,
 	) {
 		this.id = options.id;
@@ -34,6 +34,10 @@ export class PeerConnectionTransportMonitor implements PeerConnectionTransportSt
 		}
 
 		Object.assign(this, stats);
+	}
+
+	public getPeerConnection() {
+		return this._peerConnection;
 	}
 
 	public createSample(): PeerConnectionTransportStats {

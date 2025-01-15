@@ -34,7 +34,7 @@ export type ClientMonitorEvents = {
 	'issue': [AcceptedClientIssue],
 	// detector events
 	'congestion': [{
-		peerConnection: PeerConnectionMonitor,
+		peerConnectionMonitor: PeerConnectionMonitor,
 		targetIncomingBitrateAfterCongestion: number | undefined;
 		targetIncomingBitrateBeforeCongestion: number | undefined;
 		targetOutgoingBitrateAfterCongestion: number | undefined;
@@ -43,17 +43,33 @@ export type ClientMonitorEvents = {
 		highestSeenIncomingBitrateBeforeCongestion: number | undefined;
 	}],
 	'cpulimitation': [],
-	'audio-desync': [{
-		inboundRtp: InboundRtpMonitor,
-	}],
-	'freezed-video': [{
-		inboundRtp: InboundRtpMonitor,
-	}],
-	'stucked-inbound-track': [{
-		inboundTrack: InboundTrackMonitor,
-	}],
-	'too-long-pc-connection-establishment': [{
-		peerConnection: PeerConnectionMonitor,
-	}]
-	
+	'audio-desync-track': [trackMonitor: InboundTrackMonitor],
+	'freezed-video-track': [trackMonitor: InboundTrackMonitor],
+	'stucked-inbound-track': [trackMonitor: InboundTrackMonitor],
+	'too-long-pc-connection-establishment': [peerConnectionMonitor: PeerConnectionMonitor]
+	'score': [
+		clientScore: number,
+		remarks?: string[],
+	],
+	// 'new-peer-connnection-monitor': [
+	// 	peerConnectionMonitor: PeerConnectionMonitor,
+	// ]
+	// 'new-inbound-rtp-monitor': [
+	// 	inboundRtpMonitor: InboundRtpMonitor,
+	// ]
+	// 'new-inbound-track-monitor': [
+	// 	inboundTrackMonitor: InboundTrackMonitor,
+	// ]
+	// 'new-outbound-track-monitor': [
+	// 	outboundTrackMonitor: InboundTrackMonitor,
+	// ]
+	// 'new-outbound-rtp-monitor': [
+	// 	outboundRtpMonitor: InboundRtpMonitor,
+	// ],
+	// 'new-data-channel-monitor': [
+	// 	dataChannelMonitor: DataChannelMonitor,
+	// ],
+	// 'new-ice-transport-monitor': [
+	// 	iceTransportMonitor: IceTransportMonitor,
+	// ],
 }

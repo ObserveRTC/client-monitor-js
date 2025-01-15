@@ -17,6 +17,9 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 		appData,
 	} = context;
 	const clientMonitor = pcMonitor.parent;
+	// const producers = new Map<string, mediasoup.types.Producer>();
+	// const consumers = new Map<string, mediasoup.types.Consumer>();
+
 	const newConsumerListener = (consumer: mediasoup.types.Consumer) => {
 		listenConsumer(pcMonitor, consumer, appData);
 	};
@@ -53,7 +56,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 			}
 		});
 	};
-	
+
 	transport.observer.once('close', () => {
 		transport.observer.off('newconsumer', newConsumerListener);
 		transport.observer.off('newdataproducer', newDataProducerListener);
@@ -61,14 +64,8 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 		transport.observer.off('newdataconsumer', newDataConsumerListener);
 		transport.off('connectionstatechange', connectionChangeListener);
 		transport.off('icegatheringstatechange', iceGatheringStateChangeListener);
-
-		clientMonitor.addEvent({
-			type: ClientEventType.PEER_CONNECTION_CLOSED,
-			payload: {
-				peerConnectionId: pcMonitor.peerConnectionId,
-				...(appData ?? {}),
-			}
-		});
+		
+		pcMonitor.close();
 	});
 
 	transport.observer.on('newconsumer', newConsumerListener);
@@ -78,6 +75,16 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 	transport.on('connectionstatechange', connectionChangeListener);
 	transport.on('icegatheringstatechange', iceGatheringStateChangeListener);
 
+	pcMonitor.once('close', () => {
+		clientMonitor.addEvent({
+			type: ClientEventType.PEER_CONNECTION_CLOSED,
+			payload: {
+				peerConnectionId: pcMonitor.peerConnectionId,
+				...(appData ?? {}),
+			}
+		});
+	});
+
 	clientMonitor.addEvent({
 		type: ClientEventType.PEER_CONNECTION_OPENED,
 		payload: {
@@ -86,7 +93,9 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 			transportAppData: transport.appData,
 			...(appData ?? {}),
 		}
-	})
+	});
+
+	
 }
 
 function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: mediasoup.types.Producer, appData?: Record<string, unknown>) {

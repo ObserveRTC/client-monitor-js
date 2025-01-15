@@ -14,7 +14,7 @@ export class CertificateMonitor implements CertificateStats {
 	appData?: Record<string, unknown> | undefined;
 
 	public constructor(
-		public readonly peerConnection: PeerConnectionMonitor,
+		private readonly _peerConnection: PeerConnectionMonitor,
 		options: CertificateStats,
 	) {
 		this.id = options.id;
@@ -27,6 +27,10 @@ export class CertificateMonitor implements CertificateStats {
 		this._visited = false;
 
 		return result;
+	}
+
+	public getPeerConnection() {
+		return this._peerConnection;
 	}
 
 	public accept(stats: Omit<CertificateStats, 'appData'>): void {

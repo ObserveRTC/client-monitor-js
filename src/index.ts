@@ -8,14 +8,14 @@ export type {
     ClientMonitorEvents,
 } from "./ClientMonitorEvents";
 export type { 
-    CongestionDetector,
-} from './detectors/CongestionDetector';
+    Detector,
+} from './detectors/Detector';
+export type {
+    Detectors
+} from './detectors/Detectors';
 export type { 
-    CpuPerformanceDetector, 
-} from './detectors/CpuPerformanceDetector';
-export type { 
-    AudioDesyncDetector, 
-} from './detectors/AudioDesyncDetector';
+    ScoreCalculator 
+} from './scores/ScoreCalculator';
 
 export type { 
 	ClientSample,
@@ -31,6 +31,9 @@ export type {
     RemoteInboundRtpStats,
     RemoteOutboundRtpStats,
 } from './schema/ClientSample';
+export {
+    setLogger,
+} from "./utils/logger";
 
 import { ClientMonitor } from "./ClientMonitor";
 import { ClientMonitorConfig } from './ClientMonitorConfig';
@@ -48,9 +51,10 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
         collectingPeriodInMs: config?.collectingPeriodInMs ?? 2000,
         samplingPeriodInMs: config?.samplingPeriodInMs ?? 8000,
         
-        integrateNavigatorMediaDevices: config?.integrateNavigatorMediaDevices ?? false,
-        addClientJointEventOnCreated: config?.addClientJointEventOnCreated ?? false,
-        addClientLeftEventOnClose: config?.addClientLeftEventOnClose ?? false,
+        integrateNavigatorMediaDevices: config?.integrateNavigatorMediaDevices ?? true,
+        fetchUserAgentData: config?.fetchUserAgentData ?? true,
+        addClientJointEventOnCreated: config?.addClientJointEventOnCreated ?? true,
+        addClientLeftEventOnClose: config?.addClientLeftEventOnClose ?? true,
 
         videoFreezesDetector: config?.videoFreezesDetector ?? {
         },
@@ -90,7 +94,3 @@ export function createClientMonitor(config?: Partial<ClientMonitorConfig> & {
 
     return result;
 }
-
-export {
-    setLogger,
-} from "./utils/logger";
