@@ -21,6 +21,23 @@ export function roundNumber(num?: number): number | undefined {
   return Math.round(num);
 }
 
+export function calculateEmpiricalDeviation(data: number[]): number | undefined {
+  if (data.length < 2) return undefined;
+
+  // Step 1: Calculate the mean
+  const mean = data.reduce((sum, value) => sum + value, 0) / data.length;
+
+  // Step 2: Calculate the squared deviations from the mean
+  const squaredDeviations = data.map(value => Math.pow(value - mean, 2));
+
+  // Step 3: Calculate the variance (sum of squared deviations divided by n - 1)
+  const variance = squaredDeviations.reduce((sum, value) => sum + value, 0) / (data.length - 1);
+
+  // Step 4: Take the square root of the variance to get the standard deviation
+  return Math.sqrt(variance);
+}
+
+
 export type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 export type RequiredBy<T, K = keyof T> = Merge<

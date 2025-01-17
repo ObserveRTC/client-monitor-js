@@ -2,8 +2,8 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { Detector } from "./Detector";
 
 
-export class StuckedInboundTrackDetector implements Detector {
-	public readonly name = 'stucked-inbound-track-detector';
+export class DryInboundTrackDetector implements Detector {
+	public readonly name = 'dry-inbound-track-detector';
 	
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
@@ -14,10 +14,6 @@ export class StuckedInboundTrackDetector implements Detector {
 
 	private get peerConnection() {
 		return this.trackMonitor.getPeerConnection();
-	}
-
-	private get clientMonitor() {
-		return this.peerConnection.parent;
 	}
 
 	private get config() {
@@ -37,15 +33,9 @@ export class StuckedInboundTrackDetector implements Detector {
 
 		const clientMonitor = this.peerConnection.parent;
 
-		clientMonitor.emit('stucked-inbound-track', this.trackMonitor);
-
-		clientMonitor.addIssue({
-			type: 'stucked-inbound-track',
-			payload: {
-				peerConnectionId: this.peerConnection.peerConnectionId,
-				trackId: this.trackMonitor.trackIdentifier,
-				ssrc: inboundRtp.ssrc,
-			},
+		clientMonitor.emit('dry-inbound-track', {
+			trackMonitor: this.trackMonitor,
+			clientMonitor: clientMonitor,
 		});
 	}
 }

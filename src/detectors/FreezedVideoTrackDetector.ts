@@ -1,9 +1,5 @@
 import { Detector } from "./Detector";
-import { InboundRtpMonitor } from "../monitors/InboundRtpMonitor";
-import { ClientMonitorEvents } from "../ClientMonitorEvents";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
-
-type FreezedVideoEvent = ClientMonitorEvents['freezed-video-track']
 
 export class FreezedVideoTrackDetector implements Detector {
 	public readonly name = 'freezed-video-track-detector';
@@ -22,7 +18,6 @@ export class FreezedVideoTrackDetector implements Detector {
 	}
 
 	private _lastFreezeCount = 0;
-	private _startedFreezeAt = 0;
 
 	public update() {
 		const inboundRtp = this.trackMonitor.getInboundRtp();
@@ -37,21 +32,22 @@ export class FreezedVideoTrackDetector implements Detector {
 		this._lastFreezeCount = inboundRtp.freezeCount;
 
 		if (!wasFreezed && inboundRtp.isFreezed) {
-			const event: FreezedVideoEvent = [this.trackMonitor];
-			clientMonitor.emit('freezed-video-track', ...event)
-			this._startedFreezeAt = Date.now();
+			clientMonitor.emit('freezed-video-track', {
+				clientMonitor: this.peerConnection.parent,
+				trackMonitor: this.trackMonitor,
+			})
 
 		} else if (wasFreezed && !inboundRtp.isFreezed) {
-			clientMonitor.addIssue({
-				type: 'freezed-video-track',
-				payload: {
-					peerConnectionId: this.peerConnection.peerConnectionId,
-					trackId: inboundRtp.trackIdentifier,
-					ssrc: inboundRtp.ssrc,
-					duration: Date.now() - this._startedFreezeAt,
-				}
-			});
-			this._startedFreezeAt = 0;
+			// clientMonitor.addIssue({
+			// 	type: 'freezed-video-track',
+			// 	payload: {
+			// 		peerConnectionId: this.peerConnection.peerConnectionId,
+			// 		trackId: inboundRtp.trackIdentifier,
+			// 		ssrc: inboundRtp.ssrc,
+			// 		duration: Date.now() - this._startedFreezeAt,
+			// 		issueContext,
+			// 	}
+			// });
 		}
 	}
 }

@@ -77,7 +77,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	// 		...(appData ?? {}),
 	// 	}
 	// });
-	const onTrackListener = (event: RTCTrackEvent) => listenMediaStreamTrackEvents(clientMonitor, event?.track);
+	const onTrackListener = (event: RTCTrackEvent) => listenMediaStreamTrackEvents(pcMonitor, event?.track);
 	const onDataChannelListener = (event: RTCDataChannelEvent) => listenRtcDataChannelEvents(clientMonitor, event?.channel);
 
 	pcMonitor.once('close', () => {
@@ -126,10 +126,12 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	});
 }
 
-export function listenMediaStreamTrackEvents(monitor: ClientMonitor, track?: MediaStreamTrack) {
+export function listenMediaStreamTrackEvents(pcMonitor: PeerConnectionMonitor, track?: MediaStreamTrack) {
 	if (!track) return;
 
-	track.onended = () => monitor.addEvent({
+	const clientMonitor = pcMonitor.parent;
+
+	track.onended = () => clientMonitor.addEvent({
 		type: ClientEventType.MEDIA_TRACK_ADDED,
 		payload: {
 			trackId: track.id,
@@ -139,11 +141,10 @@ export function listenMediaStreamTrackEvents(monitor: ClientMonitor, track?: Med
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
-			constraints: track.getConstraints(),
 		}
 	});
 
-	track.onmute = () => monitor.addEvent({
+	track.onmute = () => clientMonitor.addEvent({
 		type: ClientEventType.MEDIA_TRACK_MUTED,
 		payload: {
 			trackId: track.id,
@@ -153,11 +154,10 @@ export function listenMediaStreamTrackEvents(monitor: ClientMonitor, track?: Med
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
-			constraints: track.getConstraints(),
 		}
 	});
 
-	track.onunmute = () => monitor.addEvent({
+	track.onunmute = () => clientMonitor.addEvent({
 		type: ClientEventType.MEDIA_TRACK_UNMUTED,
 		payload: {
 			trackId: track.id,
@@ -167,11 +167,10 @@ export function listenMediaStreamTrackEvents(monitor: ClientMonitor, track?: Med
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
-			constraints: track.getConstraints(),
 		}
 	});
 
-	monitor.addEvent({
+	clientMonitor.addEvent({
 		type: ClientEventType.MEDIA_TRACK_ADDED,
 		payload: {
 			trackId: track.id,
@@ -182,8 +181,12 @@ export function listenMediaStreamTrackEvents(monitor: ClientMonitor, track?: Med
 			readyState: track.readyState,
 			contentHint: track.contentHint,
 			constraints: track.getConstraints(),
+			capabilities: track.getCapabilities(),
+			settings: track.getSettings(),
 		}
 	});
+
+	pcMonitor.addMediaStreamTrack(track);
 }
 
 export function listenRtcDataChannelEvents(monitor: ClientMonitor, dataChannel: RTCDataChannel) {

@@ -91,8 +91,12 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	lastNFramesPerSec: number[] = [];
 	receivingAudioSamples?: number;
 	fractionLost?: number;
+	bitPerPixel?: number;
 
-	deltaPacketsLost?: number;
+	ΔpacketsLost?: number;
+	ΔpacketsReceived?: number;
+	ΔbytesReceived?: number;
+	ΔcorruptionProbability?: number;
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -133,11 +137,23 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.receivingAudioSamples = stats.totalSamplesReceived - this.totalSamplesReceived;
 		}
 		if (this.bytesReceived && stats.bytesReceived) {
-			const bytesReceived = stats.bytesReceived - this.bytesReceived;
-			this.bitrate = Math.max(0, bytesReceived * 8 / (elapsedInSec));
+			this.ΔbytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.bitrate = Math.max(0, this.ΔbytesReceived * 8 / (elapsedInSec));
 		}
 		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
-			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
+			this.ΔpacketsLost = stats.packetsLost - this.packetsLost;
+		}
+		if (this.totalCorruptionProbability !== undefined && 
+			stats.totalCorruptionProbability !== undefined &&
+			this.corruptionMeasurements !== undefined &&
+			stats.corruptionMeasurements !== undefined
+		) {
+			const deltaCoruption = stats.totalCorruptionProbability - this.totalCorruptionProbability;
+			const deltaMeasurements = Math.max(1, stats.corruptionMeasurements - this.corruptionMeasurements);
+			this.ΔcorruptionProbability = Math.max(
+				0, 
+				deltaCoruption / deltaMeasurements
+			);
 		}
 
 		Object.assign(this, stats);
@@ -154,6 +170,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	
 			this.avgFramesPerSec = avgFramesPerSec;
 			this.fpsVolatility = avgDiff / avgFramesPerSec;
+
+			if (this.bitrate && this.frameWidth && this.frameHeight) {
+				this.bitPerPixel = this.bitrate / (this.frameWidth * this.frameHeight);
+			}
 		}
 
 		if (this.packetsReceived !== undefined && this.packetsLost !== undefined) {
@@ -179,7 +199,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	}
 
 	public getTrack() {
-		return this._peerConnection.parent.mappedInboundTracks.get(this.trackIdentifier);
+		return this._peerConnection.mappedInboundTracks.get(this.trackIdentifier);
 	}
 
 	public createSample(): InboundRtpStats {

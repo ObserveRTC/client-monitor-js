@@ -17,6 +17,9 @@ export class DataChannelMonitor implements DataChannelStats {
 
 	appData?: Record<string, unknown> | undefined;
 
+	ΔbytesSent?: number | undefined;
+	ΔbytesReceived?: number | undefined;
+
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: DataChannelStats,
@@ -45,6 +48,13 @@ export class DataChannelMonitor implements DataChannelStats {
 		const elapsedInMs = stats.timestamp - this.timestamp;
 		if (elapsedInMs <= 0) { 
 			return; // logger?
+		}
+
+		if (this.bytesSent && stats.bytesSent) {
+			this.ΔbytesSent = stats.bytesSent - this.bytesSent;
+		}
+		if (this.bytesReceived && stats.bytesReceived) {
+			this.ΔbytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 
 		Object.assign(this, stats);

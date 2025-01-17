@@ -21,7 +21,7 @@ import { LongPcConnectionEstablishmentDetector } from "../detectors/LongPcConnec
 import { CongestionDetector } from "../detectors/CongestionDetector";
 import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
-import { CalculatedScore, getRttScore } from "../scores/CalculatedScore";
+import { CalculatedScore } from "../scores/CalculatedScore";
 
 const logger = createLogger('PeerConnectionMonitor');
 
@@ -42,7 +42,7 @@ export declare interface PeerConnectionMonitor {
 	emit<U extends keyof PeerConnectionMonitorEvents>(event: U, ...args: PeerConnectionMonitorEvents[U]): boolean;
 }
 
-export class PeerConnectionMonitor extends EventEmitter{
+export class PeerConnectionMonitor extends EventEmitter {
 	public readonly detectors: Detectors;
 	public readonly mappedCodecMonitors = new Map<string, CodecMonitor>();
 	public readonly mappedInboundRtpMonitors = new Map<number, InboundRtpMonitor>();
@@ -58,21 +58,24 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public readonly mappedIceCandidatePairMonitors = new Map<string, IceCandidatePairMonitor>();
 	public readonly mappedCertificateMonitors = new Map<string, CertificateMonitor>();
 
+	// tracks that are detected at peer connection level, but not yet picked up by stats
+	private readonly _pendingMediaStreamTracks = new Map<string, MediaStreamTrack>();
+	public readonly mappedInboundTracks = new Map<string, InboundTrackMonitor>();
+	public readonly mappedOutboundTracks = new Map<string, OutboundTrackMonitor>();
+
 	// indexes
 	// public readonly ωindexedCodecIdToInboundRtps = new Map<string, InboundRtpMonitor[]>();
 	// public readonly ωindexedMediaSourceIdToOutboundRtps = new Map<string, OutboundRtpMonitor[]>();
 	
 	public closed = false;
 	
-	public sendingAudioBitrate?: number;
-	public sendingVideoBitrate?: number;
-	public sendingFractionLost?: number; 
+	public sendingAudioBitrate = 0;
+	public sendingVideoBitrate = 0;
+	public receivingAudioBitrate = 0;
+	public receivingVideoBitrate = 0;
 
-	public receivingAudioBitrate?: number;
-	public receivingVideoBitrate?: number;
-
-	public outboundFractionLost = -1;
-	public inboundFractionalLost = -1;
+	public outboundFractionLost = 0.0;
+	public inboundFractionalLost = 0.0;
 
 	public totalInboundPacketsLost = 0;
 	public totalInboundPacketsReceived = 0;
@@ -85,21 +88,21 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public totalSentVideoBytes = 0;
 	public totalReceivedAudioBytes = 0;
 	public totalReceivedVideoBytes = 0;
-	public totalAvailableIncomingBitrate?: number;
-	public totalAvailableOutgoingBitrate?: number;
+	public totalAvailableIncomingBitrate = 0;
+	public totalAvailableOutgoingBitrate = 0;
 
-	public deltaInboundPacketsLost?: number;
-	public deltaInboundPacketsReceived?: number;
-	public deltaOutboundPacketsSent?: number;
-	public deltaOutboundPacketsReceived?: number;
-	public deltaOutboundPacketsLost?: number;
-	public deltaDataChannelBytesSent?: number;
-	public deltaDataChannelBytesReceived?: number;
-	public deltaSentAudioBytes?: number;
-	public deltaSentVideoBytes?: number;
-	public deltaReceivedAudioBytes?: number;
-	public deltaReceivedVideoBytes?: number;
+	// deltas between two stats
+	public ΔinboundPacketsLost = 0;
+	public ΔinboundPacketsReceived = 0;
+	public ΔoutboundPacketsSent = 0;
+	public ΔoutboundPacketsReceived = 0;
+	public ΔoutboundPacketsLost = 0;
+	public ΔaudioBytesSent = 0;
+	public ΔvideoBytesSent = 0;
+	public ΔaudioBytesReceived = 0;
+	public ΔvideoBytesReceived = 0;
 
+	// adjust these to reflect what the name actually is
 	public highestSeenSendingBitrate?: number;
 	public highestSeenReceivingBitrate?: number;
 	public highestSeenAvailableOutgoingBitrate?: number;
@@ -120,19 +123,7 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public calculatedStabilityScore: CalculatedPeerConnectionScores = {
 		weight: 1,
 		value: undefined,
-		remarks: [],
 		lastNScores: [],
-	}
-
-	private updateTracers = {
-		sumOfRttInS: 0,
-		rttMeasurementsCounter: 0,
-		sumOfSelectedIceAvailableIncomingBitrate: 0,
-		sumOfSelectedIceAvailableOutgoingBitrate: 0,
-		sumOfSendingAudioBitrate: 0,
-		sumOfSendingVideoBitrate: 0,
-		sumOfReceivingAudioBitrate: 0,
-		sumOfReceivingVideoBitrate: 0,
 	}
 
 	public constructor(
@@ -150,6 +141,18 @@ export class PeerConnectionMonitor extends EventEmitter{
 	public get score() {
 		return this.calculatedStabilityScore.value;
 	}
+
+	public get receivingBitrate() {
+		return (this.receivingAudioBitrate ?? 0) + (this.receivingVideoBitrate ?? 0);
+	}
+	
+	public get sendingBitrate() {
+		return (this.sendingAudioBitrate ?? 0) + (this.sendingVideoBitrate ?? 0);
+	}
+
+	public get tracks() {
+		return [ ...this.mappedInboundTracks.values(), ...this.mappedOutboundTracks.values() ];
+	}
 	
 	public async getStats() {
 		const stats = await this._getStats();
@@ -160,54 +163,99 @@ export class PeerConnectionMonitor extends EventEmitter{
 	}
 
 	public async accept(stats: W3C.RtcStats[]) {
-		this.updateTracers = {
-			sumOfRttInS: 0,
-			rttMeasurementsCounter: 0,
-			sumOfSelectedIceAvailableIncomingBitrate: 0,
-			sumOfSelectedIceAvailableOutgoingBitrate: 0,
-			sumOfSendingAudioBitrate: 0,
-			sumOfSendingVideoBitrate: 0,
-			sumOfReceivingAudioBitrate: 0,
-			sumOfReceivingVideoBitrate: 0,
-		};
+		let sumOfRttInS =  0;
+		let rttMeasurementsCounter = 0;
+		let ΔbytesReceived = 0;
+		let ΔbytesSent = 0;
 
 		this.sendingAudioBitrate = 0;
 		this.sendingVideoBitrate = 0;
-		this.sendingFractionLost = 0;
 		this.receivingAudioBitrate = 0;
 		this.receivingVideoBitrate = 0;
 		this.outboundFractionLost = 0;
 		this.inboundFractionalLost = 0;
+		this.totalAvailableIncomingBitrate = 0;
+		this.totalAvailableOutgoingBitrate = 0;
 
 		for (const statsItem of stats) {
 			switch (statsItem.type) {
 				case W3C.StatsType.codec: 
 					this._updateCodec(statsItem);
 					break;
-				case W3C.StatsType.inboundRtp:
-					this._updateInboundRtp(statsItem);
+				case W3C.StatsType.inboundRtp: {
+					const monitor = this._updateInboundRtp(statsItem);
+
+					switch (monitor?.kind) {
+						case 'audio':
+							this.receivingAudioBitrate += monitor?.bitrate ?? 0;
+							break;
+						case 'video':
+							this.receivingVideoBitrate += monitor?.bitrate ?? 0;
+							break;
+					}
+
+					this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
+					ΔbytesReceived += monitor?.ΔbytesReceived ?? 0;
 					break;
-				case W3C.StatsType.remoteOutboundRtp:
-					this._updateRemoteOutboundRtp(statsItem);
+				}
+				case W3C.StatsType.remoteOutboundRtp: {
+					const monitor = this._updateRemoteOutboundRtp(statsItem);
+					
+					if (monitor?.roundTripTime) {
+						sumOfRttInS += monitor.roundTripTime;
+						++rttMeasurementsCounter;
+					}
 					break;
-				case W3C.StatsType.outboundRtp:
-					this._updateOutboundRtp(statsItem);
+				}
+				case W3C.StatsType.outboundRtp: {
+					const monitor = this._updateOutboundRtp(statsItem);
+					
+					switch (monitor?.kind) {
+						case 'audio':
+							this.sendingAudioBitrate += monitor?.bitrate ?? 0;
+							break;
+						case 'video':
+							this.sendingVideoBitrate += monitor?.bitrate ?? 0;
+							break;
+					}
+					ΔbytesSent += monitor?.ΔbytesSent ?? 0;
 					break;
-				case W3C.StatsType.remoteInboundRtp: 
-					this._updateRemoteInboundRtp(statsItem);
+				}
+					
+				case W3C.StatsType.remoteInboundRtp: {
+					const monitor = this._updateRemoteInboundRtp(statsItem);
+
+					this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
 					break;
-				case W3C.StatsType.dataChannel:
-					this._updateDataChannel(statsItem);
+				}
+					
+				case W3C.StatsType.dataChannel: {
+					const monitor = this._updateDataChannel(statsItem);
+					
+					ΔbytesReceived += monitor?.ΔbytesReceived ?? 0;
+					ΔbytesSent += monitor?.ΔbytesSent ?? 0;
 					break;
+				}
 				case W3C.StatsType.mediaSource: 
 					this._updateMediaSource(statsItem);
 					break;
 				case W3C.StatsType.mediaPlayout:
 					this._updateMediaPlayout(statsItem);
 					break;
-				case W3C.StatsType.transport:
-					this._updateIceTransport(statsItem);
+				case W3C.StatsType.transport: {
+					const monitor = this._updateIceTransport(statsItem);
+					const selectedPair = monitor?.getSelectedCandidatePair();
+					
+					this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
+					this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
+
+					if (selectedPair?.currentRoundTripTime) {
+						sumOfRttInS += selectedPair.currentRoundTripTime;
+						++rttMeasurementsCounter;
+					}
 					break;
+				}
+					
 				case W3C.StatsType.peerConnection:
 					this._updatePeerConnectionTransport(statsItem);
 					break;
@@ -228,25 +276,24 @@ export class PeerConnectionMonitor extends EventEmitter{
 		
 		this._checkVisited();
 
-		if (0 < this.updateTracers.rttMeasurementsCounter) {
-			this.avgRttInSec = this.updateTracers.sumOfRttInS / this.updateTracers.rttMeasurementsCounter;
+		if (0 < rttMeasurementsCounter) {
+			this.avgRttInSec = sumOfRttInS / rttMeasurementsCounter;
 			this.ewmaRttInSec = this.ewmaRttInSec !== undefined ? (this.avgRttInSec * 0.1) + (this.ewmaRttInSec * 0.9) : this.avgRttInSec;
 		}
 
-		this.sendingAudioBitrate = this.updateTracers.sumOfSendingAudioBitrate;
-		this.sendingVideoBitrate = this.updateTracers.sumOfSendingVideoBitrate;
-		this.receivingAudioBitrate = this.updateTracers.sumOfReceivingAudioBitrate;
-		this.receivingVideoBitrate = this.updateTracers.sumOfReceivingVideoBitrate;
+		this.ΔaudioBytesReceived = ΔbytesReceived;
 
-		this.highestSeenAvailableIncomingBitrate = Math.max(this.highestSeenAvailableIncomingBitrate ?? 0, this.updateTracers.sumOfSelectedIceAvailableIncomingBitrate);
-		this.highestSeenAvailableOutgoingBitrate = Math.max(this.highestSeenAvailableOutgoingBitrate ?? 0, this.updateTracers.sumOfSelectedIceAvailableOutgoingBitrate);
+		this.highestSeenAvailableIncomingBitrate = Math.max(this.highestSeenAvailableIncomingBitrate ?? 0, this.totalAvailableIncomingBitrate);
+		this.highestSeenAvailableOutgoingBitrate = Math.max(this.highestSeenAvailableOutgoingBitrate ?? 0, this.totalAvailableOutgoingBitrate);
 		this.highestSeenSendingBitrate = Math.max(this.highestSeenSendingBitrate ?? 0, this.sendingAudioBitrate + this.sendingVideoBitrate);
 		this.highestSeenReceivingBitrate = Math.max(this.highestSeenReceivingBitrate ?? 0, this.receivingAudioBitrate + this.receivingVideoBitrate);
 
-		this.usingTCP = this.selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
-		this.usingTURN = this.selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.candidateType === 'relay') &&
-			this.selectedIceCandidatePairs.some(pair => pair.getRemoteCandidate()?.url?.startsWith('turn:'));
-		this.iceState = this.selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
+		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
+
+		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
+		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.candidateType === 'relay') &&
+			selectedIceCandidatePairs.some(pair => pair.getRemoteCandidate()?.url?.startsWith('turn:'));
+		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
 
 		this.detectors.update();
 
@@ -273,6 +320,29 @@ export class PeerConnectionMonitor extends EventEmitter{
 			certificates: this.certificates.map(certificate => certificate.createSample()),
 			
 		}
+	}
+
+	public addMediaStreamTrack(track: MediaStreamTrack) {
+		if (track.readyState === 'ended') return;
+		track.addEventListener('ended', () => {
+			this._pendingMediaStreamTracks.delete(track.id);
+			this.mappedInboundTracks.delete(track.id);
+			this.mappedOutboundTracks.delete(track.id);
+		});
+
+		const mediaSource = this.mediaSources.find(mediaSource => mediaSource.trackIdentifier === track.id);
+		
+		if (mediaSource) {
+			return this._createOutboundTrackMonitor(track, mediaSource);
+		}
+
+		const inboundRtp = this.inboundRtps.find(inboundRtp => inboundRtp.trackIdentifier === track.id);
+		
+		if (inboundRtp) {
+			return this._createInboundTrackMonitor(track, inboundRtp);
+		}
+
+		this._pendingMediaStreamTracks.set(track.id, track);
 	}
 
 	public get codecs() {
@@ -359,10 +429,6 @@ export class PeerConnectionMonitor extends EventEmitter{
 		for (const [id, monitor] of this.mappedInboundRtpMonitors) {
 			if (monitor.visited) continue;
 			this.mappedInboundRtpMonitors.delete(id);
-
-			if (monitor.trackIdentifier) {
-				this.parent.mappedInboundTracks.delete(monitor.trackIdentifier);
-			}
 		}
 
 		for (const [id, monitor] of this.mappedRemoteOutboundRtpMonitors) {
@@ -384,10 +450,6 @@ export class PeerConnectionMonitor extends EventEmitter{
 		for (const [id, monitor] of this.mappedMediaSourceMonitors) {
 			if (monitor.visited) continue;
 			this.mappedMediaSourceMonitors.delete(id);
-			
-			if (monitor.trackIdentifier) {
-				this.parent.mappedOutboundTracks.delete(monitor.trackIdentifier);
-			}
 		}
 
 		for (const [id, monitor] of this.mappedMediaPlayoutMonitors) {
@@ -450,12 +512,17 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!codecMonitor) {
 			codecMonitor = new CodecMonitor(this, stats);
 			this.mappedCodecMonitors.set(stats.id, codecMonitor);
+
+			this.parent.emit('new-codec-monitor', {
+				clientMonitor: this.parent,
+				codecMonitor,
+			});
 		}
 
 		codecMonitor.accept(stats);
 	}
 
-	private _updateInboundRtp(input: Partial<InboundRtpStats>) {
+	private _updateInboundRtp(input: Partial<InboundRtpStats>): InboundRtpMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.ssrc || !input.kind || !input.trackIdentifier) {
 			return logger.warn('Invalid inboundRtp stats', input);
@@ -467,36 +534,25 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!inboundRtpMonitor) {
 			inboundRtpMonitor = new InboundRtpMonitor(this, stats);
 			this.mappedInboundRtpMonitors.set(stats.ssrc, inboundRtpMonitor);
+			
+			this.parent.emit('new-inbound-rtp-monitor', {
+				clientMonitor: this.parent,
+				inboundRtpMonitor,
+			});
 
-			if (stats.trackIdentifier) {
-				const constInbMonitor = inboundRtpMonitor;
+			const pendingTrack = this._pendingMediaStreamTracks.get(stats.trackIdentifier ?? '');
 
-				this.parent.mappedInboundTracks.set(stats.trackIdentifier, 
-					new InboundTrackMonitor(stats.trackIdentifier, () => constInbMonitor)
-				);
+			if (pendingTrack) {
+				this._createInboundTrackMonitor(pendingTrack, inboundRtpMonitor);
 			}
 		}
 
 		inboundRtpMonitor.accept(stats);
 
-		switch (inboundRtpMonitor.kind) {
-			case 'audio': {
-				inboundRtpMonitor.bitrate && 
-					(this.updateTracers.sumOfReceivingAudioBitrate += inboundRtpMonitor.bitrate);
-				break;
-			}
-			case 'video': {
-				inboundRtpMonitor.bitrate && 
-					(this.updateTracers.sumOfReceivingVideoBitrate += inboundRtpMonitor.bitrate);
-				break;
-			}
-		}
-		if (inboundRtpMonitor.fractionLost) {
-			this.inboundFractionalLost += inboundRtpMonitor.fractionLost;
-		}
+		return inboundRtpMonitor;
 	}
 
-	private _updateDataChannel(input: Partial<DataChannelStats>) {
+	private _updateDataChannel(input: Partial<DataChannelStats>): DataChannelMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.label) {
 			return logger.warn('Invalid dataChannel stats', input);
@@ -508,12 +564,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!dataChannelMonitor) {
 			dataChannelMonitor = new DataChannelMonitor(this, stats);
 			this.mappedDataChannelMonitors.set(stats.id, dataChannelMonitor);
+
+			this.parent.emit('new-data-channel-monitor', {
+				clientMonitor: this.parent,
+				dataChannelMonitor,
+			});
 		}
 
 		dataChannelMonitor.accept(stats);
+
+		return dataChannelMonitor;
 	}
 
-	private _updateRemoteOutboundRtp(input: Partial<RemoteOutboundRtpStats>) {
+	private _updateRemoteOutboundRtp(input: Partial<RemoteOutboundRtpStats>): RemoteOutboundRtpMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.ssrc || !input.kind) {
 			return logger.warn('Invalid remoteOutboundRtp stats', input);
@@ -525,12 +588,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!remoteOutboundRtpMonitor) {
 			remoteOutboundRtpMonitor = new RemoteOutboundRtpMonitor(this, stats);
 			this.mappedRemoteOutboundRtpMonitors.set(stats.ssrc, remoteOutboundRtpMonitor);
+
+			this.parent.emit('new-remote-outbound-rtp-monitor', {
+				clientMonitor: this.parent,
+				remoteOutboundRtpMonitor,
+			});
 		}
 
 		remoteOutboundRtpMonitor.accept(stats);
+
+		return remoteOutboundRtpMonitor;
 	}
 
-	private _updateOutboundRtp(input: Partial<OutboundRtpStats>) {
+	private _updateOutboundRtp(input: Partial<OutboundRtpStats>): OutboundRtpMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.ssrc || !input.kind) {
 			return logger.warn('Invalid outboundRtp stats', input);
@@ -543,27 +613,22 @@ export class PeerConnectionMonitor extends EventEmitter{
 			outboundRtpMonitor = new OutboundRtpMonitor(this, stats);
 			this.mappedOutboundRtpMonitors.set(stats.ssrc, outboundRtpMonitor);
 
-			outboundRtpMonitor.getTrack()?.mappedOutboundRtp.set(stats.ssrc, outboundRtpMonitor);
+			this.parent.emit('new-outbound-rtp-monitor', {
+				clientMonitor: this.parent,
+				outboundRtpMonitor,
+			});
+
+			if (!outboundRtpMonitor.getTrack()?.mappedOutboundRtp.has(stats.ssrc)) {
+				outboundRtpMonitor.getTrack()?.mappedOutboundRtp.set(stats.ssrc, outboundRtpMonitor);
+			}
 		}
 
 		outboundRtpMonitor.accept(stats);
 
-		switch (outboundRtpMonitor.kind) {
-			case 'audio': {
-				outboundRtpMonitor.bitrate && 
-					(this.updateTracers.sumOfSendingAudioBitrate += outboundRtpMonitor.bitrate);
-				break;
-			}
-			case 'video': {
-				outboundRtpMonitor.bitrate && 
-					(this.updateTracers.sumOfSendingVideoBitrate += outboundRtpMonitor.bitrate);
-				break;
-			}
-		}
-
+		return outboundRtpMonitor;
 	}
 
-	private _updateRemoteInboundRtp(input: Partial<RemoteInboundRtpStats>) {
+	private _updateRemoteInboundRtp(input: Partial<RemoteInboundRtpStats>): RemoteInboundRtpMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.ssrc || !input.kind) {
 			return logger.warn('Invalid remoteInboundRtp stats', input);
@@ -575,21 +640,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!remoteInboundRtpMonitor) {
 			remoteInboundRtpMonitor = new RemoteInboundRtpMonitor(this, stats);
 			this.mappedRemoteInboundRtpMonitors.set(stats.ssrc, remoteInboundRtpMonitor);
+
+			this.parent.emit('new-remote-inbound-rtp-monitor', {
+				clientMonitor: this.parent,
+				remoteInboundRtpMonitor,
+			});
 		}
 
 		remoteInboundRtpMonitor.accept(stats);
 
-		if (remoteInboundRtpMonitor.roundTripTime) {
-			this.updateTracers.sumOfRttInS += remoteInboundRtpMonitor.roundTripTime;
-			++this.updateTracers.rttMeasurementsCounter;
-		}
-
-		if (remoteInboundRtpMonitor.fractionLost) {
-			this.outboundFractionLost += remoteInboundRtpMonitor.fractionLost;
-		}
+		return remoteInboundRtpMonitor;
 	}
 
-	private _updateMediaSource(input: Partial<MediaSourceStats>) {
+	private _updateMediaSource(input: Partial<MediaSourceStats>): MediaSourceMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.trackIdentifier || !input.kind) {
 			return logger.warn('Invalid mediaSource stats', input);
@@ -601,24 +664,26 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!mediaSourceMonitor) {
 			mediaSourceMonitor = new MediaSourceMonitor(this, stats);
 			this.mappedMediaSourceMonitors.set(stats.id, mediaSourceMonitor);
+			this.parent.emit('new-media-source-monitor', {
+				clientMonitor: this.parent,
+				mediaSourceMonitor,
+			});
 
 			if (stats.trackIdentifier) {
-				const constMediaSourceMonitor = mediaSourceMonitor;
-				const trackMonitor = new OutboundTrackMonitor(stats.trackIdentifier, () => constMediaSourceMonitor);
-				
-				this.parent.mappedOutboundTracks.set(trackMonitor.trackIdentifier, 
-					trackMonitor
-				);
-				this.outboundRtps
-					.filter(rtp => rtp.mediaSourceId === stats.id)
-					.forEach(outboundRtp => trackMonitor.mappedOutboundRtp.set(outboundRtp.ssrc, outboundRtp));
+				const pendingTrack = this._pendingMediaStreamTracks.get(stats.trackIdentifier);
+
+				if (pendingTrack) {
+					this._createOutboundTrackMonitor(pendingTrack, mediaSourceMonitor);
+				}
 			}
 		}
 
 		mediaSourceMonitor.accept(stats);
+
+		return mediaSourceMonitor;
 	}
 
-	private _updateMediaPlayout(input: Partial<MediaPlayoutStats>) {
+	private _updateMediaPlayout(input: Partial<MediaPlayoutStats>): MediaPlayoutMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.kind) {
 			return logger.warn('Invalid mediaPlayout stats', input);
@@ -630,12 +695,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!mediaPlayoutMonitor) {
 			mediaPlayoutMonitor = new MediaPlayoutMonitor(this, stats);
 			this.mappedMediaPlayoutMonitors.set(stats.id, mediaPlayoutMonitor);
+
+			this.parent.emit('new-media-playout-monitor', {
+				clientMonitor: this.parent,
+				mediaPlayoutMonitor,
+			});
 		}
 
 		mediaPlayoutMonitor.accept(stats);
+
+		return mediaPlayoutMonitor;
 	}
 
-	public _updatePeerConnectionTransport(input: Partial<PeerConnectionTransportMonitor>) {
+	public _updatePeerConnectionTransport(input: Partial<PeerConnectionTransportMonitor>): PeerConnectionTransportMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.dataChannelsOpened || !input.dataChannelsClosed) {
 			return logger.warn('Invalid peerConnectionTransport stats', input);
@@ -647,12 +719,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!peerConnectionTransportMonitor) {
 			peerConnectionTransportMonitor = new PeerConnectionTransportMonitor(this, stats);
 			this.mappedPeerConnectionTransportMonitors.set(stats.id, peerConnectionTransportMonitor);
+
+			this.parent.emit('new-peer-connection-transport-monitor', {
+				clientMonitor: this.parent,
+				peerConnectionTransportMonitor,
+			});
 		}
 
 		peerConnectionTransportMonitor.accept(stats);
+		
+		return peerConnectionTransportMonitor;
 	}
 
-	private _updateIceTransport(input: Partial<IceTransportStats>) {
+	private _updateIceTransport(input: Partial<IceTransportStats>): IceTransportMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp) {
 			return logger.warn('Invalid iceTransport stats', input);
@@ -664,22 +743,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!iceTransportMonitor) {
 			iceTransportMonitor = new IceTransportMonitor(this, stats);
 			this.mappedIceTransportMonitors.set(stats.id, iceTransportMonitor);
+
+			this.parent.emit('new-ice-transport-monitor', {
+				clientMonitor: this.parent,
+				iceTransportMonitor,
+			});
 		}
 
 		iceTransportMonitor.accept(stats);
 
-		const selectedCandidatePair = iceTransportMonitor.getSelectedCandidatePair();
-		
-		if (selectedCandidatePair) {
-			selectedCandidatePair.availableIncomingBitrate && 
-				(this.updateTracers.sumOfSelectedIceAvailableIncomingBitrate += selectedCandidatePair.availableIncomingBitrate);
-			
-				selectedCandidatePair.availableOutgoingBitrate && 
-				(this.updateTracers.sumOfSelectedIceAvailableOutgoingBitrate += selectedCandidatePair.availableOutgoingBitrate);
-		}
+		return iceTransportMonitor;
 	}
 
-	private _updateIceCandidate(input: Partial<IceCandidateStats>) {
+	private _updateIceCandidate(input: Partial<IceCandidateStats>): IceCandidateMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.protocol) {
 			return logger.warn('Invalid iceCandidate stats', input);
@@ -691,12 +767,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!iceCandidateMonitor) {
 			iceCandidateMonitor = new IceCandidateMonitor(this, stats);
 			this.mappedIceCandidateMonitors.set(stats.id, iceCandidateMonitor);
+
+			this.parent.emit('new-ice-candidate-monitor', {
+				clientMonitor: this.parent,
+				iceCandidateMonitor,
+			});
 		}
 
 		iceCandidateMonitor.accept(stats);
+
+		return iceCandidateMonitor;
 	}
 
-	private _updateIceCandidatePair(input: Partial<IceCandidatePairStats>) {
+	private _updateIceCandidatePair(input: Partial<IceCandidatePairStats>): IceCandidatePairMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.state) {
 			return logger.warn('Invalid iceCandidatePair stats', input);
@@ -708,17 +791,19 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!iceCandidatePairMonitor) {
 			iceCandidatePairMonitor = new IceCandidatePairMonitor(this, stats);
 			this.mappedIceCandidatePairMonitors.set(stats.id, iceCandidatePairMonitor);
+
+			this.parent.emit('new-ice-candidate-pair-monitor', {
+				clientMonitor: this.parent,
+				iceCandidatePairMonitor,
+			});
 		}
 
 		iceCandidatePairMonitor.accept(stats);
 
-		if (iceCandidatePairMonitor.currentRoundTripTime) {
-			this.updateTracers.sumOfRttInS += iceCandidatePairMonitor.currentRoundTripTime;
-			++this.updateTracers.rttMeasurementsCounter;
-		}
+		return iceCandidatePairMonitor;
 	}
 
-	private _updateCertificate(input: Partial<CertificateStats>) {
+	private _updateCertificate(input: Partial<CertificateStats>): CertificateMonitor | undefined | void {
 		if (this.closed) return;
 		if (!input.id || !input.timestamp || !input.fingerprint || !input.fingerprintAlgorithm) {
 			return logger.warn('Invalid certificate stats', input);
@@ -730,8 +815,46 @@ export class PeerConnectionMonitor extends EventEmitter{
 		if (!certificateMonitor) {
 			certificateMonitor = new CertificateMonitor(this, stats);
 			this.mappedCertificateMonitors.set(stats.id, certificateMonitor);
+
+			this.parent.emit('new-certificate-monitor', {
+				clientMonitor: this.parent,
+				certificateMonitor,
+			});
 		}
 
 		certificateMonitor.accept(stats);
+	
+		return certificateMonitor;
+	}
+
+	private _createOutboundTrackMonitor(track: MediaStreamTrack, mediaSourceMonitor: MediaSourceMonitor) {
+		if (this.mappedOutboundTracks.has(track.id)) return;
+
+		const trackMonitor = new OutboundTrackMonitor(
+			track,
+			mediaSourceMonitor
+		);
+		this._pendingMediaStreamTracks.delete(track.id);
+		this.mappedOutboundTracks.set(track.id, trackMonitor);
+
+
+		for (const outboundRtp of this.mappedOutboundRtpMonitors.values()) {
+			if (outboundRtp.trackIdentifier !== track.id) continue;
+
+			trackMonitor.mappedOutboundRtp.set(outboundRtp.ssrc, outboundRtp);
+		}
+	}
+
+	private _createInboundTrackMonitor(track: MediaStreamTrack, inboundRtpMonitor: InboundRtpMonitor) {
+		if (this.mappedInboundTracks.has(track.id)) return;
+	
+		const trackMonitor = new InboundTrackMonitor(
+			track,
+			inboundRtpMonitor
+		);
+
+		this._pendingMediaStreamTracks.delete(track.id);
+		this.mappedInboundTracks.set(track.id, trackMonitor);
+		
 	}
 }

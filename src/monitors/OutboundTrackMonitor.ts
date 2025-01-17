@@ -7,12 +7,11 @@ export class OutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
 	public readonly mappedOutboundRtp = new Map<number, OutboundRtpMonitor>();
-	public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
+	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 
 	public calculatedScore: CalculatedScore = {
 		weight: 1,
 		value: undefined,
-		remarks: [],
 	};
 
 	public get score() {
@@ -20,19 +19,19 @@ export class OutboundTrackMonitor {
 	}
 
 	public constructor(
-		public readonly trackIdentifier: string,
-		public readonly getMediaSource: () => MediaSourceMonitor,
+		public readonly track: MediaStreamTrack,
+		private _mediaSource: MediaSourceMonitor,
 	) {
 		this.detectors = new Detectors();
 	}
 
 
 	public getPeerConnection() {
-		return this.getMediaSource().getPeerConnection();
+		return this._mediaSource.getPeerConnection();
 	}
 
 	public get kind() {
-		return this.getMediaSource().kind;
+		return this._mediaSource.kind;
 	}
 
 	bitrate?: number;

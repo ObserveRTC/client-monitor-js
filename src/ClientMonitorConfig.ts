@@ -41,13 +41,6 @@ export type ClientMonitorConfig = {
     integrateNavigatorMediaDevices: boolean | MediaDevices;
 
     /**
-     * If true, the monitor fetches the user agent data from the browser
-     *
-     * DEFAULT: true
-     */
-    fetchUserAgentData: boolean;
-
-    /**
      * If true, the monitor generates a `CLIENT_JOINED` event when it is created.
      *
      * DEFAULT: true

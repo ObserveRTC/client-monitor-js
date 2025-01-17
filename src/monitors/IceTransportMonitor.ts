@@ -24,6 +24,11 @@ export class IceTransportMonitor implements IceTransportStats {
 	selectedCandidatePairChanges?: number | undefined;
 	appData?: Record<string, unknown> | undefined;
 
+	ΔpacketsSent?: number | undefined;
+	ΔpacketsReceived?: number | undefined;
+	ΔbytesSent?: number | undefined;
+	ΔbytesReceived?: number | undefined;
+
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: IceTransportStats,
@@ -54,6 +59,19 @@ export class IceTransportMonitor implements IceTransportStats {
 		const elapsedInMs = stats.timestamp - this.timestamp;
 		if (elapsedInMs <= 0) {
 			return; // logger?
+		}
+
+		if (this.packetsSent && stats.packetsSent) {
+			this.ΔpacketsSent = stats.packetsSent - this.packetsSent;
+		}
+		if (this.packetsReceived && stats.packetsReceived) {
+			this.ΔpacketsReceived = stats.packetsReceived - this.packetsReceived;
+		}
+		if (this.bytesSent && stats.bytesSent) {
+			this.ΔbytesSent = stats.bytesSent - this.bytesSent;
+		}
+		if (this.bytesReceived && stats.bytesReceived) {
+			this.ΔbytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 
 		Object.assign(this, stats);

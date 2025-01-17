@@ -43,7 +43,7 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	}
 
 	public getTrack() {
-		return this._peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
+		return this._peerConnection.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
 	public accept(stats: Omit<MediaSourceStats, 'appData'>): void {

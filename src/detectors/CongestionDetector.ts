@@ -7,6 +7,11 @@ export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
 export class CongestionDetector implements Detector {
 	public readonly name = 'congestion-detector';
 	
+	private _maxAvailableIncomingBitrate = 0;
+	private _maxReceivingBitrate = 0;
+	private _maxAvailableOutgoingBitrate = 0;
+	private _maxSendingBitrate = 0;
+
 	public constructor(
 		public readonly peerConnection: PeerConnectionMonitor
 	) {
@@ -54,11 +59,18 @@ export class CongestionDetector implements Detector {
 				break;
 			}
 		}
+		const availableIncomingBitrate = this.peerConnection.totalAvailableIncomingBitrate;
+		const availableOutgoingBitrate = this.peerConnection.totalAvailableOutgoingBitrate;
 
 		if (!isCongested) {
 			if (this.peerConnection.congested) {
 				this.peerConnection.congested = false;
 			}
+			this._maxAvailableIncomingBitrate = Math.max(this._maxAvailableIncomingBitrate, availableIncomingBitrate);
+			this._maxAvailableOutgoingBitrate = Math.max(this._maxAvailableOutgoingBitrate, availableOutgoingBitrate);
+			this._maxReceivingBitrate = Math.max(this._maxReceivingBitrate, this.peerConnection.receivingBitrate);
+			this._maxSendingBitrate = Math.max(this._maxSendingBitrate, this.peerConnection.sendingBitrate);
+
 			return;
 		} else if (this.peerConnection.congested) {
 			return;
@@ -66,33 +78,20 @@ export class CongestionDetector implements Detector {
 
 		// congestion is detected
 		this.peerConnection.congested = true;
-
-		const targetIncomingBitrateAfterCongestion = this.peerConnection.selectedIceCandidatePairs.reduce((acc, pair) => acc + (pair.availableIncomingBitrate ?? 0), 0);
-		const targetOutgoingBitrateAfterCongestion = this.peerConnection.selectedIceCandidatePairs.reduce((acc, pair) => acc + (pair.availableOutgoingBitrate ?? 0), 0);
-		const eventBase = {
-			targetIncomingBitrateAfterCongestion,
-			targetOutgoingBitrateAfterCongestion,
-			targetIncomingBitrateBeforeCongestion: this.peerConnection.highestSeenAvailableIncomingBitrate,
-			targetOutgoingBitrateBeforeCongestion: this.peerConnection.highestSeenAvailableOutgoingBitrate,
-			highestSeenIncomingBitrateBeforeCongestion: this.peerConnection.highestSeenReceivingBitrate,
-			highestSeenOutgoingBitrateBeforeCongestion: this.peerConnection.highestSeenSendingBitrate,
-		}
-
-		this.peerConnection.highestSeenAvailableIncomingBitrate = undefined;
-		this.peerConnection.highestSeenAvailableOutgoingBitrate = undefined;
-		this.peerConnection.highestSeenReceivingBitrate = undefined;
-		this.peerConnection.highestSeenSendingBitrate = undefined;
-
 		this.peerConnection.parent.emit('congestion', {
-			...eventBase,
+			clientMonitor: this.peerConnection.parent,
 			peerConnectionMonitor: this.peerConnection,
+			availableIncomingBitrate,
+			availableOutgoingBitrate,
+			maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
+			maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
+			maxReceivingBitrate: this._maxSendingBitrate,
+			maxSendingBitrate: this._maxSendingBitrate,
 		});
-		this.peerConnection.parent.addIssue({
-			type: 'congestion',
-			payload: {
-				peerConnectionId: this.peerConnection.peerConnectionId,
-				...eventBase,
-			},
-		});
+
+		this._maxAvailableIncomingBitrate = 0;
+		this._maxAvailableOutgoingBitrate = 0;
+		this._maxReceivingBitrate = 0;
+		this._maxSendingBitrate = 0;
 	}
 }

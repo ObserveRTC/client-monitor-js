@@ -1,4 +1,5 @@
 import { OutboundRtpStats, QualityLimitationDurations } from "../schema/ClientSample";
+import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class OutboundRtpMonitor implements OutboundRtpStats {
@@ -7,7 +8,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	timestamp: number;
 	id: string;
 	ssrc: number;
-	kind: string;
+	kind: MediaKind;
 	qualityLimitationDurations?: QualityLimitationDurations;
 	transportId?: string | undefined;
 	codecId?: string | undefined;
@@ -47,7 +48,14 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 
 	// derived fields
 	bitrate?: number | undefined;
+	payloadBitrate?: number | undefined;
 	packetRate?: number | undefined;
+	bitPerPixel?: number | undefined;
+	
+	ΔpacketsSent?: number | undefined;
+	ΔbytesSent?: number | undefined;
+
+	// public targetDeviations: [absolute: number, percentage: number][] = [];
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -56,7 +64,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
 		this.ssrc = options.ssrc;
-		this.kind = options.kind;
+		this.kind = options.kind as MediaKind;
 	}
 
 	public get visited(): boolean {
@@ -90,7 +98,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 
 	public getTrack() {
 		return this.getMediaSource()?.getTrack() ?? 
-			this._peerConnection.parent.mappedOutboundTracks.get(this.trackIdentifier ?? '');
+			this._peerConnection.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
 	public accept(stats: Omit<OutboundRtpStats, 'appData'>): void {
@@ -103,10 +111,29 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		const elapsedInSec = elapsedInMs / 1000;
 
 		if (stats.packetsSent !== undefined && this.packetsSent !== undefined) {
-			this.packetRate = (stats.packetsSent - this.packetsSent) / (elapsedInSec);
+			this.ΔpacketsSent = stats.packetsSent - this.packetsSent;
+			this.packetRate = (this.ΔpacketsSent) / (elapsedInSec);
+		}
+		if (stats.bytesSent !== undefined && this.bytesSent !== undefined) {
+			this.ΔbytesSent = stats.bytesSent - this.bytesSent;
+			this.bitrate = Math.max(0, this.ΔbytesSent * 8 / (elapsedInSec));
+			
+			if (stats.headerBytesSent !== undefined && 
+				this.headerBytesSent !== undefined
+			) {
+				const headerBytesSent = stats.headerBytesSent - this.headerBytesSent;
+				const retransmittedBytesSent = (stats.retransmittedBytesSent ?? 0) - (this.retransmittedBytesSent ?? 0);
+				const payloadBytesSent = this.ΔbytesSent - headerBytesSent - retransmittedBytesSent;
+
+				this.payloadBitrate = Math.max(0, payloadBytesSent * 8 / (elapsedInSec));
+			}
 		}
 
 		Object.assign(this, stats);
+
+		if (this.frameWidth && this.frameHeight && this.framesPerSecond && this.bitrate) {
+			this.bitPerPixel = this.bitrate / (this.frameHeight * this.frameWidth * this.framesPerSecond);
+		}
 	}
 
 	public createSample(): OutboundRtpStats {

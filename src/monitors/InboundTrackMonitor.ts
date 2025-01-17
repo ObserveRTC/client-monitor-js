@@ -1,20 +1,19 @@
 import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
 import { Detectors } from "../detectors/Detectors";
 import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetector";
-import { StuckedInboundTrackDetector } from "../detectors/StuckedInboundTrack";
+import { DryInboundTrackDetector } from "../detectors/DryInboundTrack";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 
 export class InboundTrackMonitor {
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
-	public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
+	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 	public dtxMode = false;
 
 	public calculatedScore: CalculatedScore = {
 		weight: 1,
 		value: undefined,
-		remarks: [],
 	};
 
 	public get score() {
@@ -22,11 +21,11 @@ export class InboundTrackMonitor {
 	}
 
 	public constructor(
-		public readonly trackIdentifier: string,
-		public readonly getInboundRtp: () => InboundRtpMonitor,
+		public readonly track: MediaStreamTrack,
+		private readonly _inboundRtp: InboundRtpMonitor,
 	) {
 		this.detectors = new Detectors(
-			new StuckedInboundTrackDetector(this),
+			new DryInboundTrackDetector(this),
 		);
 
 		if (this.kind === 'audio') {
@@ -36,29 +35,33 @@ export class InboundTrackMonitor {
 		}
 		
 		// for mediasoup probator we don't need to run detectors
-		if (this.trackIdentifier === 'probator') {
+		if (this.track.id === 'probator') {
 			this.detectors.clear();
 		}
 	}
 
+	public getInboundRtp() {
+		return this._inboundRtp;
+	}
+
 	public getPeerConnection() {
-		return this.getInboundRtp().getPeerConnection();
+		return this._inboundRtp.getPeerConnection();
 	}
 
 	public get kind() {
-		return this.getInboundRtp().kind;
+		return this._inboundRtp.kind;
 	}
 
 	public get bitrate() {
-		return this.getInboundRtp().bitrate;
+		return this._inboundRtp.bitrate;
 	}
 
 	public get jitter() {
-		return this.getInboundRtp().jitter;
+		return this._inboundRtp.jitter;
 	}
 
 	public get fractionLost() {
-		return this.getInboundRtp().fractionLost;
+		return this._inboundRtp.fractionLost;
 	}
 
 	public update() {

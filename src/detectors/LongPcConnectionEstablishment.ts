@@ -31,17 +31,12 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 			return;
 		}
 		this._evented = true;
-		const clientMontior = this.peerConnection.parent;
+		const clientMonitor = this.peerConnection.parent;
 
-		clientMontior.emit('too-long-pc-connection-establishment', this.peerConnection);
-
-		clientMontior.addIssue({
-			type: 'too-long-pc-connection-establishment',
-			payload: {
-				peerConnectionId: this.peerConnection.peerConnectionId,
-				connectingStartedAt: this.peerConnection.connectingStartedAt,
-				duration,
-			},
-		})
+		clientMonitor.emit('too-long-pc-connection-establishment', {
+			peerConnectionMonitor: this.peerConnection,
+			clientMonitor,
+		}
+);
 	}
 }

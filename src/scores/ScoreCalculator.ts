@@ -4,11 +4,22 @@ import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { TrackMonitor } from "../monitors/TrackMonitor";
 import { groupBy } from "../utils/common";
-import { calculateBaseVideoScore, getRttScore } from "./CalculatedScore";
 import { calculateAudioMOS } from "./mosScores";
 
 export interface ScoreCalculator {
 	update(): void;
+}
+
+type OutboundTrackScoreAppData = {
+	diffBitrateSquares: number[];
+	calculatedScoreHistory: number[];
+	lastBitrate?: number;
+	ewmaBitrate?: number;
+}
+
+type InboundVideoScoreAppData = {
+	calculatedScoreHistory: number[];
+	ewmaFps?: number;
 }
 
 export class DefaultScoreCalculator {
@@ -28,17 +39,39 @@ export class DefaultScoreCalculator {
 		this._calculateClientMonitorScore();
 	}
 
+
+	// 4.0 <= good < 5.0
+	// 3.0 <= fair < 4.0
+	// 2.0 <= poor < 3.0
+	// 1.0 <= bad < 2.0
+	// 0.0 <= very bad < 1.0
+
 	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
 		// Packet Jitter measured in seconds
 		// we use RTT and lost packets to calculate the base score for the connection
 		const score = pcMonitor.calculatedStabilityScore;
 		const rttInMs = (pcMonitor.avgRttInSec ?? 0) * 1000;
-		const latencyFactor = rttInMs < 150 ? 1.0 : getRttScore(rttInMs);
-		const totalPackets = Math.max(1, (pcMonitor.totalInboundPacketsReceived ?? 0) + (pcMonitor.totalOutboundPacketsSent ?? 0));
-		const lostPackets = (pcMonitor.totalInboundPacketsLost ?? 0) + (pcMonitor.deltaOutboundPacketsSent ?? 0);
-		const deliveryFactor = 1.0 - ((lostPackets) / (lostPackets + totalPackets));
-		// let's push the actual stability score
-		const stabilityScore = ((latencyFactor * 0.5) + (deliveryFactor * 0.5)) ** 2;
+		const fractionLost = 
+			pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)
+			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0);
+		
+		let stabilityScore = 5.0;
+
+		if (300 < rttInMs) {
+			stabilityScore -= 2.0;
+		} else if (150 < rttInMs) {
+			stabilityScore -= 1.0;
+		}
+
+		if (0.0 < fractionLost) {
+			if (fractionLost < 0.05) {
+				stabilityScore -= 1.0;
+			}	else if (fractionLost < 0.2) {
+				stabilityScore -= 2.0;
+			} else {
+				stabilityScore = 0.0
+			}
+		}
 
 		score.lastNScores.push(stabilityScore);
 		
@@ -47,17 +80,8 @@ export class DefaultScoreCalculator {
 		} else if (score.lastNScores.length < 5) {
 			return;
 		}
-		let counter = 0;
-		let weight = 0;
-		let totalScore = 0;
 
-		for (const lastScore of score.lastNScores) {
-			weight += 1;
-			counter += weight;
-			totalScore += weight * lastScore;
-		}
-		
-		score.value = totalScore / counter;
+		score.value = this._calculateFinalScore(score.lastNScores);
 	}
 
 	public _calculateClientMonitorScore() {
@@ -114,37 +138,92 @@ export class DefaultScoreCalculator {
 	}
 
 	private _calculateInboundVideoTrackScore(trackMonitor: InboundTrackMonitor) {
+		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+			if (trackMonitor.calculatedScore.appData) {
+				trackMonitor.calculatedScore.appData = undefined;
+			}
+
+			return trackMonitor.calculatedScore.value = undefined;
+		}
+
+		// fps volatility
+		// fractionOfDroppedFrames
+		// totalCorruptionProbability
+
 		const inboundRtp = trackMonitor.getInboundRtp();
-		const frameHeight = inboundRtp.frameHeight;
-		const frameWidth = inboundRtp.frameWidth;
-		const bitrate = trackMonitor.bitrate;
-		const framesPerSecond = inboundRtp.framesPerSecond;
-		const codec = this._getCodecFromMimeType(inboundRtp.getCodec()?.mimeType ?? '') ?? 'vp8';
-		
-		if (!frameHeight || !frameWidth || !bitrate || !framesPerSecond) {
+
+		if (!inboundRtp) {
 			trackMonitor.calculatedScore.value = undefined;
-			trackMonitor.calculatedScore.remarks = ['Missing data for score calculation'];
-			
+
+			return;
+		}
+		let appData = trackMonitor.calculatedScore.appData as InboundVideoScoreAppData | undefined;
+		let scoreValue = 5.0;
+
+		if (!appData) {
+			appData = {
+				calculatedScoreHistory: [],
+			}
+			trackMonitor.calculatedScore.appData = appData;
+		}
+
+		if (inboundRtp.framesPerSecond) {
+			inboundRtp.lastNFramesPerSec.push(inboundRtp.framesPerSecond);
+
+			if (!appData.ewmaFps) {
+				appData.ewmaFps = inboundRtp.framesPerSecond;
+			} else {
+				appData.ewmaFps = 0.9 * appData.ewmaFps + 0.1 * inboundRtp.framesPerSecond;
+			}
+
+			const avgFpsSqueres = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + (fps * fps), 0) / inboundRtp.lastNFramesPerSec.length;
+			const stdDev = Math.sqrt(avgFpsSqueres);
+			const volatility = stdDev / appData.ewmaFps;
+
+			if (0.1 < volatility && volatility < 0.2) {
+				scoreValue -= 1.0;
+			} else if (0.2 < volatility) {
+				scoreValue -= 2.0;
+			}
+		}
+
+		if (inboundRtp.framesDropped && inboundRtp.framesRendered) {
+			const fractionOfDroppedFrames = inboundRtp.framesDropped / (inboundRtp.framesDropped + inboundRtp.framesRendered);
+
+			if (0.1 < fractionOfDroppedFrames && fractionOfDroppedFrames < 0.2) {
+				scoreValue -= 1.0;
+			} else if (0.2 < fractionOfDroppedFrames) {
+				scoreValue -= 2.0;
+			}
+		}
+
+		if (inboundRtp.ΔcorruptionProbability) {
+			scoreValue -= 2.0 * inboundRtp.ΔcorruptionProbability;
+		}
+
+		appData.calculatedScoreHistory.push(scoreValue);
+	
+		if (10 < appData.calculatedScoreHistory.length) {
+			appData.calculatedScoreHistory.shift();
+		} else if (appData.calculatedScoreHistory.length < 5) {
 			return;
 		}
 
-		const [value, remark ]= calculateBaseVideoScore({
-			frameHeight: 0,
-			frameWidth: 0,
-			bitrate: trackMonitor.bitrate ?? 0,
-			framesPerSecond: 0,
-			codec,
-			contentType: trackMonitor.contentType,
-		});
-
-		trackMonitor.calculatedScore.value = value;
-		trackMonitor.calculatedScore.remarks = [remark];
+		trackMonitor.calculatedScore.value = this._calculateFinalScore(appData.calculatedScoreHistory);
 	}
 
 	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor) {
+		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+			if (trackMonitor.calculatedScore.appData) {
+				trackMonitor.calculatedScore.appData = undefined;
+			}
+
+			return trackMonitor.calculatedScore.value = undefined;
+		}
+
 		const pcMonitor = trackMonitor.getPeerConnection();
 		const bitrate = trackMonitor.bitrate;
-		const packetLoss = trackMonitor.getInboundRtp().deltaPacketsLost ?? 0;
+		const packetLoss = trackMonitor.getInboundRtp().ΔpacketsLost ?? 0;
 		const bufferDelayInMs = trackMonitor.getInboundRtp().jitterBufferDelay ?? 10;
 		const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
 		const dtxMode = trackMonitor.dtxMode;
@@ -152,7 +231,6 @@ export class DefaultScoreCalculator {
 
 		if (!bitrate) {
 			trackMonitor.calculatedScore.value = undefined;
-			trackMonitor.calculatedScore.remarks = ['Missing data for score calculation'];
 			
 			return;
 		}
@@ -165,98 +243,123 @@ export class DefaultScoreCalculator {
 			dtxMode,
 			fec,
 		);
-		trackMonitor.calculatedScore.remarks = [''];
 	}
 
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor) {
+		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+			if (trackMonitor.calculatedScore.appData) {
+				trackMonitor.calculatedScore.appData = undefined;
+			}
+
+			return trackMonitor.calculatedScore.value = undefined;
+		}
+
 		const outboundRtp = trackMonitor.getHighestLayer();
 	
 		if (!outboundRtp) {
 			trackMonitor.calculatedScore.value = undefined;
-			trackMonitor.calculatedScore.remarks = ['Missing data for score calculation'];
 
 			return;
 		}
+		const score = trackMonitor.calculatedScore;
+		let appData = score.appData as OutboundTrackScoreAppData | undefined;
 
-		const frameHeight = trackMonitor.getMediaSource().height;
-		const frameWidth = trackMonitor.getMediaSource().width;
-		const bitrate = outboundRtp.bitrate;
-		const framesPerSecond = outboundRtp.framesPerSecond;
-		const codec = this._getCodecFromMimeType(outboundRtp.getCodec()?.mimeType ?? '') ?? 'vp8';
-		
-		if (!frameHeight || !frameWidth || !bitrate || !framesPerSecond) {
-			return [0, 'Missing data for score calculation'] as const;
+		if (!score.appData) {
+			appData = {
+				calculatedScoreHistory: [],
+				diffBitrateSquares: [],
+			}
+			score.appData = appData;
 		}
-	
-		if (!bitrate) {
-			trackMonitor.calculatedScore.value = undefined;
-			trackMonitor.calculatedScore.remarks = ['Missing data for score calculation'];
-		
+		if (!appData) return;
+
+		// max score: 5
+		// target deviation penalty: 0-2
+		// cpu limitation penalty: 0-1
+		// bitrate volatility penalty: 0-2
+		let scoreValue = 5.0;
+
+		if (outboundRtp.targetBitrate && outboundRtp.payloadBitrate) {
+			const deviation = outboundRtp.targetBitrate - outboundRtp.payloadBitrate;
+			const percentage = deviation / outboundRtp.targetBitrate;
+			const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
+
+			if (0 < deviation && lowThreshold < deviation) {
+				if (0.05 <= percentage && percentage < 0.15) {
+					scoreValue -= 1.0;
+				} else if (0.15 <= percentage) {
+					scoreValue -= 2.0;
+				}
+			}		
+		}
+
+		if (outboundRtp.qualityLimitationReason === 'cpu') {
+			scoreValue -= 1.0;
+		}
+
+		if (outboundRtp.bitrate) {
+			if (!appData.ewmaBitrate) {
+				appData.ewmaBitrate = outboundRtp.bitrate;
+			} else {
+				appData.ewmaBitrate = 0.9 * appData.ewmaBitrate + 0.1 * outboundRtp.bitrate;
+			}
+			if (appData.lastBitrate) {
+				const diffBitrate = Math.abs(appData.lastBitrate - outboundRtp.bitrate);
+
+				appData.diffBitrateSquares.push(diffBitrate * diffBitrate);
+				
+				while (appData.diffBitrateSquares.length > 10) {
+					appData.diffBitrateSquares.shift();
+				}
+			}
+			if (appData.diffBitrateSquares.length > 3) {
+				const avgBitrateSquare = appData.diffBitrateSquares.reduce((acc, square) => acc + square, 0) / appData.diffBitrateSquares.length;
+				const stdDev = Math.sqrt(avgBitrateSquare);
+				const volatility = stdDev / appData.ewmaBitrate;
+
+				if (0.1 < volatility && volatility < 0.2) {
+					scoreValue -= 1.0;
+				} else if (0.2 < volatility) {
+					scoreValue -= 2.0;
+				}
+			}
+			appData.lastBitrate = outboundRtp.bitrate;
+		}
+
+		appData.calculatedScoreHistory.push(scoreValue);
+
+		if (10 < appData.calculatedScoreHistory.length) {
+			appData.calculatedScoreHistory.shift();
+		} else if (appData.calculatedScoreHistory.length < 5) {
 			return;
 		}
-		
-		const [value, remark] = calculateBaseVideoScore({
-			frameHeight: 0,
-			frameWidth: 0,
-			bitrate: trackMonitor.bitrate ?? 0,
-			framesPerSecond: 0,
-			codec,
-			contentType: trackMonitor.contentType,
-		});
-		trackMonitor.calculatedScore.value = value;
-		trackMonitor.calculatedScore.remarks = [remark];
+
+		score.value = this._calculateFinalScore(appData.calculatedScoreHistory);
 	}
 
 	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor) {
-		const outboundRtp = trackMonitor.getHighestLayer();
-	
-		if (!outboundRtp) {
-			trackMonitor.calculatedScore.value = undefined;
-			trackMonitor.calculatedScore.remarks = ['Missing data for score calculation'];
+		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+			if (trackMonitor.calculatedScore.appData) {
+				trackMonitor.calculatedScore.appData = undefined;
+			}
 
-			return;
+			return trackMonitor.calculatedScore.value = undefined;
 		}
 
-		const pcMonitor = trackMonitor.getPeerConnection();
-		const bitrate = outboundRtp.bitrate;
-		const packetLoss = outboundRtp.getRemoteInboundRtp()?.deltaPacketsLost ?? 0;
-		const bufferDelayInMs = 0;
-		const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
-		// assuming dtx and fec to true to get a better score for outbound audio
-		const dtxMode = true;
-		const fec = true;
-	
-		if (!bitrate) {
-			trackMonitor.calculatedScore.value = undefined;
-			trackMonitor.calculatedScore.remarks = ['Missing data for score calculation'];
-		
-			return;
-		}
-		
-		trackMonitor.calculatedScore.value = calculateAudioMOS(
-				bitrate,
-				packetLoss,
-				bufferDelayInMs,
-				roundTripTimeInMs,
-				dtxMode,
-				fec,
-			);
-		trackMonitor.calculatedScore.remarks = [''];
+		trackMonitor.calculatedScore.value = 5.0;
 	}
 
-	private _getCodecFromMimeType(mimeType: string) {
-		if (mimeType.includes('vp8')) {
-			return 'vp8';
+	private _calculateFinalScore(scores: number[]) {
+		let counter = 0;
+		let weight = 0;
+		let totalScore = 0;
+
+		for (const score of scores) {
+			weight += 1;
+			counter += weight;
+			totalScore += weight * score;
 		}
-		if (mimeType.includes('vp9')) {
-			return 'vp9';
-		}
-		if (mimeType.includes('h264')) {
-			return 'h264';
-		}
-		if (mimeType.includes('h265')) {
-			return 'h265';
-		}
-		return 'vp8';
+		
+		return totalScore / counter;
 	}
 }

@@ -31,7 +31,7 @@ export class Sources {
 		peerConnectionId?: string,
 		peerConnection: RTCPeerConnection,
 		appData?: Record<string, unknown>,
-	}): this {
+	}): void {
 		if (this.monitor.closed) throw new Error('Cannot add RTCPeerConnection to closed ClientMonitor');
 		const {
 			peerConnectionId = crypto.randomUUID(),
@@ -52,9 +52,7 @@ export class Sources {
 			appData,
 		});
 
-		this._addPeerConnectionMonitor(peerConnectionMonitor);
-
-		return this;
+		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
 	}
 
 	public addMediasoupDevice(device: mediasoup.types.Device, clientEventAppData?: Record<string, unknown>) {
@@ -63,7 +61,6 @@ export class Sources {
 		}
 		this._mediasoupDeviceListeners.push({ device, listener: newTransportListener });
 		device.observer.on('newtransport', newTransportListener);
-		return this;
 	}
 
 	public removeMediasoupDevice(device: mediasoup.types.Device) {
@@ -87,7 +84,7 @@ export class Sources {
 			appData: clientEventAppData,
 		});
 
-		this._addPeerConnectionMonitor(peerConnectionMonitor);
+		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
 
 		if (!this.mediasoupStatsAdapterAdded) {
 			this.monitor.statsAdapters.add(
@@ -102,7 +99,7 @@ export class Sources {
 	public fetchUserAgentData() {
 		const userAgentData = fetchUserAgentData();
 		
-		if (!userAgentData) return this;
+		if (!userAgentData) return;
 
 		if (!this.userAgentMetaDataSent) {
 			this.monitor.addMetaData({
@@ -124,15 +121,13 @@ export class Sources {
 					logger.error('Failed to add adapter', err);
 				}
 			}
-			
 		}
-		
 
-		return this;
+		return userAgentData;
 	}
 
 	public watchMediaDevices() {
-		if (this.mediaDevicesAreWatched) return this;
+		if (this.mediaDevicesAreWatched) return;
 
 		try {
 			watchMediaDevices(this.monitor);
@@ -140,14 +135,6 @@ export class Sources {
 		} catch (err) {
 			logger.error('Failed to watch media devices', err);
 		}
-
-		return this;
 	}
 
-	private _addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor) {
-		peerConnectionMonitor.once('close', () => {
-			this.monitor.mappedPeerConnections.delete(peerConnectionMonitor.peerConnectionId);
-		});
-		this.monitor.mappedPeerConnections.set(peerConnectionMonitor.peerConnectionId, peerConnectionMonitor);
-	}
 }

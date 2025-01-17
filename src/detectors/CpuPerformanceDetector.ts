@@ -18,6 +18,7 @@ export class CpuPerformanceDetector {
 		let gotLimited = false;
 		const { lowWatermark: lowFpsVolatility, highWatermark: highFpsVolatility } = this.config.fpsVolatilityThresholds ?? {};
 		
+		
 		if (this.config.durationOfCollectingStatsThreshold) {
 			const { lowWatermark, highWatermark } = this.config.durationOfCollectingStatsThreshold;
 			
@@ -47,6 +48,25 @@ export class CpuPerformanceDetector {
 					}
 				}
 			}
+		}
+
+		if (gotLimited) {
+			if (isLimited) return;
+			this.clientMonitor.cpuPerformanceAlertOn = true;
+
+			this.clientMonitor.emit('cpulimitation', {
+				clientMonitor: this.clientMonitor,
+			});
+
+		} else {
+			if (!isLimited) return;
+			this.clientMonitor.cpuPerformanceAlertOn = false;
+			// this.clientMonitor.addIssue({
+			// 	type: 'cpulimitation',
+			// 	payload: {
+			// 		issueContext: this._issueContext,
+			// 	},
+			// });
 		}
 	}
 }

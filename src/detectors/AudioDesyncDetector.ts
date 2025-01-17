@@ -42,15 +42,6 @@ export class AudioDesyncDetector implements Detector {
 
 		if (!inboundRtp.desync) {
 			if (wasDesync) {
-				this.peerConnection.parent.addIssue({
-					type: 'audio-desync',
-					payload: {
-						peerConnectionId: this.peerConnection.peerConnectionId,
-						trackId: inboundRtp.trackIdentifier,
-						ssrc: inboundRtp.ssrc,
-						duration: this._startedDesyncAt ? (Date.now() - this._startedDesyncAt) : undefined,
-					}
-				});
 				this._startedDesyncAt = undefined;
 			}
 			return;
@@ -59,6 +50,9 @@ export class AudioDesyncDetector implements Detector {
 		}
 
 		this._startedDesyncAt = Date.now();
-		this.peerConnection.parent.emit('audio-desync-track', this.trackMonitor);
+		this.peerConnection.parent.emit('audio-desync-track', {
+			clientMonitor: this.peerConnection.parent,
+			trackMonitor: this.trackMonitor,
+		});
 	}
 }

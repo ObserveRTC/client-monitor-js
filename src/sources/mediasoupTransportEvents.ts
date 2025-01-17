@@ -150,7 +150,7 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 	});
 
 	if (producer.track) {
-		listenMediaStreamTrackEvents(clientMonitor, producer.track);
+		listenMediaStreamTrackEvents(pcMonitor, producer.track);
 	}
 }
 
@@ -231,7 +231,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 		}
 	});
 
-	listenMediaStreamTrackEvents(clientMonitor, consumer.track);
+	listenMediaStreamTrackEvents(pcMonitor, consumer.track);
 }
 
 function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: mediasoup.types.DataConsumer, appData?: Record<string, unknown>) {

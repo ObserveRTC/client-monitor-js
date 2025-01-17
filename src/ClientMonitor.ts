@@ -1,7 +1,18 @@
-import { ExtensionStat, ClientSample, ClientEvent, ClientMetaData, ClientIssue, ClientScore } from './schema/ClientSample';
+import { ExtensionStat, 
+    ClientSample, 
+    ClientEvent as ClientSampleClientEvent, 
+    ClientMetaData as ClientSampleClientMetaData, 
+    ClientIssue as ClientSampleClientIssue, 
+    ClientScore as ClientSampleClientScore  
+} from './schema/ClientSample';
 import { createLogger } from "./utils/logger";
 import { EventEmitter } from 'events';
-import { AcceptedClientEvent, AcceptedClientIssue, AcceptedClientMetaData, ClientMonitorEvents } from './ClientMonitorEvents';
+import { 
+    ClientEvent, 
+    ClientIssue, 
+    ClientMetaData, 
+    ClientMonitorEvents 
+} from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventType } from './utils/enums';
 import { ClientMonitorConfig } from './ClientMonitorConfig';
@@ -14,6 +25,7 @@ import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
 import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
 import { DefaultScoreCalculator, ScoreCalculator } from './scores/ScoreCalculator';
+import * as mediasoup from 'mediasoup-client';
 
 const logger = createLogger('ClientMonitor');
 
@@ -25,49 +37,84 @@ export declare interface ClientMonitor {
 }
 
 export class ClientMonitor extends EventEmitter {
-    public readonly sources: Sources;
     public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
-    public readonly mappedOutboundTracks = new Map<string, OutboundTrackMonitor>();
-    public readonly mappedInboundTracks = new Map<string, InboundTrackMonitor>();
     public readonly detectors: Detectors;
     
     public scoreCalculator: ScoreCalculator;
     public bufferingSampleData: boolean;
     public closed = false;
     public lastSampledAt = 0;
-
+    public lastCollectingStatsAt = 0;
+    
     public cpuPerformanceAlertOn = false;
-
+    
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
     public receivingAudioBitrate = -1;
     public receivingVideoBitrate = -1;
     public totalAvailableIncomingBitrate = -1;
     public totalAvailableOutgoingBitrate = -1;
-
+    
     public avgRttInSec = -1;
     public score = 5.0;
-
+    
+    private readonly _sources: Sources;
     private _timer?: ReturnType<typeof setInterval>;
     private _samplingTick = 0;
     private _collectingCounter = 0;
-    private _clientEvents: ClientEvent[] = [];
-    private _clientMetaItems: ClientMetaData[] = [];
-    private _clientIssues: ClientIssue[] = [];
+    private _clientEvents: ClientSampleClientEvent[] = [];
+    private _clientMetaItems: ClientSampleClientMetaData[] = [];
+    private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
-    private _clientScores: ClientScore[] = [];
+    private _clientScores: ClientSampleClientScore[] = [];
     public durationOfCollectingStatsInMs = 0;
+    public readonly config: ClientMonitorConfig;
 
     public constructor(
-        public readonly config: ClientMonitorConfig
+        config: Partial<ClientMonitorConfig>
     ) {
         super();
-        
-        this.sources = new Sources(this);
+        this.config = {
+            ...config,
+            collectingPeriodInMs: config?.collectingPeriodInMs ?? 2000,
+            samplingPeriodInMs: config?.samplingPeriodInMs ?? 8000,
+            
+            integrateNavigatorMediaDevices: config?.integrateNavigatorMediaDevices ?? true,
+            addClientJointEventOnCreated: config?.addClientJointEventOnCreated ?? true,
+            addClientLeftEventOnClose: config?.addClientLeftEventOnClose ?? true,
+    
+            videoFreezesDetector: config?.videoFreezesDetector ?? {
+            },
+            stuckedInboundTrackDetector: config?.stuckedInboundTrackDetector ?? {
+                thresholdInMs: 5000,
+            },
+            audioDesyncDetector: config?.audioDesyncDetector ?? {
+                fractionalCorrectionAlertOffThreshold: 0.1,
+                fractionalCorrectionAlertOnThreshold: 0.05,
+            },
+            congestionDetector: config?.congestionDetector ?? {
+                sensitivity: 'medium',
+            },
+            cpuPerformanceDetector: config?.cpuPerformanceDetector ?? {
+                fpsVolatilityThresholds: {
+                    lowWatermark: 0.1,
+                    highWatermark: 0.3,
+                },
+                durationOfCollectingStatsThreshold: {
+                    lowWatermark: 5000,
+                    highWatermark: 10000,
+                },
+            },
+            longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
+                thresholdInMs: 5000,
+            },
+        }
+
+        this._sources = new Sources(this);
         this.scoreCalculator = new DefaultScoreCalculator(this);
         this.setMaxListeners(Infinity);
-        this.setCollectingPeriod(config.collectingPeriodInMs);
+        this.setCollectingPeriod(this.config.collectingPeriodInMs);
         if (config.samplingPeriodInMs) {
             this.setSamplingPeriod(config.samplingPeriodInMs);
         }
@@ -77,10 +124,12 @@ export class ClientMonitor extends EventEmitter {
             this.addClientJoinEvent();
         }
         if (this.config.integrateNavigatorMediaDevices) {
-            this.sources.watchMediaDevices();
+            this._sources.watchMediaDevices();
         }
-        if (this.config.fetchUserAgentData) {
-            this.sources.fetchUserAgentData();
+        try {
+            this._sources.fetchUserAgentData();
+        } catch (err) {
+            logger.error('Failed to fetch user agent data', err);
         }
         
         this.detectors = new Detectors(
@@ -117,7 +166,7 @@ export class ClientMonitor extends EventEmitter {
     public async collect(): Promise<[string, RTCStats[]][]> {
         if (this.closed) throw new Error('ClientMonitor is closed');
         
-        const started = Date.now();
+        this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
         
         await Promise.allSettled(this.peerConnections.map(async (peerConnection) => {
@@ -140,13 +189,15 @@ export class ClientMonitor extends EventEmitter {
         this.totalAvailableIncomingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableIncomingBitrate ?? 0), 0);
         this.totalAvailableOutgoingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableOutgoingBitrate ?? 0), 0);
         this.avgRttInSec = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length;
-        this.durationOfCollectingStatsInMs = Date.now() - started;
+        this.durationOfCollectingStatsInMs = Date.now() - this.lastCollectingStatsAt;
         
         this.tracks.forEach(track => track.update());
         this.detectors.update();
         this.scoreCalculator.update();
 
         this.emit('stats-collected', {
+            clientMonitor: this,
+            startedAt: this.lastCollectingStatsAt,
             collectedStats: result,
             durationOfCollectingStatsInMs: this.durationOfCollectingStatsInMs,
         });
@@ -172,7 +223,10 @@ export class ClientMonitor extends EventEmitter {
         }
         
         this.score = score;
-        this.emit('score', score);
+        this.emit('score', {
+            clientMonitor: this,
+            clientScore: score,
+        });
     }
 
     public createSample(): ClientSample | undefined {
@@ -200,13 +254,36 @@ export class ClientMonitor extends EventEmitter {
         if (!clientSample) {
             return;
         }
-        this.emit('sample-created', clientSample);
+        this.emit('sample-created', {
+            clientMonitor: this,
+            sample: clientSample
+        });
         this.lastSampledAt = timestamp;
 
         return clientSample;
     }
 
+    public addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor): void {
+        if (this.closed) return;
+        if (this.mappedPeerConnections.has(peerConnectionMonitor.peerConnectionId)) {
+            throw new Error(`PeerConnectionMonitor with id ${peerConnectionMonitor.peerConnectionId} already exists`);
+        }
+
+        peerConnectionMonitor.once('close', () => {
+            this.mappedPeerConnections.delete(peerConnectionMonitor.peerConnectionId);
+        })
+        this.mappedPeerConnections.set(peerConnectionMonitor.peerConnectionId, peerConnectionMonitor);
+        
+        this.emit('new-peerconnnection-monitor', {
+            peerConnectionMonitor,
+            clientMonitor: this,
+        });
+    }
+
+
     public addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+        if (this.closed) return;
+
         this.addEvent({
             type: ClientEventType.CLIENT_JOINED,
             payload: {
@@ -217,6 +294,8 @@ export class ClientMonitor extends EventEmitter {
     }
 
     public addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+        if (this.closed) return;
+
         this.addEvent({
             type: ClientEventType.CLIENT_LEFT,
             payload: {
@@ -226,7 +305,7 @@ export class ClientMonitor extends EventEmitter {
         })
     }
 
-    public addEvent(event: PartialBy<AcceptedClientEvent, 'timestamp'>): void {
+    public addEvent(event: PartialBy<ClientEvent, 'timestamp'>): void {
         if (this.closed) return;
         if (!this.bufferingSampleData) return;
 
@@ -238,7 +317,7 @@ export class ClientMonitor extends EventEmitter {
         });
     }
 
-    public addIssue(issue: PartialBy<AcceptedClientIssue, 'timestamp'>): void {
+    public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
         if (this.closed) return;
         if (!this.bufferingSampleData) return;
         
@@ -257,7 +336,7 @@ export class ClientMonitor extends EventEmitter {
         });
     }
 
-    public addMetaData(metaData: PartialBy<AcceptedClientMetaData, 'timestamp'>): void {
+    public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {
         if (this.closed) return;
         if (!this.bufferingSampleData) return;
 
@@ -277,6 +356,30 @@ export class ClientMonitor extends EventEmitter {
             type: stats.type,
             payload,
         });
+    }
+
+    public addSource(source: unknown): void {
+        if (this.closed) {
+            throw new Error('Cannot add source to closed ClientMonitor');
+        }
+
+        if (source instanceof RTCPeerConnection) {
+            this._sources.addRTCPeerConnection({ peerConnection: source });
+        } else if (source instanceof mediasoup.types.Device) {
+            this._sources.addMediasoupDevice(source as mediasoup.types.Device);
+        } else if (source instanceof mediasoup.types.Transport) {
+            this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
+        } else {
+            throw new Error('Unknown source type');
+        }
+    }
+
+    public fetchUserAgentData() {
+        return this._sources.fetchUserAgentData();
+    }
+
+    public watchNavigatorMediaDevices() {
+        this._sources.watchMediaDevices();
     }
     
     public get peerConnections() {
@@ -332,23 +435,23 @@ export class ClientMonitor extends EventEmitter {
     }
 
     public get tracks(): TrackMonitor[] {
-        return [
-            ...this.mappedInboundTracks.values(),
-            ...this.mappedOutboundTracks.values(),
-        ]
+        return [ ...this.peerConnections.flatMap(peerConnection => peerConnection.tracks) ];
     }
 
     public getTrackMonitor(trackId: string): TrackMonitor | undefined {
-        return this.mappedInboundTracks.get(trackId) ?? 
-            this.mappedOutboundTracks.get(trackId);
+        return this.getInboundTrackMonitor(trackId) ?? this.getOutboundTrackMonitor(trackId);
     }
 
     public getInboundTrackMonitor(trackId: string): InboundTrackMonitor | undefined {
-        return this.mappedInboundTracks.get(trackId);
+        return this.peerConnections.find(peerConnection => 
+            peerConnection.mappedInboundTracks.has(trackId)
+        )?.mappedInboundTracks.get(trackId);
     }
 
     public getOutboundTrackMonitor(trackId: string): OutboundTrackMonitor | undefined {
-        return this.mappedOutboundTracks.get(trackId);
+        return this.peerConnections.find(peerConnection => 
+            peerConnection.mappedOutboundTracks.has(trackId)
+        )?.mappedOutboundTracks.get(trackId);
     }
 
     public setCollectingPeriod(collectingPeriodInMs: number): void {

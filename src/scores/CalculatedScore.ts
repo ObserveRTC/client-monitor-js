@@ -1,7 +1,7 @@
 export type CalculatedScore = {
 	weight: number;
 	value?: number;
-	remarks: string[];
+	appData?: Record<string, unknown>;
 }
 
 // every track calculates its own score and stores 
@@ -20,6 +20,8 @@ Recommended bpp Ranges for Good Quality
 | Standard Motion    | 0.15 - 0.25           | 0.1 - 0.2             | 0.15 - 0.25   | 0.1 - 0.2     |
 | High Motion        | 0.25 - 0.4            | 0.15 - 0.3            | 0.25 - 0.4    | 0.15 - 0.3    |
 
+
+// might be put into a detector
 */
 export const BPP_RANGES = {
 	'lowmotion': {
@@ -85,7 +87,7 @@ export function calculateBaseVideoScore(context: BaseVideScoreContext): [score: 
 	// Normalize score between 0 and 1 based on bpp range
 	if (bpp < bppRange.low) {
 		return [
-			Math.max(0, bpp / bppRange.low), // Scale up to the lower threshold
+			Math.max(MIN_VIDEO_SCORE, bpp / bppRange.low), // Scale up to the lower threshold
 			`Bitrate per pixel is too low for ${contentType} content`,
 		];
 	} else if (bpp >= bppRange.high) {
