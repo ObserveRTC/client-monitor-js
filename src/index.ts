@@ -1,6 +1,4 @@
-import { ClientMonitor } from "./ClientMonitor";
-
-export type {
+export {
     ClientMonitor,
 } from "./ClientMonitor";
 export type {
@@ -15,7 +13,7 @@ export type {
     CongestionEventPayload,
     AudioDesyncTrackEventPayload,
     FreezedVideoTrackEventPayload,
-    DryInboundTrackEventPayload as StuckedInboundTrackEventPayload,
+    DryInboundTrackEventPayload,
     TooLongPcConnectionEstablishmentEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
@@ -23,7 +21,7 @@ export type {
 export type { 
     Detector,
 } from './detectors/Detector';
-export type {
+export {
     Detectors
 } from './detectors/Detectors';
 export type { 
