@@ -279,27 +279,24 @@ export class DefaultScoreCalculator {
 		// bitrate volatility penalty: 0-2
 		let scoreValue = 5.0;
 
-		if (outboundRtp.targetBitrate && outboundRtp.payloadBitrate) {
-			const deviation = outboundRtp.targetBitrate - outboundRtp.payloadBitrate;
-			const percentage = deviation / outboundRtp.targetBitrate;
-			const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
+		if (outboundRtp.targetBitrate) {
+			// funny thing, encoder target from a layer is for the encoder, but the bitrate is for that particular layer
+			const payloadBitrate = [...trackMonitor.mappedOutboundRtps.values()].reduce((acc, rtp) => acc + (rtp.payloadBitrate ?? 0), 0);
+			
+			if (payloadBitrate) {
+				const deviation = outboundRtp.targetBitrate - payloadBitrate;
+				const percentage = deviation / outboundRtp.targetBitrate;
+				const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
 
-			console.warn(
-				'deviation', deviation, 
-				'lowThreshold', lowThreshold, 
-				'percentage', percentage,
-				'outboundRtp.targetBitrate', outboundRtp.targetBitrate,
-				'outboundRtp.payloadBitrate', outboundRtp.payloadBitrate,
-			);
-
-			if (0 < deviation && lowThreshold < deviation) {
-				
-				if (0.05 <= percentage && percentage < 0.15) {
-					scoreValue -= 1.0;
-				} else if (0.15 <= percentage) {
-					scoreValue -= 2.0;
-				}
-			}		
+				if (0 < deviation && lowThreshold < deviation) {
+					
+					if (0.05 <= percentage && percentage < 0.15) {
+						scoreValue -= 1.0;
+					} else if (0.15 <= percentage) {
+						scoreValue -= 2.0;
+					}
+				}	
+			}
 		}
 
 		if (outboundRtp.qualityLimitationReason === 'cpu') {
