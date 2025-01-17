@@ -41,7 +41,7 @@ export class Sources {
 
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 				peerConnectionId,
-				createStatsFromRTCStatsReportProvider(peerConnection.getStats),
+				createStatsFromRTCStatsReportProvider(peerConnection.getStats.bind(peerConnection)),
 				this.monitor,
 		);
 
@@ -74,7 +74,7 @@ export class Sources {
 	public addMediasoupTransport(transport: mediasoup.types.Transport, clientEventAppData?: Record<string, unknown>) {
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 			transport.id,
-			createStatsFromRTCStatsReportProvider(transport.getStats),
+			createStatsFromRTCStatsReportProvider(transport.getStats.bind(transport)),
 			this.monitor,
 		);
 
