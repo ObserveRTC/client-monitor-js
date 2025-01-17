@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
-import { CertificateStats, CodecStats, DataChannelStats, IceCandidatePairStats, IceCandidateStats, IceTransportStats, InboundRtpStats, MediaPlayoutStats, MediaSourceStats, OutboundRtpStats, PeerConnectionSample, RemoteInboundRtpStats, RemoteOutboundRtpStats } from "../schema/ClientSample";
+import { CertificateStats, CodecStats, DataChannelStats, IceCandidatePairStats, IceCandidateStats, IceTransportStats, InboundRtpStats, MediaPlayoutStats, MediaSourceStats, OutboundRtpStats, PeerConnectionSample, PeerConnectionTransportStats, RemoteInboundRtpStats, RemoteOutboundRtpStats } from "../schema/ClientSample";
 import * as W3C from "../schema/W3cStatsIdentifiers";
 import { createLogger } from "../utils/logger";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
@@ -439,7 +439,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 		for (const [id, monitor] of this.mappedOutboundRtpMonitors) {
 			if (monitor.visited) continue;
 			this.mappedOutboundRtpMonitors.delete(id);
-			monitor.getTrack()?.mappedOutboundRtp.delete(monitor.ssrc);
+			monitor.getTrack()?.mappedOutboundRtps.delete(monitor.ssrc);
 		}
 
 		for (const [id, monitor] of this.mappedRemoteInboundRtpMonitors) {
@@ -643,9 +643,11 @@ export class PeerConnectionMonitor extends EventEmitter {
 				outboundRtpMonitor,
 			});
 
-			if (!outboundRtpMonitor.getTrack()?.mappedOutboundRtp.has(stats.ssrc)) {
-				outboundRtpMonitor.getTrack()?.mappedOutboundRtp.set(stats.ssrc, outboundRtpMonitor);
-			}
+		}
+		const track = outboundRtpMonitor.getTrack();
+
+		if (track && !track.mappedOutboundRtps.has(stats.ssrc)) {
+			track.mappedOutboundRtps.set(stats.ssrc, outboundRtpMonitor);
 		}
 
 		outboundRtpMonitor.accept(stats);
@@ -746,7 +748,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 		return mediaPlayoutMonitor;
 	}
 
-	public _updatePeerConnectionTransport(input: Partial<PeerConnectionTransportMonitor>): PeerConnectionTransportMonitor | undefined | void {
+	public _updatePeerConnectionTransport(input: Partial<PeerConnectionTransportStats>): PeerConnectionTransportMonitor | undefined | void {
 		if (this.closed) return;
 		if (
 			input.id === undefined ||
@@ -757,7 +759,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 			return logger.warn('Invalid peerConnectionTransport stats', input);
 		}
 
-		const stats = input as PeerConnectionTransportMonitor;
+		const stats = input as PeerConnectionTransportStats;
 		
 		let peerConnectionTransportMonitor = this.mappedPeerConnectionTransportMonitors.get(stats.id);
 		if (!peerConnectionTransportMonitor) {
@@ -901,7 +903,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 		for (const outboundRtp of this.mappedOutboundRtpMonitors.values()) {
 			if (outboundRtp.trackIdentifier !== track.id) continue;
 
-			trackMonitor.mappedOutboundRtp.set(outboundRtp.ssrc, outboundRtp);
+			trackMonitor.mappedOutboundRtps.set(outboundRtp.ssrc, outboundRtp);
 		}
 	}
 
