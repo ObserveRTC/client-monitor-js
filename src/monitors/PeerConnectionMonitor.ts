@@ -502,7 +502,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateCodec(input: Partial<CodecStats>) {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.payloadType || !input.mimeType) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.payloadType === undefined ||
+			input.mimeType === undefined
+		) {
 			return logger.warn('Invalid codec stats', input);
 		}
 
@@ -524,7 +529,13 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateInboundRtp(input: Partial<InboundRtpStats>): InboundRtpMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.ssrc || !input.kind || !input.trackIdentifier) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.ssrc === undefined ||
+			input.kind === undefined ||
+			input.trackIdentifier === undefined
+		) {
 			return logger.warn('Invalid inboundRtp stats', input);
 		}
 
@@ -554,7 +565,11 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateDataChannel(input: Partial<DataChannelStats>): DataChannelMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.label) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.label === undefined
+		) {
 			return logger.warn('Invalid dataChannel stats', input);
 		}
 
@@ -578,7 +593,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateRemoteOutboundRtp(input: Partial<RemoteOutboundRtpStats>): RemoteOutboundRtpMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.ssrc || !input.kind) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.ssrc === undefined ||
+			input.kind === undefined
+		) {
 			return logger.warn('Invalid remoteOutboundRtp stats', input);
 		}
 
@@ -602,7 +622,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateOutboundRtp(input: Partial<OutboundRtpStats>): OutboundRtpMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.ssrc || !input.kind) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.ssrc === undefined ||
+			input.kind === undefined
+		) {
 			return logger.warn('Invalid outboundRtp stats', input);
 		}
 
@@ -630,7 +655,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateRemoteInboundRtp(input: Partial<RemoteInboundRtpStats>): RemoteInboundRtpMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.ssrc || !input.kind) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.ssrc === undefined ||
+			input.kind === undefined
+		) {
 			return logger.warn('Invalid remoteInboundRtp stats', input);
 		}
 
@@ -654,7 +684,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateMediaSource(input: Partial<MediaSourceStats>): MediaSourceMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.trackIdentifier || !input.kind) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.trackIdentifier === undefined ||
+			input.kind === undefined
+		) {
 			return logger.warn('Invalid mediaSource stats', input);
 		}
 
@@ -685,7 +720,11 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateMediaPlayout(input: Partial<MediaPlayoutStats>): MediaPlayoutMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.kind) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.kind === undefined
+		) {
 			return logger.warn('Invalid mediaPlayout stats', input);
 		}
 
@@ -709,7 +748,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	public _updatePeerConnectionTransport(input: Partial<PeerConnectionTransportMonitor>): PeerConnectionTransportMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.dataChannelsOpened || !input.dataChannelsClosed) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.dataChannelsOpened === undefined ||
+			input.dataChannelsClosed === undefined
+		) {
 			return logger.warn('Invalid peerConnectionTransport stats', input);
 		}
 
@@ -733,7 +777,10 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateIceTransport(input: Partial<IceTransportStats>): IceTransportMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined
+		) {
 			return logger.warn('Invalid iceTransport stats', input);
 		}
 
@@ -757,7 +804,11 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateIceCandidate(input: Partial<IceCandidateStats>): IceCandidateMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.protocol) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.protocol === undefined
+		) {
 			return logger.warn('Invalid iceCandidate stats', input);
 		}
 
@@ -781,7 +832,11 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateIceCandidatePair(input: Partial<IceCandidatePairStats>): IceCandidatePairMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.state) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.state === undefined
+		) {
 			return logger.warn('Invalid iceCandidatePair stats', input);
 		}
 
@@ -805,7 +860,12 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	private _updateCertificate(input: Partial<CertificateStats>): CertificateMonitor | undefined | void {
 		if (this.closed) return;
-		if (!input.id || !input.timestamp || !input.fingerprint || !input.fingerprintAlgorithm) {
+		if (
+			input.id === undefined ||
+			input.timestamp === undefined ||
+			input.fingerprint === undefined ||
+			input.fingerprintAlgorithm === undefined
+		) {
 			return logger.warn('Invalid certificate stats', input);
 		}
 
