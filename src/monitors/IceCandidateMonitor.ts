@@ -28,6 +28,8 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	) {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

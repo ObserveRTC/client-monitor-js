@@ -31,6 +31,8 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 		this.timestamp = options.timestamp;
 		this.ssrc = options.ssrc;
 		this.kind = options.kind;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

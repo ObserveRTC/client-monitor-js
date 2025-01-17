@@ -65,6 +65,8 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		this.timestamp = options.timestamp;
 		this.ssrc = options.ssrc;
 		this.kind = options.kind as MediaKind;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

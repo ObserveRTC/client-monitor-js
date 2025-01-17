@@ -23,6 +23,7 @@ export class OutboundTrackMonitor {
 		private _mediaSource: MediaSourceMonitor,
 	) {
 		this.detectors = new Detectors();
+		
 	}
 
 

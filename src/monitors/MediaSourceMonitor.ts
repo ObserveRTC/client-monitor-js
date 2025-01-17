@@ -27,6 +27,8 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
 		this.kind = options.kind as MediaKind;
+
+		Object.assign(this, options);
 	}
 	
 

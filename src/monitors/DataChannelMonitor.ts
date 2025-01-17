@@ -26,6 +26,8 @@ export class DataChannelMonitor implements DataChannelStats {
 	) {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
+
+		Object.assign(this, options);
 	}
 	
 

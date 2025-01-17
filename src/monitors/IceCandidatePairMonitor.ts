@@ -36,6 +36,8 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	) {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

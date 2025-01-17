@@ -107,6 +107,8 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.ssrc = options.ssrc;
 		this.kind = options.kind as MediaKind;
 		this.trackIdentifier = options.trackIdentifier;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

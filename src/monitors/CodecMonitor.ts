@@ -21,6 +21,8 @@ export class CodecMonitor implements CodecStats {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
 		this.mimeType = options.mimeType;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

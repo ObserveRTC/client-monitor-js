@@ -25,7 +25,7 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 
 const logger = createLogger('PeerConnectionMonitor');
 
-export type CalculatedPeerConnectionScores = CalculatedScore &{
+export type CalculatedPeerConnectionScores = CalculatedScore & {
 	lastNScores: number[],
 }
 
@@ -643,12 +643,13 @@ export class PeerConnectionMonitor extends EventEmitter {
 				outboundRtpMonitor,
 			});
 
-		}
-		const track = outboundRtpMonitor.getTrack();
+			const track = outboundRtpMonitor.getTrack();
 
-		if (track && !track.mappedOutboundRtps.has(stats.ssrc)) {
-			track.mappedOutboundRtps.set(stats.ssrc, outboundRtpMonitor);
+			if (track && !track.mappedOutboundRtps.has(stats.ssrc)) {
+				track.mappedOutboundRtps.set(stats.ssrc, outboundRtpMonitor);
+			}
 		}
+		
 
 		outboundRtpMonitor.accept(stats);
 
@@ -899,10 +900,8 @@ export class PeerConnectionMonitor extends EventEmitter {
 		this._pendingMediaStreamTracks.delete(track.id);
 		this.mappedOutboundTracks.set(track.id, trackMonitor);
 
-
 		for (const outboundRtp of this.mappedOutboundRtpMonitors.values()) {
 			if (outboundRtp.trackIdentifier !== track.id) continue;
-
 			trackMonitor.mappedOutboundRtps.set(outboundRtp.ssrc, outboundRtp);
 		}
 	}

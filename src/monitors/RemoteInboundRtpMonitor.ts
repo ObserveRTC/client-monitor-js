@@ -33,6 +33,8 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		this.timestamp = options.timestamp;
 		this.ssrc = options.ssrc;
 		this.kind = options.kind;
+
+		Object.assign(this, options);
 	}
 
 

@@ -138,7 +138,7 @@ export class DefaultScoreCalculator {
 	}
 
 	private _calculateInboundVideoTrackScore(trackMonitor: InboundTrackMonitor) {
-		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
@@ -213,7 +213,7 @@ export class DefaultScoreCalculator {
 	}
 
 	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor) {
-		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
@@ -246,7 +246,7 @@ export class DefaultScoreCalculator {
 	}
 
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor) {
-		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
@@ -284,7 +284,16 @@ export class DefaultScoreCalculator {
 			const percentage = deviation / outboundRtp.targetBitrate;
 			const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
 
+			console.warn(
+				'deviation', deviation, 
+				'lowThreshold', lowThreshold, 
+				'percentage', percentage,
+				'outboundRtp.targetBitrate', outboundRtp.targetBitrate,
+				'outboundRtp.payloadBitrate', outboundRtp.payloadBitrate,
+			);
+
 			if (0 < deviation && lowThreshold < deviation) {
+				
 				if (0.05 <= percentage && percentage < 0.15) {
 					scoreValue -= 1.0;
 				} else if (0.15 <= percentage) {
@@ -317,6 +326,7 @@ export class DefaultScoreCalculator {
 				const stdDev = Math.sqrt(avgBitrateSquare);
 				const volatility = stdDev / appData.ewmaBitrate;
 
+				// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgBitrateSquare', avgBitrateSquare);
 				if (0.1 < volatility && volatility < 0.2) {
 					scoreValue -= 1.0;
 				} else if (0.2 < volatility) {
@@ -338,7 +348,7 @@ export class DefaultScoreCalculator {
 	}
 
 	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor) {
-		if (!trackMonitor.track.enabled || !trackMonitor.track.muted) {
+		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}

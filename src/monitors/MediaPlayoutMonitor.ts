@@ -23,6 +23,8 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
 		this.kind = options.kind as MediaKind;
+
+		Object.assign(this, options);
 	}
 
 	public get visited(): boolean {

@@ -1,3 +1,6 @@
+import { ClientMonitor } from "./ClientMonitor";
+import { ClientMonitorConfig } from "./ClientMonitorConfig";
+
 export {
     ClientMonitor,
 } from "./ClientMonitor";
@@ -45,3 +48,7 @@ export type {
 export {
     setLogger,
 } from "./utils/logger";
+
+export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {
+    return new ClientMonitor(config);
+}
