@@ -81,7 +81,10 @@ export class Sources {
 		listenMediasoupTransport({
 			monitor: peerConnectionMonitor,
 			transport,
-			appData: clientEventAppData,
+			appData: {
+				direction: transport.direction,
+				...(clientEventAppData ?? {}),
+			},
 		});
 
 		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
@@ -126,7 +129,7 @@ export class Sources {
 		return userAgentData;
 	}
 
-	public watchMediaDevices() {
+	public watchNavigatorMediaDevices() {
 		if (this.mediaDevicesAreWatched) return;
 
 		try {

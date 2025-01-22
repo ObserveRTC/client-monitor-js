@@ -31,6 +31,13 @@ export type {
     ScoreCalculator 
 } from './scores/ScoreCalculator';
 
+
+export type { 
+    DefaultScoreCalculator,
+    DefaultScoreCalclulatorInboundVideoScoreAppData,
+    DefaultScoreCalclulatorOutboundTrackScoreAppData, 
+} from './scores/DefaultScoreCalculator';
+
 export type { 
 	ClientSample,
 	ExtensionStat,
@@ -52,3 +59,4 @@ export {
 export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {
     return new ClientMonitor(config);
 }
+

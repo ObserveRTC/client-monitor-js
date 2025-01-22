@@ -1446,6 +1446,27 @@ export type CodecStats = {
 }
 
 /**
+* Track Stats items
+*/
+export type TrackStats = {
+	/**
+	* The timestamp when the stats were generated.
+	*/
+	timestamp: number;
+
+	/**
+	* The unique identifier for the stats object.
+	*/
+	id: string;
+
+	/**
+	* Additional information attached to this stats
+	*/
+	appData?: Record<string, unknown>;
+
+}
+
+/**
 * docs
 */
 export type PeerConnectionSample = {
@@ -1458,6 +1479,11 @@ export type PeerConnectionSample = {
 	* Additional information attached to this sample
 	*/
 	appData?: Record<string, unknown>;
+
+	/**
+	* Track Stats items
+	*/
+	tracks?: TrackStats[];
 
 	/**
 	* Codec items

@@ -25,9 +25,6 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 
 const logger = createLogger('PeerConnectionMonitor');
 
-export type CalculatedPeerConnectionScores = CalculatedScore & {
-	lastNScores: number[],
-}
 
 export type PeerConnectionMonitorEvents = {
 	'close': [],
@@ -120,10 +117,9 @@ export class PeerConnectionMonitor extends EventEmitter {
 	
 	public usingTURN?: boolean;
 	public usingTCP?: boolean;
-	public calculatedStabilityScore: CalculatedPeerConnectionScores = {
+	public calculatedStabilityScore: CalculatedScore = {
 		weight: 1,
 		value: undefined,
-		lastNScores: [],
 	}
 
 	public constructor(
@@ -318,6 +314,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 			iceCandidates: this.iceCandidates.map(iceCandidate => iceCandidate.createSample()),
 			iceCandidatePairs: this.iceCandidatePairs.map(iceCandidatePair => iceCandidatePair.createSample()),
 			certificates: this.certificates.map(certificate => certificate.createSample()),
+			tracks: this.tracks.map(track => track.createSample()),
 			
 		}
 	}

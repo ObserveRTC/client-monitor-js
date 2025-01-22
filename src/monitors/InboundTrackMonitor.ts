@@ -4,8 +4,11 @@ import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetecto
 import { DryInboundTrackDetector } from "../detectors/DryInboundTrack";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
+import { TrackStats } from "../schema/ClientSample";
 
 export class InboundTrackMonitor {
+	public appData?: Record<string, unknown>;
+
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
@@ -67,4 +70,12 @@ export class InboundTrackMonitor {
 	public update() {
 		this.detectors.update();
 	}
+
+	public createSample(): TrackStats {
+			return {
+				id: this.track.id,
+				timestamp: Date.now(),
+				appData: this.appData,
+			};
+		}
 }

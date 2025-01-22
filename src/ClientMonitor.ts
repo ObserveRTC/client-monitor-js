@@ -24,7 +24,8 @@ import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
 import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
-import { DefaultScoreCalculator, ScoreCalculator } from './scores/ScoreCalculator';
+import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
+import { ScoreCalculator } from "./scores/ScoreCalculator";
 import * as mediasoup from 'mediasoup-client';
 
 const logger = createLogger('ClientMonitor');
@@ -124,7 +125,7 @@ export class ClientMonitor extends EventEmitter {
             this.addClientJoinEvent();
         }
         if (this.config.integrateNavigatorMediaDevices) {
-            this._sources.watchMediaDevices();
+            this._sources.watchNavigatorMediaDevices();
         }
         try {
             this._sources.fetchUserAgentData();
@@ -379,7 +380,7 @@ export class ClientMonitor extends EventEmitter {
     }
 
     public watchNavigatorMediaDevices() {
-        this._sources.watchMediaDevices();
+        this._sources.watchNavigatorMediaDevices();
     }
     
     public get peerConnections() {

@@ -1,9 +1,12 @@
 import { Detectors } from "../detectors/Detectors";
+import { TrackStats } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
 
 export class OutboundTrackMonitor {
+	public appData?: Record<string, unknown>;
+
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
@@ -80,5 +83,13 @@ export class OutboundTrackMonitor {
 		}
 
 		return highestLayer;
+	}
+
+	public createSample(): TrackStats {
+		return {
+			id: this.track.id,
+			timestamp: Date.now(),
+			appData: this.appData,
+		};
 	}
 }
