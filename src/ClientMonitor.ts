@@ -3,7 +3,6 @@ import { ExtensionStat,
     ClientEvent as ClientSampleClientEvent, 
     ClientMetaData as ClientSampleClientMetaData, 
     ClientIssue as ClientSampleClientIssue, 
-    ClientScore as ClientSampleClientScore  
 } from './schema/ClientSample';
 import { createLogger } from "./utils/logger";
 import { EventEmitter } from 'events';
@@ -68,7 +67,6 @@ export class ClientMonitor extends EventEmitter {
     private _clientMetaItems: ClientSampleClientMetaData[] = [];
     private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
-    private _clientScores: ClientSampleClientScore[] = [];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: ClientMonitorConfig;
 
@@ -216,12 +214,6 @@ export class ClientMonitor extends EventEmitter {
 
     public setScore(score: number): void {
         if (this.closed) return;
-        if (this.bufferingSampleData) {
-            this._clientScores.push({
-                timestamp: Date.now(),
-                value: score,
-            });
-        }
         
         this.score = score;
         this.emit('score', {
@@ -243,13 +235,12 @@ export class ClientMonitor extends EventEmitter {
             clientMetaItems: this._clientMetaItems,
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
-            scores: this._clientScores,
+            score: this.score,
         };
         this._clientEvents = [];
         this._clientMetaItems = [];
         this._clientIssues = [];
         this._extensionStats = [];
-        this._clientScores = [];
 
         const timestamp = Date.now();
         if (!clientSample) {

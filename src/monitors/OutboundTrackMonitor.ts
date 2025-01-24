@@ -1,5 +1,5 @@
 import { Detectors } from "../detectors/Detectors";
-import { TrackStats } from "../schema/ClientSample";
+import { TrackSample } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -85,11 +85,13 @@ export class OutboundTrackMonitor {
 		return highestLayer;
 	}
 
-	public createSample(): TrackStats {
+	public createSample(): TrackSample {
 		return {
 			id: this.track.id,
+			kind: this.kind,
 			timestamp: Date.now(),
 			appData: this.appData,
+			score: this.score,
 		};
 	}
 }

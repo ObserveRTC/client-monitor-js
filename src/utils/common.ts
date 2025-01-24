@@ -37,7 +37,6 @@ export function calculateEmpiricalDeviation(data: number[]): number | undefined 
   return Math.sqrt(variance);
 }
 
-
 export type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 export type RequiredBy<T, K = keyof T> = Merge<

@@ -4,9 +4,15 @@ import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetecto
 import { DryInboundTrackDetector } from "../detectors/DryInboundTrack";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
-import { TrackStats } from "../schema/ClientSample";
+import { TrackSample } from "../schema/ClientSample";
 
 export class InboundTrackMonitor {
+	public static applyOnAppDataAtSampling = <T extends Record<string, unknown> = Record<string, unknown>>(appData: Record<string, unknown>) => {
+		return {
+			...appData,
+		};
+	}
+
 	public appData?: Record<string, unknown>;
 
 	public readonly direction = 'inbound';
@@ -71,11 +77,13 @@ export class InboundTrackMonitor {
 		this.detectors.update();
 	}
 
-	public createSample(): TrackStats {
+	public createSample(): TrackSample {
 			return {
 				id: this.track.id,
+				kind: this.track.kind,
 				timestamp: Date.now(),
 				appData: this.appData,
+				score: this.score,
 			};
 		}
 }

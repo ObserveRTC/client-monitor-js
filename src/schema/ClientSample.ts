@@ -1448,7 +1448,7 @@ export type CodecStats = {
 /**
 * Track Stats items
 */
-export type TrackStats = {
+export type TrackSample = {
 	/**
 	* The timestamp when the stats were generated.
 	*/
@@ -1460,9 +1460,19 @@ export type TrackStats = {
 	id: string;
 
 	/**
+	* Kind of the media (e.g., 'audio' or 'video').
+	*/
+	kind: string;
+
+	/**
 	* Additional information attached to this stats
 	*/
 	appData?: Record<string, unknown>;
+
+	/**
+	* Calculated score for track (details should be added to appData)
+	*/
+	score?: number;
 
 }
 
@@ -1481,9 +1491,14 @@ export type PeerConnectionSample = {
 	appData?: Record<string, unknown>;
 
 	/**
+	* Calculated score for peer connection (details should be added to appData)
+	*/
+	score?: number;
+
+	/**
 	* Track Stats items
 	*/
-	tracks?: TrackStats[];
+	tracks?: TrackSample[];
 
 	/**
 	* Codec items
@@ -1553,27 +1568,6 @@ export type PeerConnectionSample = {
 }
 
 /**
-* List of scores calculated for the client.
-*/
-export type ClientScore = {
-	/**
-	* The calculated score.
-	*/
-	value?: number;
-
-	/**
-	* Remarks about the score.
-	*/
-	remarks?: string;
-
-	/**
-	* The timestamp in epoch format when the score was calculated.
-	*/
-	timestamp?: number;
-
-}
-
-/**
 * docs
 */
 export type ClientSample = {
@@ -1598,9 +1592,9 @@ export type ClientSample = {
 	appData?: Record<string, unknown>;
 
 	/**
-	* List of scores calculated for the client.
+	* Calculated score for client (details should be added to appData)
 	*/
-	scores?: ClientScore[];
+	score?: number;
 
 	/**
 	* Samples taken PeerConnections
