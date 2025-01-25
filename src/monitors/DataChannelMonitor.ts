@@ -15,10 +15,18 @@ export class DataChannelMonitor implements DataChannelStats {
 	messagesReceived?: number | undefined;
 	bytesReceived?: number | undefined;
 
-	appData?: Record<string, unknown> | undefined;
-
 	ΔbytesSent?: number | undefined;
 	ΔbytesReceived?: number | undefined;
+
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -74,7 +82,7 @@ export class DataChannelMonitor implements DataChannelStats {
 			bytesSent: this.bytesSent,
 			messagesReceived: this.messagesReceived,
 			bytesReceived: this.bytesReceived,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

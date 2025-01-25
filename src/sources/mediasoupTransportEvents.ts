@@ -1,12 +1,12 @@
 import * as mediasoup from 'mediasoup-client';
 import { PeerConnectionMonitor } from '../monitors/PeerConnectionMonitor';
-import { ClientEventType } from '../utils/enums';
+import { ClientEventType } from '../utils/eventTypes';
 import { listenMediaStreamTrackEvents } from './rtcEventers';
 
 export type MediasoupTransportListenerContext = {
 	transport:  mediasoup.types.Transport;
 	monitor: PeerConnectionMonitor;
-	appData?: Record<string, unknown>;
+	attachments?: Record<string, unknown>;
 }
 
 
@@ -14,24 +14,24 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 	const {
 		transport,
 		monitor: pcMonitor,
-		appData,
+		attachments,
 	} = context;
 	const clientMonitor = pcMonitor.parent;
 	// const producers = new Map<string, mediasoup.types.Producer>();
 	// const consumers = new Map<string, mediasoup.types.Consumer>();
 
 	const newConsumerListener = (consumer: mediasoup.types.Consumer) => {
-		listenConsumer(pcMonitor, consumer, appData);
+		listenConsumer(pcMonitor, consumer);
 	};
 	const newDataConsumerListener = (dataConsumer: mediasoup.types.DataConsumer) => {
-		listenDataConsumer(pcMonitor, dataConsumer, appData);
+		listenDataConsumer(pcMonitor, dataConsumer);
 	};
 	const newProducerListener = (producer: mediasoup.types.Producer) => {
-		listenMediasoupProducer(pcMonitor, producer, appData);
+		listenMediasoupProducer(pcMonitor, producer);
 	};
 
 	const newDataProducerListener = (dataProducer: mediasoup.types.DataProducer) => {
-		listenDataProducer(pcMonitor, dataProducer, appData);
+		listenDataProducer(pcMonitor, dataProducer);
 	};
 
 	const connectionChangeListener = (...args: mediasoup.types.TransportEvents['connectionstatechange']) => {
@@ -42,7 +42,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				connectionState: args[0],
-				...(appData ?? {}),
+				...(attachments ?? {}),
 			}
 		});
 	}
@@ -52,7 +52,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				iceGatheringState: args[0],
-				...(appData ?? {}),
+				...(attachments ?? {}),
 			}
 		});
 	};
@@ -80,7 +80,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 			type: ClientEventType.PEER_CONNECTION_CLOSED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
-				...(appData ?? {}),
+				...(attachments ?? {}),
 			}
 		});
 	});
@@ -89,34 +89,32 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 		type: ClientEventType.PEER_CONNECTION_OPENED,
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
-			
-			transportAppData: transport.appData,
-			...(appData ?? {}),
+			...(attachments ?? {}),
 		}
 	});
 
 	
 }
 
-function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: mediasoup.types.Producer, appData?: Record<string, unknown>) {
+function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: mediasoup.types.Producer) {
 	const clientMonitor = pcMonitor.parent;
 	const pauseListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.MEDIA_TRACK_MUTED,
+			type: ClientEventType.PRODUCER_PAUSED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: producer.track?.id,
-				...(appData ?? {}),
+				producerId: producer.id,
 			}
 		});
 	}
 	const resumeListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.MEDIA_TRACK_UNMUTED,
+			type: ClientEventType.PRODUCER_RESUMED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: producer.track?.id,
-				...(appData ?? {}),
+				producerId: producer.id,
 			}
 		});
 	}
@@ -130,7 +128,7 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				producerId: producer.id,
-				...(appData ?? {}),
+				trackId: producer.track?.id,
 			}
 		});
 	});
@@ -144,17 +142,17 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 			peerConnectionId: pcMonitor.peerConnectionId,
 			producerId: producer.id,
 			trackId: producer.track?.id,
-			producerAppData: producer.appData,
-			...(appData ?? {}),
 		}
 	});
 
 	if (producer.track) {
-		listenMediaStreamTrackEvents(pcMonitor, producer.track);
+		listenMediaStreamTrackEvents(pcMonitor, producer.track, {
+			producerId: producer.id,
+		});
 	}
 }
 
-function listenDataProducer(pcMonitor: PeerConnectionMonitor, dataProducer: mediasoup.types.DataProducer, appData?: Record<string, unknown>) {
+function listenDataProducer(pcMonitor: PeerConnectionMonitor, dataProducer: mediasoup.types.DataProducer) {
 	const clientMonitor = pcMonitor.parent;
 
 	dataProducer.observer.once('close', () => {
@@ -163,7 +161,6 @@ function listenDataProducer(pcMonitor: PeerConnectionMonitor, dataProducer: medi
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				dataProducerId: dataProducer.id,
-				...(appData ?? {}),
 			}
 		});
 	});
@@ -173,13 +170,11 @@ function listenDataProducer(pcMonitor: PeerConnectionMonitor, dataProducer: medi
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
 			dataProducerId: dataProducer.id,
-			dataProducerAppData: dataProducer.appData,
-			...(appData ?? {}),
 		}
 	});
 }
 
-function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.types.Consumer, appData?: Record<string, unknown>) {
+function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.types.Consumer) {
 	const clientMonitor = pcMonitor.parent;
 	const pauseListener = () => {
 		clientMonitor.addEvent({
@@ -187,7 +182,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: consumer.track.id,
-				...(appData ?? {}),
+				consumerId: consumer.id,
 			}
 		});
 	}
@@ -197,7 +192,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: consumer.track.id,
-				...(appData ?? {}),
+				consumerId: consumer.id,
 			}
 		});
 	}
@@ -211,8 +206,8 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 			type: ClientEventType.CONSUMER_REMOVED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
+				trackId: consumer.track.id,
 				consumerId: consumer.id,
-				...(appData ?? {}),
 			}
 		});
 	});
@@ -226,15 +221,13 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 			peerConnectionId: pcMonitor.peerConnectionId,
 			consumerId: consumer.id,
 			trackId: consumer.track.id,
-			consumerAppData: consumer.appData,
-			...(appData ?? {}),
 		}
 	});
 
 	listenMediaStreamTrackEvents(pcMonitor, consumer.track);
 }
 
-function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: mediasoup.types.DataConsumer, appData?: Record<string, unknown>) {
+function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: mediasoup.types.DataConsumer, attachments?: Record<string, unknown>) {
 	const clientMonitor = pcMonitor.parent;
 
 	dataConsumer.observer.once('close', () => {
@@ -243,7 +236,7 @@ function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: medi
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				dataConsumerId: dataConsumer.id,
-				...(appData ?? {}),
+				...(attachments ?? {}),
 			}
 		});
 	});
@@ -254,7 +247,7 @@ function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: medi
 			peerConnectionId: pcMonitor.peerConnectionId,
 			dataConsumerId: dataConsumer.id,
 			dataConsumerAppData: dataConsumer.appData,
-			...(appData ?? {}),
+			...(attachments ?? {}),
 		}
 	});
 }

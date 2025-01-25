@@ -10,9 +10,17 @@ export class CertificateMonitor implements CertificateStats {
 	fingerprintAlgorithm?: string | undefined;
 	base64Certificate?: string | undefined;
 	issuerCertificateId?: string | undefined;
-	
-	appData?: Record<string, unknown> | undefined;
 
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+	
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: CertificateStats,
@@ -21,6 +29,7 @@ export class CertificateMonitor implements CertificateStats {
 		this.timestamp = options.timestamp;
 
 		Object.assign(this, options);
+
 	}
 
 	public get visited(): boolean {
@@ -54,7 +63,7 @@ export class CertificateMonitor implements CertificateStats {
 			fingerprintAlgorithm: this.fingerprintAlgorithm,
 			base64Certificate: this.base64Certificate,
 			issuerCertificateId: this.issuerCertificateId,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

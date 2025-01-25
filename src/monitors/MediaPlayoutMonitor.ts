@@ -14,7 +14,16 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	totalPlayoutDelay?: number | undefined;
 	totalSamplesCount?: number | undefined;
 	
-	appData?: Record<string, unknown> | undefined;
+	
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -60,7 +69,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 			totalSamplesDuration: this.totalSamplesDuration,
 			totalPlayoutDelay: this.totalPlayoutDelay,
 			totalSamplesCount: this.totalSamplesCount,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

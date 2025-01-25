@@ -12,7 +12,16 @@ export class CodecMonitor implements CodecStats {
 	clockRate?: number | undefined;
 	channels?: number | undefined;
 	sdpFmtpLine?: string | undefined;
-	appData?: Record<string, unknown> | undefined;
+
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
 
 	constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -62,7 +71,7 @@ export class CodecMonitor implements CodecStats {
 			clockRate: this.clockRate,
 			channels: this.channels,
 			sdpFmtpLine: this.sdpFmtpLine,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

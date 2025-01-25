@@ -1,6 +1,6 @@
 import { ClientMonitor } from "..";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
-import { ClientEventType } from "../utils/enums";
+import { ClientEventType } from "../utils/eventTypes";
 
 export type RtcPeerConnectionEventerContext = {
 	peerConnection: RTCPeerConnection;
@@ -126,7 +126,11 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	});
 }
 
-export function listenMediaStreamTrackEvents(pcMonitor: PeerConnectionMonitor, track?: MediaStreamTrack) {
+export function listenMediaStreamTrackEvents(
+	pcMonitor: PeerConnectionMonitor, 
+	track?: MediaStreamTrack,
+	attachments?: Record<string, unknown>,
+) {
 	if (!track) return;
 
 	const clientMonitor = pcMonitor.parent;
@@ -186,7 +190,7 @@ export function listenMediaStreamTrackEvents(pcMonitor: PeerConnectionMonitor, t
 		}
 	});
 
-	pcMonitor.addMediaStreamTrack(track);
+	pcMonitor.addMediaStreamTrack(track, attachments);
 }
 
 export function listenRtcDataChannelEvents(monitor: ClientMonitor, dataChannel: RTCDataChannel) {

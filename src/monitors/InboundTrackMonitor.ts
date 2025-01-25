@@ -13,8 +13,6 @@ export class InboundTrackMonitor {
 		};
 	}
 
-	public appData?: Record<string, unknown>;
-
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
@@ -29,10 +27,22 @@ export class InboundTrackMonitor {
 		return this.calculatedScore.value;
 	}
 
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+
 	public constructor(
 		public readonly track: MediaStreamTrack,
 		private readonly _inboundRtp: InboundRtpMonitor,
+		attachments?: Record<string, unknown>,
 	) {
+		this.attachments = attachments;
 		this.detectors = new Detectors(
 			new DryInboundTrackDetector(this),
 		);
@@ -82,7 +92,7 @@ export class InboundTrackMonitor {
 				id: this.track.id,
 				kind: this.track.kind,
 				timestamp: Date.now(),
-				appData: this.appData,
+				attachments: this.attachments,
 				score: this.score,
 			};
 		}

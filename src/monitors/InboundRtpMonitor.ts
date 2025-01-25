@@ -79,9 +79,6 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	totalSquaredCorruptionProbability?: number | undefined;
 	corruptionMeasurements?: number | undefined;
 
-	// appData
-	appData?: Record<string, unknown> | undefined;
-
 	// derived fields
 	bitrate?: number;
 	isFreezed?: boolean;
@@ -97,6 +94,16 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	ΔpacketsReceived?: number;
 	ΔbytesReceived?: number;
 	ΔcorruptionProbability?: number;
+
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -271,7 +278,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			totalCorruptionProbability: this.totalCorruptionProbability,
 			totalSquaredCorruptionProbability: this.totalSquaredCorruptionProbability,
 			corruptionMeasurements: this.corruptionMeasurements,
-			appData: this.appData,
+			attachments: this.attachments,
 		}
 	}
 }

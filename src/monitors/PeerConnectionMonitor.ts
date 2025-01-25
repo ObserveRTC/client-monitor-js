@@ -56,7 +56,10 @@ export class PeerConnectionMonitor extends EventEmitter {
 	public readonly mappedCertificateMonitors = new Map<string, CertificateMonitor>();
 
 	// tracks that are detected at peer connection level, but not yet picked up by stats
-	private readonly _pendingMediaStreamTracks = new Map<string, MediaStreamTrack>();
+	private readonly _pendingMediaStreamTracks = new Map<string, {
+		track: MediaStreamTrack,
+		attachments?: Record<string, unknown>,
+	}>();
 	public readonly mappedInboundTracks = new Map<string, InboundTrackMonitor>();
 	public readonly mappedOutboundTracks = new Map<string, OutboundTrackMonitor>();
 
@@ -105,8 +108,6 @@ export class PeerConnectionMonitor extends EventEmitter {
 	public highestSeenAvailableOutgoingBitrate?: number;
 	public highestSeenAvailableIncomingBitrate?: number;
 
-	public appData?: Record<string, unknown>;
-
 	public congested = false;
 	public avgRttInSec?: number;
 	public ewmaRttInSec?: number;
@@ -122,10 +123,18 @@ export class PeerConnectionMonitor extends EventEmitter {
 		value: undefined,
 	}
 
+
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+
 	public constructor(
 		public readonly peerConnectionId: string,
 		private readonly _getStats: () => Promise<W3C.RtcStats[]>,
-		public readonly parent: ClientMonitor
+		public readonly parent: ClientMonitor,
+		public attachments?: Record<string, unknown>,
 	) {
 		super();
 		this.detectors = new Detectors(
@@ -300,7 +309,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 		return {
 			peerConnectionId: this.peerConnectionId,
 			
-			appData: this.appData,
+			attachments: this.attachments,
 
 			codecs: this.codecs.map(codec => codec.createSample()),
 			inboundRtps: this.inboundRtps.map(inboundRtp => inboundRtp.createSample()),
@@ -319,7 +328,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 		}
 	}
 
-	public addMediaStreamTrack(track: MediaStreamTrack) {
+	public addMediaStreamTrack(track: MediaStreamTrack, attachments?: Record<string, unknown>) {
 		if (track.readyState === 'ended') return;
 		track.addEventListener('ended', () => {
 			this._pendingMediaStreamTracks.delete(track.id);
@@ -330,16 +339,19 @@ export class PeerConnectionMonitor extends EventEmitter {
 		const mediaSource = this.mediaSources.find(mediaSource => mediaSource.trackIdentifier === track.id);
 		
 		if (mediaSource) {
-			return this._createOutboundTrackMonitor(track, mediaSource);
+			return this._createOutboundTrackMonitor(track, mediaSource, attachments);
 		}
 
 		const inboundRtp = this.inboundRtps.find(inboundRtp => inboundRtp.trackIdentifier === track.id);
 		
 		if (inboundRtp) {
-			return this._createInboundTrackMonitor(track, inboundRtp);
+			return this._createInboundTrackMonitor(track, inboundRtp, attachments);
 		}
 
-		this._pendingMediaStreamTracks.set(track.id, track);
+		this._pendingMediaStreamTracks.set(track.id, {
+			track,
+			attachments,
+		});
 	}
 
 	public get codecs() {
@@ -551,7 +563,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 			const pendingTrack = this._pendingMediaStreamTracks.get(stats.trackIdentifier ?? '');
 
 			if (pendingTrack) {
-				this._createInboundTrackMonitor(pendingTrack, inboundRtpMonitor);
+				this._createInboundTrackMonitor(pendingTrack.track, inboundRtpMonitor, pendingTrack.attachments);
 			}
 		}
 
@@ -708,7 +720,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 				const pendingTrack = this._pendingMediaStreamTracks.get(stats.trackIdentifier);
 
 				if (pendingTrack) {
-					this._createOutboundTrackMonitor(pendingTrack, mediaSourceMonitor);
+					this._createOutboundTrackMonitor(pendingTrack.track, mediaSourceMonitor, pendingTrack.attachments);
 				}
 			}
 		}
@@ -887,12 +899,13 @@ export class PeerConnectionMonitor extends EventEmitter {
 		return certificateMonitor;
 	}
 
-	private _createOutboundTrackMonitor(track: MediaStreamTrack, mediaSourceMonitor: MediaSourceMonitor) {
+	private _createOutboundTrackMonitor(track: MediaStreamTrack, mediaSourceMonitor: MediaSourceMonitor, attachments?: Record<string, unknown>) {
 		if (this.mappedOutboundTracks.has(track.id)) return;
 
 		const trackMonitor = new OutboundTrackMonitor(
 			track,
-			mediaSourceMonitor
+			mediaSourceMonitor,
+			attachments,
 		);
 		this._pendingMediaStreamTracks.delete(track.id);
 		this.mappedOutboundTracks.set(track.id, trackMonitor);
@@ -903,12 +916,13 @@ export class PeerConnectionMonitor extends EventEmitter {
 		}
 	}
 
-	private _createInboundTrackMonitor(track: MediaStreamTrack, inboundRtpMonitor: InboundRtpMonitor) {
+	private _createInboundTrackMonitor(track: MediaStreamTrack, inboundRtpMonitor: InboundRtpMonitor, attachments?: Record<string, unknown>) {
 		if (this.mappedInboundTracks.has(track.id)) return;
 	
 		const trackMonitor = new InboundTrackMonitor(
 			track,
-			inboundRtpMonitor
+			inboundRtpMonitor,
+			attachments,
 		);
 
 		this._pendingMediaStreamTracks.delete(track.id);

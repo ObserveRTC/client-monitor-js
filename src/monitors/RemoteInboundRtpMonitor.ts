@@ -18,13 +18,23 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	totalRoundTripTime?: number | undefined;
 	fractionLost?: number | undefined;
 	roundTripTimeMeasurements?: number | undefined;
-	appData?: Record<string, unknown> | undefined;
 
 	// derived fields
 	packetRate?: number;
 	
 	deltaPacketsLost?: number;
 
+
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+	
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: RemoteInboundRtpStats,
@@ -95,7 +105,7 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 			fractionLost: this.fractionLost,
 			roundTripTimeMeasurements: this.roundTripTimeMeasurements,
 			
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

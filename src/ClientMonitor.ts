@@ -13,7 +13,7 @@ import {
     ClientMonitorEvents 
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
-import { ClientEventType } from './utils/enums';
+import { ClientEventType } from './utils/eventTypes';
 import { ClientMonitorConfig } from './ClientMonitorConfig';
 import { StatsAdapters } from './adapters/StatsAdapters';
 import { Sources } from './sources/Sources';
@@ -69,6 +69,11 @@ export class ClientMonitor extends EventEmitter {
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: ClientMonitorConfig;
+
+    /**
+     * Additional data attached to this stats, will be shipped to the server if sample is created
+     */
+    public attachments?: Record<string, unknown>;
 
     public constructor(
         config: Partial<ClientMonitorConfig>
@@ -229,7 +234,7 @@ export class ClientMonitor extends EventEmitter {
             clientId: this.clientId,
             timestamp: Date.now(),
             callId: this.callId,
-            appData: this.appData,
+            attachments: this.attachments,
             peerConnections: this.peerConnections.map(peerConnection => peerConnection.createSample()),
             clientEvents: this._clientEvents,
             clientMetaItems: this._clientMetaItems,

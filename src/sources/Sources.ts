@@ -30,34 +30,34 @@ export class Sources {
 	public addRTCPeerConnection(params: {
 		peerConnectionId?: string,
 		peerConnection: RTCPeerConnection,
-		appData?: Record<string, unknown>,
+		attachments?: Record<string, unknown>,
 	}): void {
 		if (this.monitor.closed) throw new Error('Cannot add RTCPeerConnection to closed ClientMonitor');
 		const {
 			peerConnectionId = crypto.randomUUID(),
 			peerConnection,
-			appData,
+			attachments,
 		} = params;
 
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 				peerConnectionId,
 				createStatsFromRTCStatsReportProvider(peerConnection.getStats.bind(peerConnection)),
 				this.monitor,
+				attachments,
 		);
 
 		listenRtcPeerConnectionEvents({
 			monitor: peerConnectionMonitor,
 			peerConnection,
 			peerConnectionId,
-			appData,
 		});
 
 		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
 	}
 
-	public addMediasoupDevice(device: mediasoup.types.Device, clientEventAppData?: Record<string, unknown>) {
+	public addMediasoupDevice(device: mediasoup.types.Device, attachments?: Record<string, unknown>) {
 		const newTransportListener = (transport: mediasoup.types.Transport) => {
-			this.addMediasoupTransport(transport, clientEventAppData);
+			this.addMediasoupTransport(transport, attachments);
 		}
 		this._mediasoupDeviceListeners.push({ device, listener: newTransportListener });
 		device.observer.on('newtransport', newTransportListener);
@@ -71,20 +71,22 @@ export class Sources {
 		return this;
 	}
 
-	public addMediasoupTransport(transport: mediasoup.types.Transport, clientEventAppData?: Record<string, unknown>) {
+	public addMediasoupTransport(transport: mediasoup.types.Transport, providedAttachemnts?: Record<string, unknown>) {
+		const attachments = {
+			direction: transport.direction,
+			...(providedAttachemnts ?? {}),
+		}
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 			transport.id,
 			createStatsFromRTCStatsReportProvider(transport.getStats.bind(transport)),
 			this.monitor,
+			attachments,
 		);
 
 		listenMediasoupTransport({
 			monitor: peerConnectionMonitor,
 			transport,
-			appData: {
-				direction: transport.direction,
-				...(clientEventAppData ?? {}),
-			},
+			attachments,
 		});
 
 		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);

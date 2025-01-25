@@ -44,8 +44,6 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	active?: boolean | undefined;
 	scalabilityMode?: string | undefined;
 
-	appData?: Record<string, unknown> | undefined;
-
 	// derived fields
 	bitrate?: number | undefined;
 	payloadBitrate?: number | undefined;
@@ -55,7 +53,15 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	ΔpacketsSent?: number | undefined;
 	ΔbytesSent?: number | undefined;
 
-	// public targetDeviations: [absolute: number, percentage: number][] = [];
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -178,7 +184,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 			powerEfficientEncoder: this.powerEfficientEncoder,
 			active: this.active,
 			scalabilityMode: this.scalabilityMode,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

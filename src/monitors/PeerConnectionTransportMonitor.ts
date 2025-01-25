@@ -8,8 +8,18 @@ export class PeerConnectionTransportMonitor implements PeerConnectionTransportSt
 	id: string;
 	dataChannelsOpened?: number;
 	dataChannelsClosed?: number;
-	appData?: Record<string, unknown> | undefined;
 
+
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+	
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: PeerConnectionTransportStats,
@@ -47,7 +57,7 @@ export class PeerConnectionTransportMonitor implements PeerConnectionTransportSt
 			timestamp: this.timestamp,
 			dataChannelsOpened: this.dataChannelsOpened,
 			dataChannelsClosed: this.dataChannelsClosed,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

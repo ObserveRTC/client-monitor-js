@@ -18,7 +18,16 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	height?: number | undefined;
 	frames?: number | undefined;
 	framesPerSecond?: number | undefined;
-	appData?: Record<string, unknown> | undefined;
+	
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
@@ -74,7 +83,7 @@ export class MediaSourceMonitor implements MediaSourceStats {
 			height: this.height,
 			frames: this.frames,
 			framesPerSecond: this.framesPerSecond,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 }

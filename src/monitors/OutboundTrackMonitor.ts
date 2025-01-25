@@ -5,8 +5,6 @@ import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
 
 export class OutboundTrackMonitor {
-	public appData?: Record<string, unknown>;
-
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
@@ -21,12 +19,24 @@ export class OutboundTrackMonitor {
 		return this.calculatedScore.value;
 	}
 
+
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+	
 	public constructor(
 		public readonly track: MediaStreamTrack,
 		private _mediaSource: MediaSourceMonitor,
+		attachments?: Record<string, unknown>,
 	) {
+		this.attachments = attachments;
 		this.detectors = new Detectors();
-		
 	}
 
 
@@ -90,7 +100,7 @@ export class OutboundTrackMonitor {
 			id: this.track.id,
 			kind: this.kind,
 			timestamp: Date.now(),
-			appData: this.appData,
+			attachments: this.attachments,
 			score: this.score,
 		};
 	}

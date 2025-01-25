@@ -22,13 +22,22 @@ export class IceTransportMonitor implements IceTransportStats {
 	dtlsRole?: string | undefined;
 	srtpCipher?: string | undefined;
 	selectedCandidatePairChanges?: number | undefined;
-	appData?: Record<string, unknown> | undefined;
 
 	ΔpacketsSent?: number | undefined;
 	ΔpacketsReceived?: number | undefined;
 	ΔbytesSent?: number | undefined;
 	ΔbytesReceived?: number | undefined;
 
+	/**
+	 * Additional data attached to this stats, will be shipped to the server
+	 */
+	attachments?: Record<string, unknown> | undefined;
+	/**
+	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * but can be used by the application
+	 */
+	public appData?: Record<string, unknown> | undefined;
+	
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: IceTransportStats,
@@ -99,7 +108,7 @@ export class IceTransportMonitor implements IceTransportStats {
 			dtlsRole: this.dtlsRole,
 			srtpCipher: this.srtpCipher,
 			selectedCandidatePairChanges: this.selectedCandidatePairChanges,
-			appData: this.appData,
+			attachments: this.attachments,
 		};
 	}
 
