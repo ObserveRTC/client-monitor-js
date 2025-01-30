@@ -1,6 +1,6 @@
 import { ClientMonitor } from "..";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
-import { ClientEventType } from "../utils/eventTypes";
+import { ClientEventTypes } from "../schema/ClientEventTypes";
 
 export type RtcPeerConnectionEventerContext = {
 	peerConnection: RTCPeerConnection;
@@ -19,7 +19,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	const clientMonitor = pcMonitor.parent;
 
 	const onIceCandidateListener = (event: RTCPeerConnectionIceEvent) => clientMonitor.addEvent({
-		type: ClientEventType.ICE_CANDIDATE,
+		type: ClientEventTypes.ICE_CANDIDATE,
 		payload: {
 			peerConnectionId,
 			candidate: event.candidate,
@@ -28,7 +28,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	});
 	const onIceConnectionStateChangeListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.ICE_CONNECTION_STATE_CHANGE,
+			type: ClientEventTypes.ICE_CONNECTION_STATE_CHANGE,
 			payload: {
 				peerConnectionId,
 				iceConnectionState: peerConnection.iceConnectionState,
@@ -38,7 +38,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	}
 	const onConnectionStateChangeListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.PEER_CONNECTION_STATE_CHANGED,
+			type: ClientEventTypes.PEER_CONNECTION_STATE_CHANGED,
 			payload: {
 				peerConnectionId,
 				connectionState: peerConnection.connectionState,
@@ -48,7 +48,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 		pcMonitor.connectionState = peerConnection.connectionState;
 	}
 	const onIceGatheringStateChangeListener = () => clientMonitor.addEvent({
-		type: ClientEventType.ICE_GATHERING_STATE_CHANGE,
+		type: ClientEventTypes.ICE_GATHERING_STATE_CHANGE,
 		payload: {
 			peerConnectionId,
 			iceGatheringState: peerConnection.iceGatheringState,
@@ -56,14 +56,14 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 		}
 	});
 	const onNegotiationNeededListener = () => clientMonitor.addEvent({
-		type: ClientEventType.NEGOTIATION_NEEDED,
+		type: ClientEventTypes.NEGOTIATION_NEEDED,
 		payload: {
 			peerConnectionId,
 			...(appData ?? {}),
 		}
 	});
 	const onSignalingStateChangeListener = () => clientMonitor.addEvent({
-		type: ClientEventType.SIGNALING_STATE_CHANGE,
+		type: ClientEventTypes.SIGNALING_STATE_CHANGE,
 		payload: {
 			signalingState: peerConnection.signalingState,
 			...(appData ?? {}),
@@ -92,7 +92,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 		peerConnection.removeEventListener('datachannel', onDataChannelListener);
 
 		clientMonitor.addEvent({
-			type: ClientEventType.PEER_CONNECTION_CLOSED,
+			type: ClientEventTypes.PEER_CONNECTION_CLOSED,
 			payload: {
 				peerConnectionId,
 				iceConnectionState: peerConnection.iceConnectionState,
@@ -115,7 +115,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	peerConnection.addEventListener('datachannel', onDataChannelListener);
 
 	clientMonitor.addEvent({
-		type: ClientEventType.PEER_CONNECTION_OPENED,
+		type: ClientEventTypes.PEER_CONNECTION_OPENED,
 		payload: {
 			peerConnectionId,
 			iceConnectionState: peerConnection.iceConnectionState,
@@ -136,7 +136,7 @@ export function listenMediaStreamTrackEvents(
 	const clientMonitor = pcMonitor.parent;
 
 	track.onended = () => clientMonitor.addEvent({
-		type: ClientEventType.MEDIA_TRACK_ADDED,
+		type: ClientEventTypes.MEDIA_TRACK_ADDED,
 		payload: {
 			trackId: track.id,
 			kind: track.kind,
@@ -149,7 +149,7 @@ export function listenMediaStreamTrackEvents(
 	});
 
 	track.onmute = () => clientMonitor.addEvent({
-		type: ClientEventType.MEDIA_TRACK_MUTED,
+		type: ClientEventTypes.MEDIA_TRACK_MUTED,
 		payload: {
 			trackId: track.id,
 			kind: track.kind,
@@ -162,7 +162,7 @@ export function listenMediaStreamTrackEvents(
 	});
 
 	track.onunmute = () => clientMonitor.addEvent({
-		type: ClientEventType.MEDIA_TRACK_UNMUTED,
+		type: ClientEventTypes.MEDIA_TRACK_UNMUTED,
 		payload: {
 			trackId: track.id,
 			kind: track.kind,
@@ -175,7 +175,7 @@ export function listenMediaStreamTrackEvents(
 	});
 
 	clientMonitor.addEvent({
-		type: ClientEventType.MEDIA_TRACK_ADDED,
+		type: ClientEventTypes.MEDIA_TRACK_ADDED,
 		payload: {
 			trackId: track.id,
 			kind: track.kind,
@@ -195,7 +195,7 @@ export function listenMediaStreamTrackEvents(
 
 export function listenRtcDataChannelEvents(monitor: ClientMonitor, dataChannel: RTCDataChannel) {
 	dataChannel.onclose = () => monitor.addEvent({
-		type: ClientEventType.DATA_CHANNEL_CLOSED,
+		type: ClientEventTypes.DATA_CHANNEL_CLOSED,
 		payload: {
 			label: dataChannel.label,
 			readyState: dataChannel.readyState,
@@ -203,7 +203,7 @@ export function listenRtcDataChannelEvents(monitor: ClientMonitor, dataChannel: 
 		}
 	});
 	dataChannel.onerror = (error) => monitor.addEvent({
-		type: ClientEventType.DATA_CHANNEL_ERROR,
+		type: ClientEventTypes.DATA_CHANNEL_ERROR,
 		payload: {
 			label: dataChannel.label,
 			readyState: dataChannel.readyState,
@@ -212,7 +212,7 @@ export function listenRtcDataChannelEvents(monitor: ClientMonitor, dataChannel: 
 		}
 	});
 	dataChannel.onopen = () => monitor.addEvent({
-		type: ClientEventType.DATA_CHANNEL_OPEN,
+		type: ClientEventTypes.DATA_CHANNEL_OPEN,
 		payload: {
 			label: dataChannel.label,
 			readyState: dataChannel.readyState,

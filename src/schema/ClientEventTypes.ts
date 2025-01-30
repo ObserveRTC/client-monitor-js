@@ -1,6 +1,6 @@
 /* eslint-disable no-shadow */
 
-export enum ClientEventType {
+export enum ClientEventTypes {
 	CALL_STARTED = 'CALL_STARTED',
 	CALL_ENDED = 'CALL_ENDED',
 	CLIENT_JOINED = 'CLIENT_JOINED',

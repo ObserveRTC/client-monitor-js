@@ -4,7 +4,7 @@ import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetecto
 import { DryInboundTrackDetector } from "../detectors/DryInboundTrack";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
-import { TrackSample } from "../schema/ClientSample";
+import { OutboundTrackSample } from "../schema/ClientSample";
 
 export class InboundTrackMonitor {
 	public static applyOnAppDataAtSampling = <T extends Record<string, unknown> = Record<string, unknown>>(appData: Record<string, unknown>) => {
@@ -87,7 +87,7 @@ export class InboundTrackMonitor {
 		this.detectors.update();
 	}
 
-	public createSample(): TrackSample {
+	public createSample(): OutboundTrackSample {
 			return {
 				id: this.track.id,
 				kind: this.track.kind,

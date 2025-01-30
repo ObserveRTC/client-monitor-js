@@ -1,6 +1,6 @@
 /* eslint-disable no-shadow */
 
-export enum ClientMetaType {
+export enum ClientMetaTypes {
 	MEDIA_CONSTRAINT = 'MEDIA_CONSTRAINT',
 	MEDIA_DEVICE = 'MEDIA_DEVICE',
 	MEDIA_DEVICES_SUPPORTED_CONSTRAINTS = 'MEDIA_DEVICES_SUPPORTED_CONSTRAINTS',

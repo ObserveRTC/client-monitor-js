@@ -13,7 +13,7 @@ import {
     ClientMonitorEvents 
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
-import { ClientEventType } from './utils/eventTypes';
+import { ClientEventTypes } from './schema/ClientEventTypes';
 import { ClientMonitorConfig } from './ClientMonitorConfig';
 import { StatsAdapters } from './adapters/StatsAdapters';
 import { Sources } from './sources/Sources';
@@ -282,7 +282,7 @@ export class ClientMonitor extends EventEmitter {
         if (this.closed) return;
 
         this.addEvent({
-            type: ClientEventType.CLIENT_JOINED,
+            type: ClientEventTypes.CLIENT_JOINED,
             payload: {
                 ...event?.payload,
             },
@@ -294,7 +294,7 @@ export class ClientMonitor extends EventEmitter {
         if (this.closed) return;
 
         this.addEvent({
-            type: ClientEventType.CLIENT_LEFT,
+            type: ClientEventTypes.CLIENT_LEFT,
             payload: {
                 ...event?.payload,
             },
@@ -359,12 +359,13 @@ export class ClientMonitor extends EventEmitter {
         if (this.closed) {
             throw new Error('Cannot add source to closed ClientMonitor');
         }
+        const constructorName = (source as any)?.constructor?.name;
 
-        if (source instanceof RTCPeerConnection) {
-            this._sources.addRTCPeerConnection({ peerConnection: source });
-        } else if (source instanceof mediasoup.types.Device) {
+        if (source instanceof RTCPeerConnection || constructorName === 'RTCPeerConnection') {
+            this._sources.addRTCPeerConnection({ peerConnection: source as RTCPeerConnection });
+        } else if (source instanceof mediasoup.types.Device || constructorName === 'Device') {
             this._sources.addMediasoupDevice(source as mediasoup.types.Device);
-        } else if (source instanceof mediasoup.types.Transport) {
+        } else if (source instanceof mediasoup.types.Transport || constructorName === 'Transport') {
             this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
         } else {
             throw new Error('Unknown source type');

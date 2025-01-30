@@ -1,6 +1,6 @@
 import { ClientMonitor } from "../ClientMonitor";
 import { createLogger } from "../utils/logger";
-import { ClientMetaType } from "../utils/metaTypes";
+import { ClientMetaTypes } from "../schema/ClientMetaTypes";
 
 const logger = createLogger('utils');
 
@@ -32,7 +32,7 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 						return result;
 				} catch (err) {
 					monitor.addIssue({
-						type: ClientMetaType.USER_MEDIA_ERROR,
+						type: ClientMetaTypes.USER_MEDIA_ERROR,
 						payload: {
 								error: `${err}`,
 						}
@@ -45,7 +45,7 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 				const supportedConstraints = mediaDevices.getSupportedConstraints();
 
 				monitor.addMetaData({
-						type: ClientMetaType.MEDIA_DEVICES_SUPPORTED_CONSTRAINTS,
+						type: ClientMetaTypes.MEDIA_DEVICES_SUPPORTED_CONSTRAINTS,
 						payload: {
 								...supportedConstraints
 						}
@@ -64,7 +64,7 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 								if (reportedDeviceIds.has(deviceId)) continue;
 								
 								monitor.addMetaData({
-										type: ClientMetaType.MEDIA_DEVICE,
+										type: ClientMetaTypes.MEDIA_DEVICE,
 										payload: mediaDevice.toJSON()
 								});
 

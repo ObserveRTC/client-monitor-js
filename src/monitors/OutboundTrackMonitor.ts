@@ -1,5 +1,5 @@
 import { Detectors } from "../detectors/Detectors";
-import { TrackSample } from "../schema/ClientSample";
+import { InboundTrackSample } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -95,7 +95,7 @@ export class OutboundTrackMonitor {
 		return highestLayer;
 	}
 
-	public createSample(): TrackSample {
+	public createSample(): InboundTrackSample {
 		return {
 			id: this.track.id,
 			kind: this.kind,

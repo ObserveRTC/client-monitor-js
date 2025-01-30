@@ -1,6 +1,6 @@
 import * as mediasoup from 'mediasoup-client';
 import { PeerConnectionMonitor } from '../monitors/PeerConnectionMonitor';
-import { ClientEventType } from '../utils/eventTypes';
+import { ClientEventTypes } from '../schema/ClientEventTypes';
 import { listenMediaStreamTrackEvents } from './rtcEventers';
 
 export type MediasoupTransportListenerContext = {
@@ -38,7 +38,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 		pcMonitor.connectionState = args[0];
 
 		clientMonitor.addEvent({
-			type: ClientEventType.PEER_CONNECTION_STATE_CHANGED,
+			type: ClientEventTypes.PEER_CONNECTION_STATE_CHANGED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				connectionState: args[0],
@@ -48,7 +48,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 	}
 	const iceGatheringStateChangeListener = (...args: mediasoup.types.TransportEvents['icegatheringstatechange']) => {
 		clientMonitor.addEvent({
-			type: ClientEventType.ICE_GATHERING_STATE_CHANGE,
+			type: ClientEventTypes.ICE_GATHERING_STATE_CHANGE,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				iceGatheringState: args[0],
@@ -77,7 +77,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 
 	pcMonitor.once('close', () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.PEER_CONNECTION_CLOSED,
+			type: ClientEventTypes.PEER_CONNECTION_CLOSED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				...(attachments ?? {}),
@@ -86,7 +86,7 @@ export function listenMediasoupTransport(context: MediasoupTransportListenerCont
 	});
 
 	clientMonitor.addEvent({
-		type: ClientEventType.PEER_CONNECTION_OPENED,
+		type: ClientEventTypes.PEER_CONNECTION_OPENED,
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
 			...(attachments ?? {}),
@@ -100,7 +100,7 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 	const clientMonitor = pcMonitor.parent;
 	const pauseListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.PRODUCER_PAUSED,
+			type: ClientEventTypes.PRODUCER_PAUSED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: producer.track?.id,
@@ -110,7 +110,7 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 	}
 	const resumeListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.PRODUCER_RESUMED,
+			type: ClientEventTypes.PRODUCER_RESUMED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: producer.track?.id,
@@ -124,7 +124,7 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 		producer.observer.off('resume', resumeListener);
 
 		clientMonitor.addEvent({
-			type: ClientEventType.PRODUCER_REMOVED,
+			type: ClientEventTypes.PRODUCER_REMOVED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				producerId: producer.id,
@@ -137,7 +137,7 @@ function listenMediasoupProducer(pcMonitor: PeerConnectionMonitor, producer: med
 	producer.observer.on('resume', resumeListener);
 
 	clientMonitor.addEvent({
-		type: ClientEventType.PRODUCER_ADDED,
+		type: ClientEventTypes.PRODUCER_ADDED,
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
 			producerId: producer.id,
@@ -157,7 +157,7 @@ function listenDataProducer(pcMonitor: PeerConnectionMonitor, dataProducer: medi
 
 	dataProducer.observer.once('close', () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.DATA_PRODUCER_CLOSED,
+			type: ClientEventTypes.DATA_PRODUCER_CLOSED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				dataProducerId: dataProducer.id,
@@ -166,7 +166,7 @@ function listenDataProducer(pcMonitor: PeerConnectionMonitor, dataProducer: medi
 	});
 
 	clientMonitor.addEvent({
-		type: ClientEventType.DATA_PRODUCER_CREATED,
+		type: ClientEventTypes.DATA_PRODUCER_CREATED,
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
 			dataProducerId: dataProducer.id,
@@ -178,7 +178,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 	const clientMonitor = pcMonitor.parent;
 	const pauseListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.MEDIA_TRACK_MUTED,
+			type: ClientEventTypes.MEDIA_TRACK_MUTED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: consumer.track.id,
@@ -188,7 +188,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 	}
 	const resumeListener = () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.MEDIA_TRACK_UNMUTED,
+			type: ClientEventTypes.MEDIA_TRACK_UNMUTED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: consumer.track.id,
@@ -203,7 +203,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 		consumer.observer.off('resume', resumeListener);
 
 		clientMonitor.addEvent({
-			type: ClientEventType.CONSUMER_REMOVED,
+			type: ClientEventTypes.CONSUMER_REMOVED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				trackId: consumer.track.id,
@@ -216,7 +216,7 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 	consumer.observer.on('resume', resumeListener);
 
 	clientMonitor.addEvent({
-		type: ClientEventType.CONSUMER_ADDED,
+		type: ClientEventTypes.CONSUMER_ADDED,
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
 			consumerId: consumer.id,
@@ -232,7 +232,7 @@ function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: medi
 
 	dataConsumer.observer.once('close', () => {
 		clientMonitor.addEvent({
-			type: ClientEventType.DATA_CONSUMER_CLOSED,
+			type: ClientEventTypes.DATA_CONSUMER_CLOSED,
 			payload: {
 				peerConnectionId: pcMonitor.peerConnectionId,
 				dataConsumerId: dataConsumer.id,
@@ -242,7 +242,7 @@ function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: medi
 	});
 
 	clientMonitor.addEvent({
-		type: ClientEventType.DATA_CONSUMER_CREATED,
+		type: ClientEventTypes.DATA_CONSUMER_CREATED,
 		payload: {
 			peerConnectionId: pcMonitor.peerConnectionId,
 			dataConsumerId: dataConsumer.id,

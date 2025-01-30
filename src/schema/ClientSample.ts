@@ -1446,9 +1446,40 @@ export type CodecStats = {
 }
 
 /**
-* Track Stats items
+* Outbound Track Stats items
 */
-export type TrackSample = {
+export type OutboundTrackSample = {
+	/**
+	* The timestamp when the stats were generated.
+	*/
+	timestamp: number;
+
+	/**
+	* The unique identifier for the stats object.
+	*/
+	id: string;
+
+	/**
+	* Kind of the media (e.g., 'audio' or 'video').
+	*/
+	kind: string;
+
+	/**
+	* Calculated score for track (details should be added to attachments)
+	*/
+	score?: number;
+
+	/**
+	* Additional information attached to this stats
+	*/
+	attachments?: Record<string, unknown>;
+
+}
+
+/**
+* Inbound Track Stats items
+*/
+export type InboundTrackSample = {
 	/**
 	* The timestamp when the stats were generated.
 	*/
@@ -1496,9 +1527,14 @@ export type PeerConnectionSample = {
 	score?: number;
 
 	/**
-	* Track Stats items
+	* Inbound Track Stats items
 	*/
-	tracks?: TrackSample[];
+	inboundTracks?: InboundTrackSample[];
+
+	/**
+	* Outbound Track Stats items
+	*/
+	outboundTracks?: OutboundTrackSample[];
 
 	/**
 	* Codec items

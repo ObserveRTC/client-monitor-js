@@ -323,7 +323,8 @@ export class PeerConnectionMonitor extends EventEmitter {
 			iceCandidates: this.iceCandidates.map(iceCandidate => iceCandidate.createSample()),
 			iceCandidatePairs: this.iceCandidatePairs.map(iceCandidatePair => iceCandidatePair.createSample()),
 			certificates: this.certificates.map(certificate => certificate.createSample()),
-			tracks: this.tracks.map(track => track.createSample()),
+			inboundTracks: [ ...this.mappedInboundTracks.values() ].map(inboundTrack => inboundTrack.createSample()),
+			outboundTracks: [ ...this.mappedOutboundTracks.values() ].map(outboundTrack => outboundTrack.createSample()),
 			score: this.score,
 		}
 	}
