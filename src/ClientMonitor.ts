@@ -20,6 +20,7 @@ import { StuckedInboundTrackDetector, StuckedInboundTrackDetectorConfig } from '
 import { LongPcConnectionEstablishmentDetector, LongPcConnectionEstablishmentDetectorConfig } from './detectors/LongPcConnectionEstablishment';
 import UAParser from 'ua-parser-js';
 import { Detector } from './detectors/Detector';
+import { StuckedOutboundTrackDetector, StuckedOutboundTrackDetectorConfig } from './detectors/StuckedOutboundTrack';
 
 const logger = createLogger('ClientMonitor');
 
@@ -96,6 +97,11 @@ export type ClientMonitorConfig = {
          * Configuration for detecting long peer connection establishment issues.
          */
         longPcConnectionEstablishment?:  boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
+
+        /**
+         * Configuration for detecting stucked outbound track issues.
+         */
+        stuckedOutboundTrack?:  boolean | ClientIssue['severity'] | ClientDetectorIssueDetectionExtension,
     }
 };
 
@@ -141,6 +147,11 @@ export interface ClientMonitorEvents {
         durationInS?: number,
     },
     'stucked-inbound-track': {
+        peerConnectionId: string,
+        trackId: string, 
+        ssrc: number,
+    },
+    'stucked-outbound-track': {
         peerConnectionId: string,
         trackId: string, 
         ssrc: number,
@@ -783,6 +794,63 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
         return detector;
     }
 
+    public createStuckedOutboundTrackDetector(config?: StuckedOutboundTrackDetectorConfig& {
+        createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
+    }): StuckedOutboundTrackDetector {
+        const existingDetector = this._detectors.get(StuckedOutboundTrackDetector.name);
+
+        if (existingDetector) {
+            logger.warn('StuckedOutboundTrackDetector is already created, closing the existing one and creating a new one.');
+            existingDetector.close();
+        }
+
+        const detector = new StuckedOutboundTrackDetector(config ?? {
+            minStuckedDurationInMs: 5000,
+        });
+        const onUpdate = () => detector.update(this.storage.outboundRtps());
+        const {
+            createIssueOnDetection,
+        } = config ?? {};
+
+        const onStuckedOutboundrack = (event: { peerConnectionId: string, trackId: string, ssrc: number }) => {
+            if (createIssueOnDetection) {
+                const attachments = (typeof createIssueOnDetection.attachments === 'function' 
+                    ? createIssueOnDetection.attachments() 
+                    : createIssueOnDetection.attachments) ?? {}
+                ;
+                
+                this.addIssue({
+                    severity: createIssueOnDetection.severity,
+                    description: createIssueOnDetection.description ?? 'Stucked outbound track detected',
+                    timestamp: Date.now(),
+                    peerConnectionId: event.peerConnectionId,
+                    mediaTrackId: event.trackId,
+                    attachments: {
+                        ssrc: event.ssrc,
+                        ...attachments,
+                    },
+                });
+            }
+            this.emit('stucked-outbound-track', {
+                peerConnectionId: event.peerConnectionId,
+                trackId: event.trackId,
+                ssrc: event.ssrc,
+            });
+        }
+
+        detector.once('close', () => {
+            this.off('stats-collected', onUpdate);
+            detector.off('stuckedtrack', onStuckedOutboundrack);
+            this._detectors.delete('StuckedOutboundTrack');
+        });
+        this.on('stats-collected', onUpdate);
+        detector.on('stuckedtrack', onStuckedOutboundrack);
+
+        this._detectors.set('StuckedOutboundTrack', detector);
+
+        return detector;
+    }
+
     public createLongPcConnectionEstablishmentDetector(config?: LongPcConnectionEstablishmentDetectorConfig & {
         createIssueOnDetection?: ClientDetectorIssueDetectionExtension,
     }): LongPcConnectionEstablishmentDetector {
@@ -1114,6 +1182,13 @@ export class ClientMonitor extends TypedEventEmitter<ClientMonitorEvents> {
                 minStuckedDurationInMs: 5000,
                 createIssueOnDetection: getCreateIssueOnDetection('stuckedInboundTrack'),
             });
+        }
+
+        if (settings.stuckedOutboundTrack) {
+            this.createStuckedOutboundTrackDetector({
+                minStuckedDurationInMs: 5000,
+                createIssueOnDetection: getCreateIssueOnDetection('stuckedOutboundTrack'),
+            })
         }
 
         if (settings.longPcConnectionEstablishment) {
