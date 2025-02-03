@@ -84,6 +84,21 @@ export type ClientMonitorConfig = {
         thresholdInMs: number;
     };
 
+    syntheticSamplesDetector: {
+        /**
+         * If true, the detection of synthesized samples is disabled.
+         *
+         * DEFAULT: false
+         */
+        disabled?: boolean;
+
+        /**
+         * The minimum duration (in milliseconds) for synthesized samples to be considered
+         * significant and trigger an alert.
+         */
+        minSynthesizedSamplesDuration: number;
+    }
+
     /**
      * Configuration for detecting audio desynchronization during monitoring.
      */

@@ -251,8 +251,8 @@ export class DefaultScoreCalculator {
 			}
 		}
 
-		if (inboundRtp.ΔcorruptionProbability) {
-			appData.lastScoreDetails.corruptionProbabilityPenalty = 2.0 * inboundRtp.ΔcorruptionProbability;
+		if (inboundRtp.deltaCorruptionProbability) {
+			appData.lastScoreDetails.corruptionProbabilityPenalty = 2.0 * inboundRtp.deltaCorruptionProbability;
 		}
 
 		const scoreValue = Math.max(
@@ -280,7 +280,7 @@ export class DefaultScoreCalculator {
 
 		const pcMonitor = trackMonitor.getPeerConnection();
 		const bitrate = trackMonitor.bitrate;
-		const packetLoss = trackMonitor.getInboundRtp().ΔpacketsLost ?? 0;
+		const packetLoss = trackMonitor.getInboundRtp().deltaPacketsLost ?? 0;
 		const bufferDelayInMs = trackMonitor.getInboundRtp().jitterBufferDelay ?? 10;
 		const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
 		const dtxMode = trackMonitor.dtxMode;

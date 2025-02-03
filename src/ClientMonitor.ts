@@ -97,6 +97,9 @@ export class ClientMonitor extends EventEmitter {
                 fractionalCorrectionAlertOffThreshold: 0.1,
                 fractionalCorrectionAlertOnThreshold: 0.05,
             },
+            syntheticSamplesDetector: {
+                minSynthesizedSamplesDuration: 0,
+            },
             congestionDetector: config?.congestionDetector ?? {
                 sensitivity: 'medium',
             },

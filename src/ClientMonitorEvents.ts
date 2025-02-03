@@ -63,6 +63,10 @@ export type AudioDesyncTrackEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 }
 
+export type SynthesizedSamplesEventPayload = ClientMonitorBaseEvent & {
+	mediaPlayoutMonitor: MediaPlayoutMonitor,
+}
+
 export type FreezedVideoTrackEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 }
@@ -154,6 +158,7 @@ export type ClientMonitorEvents = {
 	'congestion': [CongestionEventPayload],
 	'cpulimitation': [ClientMonitorBaseEvent],
 	'audio-desync-track': [AudioDesyncTrackEventPayload],
+	'synthesized-samples': [SynthesizedSamplesEventPayload],
 	'freezed-video-track': [FreezedVideoTrackEventPayload],
 	'dry-inbound-track': [DryInboundTrackEventPayload],
 	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload]

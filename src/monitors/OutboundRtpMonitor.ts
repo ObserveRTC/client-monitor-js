@@ -50,8 +50,8 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	packetRate?: number | undefined;
 	bitPerPixel?: number | undefined;
 	
-	ΔpacketsSent?: number | undefined;
-	ΔbytesSent?: number | undefined;
+	deltaPacketsSent?: number | undefined;
+	deltaBytesSent?: number | undefined;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -119,19 +119,19 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		const elapsedInSec = elapsedInMs / 1000;
 
 		if (stats.packetsSent !== undefined && this.packetsSent !== undefined) {
-			this.ΔpacketsSent = stats.packetsSent - this.packetsSent;
-			this.packetRate = (this.ΔpacketsSent) / (elapsedInSec);
+			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
+			this.packetRate = (this.deltaPacketsSent) / (elapsedInSec);
 		}
 		if (stats.bytesSent !== undefined && this.bytesSent !== undefined) {
-			this.ΔbytesSent = stats.bytesSent - this.bytesSent;
-			this.bitrate = Math.max(0, this.ΔbytesSent * 8 / (elapsedInSec));
+			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
+			this.bitrate = Math.max(0, this.deltaBytesSent * 8 / (elapsedInSec));
 			
 			if (stats.headerBytesSent !== undefined && 
 				this.headerBytesSent !== undefined
 			) {
 				const headerBytesSent = stats.headerBytesSent - this.headerBytesSent;
 				const retransmittedBytesSent = (stats.retransmittedBytesSent ?? 0) - (this.retransmittedBytesSent ?? 0);
-				const payloadBytesSent = this.ΔbytesSent - headerBytesSent - retransmittedBytesSent;
+				const payloadBytesSent = this.deltaBytesSent - headerBytesSent - retransmittedBytesSent;
 
 				this.payloadBitrate = Math.max(0, payloadBytesSent * 8 / (elapsedInSec));
 			}

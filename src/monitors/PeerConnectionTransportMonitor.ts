@@ -39,6 +39,8 @@ export class PeerConnectionTransportMonitor implements PeerConnectionTransportSt
 	}
 
 	public accept(stats: Omit<PeerConnectionTransportStats, 'appData'>): void {
+		this._visited = true;
+		
 		const elapsedInMs = stats.timestamp - this.timestamp;
 		if (elapsedInMs <= 0) { 
 			return; // logger?

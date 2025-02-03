@@ -23,10 +23,12 @@ export class IceTransportMonitor implements IceTransportStats {
 	srtpCipher?: string | undefined;
 	selectedCandidatePairChanges?: number | undefined;
 
-	ΔpacketsSent?: number | undefined;
-	ΔpacketsReceived?: number | undefined;
-	ΔbytesSent?: number | undefined;
-	ΔbytesReceived?: number | undefined;
+	deltaPacketsSent?: number | undefined;
+	deltaPacketsReceived?: number | undefined;
+	deltaBytesSent?: number | undefined;
+	deltaBytesReceived?: number | undefined;
+	sendingBitrate?: number | undefined;
+	receivingBitrate?: number | undefined;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -68,21 +70,25 @@ export class IceTransportMonitor implements IceTransportStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
+		const elapsedInSec = elapsedInMs / 1000;
+
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
 
 		if (this.packetsSent && stats.packetsSent) {
-			this.ΔpacketsSent = stats.packetsSent - this.packetsSent;
+			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
 		}
 		if (this.packetsReceived && stats.packetsReceived) {
-			this.ΔpacketsReceived = stats.packetsReceived - this.packetsReceived;
+			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
 		}
 		if (this.bytesSent && stats.bytesSent) {
-			this.ΔbytesSent = stats.bytesSent - this.bytesSent;
+			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
+			this.sendingBitrate = (this.deltaBytesSent * 8) / elapsedInSec;
 		}
 		if (this.bytesReceived && stats.bytesReceived) {
-			this.ΔbytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.receivingBitrate = (this.deltaBytesReceived * 8) / elapsedInSec;
 		}
 
 		Object.assign(this, stats);

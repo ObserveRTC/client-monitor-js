@@ -1,6 +1,3 @@
-import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
-import { Detectors } from "../detectors/Detectors";
-import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetector";
 import { InboundRtpStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
@@ -89,11 +86,12 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	receivingAudioSamples?: number;
 	fractionLost?: number;
 	bitPerPixel?: number;
+	packetRate?: number | undefined;
 
-	ΔpacketsLost?: number;
-	ΔpacketsReceived?: number;
-	ΔbytesReceived?: number;
-	ΔcorruptionProbability?: number;
+	deltaPacketsLost?: number;
+	deltaPacketsReceived?: number;
+	deltaBytesReceived?: number;
+	deltaCorruptionProbability?: number;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -146,11 +144,15 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.receivingAudioSamples = stats.totalSamplesReceived - this.totalSamplesReceived;
 		}
 		if (this.bytesReceived && stats.bytesReceived) {
-			this.ΔbytesReceived = stats.bytesReceived - this.bytesReceived;
-			this.bitrate = Math.max(0, this.ΔbytesReceived * 8 / (elapsedInSec));
+			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.bitrate = Math.max(0, this.deltaBytesReceived * 8 / (elapsedInSec));
 		}
 		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
-			this.ΔpacketsLost = stats.packetsLost - this.packetsLost;
+			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
+		}
+		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
+			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
+			this.packetRate = this.deltaPacketsReceived / elapsedInSec;
 		}
 		if (this.totalCorruptionProbability !== undefined && 
 			stats.totalCorruptionProbability !== undefined &&
@@ -159,7 +161,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		) {
 			const deltaCoruption = stats.totalCorruptionProbability - this.totalCorruptionProbability;
 			const deltaMeasurements = Math.max(1, stats.corruptionMeasurements - this.corruptionMeasurements);
-			this.ΔcorruptionProbability = Math.max(
+			this.deltaCorruptionProbability = Math.max(
 				0, 
 				deltaCoruption / deltaMeasurements
 			);

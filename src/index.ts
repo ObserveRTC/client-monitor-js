@@ -1,5 +1,22 @@
 import { ClientMonitor } from "./ClientMonitor";
 import { ClientMonitorConfig } from "./ClientMonitorConfig";
+export { CertificateMonitor } from "./monitors/CertificateMonitor";
+export { CodecMonitor } from "./monitors/CodecMonitor";
+export { DataChannelMonitor } from "./monitors/DataChannelMonitor";
+export { IceCandidateMonitor } from "./monitors/IceCandidateMonitor";
+export { IceCandidatePairMonitor } from "./monitors/IceCandidatePairMonitor";
+export { IceTransportMonitor } from "./monitors/IceTransportMonitor";
+export { InboundRtpMonitor } from "./monitors/InboundRtpMonitor";
+export { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
+export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
+export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
+export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
+export { OutboundTrackMonitor } from "./monitors/OutboundTrackMonitor";
+export { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
+export { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTransportMonitor";
+export { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
+export { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
+export type { TrackMonitor }  from "./monitors/TrackMonitor";
 
 export {
     ClientMonitor,

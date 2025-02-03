@@ -15,8 +15,8 @@ export class DataChannelMonitor implements DataChannelStats {
 	messagesReceived?: number | undefined;
 	bytesReceived?: number | undefined;
 
-	ΔbytesSent?: number | undefined;
-	ΔbytesReceived?: number | undefined;
+	deltaBytesSent?: number | undefined;
+	deltaBytesReceived?: number | undefined;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -61,10 +61,10 @@ export class DataChannelMonitor implements DataChannelStats {
 		}
 
 		if (this.bytesSent && stats.bytesSent) {
-			this.ΔbytesSent = stats.bytesSent - this.bytesSent;
+			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 		}
 		if (this.bytesReceived && stats.bytesReceived) {
-			this.ΔbytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 
 		Object.assign(this, stats);

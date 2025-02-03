@@ -92,15 +92,17 @@ export class PeerConnectionMonitor extends EventEmitter {
 	public totalAvailableOutgoingBitrate = 0;
 
 	// deltas between two stats
-	public ΔinboundPacketsLost = 0;
-	public ΔinboundPacketsReceived = 0;
-	public ΔoutboundPacketsSent = 0;
-	public ΔoutboundPacketsReceived = 0;
-	public ΔoutboundPacketsLost = 0;
-	public ΔaudioBytesSent = 0;
-	public ΔvideoBytesSent = 0;
-	public ΔaudioBytesReceived = 0;
-	public ΔvideoBytesReceived = 0;
+	public deltaInboundPacketsLost = 0;
+	public deltaInboundPacketsReceived = 0;
+	public deltaOutboundPacketsSent = 0;
+	public deltaOutboundPacketsReceived = 0;
+	public deltaOutboundPacketsLost = 0;
+	public deltaAudioBytesSent = 0;
+	public deltaVideoBytesSent = 0;
+	public deltaAudioBytesReceived = 0;
+	public deltaVideoBytesReceived = 0;
+	public deltaDataChannelBytesReceived = 0;
+	public deltaDataChannelBytesSent = 0;
 
 	// adjust these to reflect what the name actually is
 	public highestSeenSendingBitrate?: number;
@@ -170,8 +172,16 @@ export class PeerConnectionMonitor extends EventEmitter {
 	public async accept(stats: W3C.RtcStats[]) {
 		let sumOfRttInS =  0;
 		let rttMeasurementsCounter = 0;
-		let ΔbytesReceived = 0;
-		let ΔbytesSent = 0;
+		this.deltaVideoBytesSent = 0;
+		this.deltaAudioBytesSent = 0;
+		this.deltaVideoBytesReceived = 0;
+		this.deltaAudioBytesReceived = 0;
+		this.deltaDataChannelBytesReceived = 0;
+		this.deltaDataChannelBytesSent = 0;
+		this.deltaOutboundPacketsLost = 0;
+		this.deltaOutboundPacketsReceived = 0;
+		this.deltaInboundPacketsLost = 0;
+		this.deltaInboundPacketsReceived = 0;
 
 		this.sendingAudioBitrate = 0;
 		this.sendingVideoBitrate = 0;
@@ -193,20 +203,23 @@ export class PeerConnectionMonitor extends EventEmitter {
 					switch (monitor?.kind) {
 						case 'audio':
 							this.receivingAudioBitrate += monitor?.bitrate ?? 0;
+							this.deltaAudioBytesReceived += monitor?.deltaBytesReceived ?? 0;
 							break;
 						case 'video':
 							this.receivingVideoBitrate += monitor?.bitrate ?? 0;
+							this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
 							break;
 					}
 
 					this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
-					ΔbytesReceived += monitor?.ΔbytesReceived ?? 0;
+					this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
+					this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
 					break;
 				}
 				case W3C.StatsType.remoteOutboundRtp: {
 					const monitor = this._updateRemoteOutboundRtp(statsItem);
 					
-					if (monitor?.roundTripTime) {
+					if (monitor?.roundTripTime !== undefined) {
 						sumOfRttInS += monitor.roundTripTime;
 						++rttMeasurementsCounter;
 					}
@@ -218,12 +231,14 @@ export class PeerConnectionMonitor extends EventEmitter {
 					switch (monitor?.kind) {
 						case 'audio':
 							this.sendingAudioBitrate += monitor?.bitrate ?? 0;
+							this.deltaAudioBytesSent += monitor?.deltaBytesSent ?? 0;
 							break;
 						case 'video':
 							this.sendingVideoBitrate += monitor?.bitrate ?? 0;
+							this.deltaVideoBytesSent += monitor?.deltaBytesSent ?? 0;
 							break;
 					}
-					ΔbytesSent += monitor?.ΔbytesSent ?? 0;
+					this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
 					break;
 				}
 					
@@ -231,14 +246,15 @@ export class PeerConnectionMonitor extends EventEmitter {
 					const monitor = this._updateRemoteInboundRtp(statsItem);
 
 					this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
+					// this.ΔoutboundPacketsLost += monitor?.ΔpacketsLost ?? 0;
 					break;
 				}
 					
 				case W3C.StatsType.dataChannel: {
 					const monitor = this._updateDataChannel(statsItem);
 					
-					ΔbytesReceived += monitor?.ΔbytesReceived ?? 0;
-					ΔbytesSent += monitor?.ΔbytesSent ?? 0;
+					this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
+					this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
 					break;
 				}
 				case W3C.StatsType.mediaSource: 
@@ -254,7 +270,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 					this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
 					this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
 
-					if (selectedPair?.currentRoundTripTime) {
+					if (selectedPair?.currentRoundTripTime !== undefined) {
 						sumOfRttInS += selectedPair.currentRoundTripTime;
 						++rttMeasurementsCounter;
 					}
@@ -286,8 +302,6 @@ export class PeerConnectionMonitor extends EventEmitter {
 			this.ewmaRttInSec = this.ewmaRttInSec !== undefined ? (this.avgRttInSec * 0.1) + (this.ewmaRttInSec * 0.9) : this.avgRttInSec;
 		}
 
-		this.ΔaudioBytesReceived = ΔbytesReceived;
-
 		this.highestSeenAvailableIncomingBitrate = Math.max(this.highestSeenAvailableIncomingBitrate ?? 0, this.totalAvailableIncomingBitrate);
 		this.highestSeenAvailableOutgoingBitrate = Math.max(this.highestSeenAvailableOutgoingBitrate ?? 0, this.totalAvailableOutgoingBitrate);
 		this.highestSeenSendingBitrate = Math.max(this.highestSeenSendingBitrate ?? 0, this.sendingAudioBitrate + this.sendingVideoBitrate);
@@ -299,6 +313,18 @@ export class PeerConnectionMonitor extends EventEmitter {
 		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.candidateType === 'relay') &&
 			selectedIceCandidatePairs.some(pair => pair.getRemoteCandidate()?.url?.startsWith('turn:'));
 		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
+
+		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
+		this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
+		this.totalSentAudioBytes += this.deltaAudioBytesSent;
+		this.totalSentVideoBytes += this.deltaVideoBytesSent;
+		this.totalReceivedAudioBytes += this.deltaAudioBytesReceived;
+		this.totalReceivedVideoBytes += this.deltaVideoBytesReceived;
+		this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
+		this.totalOutboundPacketsReceived += this.deltaOutboundPacketsReceived;
+		this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
+		this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
+		this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
 
 		this.detectors.update();
 
