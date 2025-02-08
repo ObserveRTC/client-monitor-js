@@ -305,7 +305,7 @@ export class ClientMonitor extends EventEmitter {
         })
     }
 
-    public addEvent(event: PartialBy<ClientEvent, 'timestamp'>): void {
+    public addEvent<Payload = Record<string, unknown>>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
         if (this.closed) return;
         if (!this.bufferingSampleData) return;
 

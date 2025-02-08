@@ -1,6 +1,6 @@
 import { ClientMonitor } from "..";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
-import { ClientEventTypes } from "../schema/ClientEventTypes";
+import { ClientEventTypes, MediaTrackAddedEventPayload, MediaTrackMutedEventPayload, MediaTrackRemovedEventPayload, PeerConnectionClosedEventPayload, PeerConnectionOpenedEventPayload } from "../schema/ClientEventTypes";
 
 export type RtcPeerConnectionEventerContext = {
 	peerConnection: RTCPeerConnection;
@@ -90,8 +90,8 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 		// peerConnection.removeEventListener('icecandidateerror', onIceCandidateErrorListener);
 		peerConnection.removeEventListener('track', onTrackListener);
 		peerConnection.removeEventListener('datachannel', onDataChannelListener);
-
-		clientMonitor.addEvent({
+		
+		clientMonitor.addEvent<PeerConnectionClosedEventPayload>({
 			type: ClientEventTypes.PEER_CONNECTION_CLOSED,
 			payload: {
 				peerConnectionId,
@@ -99,7 +99,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 				iceGatheringState: peerConnection.iceGatheringState,
 				signalingState: peerConnection.signalingState,
 				...(appData ?? {}),
-			}
+			},
 		});
 	})
 
@@ -114,7 +114,7 @@ export function listenRtcPeerConnectionEvents(context: RtcPeerConnectionEventerC
 	peerConnection.addEventListener('track', onTrackListener);
 	peerConnection.addEventListener('datachannel', onDataChannelListener);
 
-	clientMonitor.addEvent({
+	clientMonitor.addEvent<PeerConnectionOpenedEventPayload>({
 		type: ClientEventTypes.PEER_CONNECTION_OPENED,
 		payload: {
 			peerConnectionId,
@@ -135,11 +135,11 @@ export function listenMediaStreamTrackEvents(
 
 	const clientMonitor = pcMonitor.parent;
 
-	track.onended = () => clientMonitor.addEvent({
-		type: ClientEventTypes.MEDIA_TRACK_ADDED,
+	track.onended = () => clientMonitor.addEvent<MediaTrackRemovedEventPayload>({
+		type: ClientEventTypes.MEDIA_TRACK_REMOVED,
 		payload: {
 			trackId: track.id,
-			kind: track.kind,
+			kind: track.kind as 'audio' | 'video',
 			label: track.label,
 			muted: track.muted,
 			enabled: track.enabled,
@@ -148,11 +148,11 @@ export function listenMediaStreamTrackEvents(
 		}
 	});
 
-	track.onmute = () => clientMonitor.addEvent({
+	track.onmute = () => clientMonitor.addEvent<MediaTrackMutedEventPayload>({
 		type: ClientEventTypes.MEDIA_TRACK_MUTED,
 		payload: {
 			trackId: track.id,
-			kind: track.kind,
+			kind: track.kind as 'audio' | 'video',
 			label: track.label,
 			muted: track.muted,
 			enabled: track.enabled,
@@ -161,11 +161,11 @@ export function listenMediaStreamTrackEvents(
 		}
 	});
 
-	track.onunmute = () => clientMonitor.addEvent({
+	track.onunmute = () => clientMonitor.addEvent<MediaTrackMutedEventPayload>({
 		type: ClientEventTypes.MEDIA_TRACK_UNMUTED,
 		payload: {
 			trackId: track.id,
-			kind: track.kind,
+			kind: track.kind as 'audio' | 'video',
 			label: track.label,
 			muted: track.muted,
 			enabled: track.enabled,
@@ -174,11 +174,11 @@ export function listenMediaStreamTrackEvents(
 		}
 	});
 
-	clientMonitor.addEvent({
+	clientMonitor.addEvent<MediaTrackAddedEventPayload>({
 		type: ClientEventTypes.MEDIA_TRACK_ADDED,
 		payload: {
 			trackId: track.id,
-			kind: track.kind,
+			kind: track.kind as 'audio' | 'video',
 			label: track.label,
 			muted: track.muted,
 			enabled: track.enabled,

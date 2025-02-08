@@ -1,5 +1,3 @@
-import { ClientMonitor } from "./ClientMonitor";
-import { ClientMonitorConfig } from "./ClientMonitorConfig";
 export { CertificateMonitor } from "./monitors/CertificateMonitor";
 export { CodecMonitor } from "./monitors/CodecMonitor";
 export { DataChannelMonitor } from "./monitors/DataChannelMonitor";
@@ -73,7 +71,7 @@ export {
     setLogger,
 } from "./utils/logger";
 
-export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {
-    return new ClientMonitor(config);
-}
+// export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {
+//     return new ClientMonitor(config);
+// }
 
