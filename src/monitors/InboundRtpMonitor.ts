@@ -91,6 +91,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaPacketsLost?: number;
 	deltaPacketsReceived?: number;
 	deltaBytesReceived?: number;
+	deltaJitterBufferDelay?: number;
 	deltaCorruptionProbability?: number;
 
 	/**
@@ -165,6 +166,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 				0, 
 				deltaCoruption / deltaMeasurements
 			);
+		}
+		if (this.jitterBufferDelay !== undefined && stats.jitterBufferDelay !== undefined) {
+			this.deltaJitterBufferDelay = stats.jitterBufferDelay - this.jitterBufferDelay;
 		}
 
 		Object.assign(this, stats);

@@ -11,7 +11,7 @@ export class OutboundTrackMonitor {
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 
 	public calculatedScore: CalculatedScore = {
-		weight: 1,
+		weight: this.kind === 'audio' ? 1 : 2,
 		value: undefined,
 	};
 

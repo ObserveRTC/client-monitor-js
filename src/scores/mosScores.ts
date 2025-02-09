@@ -9,6 +9,8 @@ export function calculateAudioMOS(
 	dtxMode: boolean,
 	fec: boolean
 ) {
+
+	// console.warn('calculateAudioMOS', bitrate, packetLoss, bufferDelayInMs, roundTripTimeInMs, dtxMode, fec);
 	// Audio MOS calculation is based on E-Model algorithm
 	// Assume 20ms packetization delay
 	const delayInMs = 20 + bufferDelayInMs + roundTripTimeInMs / 2;
@@ -27,6 +29,8 @@ export function calculateAudioMOS(
 	const R = clamp(R0 - Ipl - delayImpairment, 0, 100);
 	const MOS = 1 + 0.035 * R + (R * (R - 60) * (100 - R) * 7) / 1000000;
 	
+	// console.warn('MOS', MOS, 'R', R, 'Ipl', Ipl, 'delayImpairment', delayImpairment, 'equipmentImpairment', equipmentImpairment, 'delayInMs', delayInMs);
+
 	return clamp(Math.round(MOS * 100) / 100, 1, 5);
 }
 

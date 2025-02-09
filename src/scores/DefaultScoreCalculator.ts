@@ -5,7 +5,7 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { TrackMonitor } from "../monitors/TrackMonitor";
 import { calculateAudioMOS } from "./mosScores";
 
-export type DefaultScoreCalclulatorOutboundTrackScoreAppData = {
+export type DefaultScoreCalclulatorOutboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	diffBitrateSquares: number[];
 	lastBitrate?: number;
@@ -17,7 +17,16 @@ export type DefaultScoreCalclulatorOutboundTrackScoreAppData = {
 	}
 }
 
-export type DefaultScoreCalclulatorInboundVideoScoreAppData = {
+export type DefaultScoreCalclulatorOutboundAudioTrackScoreAppData = {
+	lastNScores: number[];
+	lastScoreDetails: {
+		targetDeviatioPenalty: number,
+		cpuLimitationPenalty: number,
+		bitrateVolatilityPenalty: number,
+	}
+}
+
+export type DefaultScoreCalclulatorInboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	ewmaFps?: number;
 	lastScoreDetails: {
@@ -77,6 +86,7 @@ export class DefaultScoreCalculator {
 
 			let trackTotalScore = 0;
 			let trackTotalWeight = 0;
+			let noTrack = true;
 
 			for (const trackMonitor of pcMonitor.tracks) {
 				const trackScore = trackMonitor.calculatedScore;
@@ -85,20 +95,24 @@ export class DefaultScoreCalculator {
 				
 				trackTotalScore += trackScore.value * trackScore.weight;
 				trackTotalWeight += trackScore.weight;
+				noTrack = false;
 			}
+
 			
-			const weightedTrackScore = trackTotalScore / trackTotalWeight;
+			const weightedTrackScore = noTrack ? DefaultScoreCalculator.MAX_SCORE : trackTotalScore / Math.max(trackTotalWeight, 1);
 			const normalizedPcScore = Math.max(
 				DefaultScoreCalculator.MIN_SCORE,
 				pcMonitor.calculatedStabilityScore.value
 			) / DefaultScoreCalculator.MAX_SCORE;
 			const totalPcScore = weightedTrackScore * normalizedPcScore;
-
+			
+			// console.warn('trackTotalScore', trackTotalScore, 'trackTotalWeight', trackTotalWeight, 'weightedTrackScore', weightedTrackScore, 'normalizedPcScore', normalizedPcScore, pcMonitor.attachments?.direaction);
+			
 			clientTotalScore += totalPcScore * pcMonitor.calculatedStabilityScore.weight;
 			clientTotalWeight += pcMonitor.calculatedStabilityScore.weight;
 		}
 
-		const clientScore = clientTotalScore / clientTotalWeight;
+		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
 		clientMonitor.setScore(clientScore);
 	}
 
@@ -109,8 +123,8 @@ export class DefaultScoreCalculator {
 		const score = pcMonitor.calculatedStabilityScore;
 		const rttInMs = (pcMonitor.avgRttInSec ?? 0) * 1000;
 		const fractionLost = 
-			pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)
-			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0);
+			(pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)
+			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)) 
 		
 		let scoreValue = 5.0;
 		let appData = score.appData as DefaultScoreCalculatorPeerConnectionScoreAppData | undefined;
@@ -134,7 +148,7 @@ export class DefaultScoreCalculator {
 			lastScoreDetails.rttPenalty = 1.0;
 		}
 
-		if (0.0 < fractionLost) {
+		if (0.01 < fractionLost) {
 			if (fractionLost < 0.05) {
 				lastScoreDetails.fractionLostPenalty = 1.0;
 			}	else if (fractionLost < 0.2) {
@@ -201,7 +215,7 @@ export class DefaultScoreCalculator {
 
 			return;
 		}
-		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalclulatorInboundVideoScoreAppData | undefined;
+		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalclulatorInboundVideoTrackScoreAppData | undefined;
 
 		if (!appData) {
 			appData = {
@@ -234,9 +248,11 @@ export class DefaultScoreCalculator {
 			const stdDev = Math.sqrt(avgFpsSqueres);
 			const volatility = stdDev / appData.ewmaFps;
 
-			if (0.1 < volatility && volatility < 0.2) {
+			// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgFpsSqueres', avgFpsSqueres);
+
+			if (1.1 < volatility && volatility < 1.2) {
 				lastScoreDetails.fpsPenalty = 1.0;
-			} else if (0.2 < volatility) {
+			} else if (1.2 < volatility) {
 				lastScoreDetails.fpsPenalty = 2.0;
 			}
 		}
@@ -281,7 +297,7 @@ export class DefaultScoreCalculator {
 		const pcMonitor = trackMonitor.getPeerConnection();
 		const bitrate = trackMonitor.bitrate;
 		const packetLoss = trackMonitor.getInboundRtp().deltaPacketsLost ?? 0;
-		const bufferDelayInMs = trackMonitor.getInboundRtp().jitterBufferDelay ?? 10;
+		const bufferDelayInMs = trackMonitor.getInboundRtp().deltaJitterBufferDelay ?? 10;
 		const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
 		const dtxMode = trackMonitor.dtxMode;
 		const fec = (trackMonitor.getInboundRtp().fecBytesReceived ?? 0) > 0;
@@ -319,7 +335,7 @@ export class DefaultScoreCalculator {
 			return;
 		}
 		const score = trackMonitor.calculatedScore;
-		let appData = score.appData as DefaultScoreCalclulatorOutboundTrackScoreAppData | undefined;
+		let appData = score.appData as DefaultScoreCalclulatorOutboundVideoTrackScoreAppData | undefined;
 
 		if (!appData) {
 			appData = {

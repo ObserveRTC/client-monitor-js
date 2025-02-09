@@ -19,7 +19,7 @@ export class InboundTrackMonitor {
 	public dtxMode = false;
 
 	public calculatedScore: CalculatedScore = {
-		weight: 1,
+		weight: this.kind === 'audio' ? 1 : 2,
 		value: undefined,
 	};
 
