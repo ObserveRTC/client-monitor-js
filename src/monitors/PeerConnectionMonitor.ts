@@ -22,6 +22,7 @@ import { CongestionDetector } from "../detectors/CongestionDetector";
 import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
+import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
 
 const logger = createLogger('PeerConnectionMonitor');
 
@@ -142,6 +143,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 		this.detectors = new Detectors(
 			new LongPcConnectionEstablishmentDetector(this),
 			new CongestionDetector(this),
+			new IceTupleChangeDetector(this),
 		);
 	}
 

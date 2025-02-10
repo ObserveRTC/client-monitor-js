@@ -1,4 +1,5 @@
 import { Detectors } from "../detectors/Detectors";
+import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrack";
 import { InboundTrackSample } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
@@ -36,7 +37,9 @@ export class OutboundTrackMonitor {
 		attachments?: Record<string, unknown>,
 	) {
 		this.attachments = attachments;
-		this.detectors = new Detectors();
+		this.detectors = new Detectors(
+			new DryOutboundTrackDetector(this),
+		);
 	}
 
 

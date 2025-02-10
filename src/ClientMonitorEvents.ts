@@ -10,6 +10,7 @@ import { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
 import { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 import { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
+import { OutboundTrackMonitor } from "./monitors/OutboundTrackMonitor";
 import { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
 import { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTransportMonitor";
 import { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
@@ -75,7 +76,15 @@ export type DryInboundTrackEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 }
 
+export type DryOutboundTrackEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+}
+
 export type TooLongPcConnectionEstablishmentEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+}
+
+export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
 }
 
@@ -148,6 +157,8 @@ export type NewCertificateMonitorEventPayload = ClientMonitorBaseEvent & {
 	certificateMonitor: CertificateMonitor,
 }
 
+
+
 export type ClientMonitorEvents = {
 	'sample-created': [SampleCreatedEventPayload],
 	"stats-collected": [StatsCollectedEventPayload],
@@ -161,6 +172,8 @@ export type ClientMonitorEvents = {
 	'synthesized-samples': [SynthesizedSamplesEventPayload],
 	'freezed-video-track': [FreezedVideoTrackEventPayload],
 	'dry-inbound-track': [DryInboundTrackEventPayload],
+	'dry-outbound-track': [DryOutboundTrackEventPayload],
+	'ice-tuple-changed': [IceTupleChangedEventPayload],
 	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload]
 	// 'ice-restart': [peerConnectionMonitor: PeerConnectionMonitor],
 	'score': [ScoreEventPayload],

@@ -7,16 +7,11 @@ import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { OutboundTrackSample } from "../schema/ClientSample";
 
 export class InboundTrackMonitor {
-	public static applyOnAppDataAtSampling = <T extends Record<string, unknown> = Record<string, unknown>>(appData: Record<string, unknown>) => {
-		return {
-			...appData,
-		};
-	}
-
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 	public dtxMode = false;
+	public remoteOutboundTrackPaused = false;
 
 	public calculatedScore: CalculatedScore = {
 		weight: this.kind === 'audio' ? 1 : 2,

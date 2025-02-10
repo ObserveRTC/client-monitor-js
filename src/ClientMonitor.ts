@@ -90,7 +90,10 @@ export class ClientMonitor extends EventEmitter {
     
             videoFreezesDetector: config?.videoFreezesDetector ?? {
             },
-            stuckedInboundTrackDetector: config?.stuckedInboundTrackDetector ?? {
+            dryInboundTrackDetector: config?.dryInboundTrackDetector ?? {
+                thresholdInMs: 5000,
+            },
+            dryOutboundTrackDetector: config?.dryOutboundTrackDetector ?? {
                 thresholdInMs: 5000,
             },
             audioDesyncDetector: config?.audioDesyncDetector ?? {

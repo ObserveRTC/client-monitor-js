@@ -9,6 +9,7 @@ export class AudioDesyncDetector implements Detector {
 	) {
 		
 	}
+	public lastDesyncDuration?: number;
 	private _startedDesyncAt?: number;
 	private _prevCorrectedSamples = 0;
 	
@@ -42,6 +43,9 @@ export class AudioDesyncDetector implements Detector {
 
 		if (!inboundRtp.desync) {
 			if (wasDesync) {
+				if (this._startedDesyncAt) {
+					this.lastDesyncDuration = Date.now() - this._startedDesyncAt;
+				}
 				this._startedDesyncAt = undefined;
 			}
 			return;

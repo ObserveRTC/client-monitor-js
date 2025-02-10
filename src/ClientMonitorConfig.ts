@@ -69,7 +69,25 @@ export type ClientMonitorConfig = {
     /**
      * Configuration for detecting inbound track stalling during monitoring.
      */
-    stuckedInboundTrackDetector: {
+    dryInboundTrackDetector: {
+        /**
+         * If true, the detection of stalled inbound tracks is disabled.
+         *
+         * DEFAULT: false
+         */
+        disabled?: boolean;
+
+        /**
+         * The time threshold (in milliseconds) to determine if an inbound track
+         * is considered stalled.
+         */
+        thresholdInMs: number;
+    };
+
+    /**
+     * Configuration for detecting inbound track stalling during monitoring.
+     */
+    dryOutboundTrackDetector: {
         /**
          * If true, the detection of stalled inbound tracks is disabled.
          *

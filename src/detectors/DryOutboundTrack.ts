@@ -1,12 +1,12 @@
-import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
+import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { Detector } from "./Detector";
 
 
-export class DryInboundTrackDetector implements Detector {
-	public readonly name = 'dry-inbound-track-detector';
+export class DryOutboundTrackDetector implements Detector {
+	public readonly name = 'dry-outbound-track-detector';
 	
 	public constructor(
-		public readonly trackMonitor: InboundTrackMonitor,
+		public readonly trackMonitor: OutboundTrackMonitor,
 	) {
 	}
 
@@ -17,15 +17,15 @@ export class DryInboundTrackDetector implements Detector {
 	}
 
 	private get config() {
-		return this.peerConnection.parent.config.dryInboundTrackDetector;
+		return this.peerConnection.parent.config.dryOutboundTrackDetector;
 	}
 
 	private _activatedAt?: number;
 
 	public update() {
 		if (this._evented || this.config.disabled) return;
-		if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
-		if (this.trackMonitor.remoteOutboundTrackPaused) {
+		if (this.trackMonitor.getOutboundRtps()?.[0].bytesSent !== 0) return;
+		if (this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
 			this._activatedAt = undefined;
 			return;
 		}
@@ -42,7 +42,7 @@ export class DryInboundTrackDetector implements Detector {
 
 		const clientMonitor = this.peerConnection.parent;
 
-		clientMonitor.emit('dry-inbound-track', {
+		clientMonitor.emit('dry-outbound-track', {
 			trackMonitor: this.trackMonitor,
 			clientMonitor: clientMonitor,
 		});
