@@ -87,12 +87,17 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	fractionLost?: number;
 	bitPerPixel?: number;
 	packetRate?: number | undefined;
+	ewmaFps?: number;
 
 	deltaPacketsLost?: number;
 	deltaPacketsReceived?: number;
 	deltaBytesReceived?: number;
 	deltaJitterBufferDelay?: number;
 	deltaCorruptionProbability?: number;
+	deltaFramesDecoded?: number;
+	deltaFramesReceived?: number;
+	deltaFramesRendered?: number;
+	deltaTime?: number;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -167,9 +172,20 @@ export class InboundRtpMonitor implements InboundRtpStats {
 				deltaCoruption / deltaMeasurements
 			);
 		}
+
 		if (this.jitterBufferDelay !== undefined && stats.jitterBufferDelay !== undefined) {
 			this.deltaJitterBufferDelay = stats.jitterBufferDelay - this.jitterBufferDelay;
 		}
+		if (this.framesDecoded !== undefined && stats.framesDecoded !== undefined) {
+			this.deltaFramesDecoded = stats.framesDecoded - this.framesDecoded;
+		}
+		if (this.framesReceived !== undefined && stats.framesReceived !== undefined) {
+			this.deltaFramesReceived = stats.framesReceived - this.framesReceived;
+		}
+		if (this.framesRendered !== undefined && stats.framesRendered !== undefined) {
+			this.deltaFramesRendered = stats.framesRendered - this.framesRendered;
+		}
+		this.deltaTime = elapsedInMs;
 
 		Object.assign(this, stats);
 
@@ -194,6 +210,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		if (this.packetsReceived !== undefined && this.packetsLost !== undefined) {
 			this.fractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
 				? (this.packetsLost) / (this.packetsLost + this.packetsReceived) : 0.0;
+		}
+		if (this.framesDecoded !== undefined) {
+			this.ewmaFps = this.ewmaFps ? 0.9 * this.ewmaFps + 0.1 * this.framesDecoded : this.framesDecoded;
 		}
 	}
 

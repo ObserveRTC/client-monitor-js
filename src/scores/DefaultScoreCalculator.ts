@@ -172,7 +172,10 @@ export class DefaultScoreCalculator {
 		);
 
 		appData.lastNScores.push(scoreValue);
-		score.value = this._calculateFinalScore(appData.lastNScores);
+		
+		const finalScore = this._calculateFinalScore(appData.lastNScores);
+
+		score.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	public _calculateTrackScore(trackMonitor: TrackMonitor) {
@@ -286,8 +289,10 @@ export class DefaultScoreCalculator {
 		);
 
 		appData.lastNScores.push(scoreValue);
-	
-		trackMonitor.calculatedScore.value = this._calculateFinalScore(appData.lastNScores);
+		
+		const finalScore = this._calculateFinalScore(appData.lastNScores)
+
+		trackMonitor.calculatedScore.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor) {
@@ -313,13 +318,15 @@ export class DefaultScoreCalculator {
 			return;
 		}
 
-		trackMonitor.calculatedScore.value = calculateAudioMOS(
-			bitrate,
-			packetLoss,
-			bufferDelayInMs,
-			roundTripTimeInMs,
-			dtxMode,
-			fec,
+		trackMonitor.calculatedScore.value = this._getRoundedScore(
+			calculateAudioMOS(
+				bitrate,
+				packetLoss,
+				bufferDelayInMs,
+				roundTripTimeInMs,
+				dtxMode,
+				fec,
+			)
 		);
 	}
 
@@ -463,16 +470,14 @@ export class DefaultScoreCalculator {
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
 		const lossPenalty = Math.exp(-(outboundRtp.getRemoteInboundRtp()?.deltaPacketsLost ?? 0) / 2); // Exponential decay for packet loss impact
-
-		console.warn('normalizedBitrate', normalizedBitrate, 'lossPenalty', lossPenalty);
-
-		trackMonitor.calculatedScore.value = Math.max(
+		const score = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
 			Math.min(
 				DefaultScoreCalculator.MAX_SCORE,
 				5 * normalizedBitrate * lossPenalty
 			)
-		)
+		);
+		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
 	}
 
 	private _calculateFinalScore(scores: number[]) {
@@ -493,5 +498,9 @@ export class DefaultScoreCalculator {
 		}
 		
 		return totalScore / counter;
+	}
+
+	private _getRoundedScore(score: number) {
+		return Math.round(score * 100) / 100;
 	}
 }

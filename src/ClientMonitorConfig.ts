@@ -102,6 +102,25 @@ export type ClientMonitorConfig = {
         thresholdInMs: number;
     };
 
+    playoutDiscrepancyDetector: {
+        /**
+         * If true, the detection of playout discrepancies is disabled.
+         *
+         * DEFAULT: false
+         */
+        disabled?: boolean;
+
+        /**
+         * The low watermark for the skew of frames between the received and rendered
+         */
+        lowSkewThreshold: number;
+
+        /**
+         * The high watermark for the skew of frames between the received and rendered
+         */
+        highSkewThreshold: number;
+    };
+
     syntheticSamplesDetector: {
         /**
          * If true, the detection of synthesized samples is disabled.

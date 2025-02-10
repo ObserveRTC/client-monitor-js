@@ -5,6 +5,7 @@ import { DryInboundTrackDetector } from "../detectors/DryInboundTrack";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { OutboundTrackSample } from "../schema/ClientSample";
+import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetector";
 
 export class InboundTrackMonitor {
 	public readonly direction = 'inbound';
@@ -46,6 +47,7 @@ export class InboundTrackMonitor {
 			this.detectors.add(new AudioDesyncDetector(this));
 		} else if (this.kind === 'video') {
 			this.detectors.add(new FreezedVideoTrackDetector(this));
+			this.detectors.add(new PlayoutDiscrepancyDetector(this));
 		}
 		
 		// for mediasoup probator we don't need to run detectors

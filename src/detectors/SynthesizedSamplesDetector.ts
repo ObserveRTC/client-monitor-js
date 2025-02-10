@@ -10,8 +10,6 @@ export class SynthesizedSamplesDetector implements Detector {
     ) {
     }
 
-    private _evented = false;
-
     private get peerConnection() {
         return this.mediaPlayout.getPeerConnection();
     }
@@ -23,7 +21,7 @@ export class SynthesizedSamplesDetector implements Detector {
     public update() {
         if (this.config.disabled) return;
         if (this.mediaPlayout.deltaSynthesizedSamplesDuration <= this.config.minSynthesizedSamplesDuration) {
-            return this._evented = false;
+            return;
         }
 
 
@@ -33,7 +31,5 @@ export class SynthesizedSamplesDetector implements Detector {
             mediaPlayoutMonitor: this.mediaPlayout,
             clientMonitor: clientMonitor,
         });
-
-        this._evented = true;
     }
 }

@@ -88,6 +88,10 @@ export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
 }
 
+export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent & {	
+	trackMonitor: InboundTrackMonitor,
+}
+
 export type ScoreEventPayload = ClientMonitorBaseEvent & {
 	clientScore: number,
 	remarks?: string[],
@@ -174,7 +178,8 @@ export type ClientMonitorEvents = {
 	'dry-inbound-track': [DryInboundTrackEventPayload],
 	'dry-outbound-track': [DryOutboundTrackEventPayload],
 	'ice-tuple-changed': [IceTupleChangedEventPayload],
-	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload]
+	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload],
+	'inbound-video-playout-discrepancy': [InboundVideoPlayoutDiscrepancyEventPayload],
 	// 'ice-restart': [peerConnectionMonitor: PeerConnectionMonitor],
 	'score': [ScoreEventPayload],
 
