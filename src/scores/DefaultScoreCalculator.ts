@@ -60,7 +60,12 @@ export class DefaultScoreCalculator {
 	public static readonly MIN_SCORE = 0.0;
 	public static lastNScoresMaxLength = 10;
 	public static lastNScoresMinLength = 5;
+	public static readonly TARGET_AUDIO_BITRATE = 32000; // 64 kbps is a good quality for Opus
+	// public static readonly MAX_AUDIO_BITRATE = 510000; // 510 kbps is a good quality for Opus
+	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
+	private static  readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
 
+	
 	public constructor(
 		private readonly clientMonitor: ClientMonitor,
 	) {
@@ -433,10 +438,6 @@ export class DefaultScoreCalculator {
 		score.value = this._calculateFinalScore(appData.lastNScores);
 	}
 
-	public static readonly MAX_AUDIO_BITRATE = 510000; // 510 kbps is a good quality for Opus
-	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
-	private static  readonly NORMALIZATION_FACTOR = Math.log10(this.MAX_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
-
 	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor) {
 		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
@@ -462,6 +463,8 @@ export class DefaultScoreCalculator {
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
 		const lossPenalty = Math.exp(-(outboundRtp.getRemoteInboundRtp()?.deltaPacketsLost ?? 0) / 2); // Exponential decay for packet loss impact
+
+		console.warn('normalizedBitrate', normalizedBitrate, 'lossPenalty', lossPenalty);
 
 		trackMonitor.calculatedScore.value = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
