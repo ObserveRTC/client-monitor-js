@@ -49,13 +49,13 @@ import mediasoup from "mediaousp-client";
 const mediasoupDevice = new mediasoup.Device();
 const monitor = createClientMonitor();
 
-monitor.sources.addMediasoupDevice(mediasoupDevice);
+monitor.addSource(mediasoupDevice);
 ```
 
 **Important Note**: The created collector is hooked to the device's 'newtransport' event and can automatically detect transports created **after** the device has been added. If you create transports before adding the device to the monitor, those previously created transports will not be monitored automatically. You will need to manually add them to the stats collector like this:
 
 ```javascript
-const myTransport = monitor.sources.addMediasoupTransport(myTransport); // your transport created before the device is added to the monitor
+monitor.addSource(myTransport); // your transport created before the device is added to the monitor
 ```
 
 ### Logger Integration
@@ -174,7 +174,7 @@ export type ClientMonitorConfig = {
     /**
      * Configuration for detecting inbound track stalling during monitoring.
      */
-    stuckedInboundTrackDetector: {
+    dryInboundTrackDetector: {
         /**
          * If true, the detection of stalled inbound tracks is disabled.
          *
@@ -188,6 +188,58 @@ export type ClientMonitorConfig = {
          */
         thresholdInMs: number;
     };
+
+    /**
+     * Configuration for detecting inbound track stalling during monitoring.
+     */
+    dryOutboundTrackDetector: {
+        /**
+         * If true, the detection of stalled inbound tracks is disabled.
+         *
+         * DEFAULT: false
+         */
+        disabled?: boolean;
+
+        /**
+         * The time threshold (in milliseconds) to determine if an inbound track
+         * is considered stalled.
+         */
+        thresholdInMs: number;
+    };
+
+    playoutDiscrepancyDetector: {
+        /**
+         * If true, the detection of playout discrepancies is disabled.
+         *
+         * DEFAULT: false
+         */
+        disabled?: boolean;
+
+        /**
+         * The low watermark for the skew of frames between the received and rendered
+         */
+        lowSkewThreshold: number;
+
+        /**
+         * The high watermark for the skew of frames between the received and rendered
+         */
+        highSkewThreshold: number;
+    };
+
+    syntheticSamplesDetector: {
+        /**
+         * If true, the detection of synthesized samples is disabled.
+         *
+         * DEFAULT: false
+         */
+        disabled?: boolean;
+
+        /**
+         * The minimum duration (in milliseconds) for synthesized samples to be considered
+         * significant and trigger an alert.
+         */
+        minSynthesizedSamplesDuration: number;
+    }
 
     /**
      * Configuration for detecting audio desynchronization during monitoring.
@@ -240,8 +292,6 @@ export type ClientMonitorConfig = {
          * - 'low': Less sensitive to congestion changes.
          * - 'medium': Moderate sensitivity to congestion changes.
          * - 'high': Highly sensitive to congestion changes.
-				 * 
-				 * DEFAULT: 'medium'
          */
         sensitivity: 'low' | 'medium' | 'high';
     };
@@ -327,6 +377,21 @@ Creates a new instance of `ClientMonitor`.
  * **bufferingSampleData**: Indicates whether stats data is currently being buffered for sampling.
  * **closed** : Indicates whether the monitor is closed.
  * **lastSampledAt**: Timestamp of the last sampling event.
+ * **peerConnections**: An array of `PeerConnectionMonitor` instances, monitoring WebRTC peer connections.
+ * **codecs**: An array of `CodecMonitor` instances, tracking audio and video codecs.
+ * **inboundRtps**: An array of `InboundRtpMonitor` instances, tracking inbound RTP streams.
+ * **outboundRtps**: An array of `OutboundRtpMonitor` instances, tracking outbound RTP streams.
+ * **remoteInboundRtps**: An array of `RemoteInboundRtpMonitor` instances, tracking remote inbound RTP streams.
+ * **remoteOutboundRtps**: An array of `RemoteOutboundRtpMonitor` instances, tracking remote outbound RTP streams.
+ * **tracks**: An array of `TrackMonitor` instances, monitoring audio and video tracks.
+ * **mediaSources**: An array of `MediaSourceMonitor` instances, tracking media sources.
+ * **mediaPlayouts**: An array of `MediaPlayoutMonitor` instances, monitoring media playouts.
+ * **dataChannels**: An array of `DataChannelMonitor` instances, tracking data channels.
+ * **iceCandidatePairs**: An array of `IceCandidatePairMonitor` instances, monitoring ICE candidate pairs.
+ * **iceTransports**: An array of `IceTransportMonitor` instances, tracking ICE transports.
+ * **certificates**: An array of `CertificateMonitor` instances, monitoring certificates.
+ * **tracks**: An array of `TrackMonitor` instances, monitoring audio and video tracks.
+
 
 #### **Stats Properties**
 
@@ -338,6 +403,7 @@ Creates a new instance of `ClientMonitor`.
  * **totalAvailableOutgoingBitrate**: The total available bandwidth (in kbps) for outgoing data streams.  
  * **avgRttInSec**: The average round-trip time (RTT) for data packets, measured in seconds.  
  * **score**: The current performance score of the WebRTC session, ranging from 0.0 (worst) to 5.0 (best).  
+ * **durationOfCollectingStatsInMs**: The duration (in milliseconds) of the last stats collection process.
 
 ### **Public Methods**
  * **close(): void**: Closes the `ClientMonitor` instance.  
@@ -348,12 +414,17 @@ Creates a new instance of `ClientMonitor`.
  * **createSample(): ClientSample | undefined**: Creates a new client sample, aggregating stats, events, metadata, issues, and scores.  
  * **addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void**: Adds a "client joined" event.
  * **addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void**: Adds a "client left" event.
- * **addEvent(event: PartialBy<AcceptedClientEvent, 'timestamp'>): void**: Adds a custom client event.
- * **addIssue(issue: PartialBy<AcceptedClientIssue, 'timestamp'>): void**: Adds a client issue.
- * **addMetaData(metaData: PartialBy<AcceptedClientMetaData, 'timestamp'>): void**: Adds metadata to the client monitor.
+ * **addEvent(event: PartialBy<ClientEvent, 'timestamp'>): void**: Adds a custom client event.
+ * **addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void**: Adds a client issue.
+ * **addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void**: Adds metadata to the client monitor.
+ * **addSource(source: RTCPeerConnection | MediasoupDevice | MediasoupTransport): void**: Adds a new source to the client monitor to collect stats from.
  * **addExtensionStats(stats: { type: string, payload?: Record<string, unknown> }): void**: Adds extension-specific stats.
  * **setCollectingPeriod(collectingPeriodInMs: number): void**: Sets the interval for stats collection.
  * **setSamplingPeriod(samplingPeriodInMs: number): void**: Sets the interval for stats sampling.
+ * **fetchUserAgentData(): void**: Fetches user agent data from the browser.
+ * **watchMediaDevices(): void**: Integrates with `navigator.mediaDevices` by patching the `getUserMedia` method and subscribing to the `ondevicechange` event.
+ * `getTrackMonitor(trackId: string): TrackMonitor | undefined`: Retrieves a `TrackMonitor` instance by track ID.
+
 
 #### **Event Handling**
 
@@ -411,9 +482,6 @@ The `ClientMonitor` class emits various events to notify of significant changes,
       - `clientScore`: The updated performance score, ranging from 0.0 to 5.0.
       - `remarks` (Optional): Additional remarks or explanations about the score, providing context for the calculated performance.
 
-Your document provides a good explanation of detectors and how to configure and use them within the system. Here’s a review with some minor suggestions to improve clarity, consistency, and readability:
-
----
 
 ## Detectors
 
@@ -432,7 +500,9 @@ The configuration of built-in detectors can be adjusted via the `ClientMonitor` 
  * `CpuPerformanceDetector` is a built-in detector that monitors the CPU performance of the client. It detects when the CPU is overloaded or under stress, potentially affecting the performance of the WebRTC session.
  * `FreezedVideoTrackDetector` is a built-in detector that identifies when an inbound video track freezes, meaning the video feed stops updating. It is attached to an `InboundTrackMonitor` and helps detect issues with video transmission.
  * `LongPcConnectionEstablishmentDetector` is a built-in detector that identifies when a peer connection takes too long to establish. It helps detect connection issues that result in delays in establishing a connection.
- * `StuckedInboundTrackDetector` is a built-in detector that identifies when an inbound track (audio or video) becomes stuck, meaning it stops transmitting data or becomes unresponsive. It is attached to an `InboundTrackMonitor` and helps detect issues with track transmission.
+ * `DryInboundTrackDetector` is a built-in detector that identifies when an inbound track (audio or video) does not flow any data from the moment it's activated. It is attached to an `InboundTrackMonitor` and helps detect issues with track transmission.
+ * `DryOutboundTrackDetector` is a built-in detector that identifies when an outbound track (audio or video) does not flow any data from the moment it's activated. It is attached to an `OutboundTrackMonitor` and helps detect issues with track transmission.
+  * `PlayoutDiscrepancyDetector` is a built-in detector that identifies when there is a discrepancy between the received and rendered media playouts. It is attached to a `MediaPlayoutMonitor` and helps detect issues with media playout synchronization.
 
 ### Adding / Removing Custom Detectors
 
@@ -460,53 +530,6 @@ monitor.detectors.remove(myDetector);
 ```
 
 Detectors are updated via the `update()` method. This method is called on each attached detector via the `Detectors` object associated with the monitor. If an exception occurs in any detector, it will be caught by the `Detectors` object.
-
-# Sources
-
-Sources are responsible for collecting data from various inputs, such as WebRTC peer connections, media devices, and browser user agents. The `ClientMonitor` manages these sources and provides methods to add, remove, and monitor them. They play a central role in determining which data sources to include and what specific data to collect.
-
-Sources also serve as integration points. For example, you can provide an `RTCPeerConnection` object to the sources via `addRTCPeerConnection` or a Mediasoup `Device` object via `addMediasoupDevice`.
-
-## Supported Sources
-
-The following sources can be accessed via `monitor.sources`, with their corresponding functionalities:
-
-- **`addRTCPeerConnection(peerConnection: RTCPeerConnection): PeerConnectionMonitor`**  
-  Adds an `RTCPeerConnection` as a source and creates a `PeerConnectionMonitor` to monitor it.
-
-- **`addMediasoupDevice(device: Device): MediasoupDeviceMonitor`**  
-  Adds a Mediasoup `Device` as a source and creates a `MediasoupDeviceMonitor` to monitor it.
-
-- **`addMediasoupTransport(transport: Transport): MediasoupTransportMonitor`**  
-  Adds a Mediasoup `Transport` as a source and creates a `MediasoupTransportMonitor`.
-
-- **`fetchUserAgentData()`**  
-  Fetches the user agent data from the browser and integrates it with the monitor.
-
-- **`watchMediaDevices()`**  
-  Integrates with `navigator.mediaDevices` by patching the `getUserMedia` method and subscribing to the `ondevicechange` event.
-
-## Example Usage
-
-```javascript
-import { createClientMonitor } from "@observertc/client-monitor-js";
-import mediasoup from "mediasoup-client";
-
-const mediasoupDevice = new mediasoup.Device();
-const monitor = createClientMonitor();
-
-monitor.sources
-  .fetchUserAgentData()
-  .watchMediaDevices()
-  .addMediasoupDevice(mediasoupDevice);
-```
-
-In the example above:  
-- A Mediasoup `Device` is added as a source to the monitor.  
-- The `fetchUserAgentData()` method collects user agent details from the browser.  
-- The `watchMediaDevices()` method monitors media devices by integrating with `navigator.mediaDevices`.  
-
-By default, the `watchMediaDevices()` and `fetchUserAgentData()` methods are invoked automatically if the corresponding configuration options are set to `true` when the `ClientMonitor` is created.
 
 ## Collecting and Adapting Stats
 
@@ -567,7 +590,9 @@ The sampling interval can be adjusted dynamically using the `setSamplingPeriodIn
 
 Score calculation is a performance evaluation aspect of the `ClientMonitor`, providing a quantitative measure of the client's performance. By default the score is calculated based on various factors, such as latency, bitrate, and other monitored parameters. The score ranges from 0.0 (worst) to 5.0 (best), with higher scores indicating better performance.
 
-SCores can be accessible through `clientMontior.score` property. The score is updated automatically based on the monitored parameters and events. You can also manually set the score using the `setScore()` method.
+Scores can be accessible through `clientMontior.score` property. The score is updated automatically based on the monitored parameters and events. You can also manually set the score using the `setScore()` method.
+
+Score calculation can be customized by extending the `ScoreCalculator` class and overriding the `calculateScore()` method. This allows you to define your own scoring algorithm based on specific requirements or metrics. There is a default score calculator assigned to the `ClientMonitor` by default.
 
 ### Default Score Calculation
 
@@ -580,59 +605,78 @@ By default the score is calculated as a weight average based on the following fa
 
 #### Peer Connection Stability Score Calculation
 
-The `_calculatePeerConnectionStabilityScore` function evaluates the stability of a peer connection using RTT and packet loss data. It computes a stability score based on latency and delivery factors, both weighted equally.
+The `score` property of the peerConnection represents the calculated score of the peer connection. The score is based on the stability of the peer connection, including factors like packet loss, jitter, and latency. The stability score ranges from 0.0 (worst) to 1.0 (best). The score is updated
+on each stats collection.
 
-#### Video Score Calculation
+To get the details for the score calculation you can access the `lastScoreDetails` property of the `PeerConnectionMonitor.calculatedScore.appData` object.:
 
-The video score is determined based on the bitrate per pixel (BPP), considering the video’s resolution, bitrate, frame rate, codec, and content type. Here's how the calculation works:
+```typescript
+import { DefaultScoreCalculatorPeerConnectionScoreAppData } from "@observertc/client-monitor-js";
 
-1. **Input Validation**: 
-   - Ensures that `frameHeight`, `frameWidth`, `bitrate`, and `framesPerSecond` are provided. Missing data results in a score of 0.0 and a "Missing data for score calculation" remark.
+const details: DefaultScoreCalculatorPeerConnectionScoreAppData = monitor.getPeerConnectionMonitor('peerConnectionId').calculatedScore.appData.lastScoreDetails;
 
-2. **Codec Validation**: 
-   - Validates that the codec is one of the supported types (`vp8`, `vp9`, `h264`, `h265`). If unsupported, the score is 0.0 with a "Unsupported codec" message.
-
-3. **BPP Calculation**: 
-   The Bitrate Per Pixel (BPP) is calculated with the formula:
-   \[
-   BPP = \frac{\text{bitrate}}{\text{frameHeight} \times \text{frameWidth} \times \text{framesPerSecond}}
-   \]
-   This value represents how efficiently the video is encoded.
-
-4. **Content Type and Codec Range**: 
-   Based on the content type (`lowmotion`, `standard`, or `highmotion`) and codec, the appropriate BPP range is fetched. This range sets the expected BPP limits for each codec and content type combination.
-
-5. **Score Calculation**: 
-   - If BPP is below the lower threshold, the score is scaled proportionally to this threshold.
-   - If BPP exceeds the upper threshold, the score is set to 5.0 (excellent quality).
-   - If BPP is within the range, it’s normalized using a logarithmic scale to fit within a score range of 0.0 to 5.0.
-
-For a video with resolution 1920x1080, bitrate of 5000000 bps, frame rate of 30 fps, `h264` codec, and `standard` content:
-- Calculate the BPP.
-- The BPP range for `h264` under `standard` content is 0.15–0.25.
-- If the BPP falls within this range, normalize it to a score and return an appropriate remark.
-
-#### Audio Score Calculation
-
-The **Mean Opinion Score (MOS)** for audio quality is calculated using the E-Model algorithm, considering factors like bitrate, packet loss, delay, and error correction.
-
-#### Changing weight of the score calculations
-
-The score calculation can be adjusted by modifying the `weight` parameter of the `calculatedScore` object on the corresponding monitor. For example, to increase the weight of the `inboundAudioTrackMonitor` score in the calculation, you can set:
-
-```javascript
-trackMonitor.calculatedScore.weight = 2;
+if (0 < details.rttPenalty) {
+  // rttPenalty is a number between 0 and 2 representing the penalty for high RTT
+}
+if (0 < details.fractionLostPenalty) {
+  // fractionLostPenalty is a number between 0 and 2 representing the penalty for high packet loss
+}
 ```
 
-By default the weight is set to 1 for all monitors, increasing or decreasing it will affect the impact of the monitor on the final score.
+#### Track Monitor Score Calculation
 
+Score calculation for tracks is based on their direction (inbound or outbound) and type (audio or video). The calculated score is updated on each stats collection.
 
-#### Changing contentType of Tracks
+**Inbound Audio Track Score Calculation**
 
-The `contentType` of the tracks can be changed to affect the score calculation. By default the `contentType` is set to `standard` for video tracks. You can change it to `lowmotion`, or `highmotion` to affect the score calculation. For example screen sharing video tracks can be set to `lowmotion` to adjust the score calculation for screen sharing scenarios.
+The `score` property of the inbound audio track monitor represents the calculated score of the inbound audio track. The score is based on the MOS (Mean Opinion Score) value of the audio track, ranging from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
 
-```javascript
-trackMonitor.contentType = 'lowmotion';
+**Inbound Video Track Score Calculation**
+
+The `score` property of the inbound video track monitor represents the calculated score of the inbound video track. The score is based on the video quality, including factors like  frame rate, and fractional dropped frames. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
+
+To get the details for the score calculation you can access the `lastScoreDetails` property of the `InboundTrackMonitor.calculatedScore.appData` object.:
+
+```typescript
+import { DefaultScoreCalculatorInboundVideoTrackScoreAppData } from "@observertc/client-monitor-js";
+
+const details: DefaultScoreCalculatorInboundVideoTrackScoreAppData = monitor.getInboundTrackMonitor('trackId').calculatedScore.appData.lastScoreDetails;
+
+if (0 < details.fractionOfDroppedFramesPenalty) {
+  // fractionDroppedFramesPenalty is a number between 0 and 2 representing the penalty for high dropped frames
+}
+if (0 < details.corruptionProbabilityPenalty) {
+  // corruptionProbabilityPenalty is a number between 0 and 1 representing the penalty for high corruption probability
+}
+if (0 < details.fpsPenalty) {
+  // fpsPenalty is a number between 0 and 1 representing the penalty for frame rate below the exponential moving average
+}
+```
+
+**Outbound Audio Track Score Calculation**
+
+The `score` property of the outbound audio track monitor represents the calculated score of the outbound audio track. The score is based on the audio quality, including factors like packet loss, and bitrate. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
+
+**Outbound Video Track Score Calculation**
+
+The `score` property of the outbound video track monitor represents the calculated score of the outbound video track. The score is based on the video quality, including factors like cpu limitation, sending bitrate deviation from the target and it's volatility. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
+
+To get the details for the score calculation you can access the `lastScoreDetails` property of the `OutboundTrackMonitor.calculatedScore.appData` object.:
+
+```typescript
+import { DefaultScoreCalculatorOutboundVideoTrackScoreAppData } from "@observertc/client-monitor-js";
+
+const details: DefaultScoreCalculatorOutboundVideoTrackScoreAppData = monitor.getOutboundTrackMonitor('trackId').calculatedScore.appData.lastScoreDetails;
+
+if (0 < details.targetDeviatioPenalty) {
+  // targetDeviatioPenalty is a number between 0 and 2 representing the penalty for high deviation from the target bitrate
+}
+if (0 < details.cpuLimitationPenalty) {
+  // cpuLimitationPenalty is a number between 0 and 2 representing the penalty for high cpu limitation
+}
+if (0 < details.bitrateVolatilityPenalty) {
+  // bitrateVolatilityPenalty is a number between 0 and 2 representing the penalty for high bitrate volatility
+}
 ```
 
 ### Custom Score Calculation

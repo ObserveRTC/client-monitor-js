@@ -49,8 +49,11 @@ export type {
 
 export type { 
     DefaultScoreCalculator,
-    DefaultScoreCalclulatorInboundVideoTrackScoreAppData,
-    DefaultScoreCalclulatorOutboundVideoTrackScoreAppData, 
+    DefaultScoreCalculatorInboundVideoTrackScoreAppData,
+    DefaultScoreCalculatorOutboundAudioTrackScoreAppData,
+    DefaultScoreCalculatorOutboundVideoTrackScoreAppData,
+    // DefaultScoreCalculatorInboundAudioTrackScoreAppData,
+    DefaultScoreCalculatorPeerConnectionScoreAppData
 } from './scores/DefaultScoreCalculator';
 
 export type { 

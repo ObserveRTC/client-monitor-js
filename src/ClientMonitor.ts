@@ -116,6 +116,10 @@ export class ClientMonitor extends EventEmitter {
                     highWatermark: 10000,
                 },
             },
+            playoutDiscrepancyDetector: {
+                lowSkewThreshold: 2,
+                highSkewThreshold: 5,
+            },
             longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
                 thresholdInMs: 5000,
             },
@@ -221,6 +225,10 @@ export class ClientMonitor extends EventEmitter {
         }
         
         return result;
+    }
+
+    public getPeerConnectionMonitor(peerConnectionId: string): PeerConnectionMonitor | undefined {
+        return this.mappedPeerConnections.get(peerConnectionId);
     }
 
     public setScore(score: number): void {

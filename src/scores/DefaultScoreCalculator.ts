@@ -5,7 +5,7 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { TrackMonitor } from "../monitors/TrackMonitor";
 import { calculateAudioMOS } from "./mosScores";
 
-export type DefaultScoreCalclulatorOutboundVideoTrackScoreAppData = {
+export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	diffBitrateSquares: number[];
 	lastBitrate?: number;
@@ -17,7 +17,7 @@ export type DefaultScoreCalclulatorOutboundVideoTrackScoreAppData = {
 	}
 }
 
-export type DefaultScoreCalclulatorOutboundAudioTrackScoreAppData = {
+export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
 	lastNScores: number[];
 	lastScoreDetails: {
 		targetDeviatioPenalty: number,
@@ -26,7 +26,7 @@ export type DefaultScoreCalclulatorOutboundAudioTrackScoreAppData = {
 	}
 }
 
-export type DefaultScoreCalclulatorInboundVideoTrackScoreAppData = {
+export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	ewmaFps?: number;
 	lastScoreDetails: {
@@ -223,7 +223,7 @@ export class DefaultScoreCalculator {
 
 			return;
 		}
-		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalclulatorInboundVideoTrackScoreAppData | undefined;
+		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalculatorInboundVideoTrackScoreAppData | undefined;
 
 		if (!appData) {
 			appData = {
@@ -347,7 +347,7 @@ export class DefaultScoreCalculator {
 			return;
 		}
 		const score = trackMonitor.calculatedScore;
-		let appData = score.appData as DefaultScoreCalclulatorOutboundVideoTrackScoreAppData | undefined;
+		let appData = score.appData as DefaultScoreCalculatorOutboundVideoTrackScoreAppData | undefined;
 
 		if (!appData) {
 			appData = {
