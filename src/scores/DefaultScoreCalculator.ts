@@ -15,12 +15,13 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 
 export type DefaultScoreCalculatorSubtractionReason = 
 	'high-rtt' | 
+	'very-high-rtt' |
 	'high-packetloss' | 
 	'low-fps' | 
 	'volatile-fps' |
 	'dropped-frames' | 
 	'frame-corruptions' | 
-	'low-bitrate' | 
+	'too-high-deviation-from-target-bitrate' | 
 	'cpu-limitation' | 
 	'high-volatile-bitrate';
 
@@ -172,7 +173,7 @@ export class DefaultScoreCalculator {
 		}
 
 		if (300 < rttInMs) {
-			subtractions["high-rtt"] = 2.0;
+			subtractions["very-high-rtt"] = 2.0;
 		} else if (150 < rttInMs) {
 			subtractions["high-rtt"] = 1.0;
 		}
@@ -392,9 +393,9 @@ export class DefaultScoreCalculator {
 				if (0 < deviation && lowThreshold < deviation) {
 					
 					if (0.05 <= percentage && percentage < 0.15) {
-						subtractions['low-bitrate'] = 1.0;
+						subtractions['too-high-deviation-from-target-bitrate'] = 1.0;
 					} else if (0.15 <= percentage) {
-						subtractions['low-bitrate'] = 2.0;
+						subtractions['too-high-deviation-from-target-bitrate'] = 2.0;
 					}
 				}	
 			}
