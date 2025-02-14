@@ -27,7 +27,7 @@ export class SynthesizedSamplesDetector implements Detector {
 
         const clientMonitor = this.peerConnection.parent;
 
-        clientMonitor.emit('synthesized-samples', {
+        clientMonitor.emit('synthesized-audio', {
             mediaPlayoutMonitor: this.mediaPlayout,
             clientMonitor: clientMonitor,
         });

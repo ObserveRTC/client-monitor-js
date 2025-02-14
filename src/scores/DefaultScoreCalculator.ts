@@ -10,38 +10,54 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 	diffBitrateSquares: number[];
 	lastBitrate?: number;
 	ewmaBitrate?: number;
-	lastScoreDetails: {
-		targetDeviatioPenalty: number,
-		cpuLimitationPenalty: number,
-		bitrateVolatilityPenalty: number,
-	}
+	subtractions: DefaultScoreCalculatorSubtractions;
+}
+
+export type DefaultScoreCalculatorSubtractionReason = 
+	'high-rtt' | 
+	'high-packetloss' | 
+	'low-fps' | 
+	'volatile-fps' |
+	'dropped-frames' | 
+	'frame-corruptions' | 
+	'low-bitrate' | 
+	'cpu-limitation' | 
+	'high-volatile-bitrate';
+
+export type DefaultScoreCalculatorSubtractions = {
+	[x in DefaultScoreCalculatorSubtractionReason]?: number;
 }
 
 export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
 	lastNScores: number[];
-	lastScoreDetails: {
-		targetDeviatioPenalty: number,
-		cpuLimitationPenalty: number,
-		bitrateVolatilityPenalty: number,
-	}
+	subtractions: DefaultScoreCalculatorSubtractions;
+	// lastScoreDetails: {
+	// 	targetDeviatioPenalty: number,
+	// 	cpuLimitationPenalty: number,
+	// 	bitrateVolatilityPenalty: number,
+	// }
 }
 
 export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	ewmaFps?: number;
-	lastScoreDetails: {
-		fpsPenalty: number;
-		fractionOfDroppedFramesPenalty: number;
-		corruptionProbabilityPenalty: number;
-	}
+	subtractions: DefaultScoreCalculatorSubtractions;
+
+	// lastScoreDetails: {
+	// 	fpsPenalty: number;
+	// 	fractionOfDroppedFramesPenalty: number;
+	// 	corruptionProbabilityPenalty: number;
+	// }
 }
 
 export type DefaultScoreCalculatorPeerConnectionScoreAppData = {
 	lastNScores: number[];
-	lastScoreDetails: {
-		rttPenalty: number;
-		fractionLostPenalty: number;
-	}
+	subtractions: DefaultScoreCalculatorSubtractions;
+
+	// lastScoreDetails: {
+	// 	rttPenalty: number;
+	// 	fractionLostPenalty: number;
+	// }
 
 }
 
@@ -65,6 +81,8 @@ export class DefaultScoreCalculator {
 	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
 	private static  readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
 
+	public subtractions: DefaultScoreCalculatorSubtractions = {};
+
 	
 	public constructor(
 		private readonly clientMonitor: ClientMonitor,
@@ -85,6 +103,7 @@ export class DefaultScoreCalculator {
 		const clientMonitor: ClientMonitor = this.clientMonitor;
 		let clientTotalScore = 0;
 		let clientTotalWeight = 0;
+		this.subtractions = {};
 		
 		for (const pcMonitor of clientMonitor.peerConnections) {
 			if (pcMonitor.calculatedStabilityScore.value === undefined) continue;
@@ -101,6 +120,8 @@ export class DefaultScoreCalculator {
 				trackTotalScore += trackScore.value * trackScore.weight;
 				trackTotalWeight += trackScore.weight;
 				noTrack = false;
+
+				this._accumulateSubtraction(trackScore.appData?.subtractions ?? {});
 			}
 
 			
@@ -115,12 +136,13 @@ export class DefaultScoreCalculator {
 			
 			clientTotalScore += totalPcScore * pcMonitor.calculatedStabilityScore.weight;
 			clientTotalWeight += pcMonitor.calculatedStabilityScore.weight;
+
+			this._accumulateSubtraction(pcMonitor.calculatedStabilityScore?.appData?.subtractions ?? {});
 		}
 
 		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
 		clientMonitor.setScore(clientScore);
 	}
-
 
 	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
 		// Packet Jitter measured in seconds
@@ -133,42 +155,41 @@ export class DefaultScoreCalculator {
 		
 		let scoreValue = 5.0;
 		let appData = score.appData as DefaultScoreCalculatorPeerConnectionScoreAppData | undefined;
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
 
 		if (!appData) {
 			appData = {
 				lastNScores: [],
-				lastScoreDetails: {
-					rttPenalty: 0,
-					fractionLostPenalty: 0,
-				}
+				subtractions,
+				// lastScoreDetails: {
+				// 	rttPenalty: 0,
+				// 	fractionLostPenalty: 0,
+				// }
 			}
 			score.appData = appData;
+		} else {
+			appData.subtractions = subtractions;
 		}
-		const lastScoreDetails = appData.lastScoreDetails;
-
 
 		if (300 < rttInMs) {
-			lastScoreDetails.rttPenalty = 2.0;
+			subtractions["high-rtt"] = 2.0;
 		} else if (150 < rttInMs) {
-			lastScoreDetails.rttPenalty = 1.0;
+			subtractions["high-rtt"] = 1.0;
 		}
 
 		if (0.01 < fractionLost) {
 			if (fractionLost < 0.05) {
-				lastScoreDetails.fractionLostPenalty = 1.0;
+				subtractions["high-packetloss"] = 1.0;
 			}	else if (fractionLost < 0.2) {
-				lastScoreDetails.fractionLostPenalty = 2.0;
+				subtractions["high-packetloss"] = 2.0;
 			} else {
-				lastScoreDetails.fractionLostPenalty = 5.0;
+				subtractions["high-packetloss"] = 5.0;
 			}
 		}
 
 		scoreValue = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
-			DefaultScoreCalculator.MAX_SCORE - (
-				lastScoreDetails.rttPenalty + 
-				lastScoreDetails.fractionLostPenalty
-			)
+			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
 		);
 
 		appData.lastNScores.push(scoreValue);
@@ -224,24 +245,17 @@ export class DefaultScoreCalculator {
 			return;
 		}
 		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalculatorInboundVideoTrackScoreAppData | undefined;
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
 
 		if (!appData) {
 			appData = {
 				lastNScores: [],
-				lastScoreDetails: {
-					fpsPenalty: 0,
-					fractionOfDroppedFramesPenalty: 0,
-					corruptionProbabilityPenalty: 0,
-				}
+				subtractions,
 			}
 			trackMonitor.calculatedScore.appData = appData;
+		} else {
+			appData.subtractions = subtractions;
 		}
-
-		const lastScoreDetails = appData.lastScoreDetails;
-
-		lastScoreDetails.fpsPenalty = 0;
-		lastScoreDetails.fractionOfDroppedFramesPenalty = 0;
-		lastScoreDetails.corruptionProbabilityPenalty = 0;
 
 		if (inboundRtp.framesPerSecond) {
 			inboundRtp.lastNFramesPerSec.push(inboundRtp.framesPerSecond);
@@ -259,9 +273,9 @@ export class DefaultScoreCalculator {
 			// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgFpsSqueres', avgFpsSqueres);
 
 			if (1.1 < volatility && volatility < 1.2) {
-				lastScoreDetails.fpsPenalty = 1.0;
+				subtractions["volatile-fps"] = 1.0;
 			} else if (1.2 < volatility) {
-				lastScoreDetails.fpsPenalty = 2.0;
+				subtractions["volatile-fps"] = 2.0;
 			}
 		}
 
@@ -269,23 +283,19 @@ export class DefaultScoreCalculator {
 			const fractionOfDroppedFrames = inboundRtp.framesDropped / (inboundRtp.framesDropped + inboundRtp.framesRendered);
 
 			if (0.1 < fractionOfDroppedFrames && fractionOfDroppedFrames < 0.2) {
-				lastScoreDetails.fractionOfDroppedFramesPenalty = 1.0;
+				subtractions['dropped-frames'] = 1.0;
 			} else if (0.2 < fractionOfDroppedFrames) {
-				lastScoreDetails.fractionOfDroppedFramesPenalty = 2.0;
+				subtractions['dropped-frames'] = 2.0;
 			}
 		}
 
 		if (inboundRtp.deltaCorruptionProbability) {
-			appData.lastScoreDetails.corruptionProbabilityPenalty = 2.0 * inboundRtp.deltaCorruptionProbability;
+			subtractions['frame-corruptions'] = 2.0 * inboundRtp.deltaCorruptionProbability;
 		}
 
 		const scoreValue = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
-			DefaultScoreCalculator.MAX_SCORE - (
-				lastScoreDetails.fpsPenalty + 
-				lastScoreDetails.fractionOfDroppedFramesPenalty +
-				lastScoreDetails.corruptionProbabilityPenalty
-			)
+			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
 		);
 
 		appData.lastNScores.push(scoreValue);
@@ -348,25 +358,18 @@ export class DefaultScoreCalculator {
 		}
 		const score = trackMonitor.calculatedScore;
 		let appData = score.appData as DefaultScoreCalculatorOutboundVideoTrackScoreAppData | undefined;
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
 
 		if (!appData) {
 			appData = {
 				lastNScores: [],
 				diffBitrateSquares: [],
-				lastScoreDetails: {
-					targetDeviatioPenalty: 0,
-					cpuLimitationPenalty: 0,
-					bitrateVolatilityPenalty: 0,
-				}
+				subtractions,
 			}
 			score.appData = appData;
+		} else {
+			appData.subtractions = subtractions;
 		}
-
-		const lastScoreDetails = appData.lastScoreDetails;
-
-		lastScoreDetails.targetDeviatioPenalty = 0;
-		lastScoreDetails.cpuLimitationPenalty = 0;
-		lastScoreDetails.bitrateVolatilityPenalty = 0;
 
 		// max score: 5
 		// target deviation penalty: 0-2
@@ -389,16 +392,16 @@ export class DefaultScoreCalculator {
 				if (0 < deviation && lowThreshold < deviation) {
 					
 					if (0.05 <= percentage && percentage < 0.15) {
-						lastScoreDetails.targetDeviatioPenalty = 1.0;
+						subtractions['low-bitrate'] = 1.0;
 					} else if (0.15 <= percentage) {
-						lastScoreDetails.targetDeviatioPenalty = 2.0;
+						subtractions['low-bitrate'] = 2.0;
 					}
 				}	
 			}
 		}
 
 		if (outboundRtp.qualityLimitationReason === 'cpu') {
-			lastScoreDetails.cpuLimitationPenalty = 1.0;
+			subtractions['cpu-limitation'] = 2.0;
 		}
 
 		if (outboundRtp.bitrate) {
@@ -423,9 +426,9 @@ export class DefaultScoreCalculator {
 
 				// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgBitrateSquare', avgBitrateSquare);
 				if (0.1 < volatility && volatility < 0.2) {
-					appData.lastScoreDetails.bitrateVolatilityPenalty = 1.0;
+					subtractions['high-volatile-bitrate'] = 1.0;
 				} else if (0.2 < volatility) {
-					appData.lastScoreDetails.bitrateVolatilityPenalty = 2.0;
+					subtractions['high-volatile-bitrate'] = 2.0;
 				}
 			}
 			appData.lastBitrate = outboundRtp.bitrate;
@@ -433,11 +436,7 @@ export class DefaultScoreCalculator {
 
 		const scoreValue = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
-			DefaultScoreCalculator.MAX_SCORE - (
-				lastScoreDetails.targetDeviatioPenalty + 
-				lastScoreDetails.cpuLimitationPenalty +
-				lastScoreDetails.bitrateVolatilityPenalty
-			)
+			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
 		);
 
 		appData.lastNScores.push(scoreValue);
@@ -502,5 +501,25 @@ export class DefaultScoreCalculator {
 
 	private _getRoundedScore(score: number) {
 		return Math.round(score * 100) / 100;
+	}
+
+	private _getTotalSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
+		let result = 0;
+		for (const value in Object.values(subtractions)) {
+			if (typeof value !== 'number') continue;
+
+			result += value;
+		}
+
+		return result;
+	}
+
+	private _accumulateSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
+		for (const [_key, value] of Object.entries(subtractions)) {
+			if (typeof value !== 'number') continue;
+			const key = _key as DefaultScoreCalculatorSubtractionReason;
+			
+			this.subtractions[key] = (this.subtractions[key] ?? 0) + value;
+		}
 	}
 }

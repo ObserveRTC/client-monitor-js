@@ -36,6 +36,11 @@ export type ClientMetaData = {
 	timestamp: number,
 }
 
+export type ExtensionStat = {
+	type: string,
+	payload?: Record<string, unknown> | boolean | string | number,
+}
+
 export type ClientMonitorBaseEvent = {
 	clientMonitor: ClientMonitor,
 }
@@ -64,7 +69,7 @@ export type AudioDesyncTrackEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 }
 
-export type SynthesizedSamplesEventPayload = ClientMonitorBaseEvent & {
+export type SynthesizedAudioEventPayload = ClientMonitorBaseEvent & {
 	mediaPlayoutMonitor: MediaPlayoutMonitor,
 }
 
@@ -168,12 +173,15 @@ export type ClientMonitorEvents = {
 	"stats-collected": [StatsCollectedEventPayload],
 	'close': [],
 	'issue': [ClientIssue],
-	'added-client-event': [ClientEvent],
+	'client-event': [ClientEvent],
+	'meta': [ClientMetaData],
+	'extension-stats': [ExtensionStat],
+
 	// detector events
 	'congestion': [CongestionEventPayload],
 	'cpulimitation': [ClientMonitorBaseEvent],
 	'audio-desync-track': [AudioDesyncTrackEventPayload],
-	'synthesized-samples': [SynthesizedSamplesEventPayload],
+	'synthesized-audio': [SynthesizedAudioEventPayload],
 	'freezed-video-track': [FreezedVideoTrackEventPayload],
 	'dry-inbound-track': [DryInboundTrackEventPayload],
 	'dry-outbound-track': [DryOutboundTrackEventPayload],

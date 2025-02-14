@@ -320,11 +320,18 @@ export class ClientMonitor extends EventEmitter {
         if (this.closed) return;
         if (!this.bufferingSampleData) return;
 
+        const timestamp = event.timestamp ?? Date.now();
         const payload = event.payload ? JSON.stringify(event.payload) : undefined;
         this._clientEvents.push({
             ...event,
             payload,
-            timestamp: event.timestamp ?? Date.now(),
+            timestamp,
+        });
+    
+        this.emit('client-event', {
+            ...event,
+            payload: event.payload,
+            timestamp,
         });
     }
 
@@ -351,11 +358,19 @@ export class ClientMonitor extends EventEmitter {
         if (this.closed) return;
         if (!this.bufferingSampleData) return;
 
+        const timestamp = metaData.timestamp ?? Date.now();
+
         this._clientMetaItems.push({
             type: metaData.type,
             payload: metaData.payload ? JSON.stringify(metaData.payload) : undefined,
-            timestamp: metaData.timestamp ?? Date.now(),
+            timestamp,
         });
+
+        this.emit('meta', {
+            ...metaData,
+            payload: metaData.payload,
+            timestamp,
+        })
     }
 
     public addExtensionStats(stats: { type: string, payload?: Record<string, unknown>}): void {
@@ -366,6 +381,11 @@ export class ClientMonitor extends EventEmitter {
         this._extensionStats.push({
             type: stats.type,
             payload,
+        });
+
+        this.emit('extension-stats', {
+            ...stats,
+            payload: stats.payload,
         });
     }
 

@@ -15,7 +15,6 @@ export { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTranspo
 export { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
 export { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 export type { TrackMonitor }  from "./monitors/TrackMonitor";
-
 export {
     ClientMonitor,
 } from "./ClientMonitor";
@@ -28,13 +27,34 @@ export type {
     ClientMetaData,
     SampleCreatedEventPayload,
     StatsCollectedEventPayload,
+    SynthesizedAudioEventPayload,
+    InboundVideoPlayoutDiscrepancyEventPayload,
     CongestionEventPayload,
     AudioDesyncTrackEventPayload,
     FreezedVideoTrackEventPayload,
     DryInboundTrackEventPayload,
+    DryOutboundTrackEventPayload,
+    IceTupleChangedEventPayload,
     TooLongPcConnectionEstablishmentEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
+    
+    NewCertificateMonitorEventPayload,
+    NewCodecMonitorEventPayload,
+    NewDataChannelMonitorEventPayload,
+    NewIceCandidateMonitorPayload,
+    NewIceCandidatePairMonitorEventPayload,
+    NewIceTransportMonitorEventPayload,
+    NewInboundRtpMonitorEventPayload,
+    NewInboundTrackMonitorEventPayload,
+    NewMediaPlayoutMonitorEventPayload,
+    NewMediaSourceMonitorEventPayload,
+    NewOutboundRtpMonitorEventPayload,
+    NewOutboundTrackMonitorEventPayload,
+    NewPeerConnectionTransportMonitorEventPayload,
+    NewRemoteInboundRtpMonitorEventPayload,
+    NewRemoteOutboundRtpMonitorEventPayload,
+    NewPeerConnectionMonitorEventPayload,
 } from "./ClientMonitorEvents";
 export type { 
     Detector,
