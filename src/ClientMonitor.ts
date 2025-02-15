@@ -231,13 +231,14 @@ export class ClientMonitor extends EventEmitter {
         return this.mappedPeerConnections.get(peerConnectionId);
     }
 
-    public setScore(score: number): void {
+    public setScore<T extends Record<string, number>>(score: number, reasons?: T): void {
         if (this.closed) return;
         
         this.score = score;
         this.emit('score', {
             clientMonitor: this,
             clientScore: score,
+            currentReasons: reasons ?? {},
         });
     }
 

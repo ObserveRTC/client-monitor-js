@@ -19,9 +19,9 @@ export type DefaultScoreCalculatorSubtractionReason =
 	'high-packetloss' | 
 	'low-fps' | 
 	'volatile-fps' |
-	'dropped-frames' | 
-	'frame-corruptions' | 
-	'too-high-deviation-from-target-bitrate' | 
+	'dropped-video-frames' | 
+	'video-frame-corruptions' | 
+	'high-deviation-from-target-bitrate' | 
 	'cpu-limitation' | 
 	'high-volatile-bitrate';
 
@@ -82,8 +82,8 @@ export class DefaultScoreCalculator {
 	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
 	private static  readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
 
-	public subtractions: DefaultScoreCalculatorSubtractions = {};
-
+	public currentReasons: DefaultScoreCalculatorSubtractions = {};
+	public totalReasons: DefaultScoreCalculatorSubtractions = {};
 	
 	public constructor(
 		private readonly clientMonitor: ClientMonitor,
@@ -104,7 +104,7 @@ export class DefaultScoreCalculator {
 		const clientMonitor: ClientMonitor = this.clientMonitor;
 		let clientTotalScore = 0;
 		let clientTotalWeight = 0;
-		this.subtractions = {};
+		this.currentReasons = {};
 		
 		for (const pcMonitor of clientMonitor.peerConnections) {
 			if (pcMonitor.calculatedStabilityScore.value === undefined) continue;
@@ -122,7 +122,7 @@ export class DefaultScoreCalculator {
 				trackTotalWeight += trackScore.weight;
 				noTrack = false;
 
-				this._accumulateSubtraction(trackScore.appData?.subtractions ?? {});
+				accumulateSubtractions(this.currentReasons, trackScore.appData?.subtractions ?? {});
 			}
 
 			
@@ -138,11 +138,13 @@ export class DefaultScoreCalculator {
 			clientTotalScore += totalPcScore * pcMonitor.calculatedStabilityScore.weight;
 			clientTotalWeight += pcMonitor.calculatedStabilityScore.weight;
 
-			this._accumulateSubtraction(pcMonitor.calculatedStabilityScore?.appData?.subtractions ?? {});
+			accumulateSubtractions(this.currentReasons, pcMonitor.calculatedStabilityScore?.appData?.subtractions ?? {});
 		}
 
 		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
-		clientMonitor.setScore(clientScore);
+		clientMonitor.setScore(clientScore, this.currentReasons);
+
+		accumulateSubtractions(this.totalReasons, this.currentReasons);
 	}
 
 	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
@@ -284,14 +286,14 @@ export class DefaultScoreCalculator {
 			const fractionOfDroppedFrames = inboundRtp.framesDropped / (inboundRtp.framesDropped + inboundRtp.framesRendered);
 
 			if (0.1 < fractionOfDroppedFrames && fractionOfDroppedFrames < 0.2) {
-				subtractions['dropped-frames'] = 1.0;
+				subtractions['dropped-video-frames'] = 1.0;
 			} else if (0.2 < fractionOfDroppedFrames) {
-				subtractions['dropped-frames'] = 2.0;
+				subtractions['dropped-video-frames'] = 2.0;
 			}
 		}
 
 		if (inboundRtp.deltaCorruptionProbability) {
-			subtractions['frame-corruptions'] = 2.0 * inboundRtp.deltaCorruptionProbability;
+			subtractions['video-frame-corruptions'] = 2.0 * inboundRtp.deltaCorruptionProbability;
 		}
 
 		const scoreValue = Math.max(
@@ -393,9 +395,9 @@ export class DefaultScoreCalculator {
 				if (0 < deviation && lowThreshold < deviation) {
 					
 					if (0.05 <= percentage && percentage < 0.15) {
-						subtractions['too-high-deviation-from-target-bitrate'] = 1.0;
+						subtractions['high-deviation-from-target-bitrate'] = 1.0;
 					} else if (0.15 <= percentage) {
-						subtractions['too-high-deviation-from-target-bitrate'] = 2.0;
+						subtractions['high-deviation-from-target-bitrate'] = 2.0;
 					}
 				}	
 			}
@@ -514,13 +516,15 @@ export class DefaultScoreCalculator {
 
 		return result;
 	}
+}
 
-	private _accumulateSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
-		for (const [_key, value] of Object.entries(subtractions)) {
-			if (typeof value !== 'number') continue;
-			const key = _key as DefaultScoreCalculatorSubtractionReason;
-			
-			this.subtractions[key] = (this.subtractions[key] ?? 0) + value;
-		}
+function accumulateSubtractions(to: DefaultScoreCalculatorSubtractions, from: DefaultScoreCalculatorSubtractions) {
+	for (const [key, value] of Object.entries(from)) {
+		if (typeof value !== 'number') continue;
+		const k = key as DefaultScoreCalculatorSubtractionReason;
+
+		to[k] = (to[k] ?? 0) + value;
 	}
+
+	return to;
 }

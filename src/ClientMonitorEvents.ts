@@ -99,7 +99,7 @@ export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent 
 
 export type ScoreEventPayload = ClientMonitorBaseEvent & {
 	clientScore: number,
-	remarks?: string[],
+	currentReasons: Record<string, number>,
 }
 
 export type NewCodecMonitorEventPayload = ClientMonitorBaseEvent & {
