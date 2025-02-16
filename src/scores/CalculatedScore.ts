@@ -2,6 +2,7 @@ export type CalculatedScore = {
 	weight: number;
 	value?: number;
 	appData?: Record<string, unknown>;
+	reasons?: Record<string, number>;
 }
 
 // every track calculates its own score and stores 

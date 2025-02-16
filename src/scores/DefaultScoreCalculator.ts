@@ -10,7 +10,7 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 	diffBitrateSquares: number[];
 	lastBitrate?: number;
 	ewmaBitrate?: number;
-	subtractions: DefaultScoreCalculatorSubtractions;
+	// subtractions: DefaultScoreCalculatorSubtractions;
 }
 
 export type DefaultScoreCalculatorSubtractionReason = 
@@ -31,7 +31,7 @@ export type DefaultScoreCalculatorSubtractions = {
 
 export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
 	lastNScores: number[];
-	subtractions: DefaultScoreCalculatorSubtractions;
+	// subtractions: DefaultScoreCalculatorSubtractions;
 	// lastScoreDetails: {
 	// 	targetDeviatioPenalty: number,
 	// 	cpuLimitationPenalty: number,
@@ -42,7 +42,7 @@ export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
 export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	ewmaFps?: number;
-	subtractions: DefaultScoreCalculatorSubtractions;
+	// subtractions: DefaultScoreCalculatorSubtractions;
 
 	// lastScoreDetails: {
 	// 	fpsPenalty: number;
@@ -53,7 +53,7 @@ export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
 
 export type DefaultScoreCalculatorPeerConnectionScoreAppData = {
 	lastNScores: number[];
-	subtractions: DefaultScoreCalculatorSubtractions;
+	// subtractions: DefaultScoreCalculatorSubtractions;
 
 	// lastScoreDetails: {
 	// 	rttPenalty: number;
@@ -163,16 +163,14 @@ export class DefaultScoreCalculator {
 		if (!appData) {
 			appData = {
 				lastNScores: [],
-				subtractions,
 				// lastScoreDetails: {
 				// 	rttPenalty: 0,
 				// 	fractionLostPenalty: 0,
 				// }
 			}
 			score.appData = appData;
-		} else {
-			appData.subtractions = subtractions;
 		}
+		score.reasons = subtractions;
 
 		if (300 < rttInMs) {
 			subtractions["very-high-rtt"] = 2.0;
@@ -253,12 +251,10 @@ export class DefaultScoreCalculator {
 		if (!appData) {
 			appData = {
 				lastNScores: [],
-				subtractions,
 			}
 			trackMonitor.calculatedScore.appData = appData;
-		} else {
-			appData.subtractions = subtractions;
 		}
+		trackMonitor.calculatedScore.reasons = subtractions;
 
 		if (inboundRtp.framesPerSecond) {
 			inboundRtp.lastNFramesPerSec.push(inboundRtp.framesPerSecond);
@@ -367,12 +363,10 @@ export class DefaultScoreCalculator {
 			appData = {
 				lastNScores: [],
 				diffBitrateSquares: [],
-				subtractions,
 			}
 			score.appData = appData;
-		} else {
-			appData.subtractions = subtractions;
 		}
+		score.reasons = subtractions;
 
 		// max score: 5
 		// target deviation penalty: 0-2
@@ -508,7 +502,8 @@ export class DefaultScoreCalculator {
 
 	private _getTotalSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
 		let result = 0;
-		for (const value in Object.values(subtractions)) {
+		for (const key of Object.keys(subtractions)) {
+			const value = subtractions[key as DefaultScoreCalculatorSubtractionReason];	
 			if (typeof value !== 'number') continue;
 
 			result += value;
