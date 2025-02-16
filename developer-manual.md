@@ -1307,6 +1307,8 @@ The detector checks if the bitrate of the track is below a certain threshold and
 
 ### Show reasons for a low score
 
+
+
 ### Add `appData` and `attachments`
 
 ```javascript
@@ -1332,4 +1334,10 @@ monitor.on('new-inbound-track-monitor', (event) => {
 ## Schema compatibility Table
 
 ## FAQ
+
+
+
+
+
+
 

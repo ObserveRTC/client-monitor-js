@@ -72,6 +72,8 @@ export type {
     DefaultScoreCalculatorInboundVideoTrackScoreAppData,
     DefaultScoreCalculatorOutboundAudioTrackScoreAppData,
     DefaultScoreCalculatorOutboundVideoTrackScoreAppData,
+    DefaultScoreCalculatorSubtractionReason,
+    DefaultScoreCalculatorSubtractions,
     // DefaultScoreCalculatorInboundAudioTrackScoreAppData,
     DefaultScoreCalculatorPeerConnectionScoreAppData
 } from './scores/DefaultScoreCalculator';

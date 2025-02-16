@@ -10,7 +10,6 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 	diffBitrateSquares: number[];
 	lastBitrate?: number;
 	ewmaBitrate?: number;
-	// subtractions: DefaultScoreCalculatorSubtractions;
 }
 
 export type DefaultScoreCalculatorSubtractionReason = 
@@ -31,35 +30,15 @@ export type DefaultScoreCalculatorSubtractions = {
 
 export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
 	lastNScores: number[];
-	// subtractions: DefaultScoreCalculatorSubtractions;
-	// lastScoreDetails: {
-	// 	targetDeviatioPenalty: number,
-	// 	cpuLimitationPenalty: number,
-	// 	bitrateVolatilityPenalty: number,
-	// }
 }
 
 export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
 	lastNScores: number[];
 	ewmaFps?: number;
-	// subtractions: DefaultScoreCalculatorSubtractions;
-
-	// lastScoreDetails: {
-	// 	fpsPenalty: number;
-	// 	fractionOfDroppedFramesPenalty: number;
-	// 	corruptionProbabilityPenalty: number;
-	// }
 }
 
 export type DefaultScoreCalculatorPeerConnectionScoreAppData = {
 	lastNScores: number[];
-	// subtractions: DefaultScoreCalculatorSubtractions;
-
-	// lastScoreDetails: {
-	// 	rttPenalty: number;
-	// 	fractionLostPenalty: number;
-	// }
-
 }
 
 /**
