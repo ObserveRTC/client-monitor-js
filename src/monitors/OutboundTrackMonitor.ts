@@ -1,5 +1,5 @@
 import { Detectors } from "../detectors/Detectors";
-import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrack";
+import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector";
 import { InboundTrackSample } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";

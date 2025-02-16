@@ -1,7 +1,7 @@
 import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
 import { Detectors } from "../detectors/Detectors";
 import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetector";
-import { DryInboundTrackDetector } from "../detectors/DryInboundTrack";
+import { DryInboundTrackDetector } from "../detectors/DryInboundTrackDetector";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { OutboundTrackSample } from "../schema/ClientSample";
