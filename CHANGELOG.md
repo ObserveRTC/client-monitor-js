@@ -1,3 +1,12 @@
+## 4.0.0
+
+ * The ClientMonitor API is refactored.
+ * The schema used for sampling is 3.0.0
+
+## 3.0.0
+
+ * The ClientMonitor API is simplified and refactored.
+
 ## 2.3.0
  * refactored collectors and sampler
  * `clientMontior.os` is moved to `clientMonitor.meta.operationSystem`
