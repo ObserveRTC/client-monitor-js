@@ -78,13 +78,9 @@ For detailed information on how to use the library, please refer to the [Develop
 
 https://www.npmjs.com/package/@observertc/client-monitor-js
 
-## API docs
-
-https://observertc.org/docs/api/client-monitor-js-v2/
-
 ## Schemas
 
-https://github.com/observertc/schemas
+Schema definitions are available at https://github.com/observertc/schemas
 
 ## Getting Involved
 

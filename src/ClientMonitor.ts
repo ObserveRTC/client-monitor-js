@@ -2,7 +2,8 @@ import { ExtensionStat,
     ClientSample, 
     ClientEvent as ClientSampleClientEvent, 
     ClientMetaData as ClientSampleClientMetaData, 
-    ClientIssue as ClientSampleClientIssue, 
+    ClientIssue as ClientSampleClientIssue,
+    schemaVersion, 
 } from './schema/ClientSample';
 import { createLogger } from "./utils/logger";
 import { EventEmitter } from 'events';
@@ -37,6 +38,8 @@ export declare interface ClientMonitor {
 }
 
 export class ClientMonitor extends EventEmitter {
+    public static readonly samplingSchemaVersion = schemaVersion;
+
     public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly detectors: Detectors;

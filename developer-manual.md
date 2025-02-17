@@ -1,6 +1,4 @@
-## User Manual
-
-client-monitor / [Monitors](./monitors.md) / [Detectors](./detectors.md) / [Sampling](./sampling.md) / [Scores](scores.md) / [Sources](./sources.md)
+## Developer Manual
 
  - appData,
   - score calculation
@@ -18,9 +16,8 @@ client-monitor / [Monitors](./monitors.md) / [Detectors](./detectors.md) / [Samp
 6. [Sampling](#sampling)
 6. [Scores](#scores)
 8. [Events and Issues](#events-and-issues)
-6. [WebRTC Monitors](#webrtc-monitors)
+6. [WebRTC Stats Monitors](#webrtc-stats-monitors)
 7. [Examples](#examples)
-8. [Best Practices](#best-practices)
 9. [Troubleshooting](#troubleshooting)
 10. [Schema compatibility Table](#hamokmessage-compatibility-table)
 11. [FAQ](#faq)
@@ -46,7 +43,7 @@ import { createClientMonitor } from "@observertc/client-monitor-js";
 import mediasoup from "mediaousp-client";
 
 const mediasoupDevice = new mediasoup.Device();
-const monitor = createClientMonitor();
+const monitor = new ClientMonitor();
 
 monitor.addSource(mediasoupDevice);
 ```
@@ -607,21 +604,6 @@ By default the score is calculated as a weight average based on the following fa
 The `score` property of the peerConnection represents the calculated score of the peer connection. The score is based on the stability of the peer connection, including factors like packet loss, jitter, and latency. The stability score ranges from 0.0 (worst) to 1.0 (best). The score is updated
 on each stats collection.
 
-To get the details for the score calculation you can access the `lastScoreDetails` property of the `PeerConnectionMonitor.calculatedScore.appData` object.:
-
-```typescript
-import { DefaultScoreCalculatorPeerConnectionScoreAppData } from "@observertc/client-monitor-js";
-
-const details: DefaultScoreCalculatorPeerConnectionScoreAppData = monitor.getPeerConnectionMonitor('peerConnectionId').calculatedScore.appData.lastScoreDetails;
-
-if (0 < details.rttPenalty) {
-  // rttPenalty is a number between 0 and 2 representing the penalty for high RTT
-}
-if (0 < details.fractionLostPenalty) {
-  // fractionLostPenalty is a number between 0 and 2 representing the penalty for high packet loss
-}
-```
-
 #### Track Monitor Score Calculation
 
 Score calculation for tracks is based on their direction (inbound or outbound) and type (audio or video). The calculated score is updated on each stats collection.
@@ -634,24 +616,6 @@ The `score` property of the inbound audio track monitor represents the calculate
 
 The `score` property of the inbound video track monitor represents the calculated score of the inbound video track. The score is based on the video quality, including factors like  frame rate, and fractional dropped frames. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
 
-To get the details for the score calculation you can access the `lastScoreDetails` property of the `InboundTrackMonitor.calculatedScore.appData` object.:
-
-```typescript
-import { DefaultScoreCalculatorInboundVideoTrackScoreAppData } from "@observertc/client-monitor-js";
-
-const details: DefaultScoreCalculatorInboundVideoTrackScoreAppData = monitor.getInboundTrackMonitor('trackId').calculatedScore.appData.lastScoreDetails;
-
-if (0 < details.fractionOfDroppedFramesPenalty) {
-  // fractionDroppedFramesPenalty is a number between 0 and 2 representing the penalty for high dropped frames
-}
-if (0 < details.corruptionProbabilityPenalty) {
-  // corruptionProbabilityPenalty is a number between 0 and 1 representing the penalty for high corruption probability
-}
-if (0 < details.fpsPenalty) {
-  // fpsPenalty is a number between 0 and 1 representing the penalty for frame rate below the exponential moving average
-}
-```
-
 **Outbound Audio Track Score Calculation**
 
 The `score` property of the outbound audio track monitor represents the calculated score of the outbound audio track. The score is based on the audio quality, including factors like packet loss, and bitrate. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
@@ -660,23 +624,20 @@ The `score` property of the outbound audio track monitor represents the calculat
 
 The `score` property of the outbound video track monitor represents the calculated score of the outbound video track. The score is based on the video quality, including factors like cpu limitation, sending bitrate deviation from the target and it's volatility. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
 
-To get the details for the score calculation you can access the `lastScoreDetails` property of the `OutboundTrackMonitor.calculatedScore.appData` object.:
+#### Reasons for Scores
 
-```typescript
-import { DefaultScoreCalculatorOutboundVideoTrackScoreAppData } from "@observertc/client-monitor-js";
+The `reasons` property of `calculatedScore` object of the `PeerConnectionMonitor`, 
+and `TrackMonitor` instances provides information about the factors that contributed to the calculated score. 
 
-const details: DefaultScoreCalculatorOutboundVideoTrackScoreAppData = monitor.getOutboundTrackMonitor('trackId').calculatedScore.appData.lastScoreDetails;
+```javascript
+const monitor = new ClientMonitor();
 
-if (0 < details.targetDeviatioPenalty) {
-  // targetDeviatioPenalty is a number between 0 and 2 representing the penalty for high deviation from the target bitrate
-}
-if (0 < details.cpuLimitationPenalty) {
-  // cpuLimitationPenalty is a number between 0 and 2 representing the penalty for high cpu limitation
-}
-if (0 < details.bitrateVolatilityPenalty) {
-  // bitrateVolatilityPenalty is a number between 0 and 2 representing the penalty for high bitrate volatility
-}
+monitor.on('score', (event) => {
+  console.log('Score:', event.payload.clientScore);
+  console.log('Reasons:', event.payload.currentReasons);
+})
 ```
+
 
 ### Custom Score Calculation
 
@@ -722,7 +683,7 @@ monitor.addIssue({
 ```
 
 
-## WebRTC Monitors
+## WebRTC Stats Monitors
 
 Every WebRTC source added to the `ClientMonitor` creates a corresponding monitor object within the `ClientMonitor`, where stats properties are tracked, anomalies are detected, and derived fields are calculated. For example, when a peer connection is added via `monitor.sources.addRTCPeerConnection(peerConnection)`, a corresponding `PeerConnectionMonitor` is created. If stats are collected through the `monitor.collect()` method (automatically called when `collectingPeriodInMs` is configured), the monitor will create an `OutboundRtpMonitor` if the stats indicate that a new `outbound-rtp` entry has not been previously monitored. Conversely, if stats for an existing entry are no longer present in the new stats collection, the monitor will remove the corresponding `OutboundRtpMonitor` instance.
 
@@ -1327,16 +1288,54 @@ monitor.on('new-inbound-track-monitor', (event) => {
 });
 ```
 
-## Best Practices
-
 ## Troubleshooting
 
-## Schema compatibility Table
+### No stats received
+
+Check if peer connection is added to the `ClientMonitor` instance. 
+
+```javascript
+const monitor = new ClientMonitor();
+
+console.log('Peer connections:', monitor.peerConnections);
+```
+
+If there are peer connections ensure the `collect()` method is called on the `ClientMonitor` instance to collect the stats. You can check the last time stats were collected using the `lastCollectingStatsAt` property.
+
+```javascript
+console.log('Last stats collected at:', monitor.lastCollectingStatsAt);
+```
+
+## Sampling Schema
+
+The `createSample()` method is used by the `ClientMonitor` to generate a `ClientSample` object, which contains a snapshot of the current state of the monitor. The sample follows a specific schema. The current version of the schema can be extracted from `ClientMonitor` class.
+
+```javascript
+console.log(ClientMonitor.samplingSchemaVersion);
+``` 
+
+The schema is developer [here](https://github.com/observertc/schema), and converted to 
+different language bindings. If you maintain a server and client side of the application, 
+you need to ensure the schema versions are compatible between the server and client.
+
 
 ## FAQ
 
+### How to access the raw stats?
 
+The `collect()` method of the `ClientMonitor` collects the raw stats from the WebRTC API and updates the monitor instances with the new stats. The `collect()` method returns a tuple containing the peer connection ID and the raw stats collected.
 
+Alternativily the `ClientMonitor` instance emits `stats-collected` event with the raw stats collected can be accessed from the event object.
+
+### How to transport the samples to the server?
+
+The `ClientMonitor` instance emits `sample` event with the sample object, which can be sent to the server using a WebSocket, HTTP request, or any other transport mechanism. The transport and serialization mechanism depends on the application architecture and requirements, the `ClientMonitor` only provides the samples.
+
+### How can I serialize the samples?
+
+The samples can be serialized using JSON.stringify() or any other serialization mechanism. The samples are plain JavaScript objects that can be easily serialized and sent over the network.
+
+`@observertc/samples-encoder` and `@observertc/samples-decoder` packages are provided to encode and decode the samples developed by the `@observertc/schema` package.
 
 
 
