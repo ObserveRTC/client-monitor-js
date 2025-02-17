@@ -312,8 +312,8 @@ export class PeerConnectionMonitor extends EventEmitter {
 		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
 
 		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
-		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.candidateType === 'relay') &&
-			selectedIceCandidatePairs.some(pair => pair.getRemoteCandidate()?.url?.startsWith('turn:'));
+		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.relayProtocol) &&
+			selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.url?.startsWith('turn'));
 		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
 
 		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;

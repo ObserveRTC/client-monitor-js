@@ -121,6 +121,7 @@ export class Sources {
 			if (userAgentData.browser) {
 				// let's add adapter here if we know the browser
 				try {
+					// console.warn('userAgentData.browser', userAgentData.browser);
 					// no-op
 				} catch (err) {
 					logger.error('Failed to add adapter', err);
