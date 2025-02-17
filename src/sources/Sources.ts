@@ -8,10 +8,15 @@ import { createLogger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { listenMediasoupTransport } from "./mediasoupTransportEvents";
 import { mediasoupStatsAdapter } from "../adapters/mediasoupAdapter";
+import { firefox94StatsAdapter } from "../adapters/firefox94StatsAdapter";
+import { StatsGenerator } from "../adapters/StatsGenerators";
+import { FirefoxTransportStatsGenerator } from "../adapters/firefoxTransportStatsGenerator";
 
 const logger = createLogger('Sources');
 
 export class Sources {
+	private _generatorProviders = new Map<string, (pcMonitor: PeerConnectionMonitor) => StatsGenerator>();
+
 	public mediaDevicesAreWatched = false;
 	public userAgentMetaDataSent = false;
 	public userAgentStatsAdapterAdded = false;
@@ -52,7 +57,7 @@ export class Sources {
 			peerConnectionId,
 		});
 
-		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
+		this._addPeerConnectionMonitor(peerConnectionMonitor);
 	}
 
 	public addMediasoupDevice(device: mediasoup.types.Device, attachments?: Record<string, unknown>) {
@@ -89,7 +94,7 @@ export class Sources {
 			attachments,
 		});
 
-		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
+		this._addPeerConnectionMonitor(peerConnectionMonitor);
 
 		if (!this.mediasoupStatsAdapterAdded) {
 			this.monitor.statsAdapters.add(
@@ -121,7 +126,13 @@ export class Sources {
 			if (userAgentData.browser) {
 				// let's add adapter here if we know the browser
 				try {
-					// console.warn('userAgentData.browser', userAgentData.browser);
+					if (userAgentData.browser.name === 'Firefox') {
+						this.monitor.statsAdapters.add(firefox94StatsAdapter);
+						this._addStatsGeneratorProvider(
+							FirefoxTransportStatsGenerator.constructor.name,
+							(pcMonitor) => new FirefoxTransportStatsGenerator(pcMonitor),
+						)
+					}
 					// no-op
 				} catch (err) {
 					logger.error('Failed to add adapter', err);
@@ -143,4 +154,25 @@ export class Sources {
 		}
 	}
 
+	private _addPeerConnectionMonitor(pcMonitor: PeerConnectionMonitor) {
+		for (const generator of this._generatorProviders.values()) {
+			const statsGenerator = generator(pcMonitor);
+
+			pcMonitor.statsGenerators.add(statsGenerator);
+		}
+		this.monitor.addPeerConnectionMonitor(pcMonitor);
+	}
+
+	private _addStatsGeneratorProvider(name: string, provider: (pcMonitor: PeerConnectionMonitor) => StatsGenerator, applyOnExisting = true) {
+		if (this._generatorProviders.has(name)) return;
+
+		if (applyOnExisting) {
+			for (const pcMonitor of this.monitor.peerConnections) {
+				const generator = provider(pcMonitor);
+				pcMonitor.statsGenerators.add(generator);
+			}
+		}
+
+		this._generatorProviders.set(name, provider);
+	}
 }

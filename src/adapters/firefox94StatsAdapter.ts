@@ -24,5 +24,7 @@ export function firefox94StatsAdapter(rtcStats: RtcStats[]): RtcStats[] {
 		}
 	}
 
+	console.warn("firefox94StatsAdapter 2", rtcStats);
+
 	return rtcStats;
 }

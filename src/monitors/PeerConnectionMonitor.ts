@@ -23,6 +23,7 @@ import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
+import { StatsGenerators } from "../adapters/StatsGenerators";
 
 const logger = createLogger('PeerConnectionMonitor');
 
@@ -41,6 +42,7 @@ export declare interface PeerConnectionMonitor {
 }
 
 export class PeerConnectionMonitor extends EventEmitter {
+	public readonly statsGenerators = new StatsGenerators();
 	public readonly detectors: Detectors;
 	public readonly mappedCodecMonitors = new Map<string, CodecMonitor>();
 	public readonly mappedInboundRtpMonitors = new Map<number, InboundRtpMonitor>();
@@ -193,109 +195,117 @@ export class PeerConnectionMonitor extends EventEmitter {
 		this.inboundFractionalLost = 0;
 		this.totalAvailableIncomingBitrate = 0;
 		this.totalAvailableOutgoingBitrate = 0;
+		
+		for (let i = 0, input = stats; i < 2 && input && input.length > 0; ++i) {
 
-		for (const statsItem of stats) {
-			switch (statsItem.type) {
-				case W3C.StatsType.codec: 
-					this._updateCodec(statsItem);
-					break;
-				case W3C.StatsType.inboundRtp: {
-					const monitor = this._updateInboundRtp(statsItem);
-
-					switch (monitor?.kind) {
-						case 'audio':
-							this.receivingAudioBitrate += monitor?.bitrate ?? 0;
-							this.deltaAudioBytesReceived += monitor?.deltaBytesReceived ?? 0;
-							break;
-						case 'video':
-							this.receivingVideoBitrate += monitor?.bitrate ?? 0;
-							this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
-							break;
+			for (const statsItem of input) {
+				switch (statsItem.type) {
+					case W3C.StatsType.codec: 
+						this._updateCodec(statsItem);
+						break;
+					case W3C.StatsType.inboundRtp: {
+						const monitor = this._updateInboundRtp(statsItem);
+	
+						switch (monitor?.kind) {
+							case 'audio':
+								this.receivingAudioBitrate += monitor?.bitrate ?? 0;
+								this.deltaAudioBytesReceived += monitor?.deltaBytesReceived ?? 0;
+								break;
+							case 'video':
+								this.receivingVideoBitrate += monitor?.bitrate ?? 0;
+								this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
+								break;
+						}
+	
+						this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
+						this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
+						this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
+						break;
 					}
-
-					this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
-					this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
-					this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
-					break;
-				}
-				case W3C.StatsType.remoteOutboundRtp: {
-					const monitor = this._updateRemoteOutboundRtp(statsItem);
-					
-					if (monitor?.roundTripTime !== undefined) {
-						sumOfRttInS += monitor.roundTripTime;
-						++rttMeasurementsCounter;
+					case W3C.StatsType.remoteOutboundRtp: {
+						const monitor = this._updateRemoteOutboundRtp(statsItem);
+						
+						if (monitor?.roundTripTime !== undefined) {
+							sumOfRttInS += monitor.roundTripTime;
+							++rttMeasurementsCounter;
+						}
+						break;
 					}
-					break;
-				}
-				case W3C.StatsType.outboundRtp: {
-					const monitor = this._updateOutboundRtp(statsItem);
-					
-					switch (monitor?.kind) {
-						case 'audio':
-							this.sendingAudioBitrate += monitor?.bitrate ?? 0;
-							this.deltaAudioBytesSent += monitor?.deltaBytesSent ?? 0;
-							break;
-						case 'video':
-							this.sendingVideoBitrate += monitor?.bitrate ?? 0;
-							this.deltaVideoBytesSent += monitor?.deltaBytesSent ?? 0;
-							break;
+					case W3C.StatsType.outboundRtp: {
+						const monitor = this._updateOutboundRtp(statsItem);
+						
+						switch (monitor?.kind) {
+							case 'audio':
+								this.sendingAudioBitrate += monitor?.bitrate ?? 0;
+								this.deltaAudioBytesSent += monitor?.deltaBytesSent ?? 0;
+								break;
+							case 'video':
+								this.sendingVideoBitrate += monitor?.bitrate ?? 0;
+								this.deltaVideoBytesSent += monitor?.deltaBytesSent ?? 0;
+								break;
+						}
+						this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
+						break;
 					}
-					this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
-					break;
-				}
-					
-				case W3C.StatsType.remoteInboundRtp: {
-					const monitor = this._updateRemoteInboundRtp(statsItem);
-
-					this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
-					// this.ΔoutboundPacketsLost += monitor?.ΔpacketsLost ?? 0;
-					break;
-				}
-					
-				case W3C.StatsType.dataChannel: {
-					const monitor = this._updateDataChannel(statsItem);
-					
-					this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
-					this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
-					break;
-				}
-				case W3C.StatsType.mediaSource: 
-					this._updateMediaSource(statsItem);
-					break;
-				case W3C.StatsType.mediaPlayout:
-					this._updateMediaPlayout(statsItem);
-					break;
-				case W3C.StatsType.transport: {
-					const monitor = this._updateIceTransport(statsItem);
-					const selectedPair = monitor?.getSelectedCandidatePair();
-					
-					this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
-					this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
-
-					if (selectedPair?.currentRoundTripTime !== undefined) {
-						sumOfRttInS += selectedPair.currentRoundTripTime;
-						++rttMeasurementsCounter;
+						
+					case W3C.StatsType.remoteInboundRtp: {
+						const monitor = this._updateRemoteInboundRtp(statsItem);
+	
+						this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
+						// this.ΔoutboundPacketsLost += monitor?.ΔpacketsLost ?? 0;
+						break;
 					}
-					break;
+						
+					case W3C.StatsType.dataChannel: {
+						const monitor = this._updateDataChannel(statsItem);
+						
+						this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
+						this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
+						break;
+					}
+					case W3C.StatsType.mediaSource: 
+						this._updateMediaSource(statsItem);
+						break;
+					case W3C.StatsType.mediaPlayout:
+						this._updateMediaPlayout(statsItem);
+						break;
+					case W3C.StatsType.transport: {
+						const monitor = this._updateIceTransport(statsItem);
+						const selectedPair = monitor?.getSelectedCandidatePair();
+						
+						this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
+						this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
+	
+						if (selectedPair?.currentRoundTripTime !== undefined) {
+							sumOfRttInS += selectedPair.currentRoundTripTime;
+							++rttMeasurementsCounter;
+						}
+						break;
+					}
+						
+					case W3C.StatsType.peerConnection:
+						this._updatePeerConnectionTransport(statsItem);
+						break;
+					case W3C.StatsType.localCandidate:
+					case W3C.StatsType.remoteCandidate:
+						this._updateIceCandidate(statsItem);
+						break;
+					case W3C.StatsType.candidatePair:
+						this._updateIceCandidatePair(statsItem);
+						break;
+					case W3C.StatsType.certificate:
+						this._updateCertificate(statsItem);
+						break;
+					default:
+						logger.debug('Unknown stats type', statsItem);
 				}
-					
-				case W3C.StatsType.peerConnection:
-					this._updatePeerConnectionTransport(statsItem);
-					break;
-				case W3C.StatsType.localCandidate:
-				case W3C.StatsType.remoteCandidate:
-					this._updateIceCandidate(statsItem);
-					break;
-				case W3C.StatsType.candidatePair:
-					this._updateIceCandidatePair(statsItem);
-					break;
-				case W3C.StatsType.certificate:
-					this._updateCertificate(statsItem);
-					break;
-				default:
-					logger.debug('Unknown stats type', statsItem);
 			}
+
+			input = this.statsGenerators.generate();
+
+			console.warn('Generated stats', input);
 		}
+		
 		
 		this._checkVisited();
 

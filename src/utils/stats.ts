@@ -9,7 +9,7 @@ export function createStatsFromRTCStatsReportProvider(statsProvider: () => Promi
             const stats = await statsProvider();
     
             const result: W3C.RtcStats[] = [];
-    
+
             // legacy support
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             if ((stats as any).values) {
