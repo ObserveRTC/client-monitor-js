@@ -3,11 +3,13 @@ import { fetchUserAgentData } from "./fetchUserAgentData";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { listenRtcPeerConnectionEvents } from "./rtcEventers";
 import { watchMediaDevices } from "./watchMediaDevice";
-import { createStatsFromRTCStatsReportProvider } from "../utils/stats";
 import { createLogger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { listenMediasoupTransport } from "./mediasoupTransportEvents";
-import { mediasoupStatsAdapter } from "../adapters/mediasoupAdapter";
+import { RtcPeerConnectionStatsCollector } from "../collectors/RtcPeerConnectionStatsCollector";
+import { MediasoupTransportStatsCollector } from "../collectors/MediasoupTransportStatsCollector";
+import { Firefox94StatsAdapter } from "../adapters/Firefox94StatsAdapter";
+import { FirefoxTransportStatsAdapter } from "../adapters/FirefoxTransportStatsAdapter";
 
 const logger = createLogger('Sources');
 
@@ -41,7 +43,7 @@ export class Sources {
 
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 				peerConnectionId,
-				createStatsFromRTCStatsReportProvider(peerConnection.getStats.bind(peerConnection)),
+				new RtcPeerConnectionStatsCollector(peerConnection, this.monitor),
 				this.monitor,
 				attachments,
 		);
@@ -52,7 +54,7 @@ export class Sources {
 			peerConnectionId,
 		});
 
-		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
+		this._addPeerConnectionMonitor(peerConnectionMonitor);
 	}
 
 	public addMediasoupDevice(device: mediasoup.types.Device, attachments?: Record<string, unknown>) {
@@ -78,7 +80,7 @@ export class Sources {
 		}
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 			transport.id,
-			createStatsFromRTCStatsReportProvider(transport.getStats.bind(transport)),
+			new MediasoupTransportStatsCollector(transport, this.monitor),
 			this.monitor,
 			attachments,
 		);
@@ -89,14 +91,7 @@ export class Sources {
 			attachments,
 		});
 
-		this.monitor.addPeerConnectionMonitor(peerConnectionMonitor);
-
-		if (!this.mediasoupStatsAdapterAdded) {
-			this.monitor.statsAdapters.add(
-				mediasoupStatsAdapter
-			);
-			this.mediasoupStatsAdapterAdded = true;
-		}
+		this._addPeerConnectionMonitor(peerConnectionMonitor);
 
 		return this;
 	}
@@ -118,13 +113,20 @@ export class Sources {
 
 		if (!this.userAgentStatsAdapterAdded) {
 			this.userAgentStatsAdapterAdded = true;
-			if (userAgentData.browser) {
-				// let's add adapter here if we know the browser
-				try {
-					// console.warn('userAgentData.browser', userAgentData.browser);
-					// no-op
-				} catch (err) {
-					logger.error('Failed to add adapter', err);
+			if (!this.monitor.browser && userAgentData.browser) {
+
+				// the browser set triggers to call the stats adapter for existing peer connections
+				const browserName = userAgentData.browser.name.toLowerCase();
+				if ([ 'chrome', 'firefox', 'safari', 'edge' ].includes(browserName)) {
+					this.monitor.browser = {
+						name: browserName,
+						version: userAgentData.browser?.version,
+					}
+				} else {
+					this.monitor.browser = {
+						name: 'unknown',
+						version: 'unknown',
+					}
 				}
 			}
 		}
@@ -143,4 +145,36 @@ export class Sources {
 		}
 	}
 
+	private _addPeerConnectionMonitor(pcMonitor: PeerConnectionMonitor) {
+		this.monitor.addPeerConnectionMonitor(pcMonitor);
+
+		this.addStatsAdapters(pcMonitor);
+	}
+
+	public addStatsAdapters(pcMonitor: PeerConnectionMonitor) {
+		if (!this.monitor.browser) return;
+
+		switch (this.monitor.browser.name) {
+			case 'chrome': {
+				break;
+			}
+			case 'edge': {
+				break;
+			}
+			case 'opera': {
+				break;
+			}
+			case 'safari': {
+				break;
+			}
+			case 'firefox': {
+				pcMonitor.statsAdapters.add(new Firefox94StatsAdapter());
+				pcMonitor.statsAdapters.add(new FirefoxTransportStatsAdapter());
+				break;
+			}
+			case 'unknown' : {
+				break;
+			}
+		}
+	}
 }

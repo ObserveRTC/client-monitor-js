@@ -28,6 +28,11 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	consentRequestsSent?: number | undefined;
 	packetsDiscardedOnSend?: number | undefined;
 	bytesDiscardedOnSend?: number | undefined;
+
+	public deltaPacketsSent?: number | undefined;
+	public deltaPacketsReceived?: number | undefined;
+	public deltaBytesSent?: number | undefined;
+	public deltaBytesReceived?: number | undefined;
 	
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -63,6 +68,24 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		const elapsedInMs = stats.timestamp - this.timestamp;
 		if (elapsedInMs <= 0) { 
 			return; // logger?
+		}
+
+		this.deltaBytesReceived = 0;
+		this.deltaBytesSent = 0;
+		this.deltaPacketsReceived = 0;
+		this.deltaPacketsSent = 0;
+
+		if (this.packetsSent && stats.packetsSent) {
+			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
+		}
+		if (this.packetsReceived && stats.packetsReceived) {
+			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
+		}
+		if (this.bytesSent && stats.bytesSent) {
+			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
+		}
+		if (this.bytesReceived && stats.bytesReceived) {
+			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 
 		Object.assign(this, stats);

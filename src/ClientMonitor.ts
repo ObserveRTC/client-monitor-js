@@ -40,15 +40,17 @@ export declare interface ClientMonitor {
 export class ClientMonitor extends EventEmitter {
     public static readonly samplingSchemaVersion = schemaVersion;
 
-    public readonly statsAdapters = new StatsAdapters();
+    // public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly detectors: Detectors;
     
+
     public scoreCalculator: ScoreCalculator;
     public bufferingSampleData: boolean;
     public closed = false;
     public lastSampledAt = 0;
     public lastCollectingStatsAt = 0;
+    
     
     public cpuPerformanceAlertOn = false;
     
@@ -62,6 +64,10 @@ export class ClientMonitor extends EventEmitter {
     public avgRttInSec = -1;
     public score = 5.0;
     
+    private _browser?: {
+        name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown';
+        version: string;
+    }
     private readonly _sources: Sources;
     private _timer?: ReturnType<typeof setInterval>;
     private _samplingTick = 0;
@@ -160,6 +166,20 @@ export class ClientMonitor extends EventEmitter {
     public set callId(callId: string | undefined) { this.config.callId = callId; }
     public get appData() { return this.config.appData; }
     public set appData(appData: Record<string, unknown> | undefined) { this.config.appData = appData; }
+    public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
+        if (this.closed || !browser) return;
+        if (this._browser) throw new Error('Browser info is already set, cannot change it');
+        
+        this._browser = browser;
+
+        for (const peerConnection of this.peerConnections) {
+            this._sources.addStatsAdapters(peerConnection);
+        }
+    }
+
+    public get browser() {
+        return this._browser;
+    }
 
     public close(): void {
         if (this.closed) {
@@ -188,10 +208,7 @@ export class ClientMonitor extends EventEmitter {
         
         await Promise.allSettled(this.peerConnections.map(async (peerConnection) => {
             try {
-                const collectedStats = await peerConnection.getStats();
-                const adaptedStats = this.statsAdapters.adapt(collectedStats);
-    
-                peerConnection.accept(adaptedStats);
+                const collectedStats = await peerConnection.collect();
     
                 result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
             } catch (err) {

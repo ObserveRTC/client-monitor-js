@@ -23,6 +23,8 @@ import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
+import { StatsCollector } from "../collectors/StatsCollector";
+import { StatsAdapters } from "../adapters/StatsAdapters";
 
 const logger = createLogger('PeerConnectionMonitor');
 
@@ -41,6 +43,8 @@ export declare interface PeerConnectionMonitor {
 }
 
 export class PeerConnectionMonitor extends EventEmitter {
+	public readonly statsAdapters = new StatsAdapters();
+
 	public readonly detectors: Detectors;
 	public readonly mappedCodecMonitors = new Map<string, CodecMonitor>();
 	public readonly mappedInboundRtpMonitors = new Map<number, InboundRtpMonitor>();
@@ -135,7 +139,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	public constructor(
 		public readonly peerConnectionId: string,
-		private readonly _getStats: () => Promise<W3C.RtcStats[]>,
+		public readonly statsCollector: StatsCollector,
 		public readonly parent: ClientMonitor,
 		public attachments?: Record<string, unknown>,
 	) {
@@ -163,15 +167,20 @@ export class PeerConnectionMonitor extends EventEmitter {
 		return [ ...this.mappedInboundTracks.values(), ...this.mappedOutboundTracks.values() ];
 	}
 	
-	public async getStats() {
-		const stats = await this._getStats();
+	public async collect() {
+		let stats = await this.statsCollector.getStats();
+		
+		stats = this.statsAdapters.adapt(stats);
 
 		this.emit('stats', stats);
+
+		this.accept(stats);
 
 		return stats;
 	}
 
-	public async accept(stats: W3C.RtcStats[]) {
+
+	public accept(stats: W3C.RtcStats[]) {
 		let sumOfRttInS =  0;
 		let rttMeasurementsCounter = 0;
 		this.deltaVideoBytesSent = 0;
@@ -194,107 +203,114 @@ export class PeerConnectionMonitor extends EventEmitter {
 		this.totalAvailableIncomingBitrate = 0;
 		this.totalAvailableOutgoingBitrate = 0;
 
-		for (const statsItem of stats) {
-			switch (statsItem.type) {
-				case W3C.StatsType.codec: 
-					this._updateCodec(statsItem);
-					break;
-				case W3C.StatsType.inboundRtp: {
-					const monitor = this._updateInboundRtp(statsItem);
+		stats = this.statsAdapters.adapt(stats);
 
-					switch (monitor?.kind) {
-						case 'audio':
-							this.receivingAudioBitrate += monitor?.bitrate ?? 0;
-							this.deltaAudioBytesReceived += monitor?.deltaBytesReceived ?? 0;
-							break;
-						case 'video':
-							this.receivingVideoBitrate += monitor?.bitrate ?? 0;
-							this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
-							break;
-					}
+		for (let i = 0, input = stats; i < 2 && 0 < input.length; ++i) {
 
-					this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
-					this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
-					this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
-					break;
-				}
-				case W3C.StatsType.remoteOutboundRtp: {
-					const monitor = this._updateRemoteOutboundRtp(statsItem);
-					
-					if (monitor?.roundTripTime !== undefined) {
-						sumOfRttInS += monitor.roundTripTime;
-						++rttMeasurementsCounter;
+			for (const statsItem of input) {
+				switch (statsItem.type) {
+					case W3C.StatsType.codec: 
+						this._updateCodec(statsItem);
+						break;
+					case W3C.StatsType.inboundRtp: {
+						const monitor = this._updateInboundRtp(statsItem);
+	
+						switch (monitor?.kind) {
+							case 'audio':
+								this.receivingAudioBitrate += monitor?.bitrate ?? 0;
+								this.deltaAudioBytesReceived += monitor?.deltaBytesReceived ?? 0;
+								break;
+							case 'video':
+								this.receivingVideoBitrate += monitor?.bitrate ?? 0;
+								this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
+								break;
+						}
+	
+						this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
+						this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
+						this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
+						break;
 					}
-					break;
-				}
-				case W3C.StatsType.outboundRtp: {
-					const monitor = this._updateOutboundRtp(statsItem);
-					
-					switch (monitor?.kind) {
-						case 'audio':
-							this.sendingAudioBitrate += monitor?.bitrate ?? 0;
-							this.deltaAudioBytesSent += monitor?.deltaBytesSent ?? 0;
-							break;
-						case 'video':
-							this.sendingVideoBitrate += monitor?.bitrate ?? 0;
-							this.deltaVideoBytesSent += monitor?.deltaBytesSent ?? 0;
-							break;
+					case W3C.StatsType.remoteOutboundRtp: {
+						const monitor = this._updateRemoteOutboundRtp(statsItem);
+						
+						if (monitor?.roundTripTime !== undefined) {
+							sumOfRttInS += monitor.roundTripTime;
+							++rttMeasurementsCounter;
+						}
+						break;
 					}
-					this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
-					break;
-				}
-					
-				case W3C.StatsType.remoteInboundRtp: {
-					const monitor = this._updateRemoteInboundRtp(statsItem);
-
-					this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
-					// this.ΔoutboundPacketsLost += monitor?.ΔpacketsLost ?? 0;
-					break;
-				}
-					
-				case W3C.StatsType.dataChannel: {
-					const monitor = this._updateDataChannel(statsItem);
-					
-					this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
-					this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
-					break;
-				}
-				case W3C.StatsType.mediaSource: 
-					this._updateMediaSource(statsItem);
-					break;
-				case W3C.StatsType.mediaPlayout:
-					this._updateMediaPlayout(statsItem);
-					break;
-				case W3C.StatsType.transport: {
-					const monitor = this._updateIceTransport(statsItem);
-					const selectedPair = monitor?.getSelectedCandidatePair();
-					
-					this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
-					this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
-
-					if (selectedPair?.currentRoundTripTime !== undefined) {
-						sumOfRttInS += selectedPair.currentRoundTripTime;
-						++rttMeasurementsCounter;
+					case W3C.StatsType.outboundRtp: {
+						const monitor = this._updateOutboundRtp(statsItem);
+						
+						switch (monitor?.kind) {
+							case 'audio':
+								this.sendingAudioBitrate += monitor?.bitrate ?? 0;
+								this.deltaAudioBytesSent += monitor?.deltaBytesSent ?? 0;
+								break;
+							case 'video':
+								this.sendingVideoBitrate += monitor?.bitrate ?? 0;
+								this.deltaVideoBytesSent += monitor?.deltaBytesSent ?? 0;
+								break;
+						}
+						this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
+						break;
 					}
-					break;
+						
+					case W3C.StatsType.remoteInboundRtp: {
+						const monitor = this._updateRemoteInboundRtp(statsItem);
+	
+						this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
+						// this.ΔoutboundPacketsLost += monitor?.ΔpacketsLost ?? 0;
+						break;
+					}
+						
+					case W3C.StatsType.dataChannel: {
+						const monitor = this._updateDataChannel(statsItem);
+						
+						this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
+						this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
+						break;
+					}
+					case W3C.StatsType.mediaSource: 
+						this._updateMediaSource(statsItem);
+						break;
+					case W3C.StatsType.mediaPlayout:
+						this._updateMediaPlayout(statsItem);
+						break;
+					case W3C.StatsType.transport: {
+						const monitor = this._updateIceTransport(statsItem);
+						const selectedPair = monitor?.getSelectedCandidatePair();
+						
+						this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
+						this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
+	
+						if (selectedPair?.currentRoundTripTime !== undefined) {
+							sumOfRttInS += selectedPair.currentRoundTripTime;
+							++rttMeasurementsCounter;
+						}
+						break;
+					}
+						
+					case W3C.StatsType.peerConnection:
+						this._updatePeerConnectionTransport(statsItem);
+						break;
+					case W3C.StatsType.localCandidate:
+					case W3C.StatsType.remoteCandidate:
+						this._updateIceCandidate(statsItem);
+						break;
+					case W3C.StatsType.candidatePair:
+						this._updateIceCandidatePair(statsItem);
+						break;
+					case W3C.StatsType.certificate:
+						this._updateCertificate(statsItem);
+						break;
+					default:
+						logger.debug('Unknown stats type', statsItem);
 				}
-					
-				case W3C.StatsType.peerConnection:
-					this._updatePeerConnectionTransport(statsItem);
-					break;
-				case W3C.StatsType.localCandidate:
-				case W3C.StatsType.remoteCandidate:
-					this._updateIceCandidate(statsItem);
-					break;
-				case W3C.StatsType.candidatePair:
-					this._updateIceCandidatePair(statsItem);
-					break;
-				case W3C.StatsType.certificate:
-					this._updateCertificate(statsItem);
-					break;
-				default:
-					logger.debug('Unknown stats type', statsItem);
 			}
+
+			input = this.statsAdapters.postAdapt(input);
 		}
 		
 		this._checkVisited();
