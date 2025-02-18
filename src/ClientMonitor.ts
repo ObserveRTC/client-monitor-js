@@ -16,7 +16,6 @@ import {
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from './schema/ClientEventTypes';
 import { ClientMonitorConfig } from './ClientMonitorConfig';
-import { StatsAdapters } from './adapters/StatsAdapters';
 import { Sources } from './sources/Sources';
 import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
