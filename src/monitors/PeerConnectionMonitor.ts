@@ -23,7 +23,8 @@ import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
-import { StatsGenerators } from "../adapters/StatsGenerators";
+import { StatsCollector } from "../collectors/StatsCollector";
+import { StatsAdapters } from "../adapters/StatsAdapters";
 
 const logger = createLogger('PeerConnectionMonitor');
 
@@ -42,7 +43,8 @@ export declare interface PeerConnectionMonitor {
 }
 
 export class PeerConnectionMonitor extends EventEmitter {
-	public readonly statsGenerators = new StatsGenerators();
+	public readonly statsAdapters = new StatsAdapters();
+
 	public readonly detectors: Detectors;
 	public readonly mappedCodecMonitors = new Map<string, CodecMonitor>();
 	public readonly mappedInboundRtpMonitors = new Map<number, InboundRtpMonitor>();
@@ -137,7 +139,7 @@ export class PeerConnectionMonitor extends EventEmitter {
 
 	public constructor(
 		public readonly peerConnectionId: string,
-		private readonly _getStats: () => Promise<W3C.RtcStats[]>,
+		public readonly statsCollector: StatsCollector,
 		public readonly parent: ClientMonitor,
 		public attachments?: Record<string, unknown>,
 	) {
@@ -165,15 +167,20 @@ export class PeerConnectionMonitor extends EventEmitter {
 		return [ ...this.mappedInboundTracks.values(), ...this.mappedOutboundTracks.values() ];
 	}
 	
-	public async getStats() {
-		const stats = await this._getStats();
+	public async collect() {
+		let stats = await this.statsCollector.getStats();
+		
+		stats = this.statsAdapters.adapt(stats);
 
 		this.emit('stats', stats);
+
+		this.accept(stats);
 
 		return stats;
 	}
 
-	public async accept(stats: W3C.RtcStats[]) {
+
+	public accept(stats: W3C.RtcStats[]) {
 		let sumOfRttInS =  0;
 		let rttMeasurementsCounter = 0;
 		this.deltaVideoBytesSent = 0;
@@ -195,8 +202,10 @@ export class PeerConnectionMonitor extends EventEmitter {
 		this.inboundFractionalLost = 0;
 		this.totalAvailableIncomingBitrate = 0;
 		this.totalAvailableOutgoingBitrate = 0;
-		
-		for (let i = 0, input = stats; i < 2 && input && input.length > 0; ++i) {
+
+		stats = this.statsAdapters.adapt(stats);
+
+		for (let i = 0, input = stats; i < 2 && 0 < input.length; ++i) {
 
 			for (const statsItem of input) {
 				switch (statsItem.type) {
@@ -301,11 +310,8 @@ export class PeerConnectionMonitor extends EventEmitter {
 				}
 			}
 
-			input = this.statsGenerators.generate();
-
-			console.warn('Generated stats', input);
+			input = this.statsAdapters.postAdapt(input);
 		}
-		
 		
 		this._checkVisited();
 
