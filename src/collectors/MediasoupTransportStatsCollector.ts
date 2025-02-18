@@ -1,9 +1,10 @@
-import { ClientMonitor, InboundRtpStats } from "..";
+import { ClientMonitor, CodecStats, InboundRtpStats, MediaSourceStats, OutboundRtpStats } from "..";
 import { RtcStats } from "../schema/W3cStatsIdentifiers";
 import { StatsCollector } from "./StatsCollector";
 import { createLogger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { convertRTCStatsReport } from "./utils";
+import * as W3C from '../schema/W3cStatsIdentifiers';
 
 const logger = createLogger('MediasoupTransportStatsCollector');
 
@@ -32,7 +33,8 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 	public async getStats(): Promise<RtcStats[]> {
 		try {
 			this.lastStats = convertRTCStatsReport(await this.transport.getStats());
-			
+			this._stats = [];
+
 			// rip out the probator
 			for (const stats of this.lastStats) {
 				if (stats.type === 'inbound-rtp' ) {
@@ -82,7 +84,7 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 				break;
 			}
 			case 'firefox': {
-				this._firefoxTrackStats();
+				await this._firefoxTrackStats();
 				break;
 			}
 			case 'unknown' : {
@@ -91,7 +93,29 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 		}
 	}
 
-	private _firefoxTrackStats() {
+	private async _firefoxTrackStats() {
 		// get the track ids, then run the getStats again.
+		await Promise.allSettled([...this.producers.values()].map(async producer => {
+			const report = await producer.getStats();
+			const outboundRtpStats: OutboundRtpStats[] = [];
+			let mediaSourceStat: MediaSourceStats | undefined;
+			let codecStats: CodecStats | undefined;
+
+			report.forEach(stat => {
+				if (stat.type === W3C.StatsType.outboundRtp) outboundRtpStats.push(stat as OutboundRtpStats);
+				else if (stat.type === W3C.StatsType.mediaSource) mediaSourceStat = stat as MediaSourceStats;
+				else if (stat.type === W3C.StatsType.codec) codecStats = stat as CodecStats;
+			});
+
+			for (const outboundRtp of outboundRtpStats) {
+				const stat = this._stats.find(stat => stat.id === outboundRtp.id) as (OutboundRtpStats & RtcStats);
+
+				if (!stat) continue;
+
+				
+				stat.codecId = codecStats?.id;
+				stat.mediaSourceId = mediaSourceStat?.id;
+			}
+		}));
 	}
 }

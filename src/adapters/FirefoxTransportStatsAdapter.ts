@@ -39,10 +39,14 @@ export class FirefoxTransportStatsAdapter implements StatsAdapter {
 
     adapt(stats: RtcStats[]): RtcStats[] {
         let selectedCandidatePair: SelectedIceCandidatePairStats | undefined;
+        let hasTransportStats = false;
 
         for (const stat of stats) {
+            if (stat.type === W3C.StatsType.transport) {
+                hasTransportStats = true;
+                break;
+            }
             if (stat.type !== W3C.StatsType.candidatePair) continue;
-
             const pair = stat as SelectedIceCandidatePairStats;
 
             if (!pair.selected) continue;
@@ -51,7 +55,9 @@ export class FirefoxTransportStatsAdapter implements StatsAdapter {
             break;
         }
 
-        if (!selectedCandidatePair) return stats;
+        // console.warn('selectedCandidatePair', selectedCandidatePair, 'hasTransportStats', hasTransportStats);
+
+        if (hasTransportStats || !selectedCandidatePair) return stats;
 
         if (this._selectedCandidatePair?.id !== selectedCandidatePair.id) {
             this.stats.selectedCandidatePairChanges = (this.stats.selectedCandidatePairChanges ?? 0) + 1;
@@ -63,8 +69,8 @@ export class FirefoxTransportStatsAdapter implements StatsAdapter {
             const deltaBytesReceived = (selectedCandidatePair.bytesReceived ?? 0) - (this._selectedCandidatePair.bytesReceived ?? 0);
             const deltaBytesSent = (selectedCandidatePair.bytesSent ?? 0) - (this._selectedCandidatePair.bytesSent ?? 0);
 
-            if (0 < deltaPacketsReceived) this.stats.bytesReceived = (this.stats.bytesReceived ?? 0) + deltaBytesReceived;
-            if (0 < deltaPacketsSent) this.stats.bytesSent = (this.stats.bytesSent ?? 0) + deltaBytesSent;
+            if (0 < deltaBytesReceived) this.stats.bytesReceived = (this.stats.bytesReceived ?? 0) + deltaBytesReceived;
+            if (0 < deltaBytesSent) this.stats.bytesSent = (this.stats.bytesSent ?? 0) + deltaBytesSent;
             if (0 < deltaPacketsReceived) this.stats.packetsReceived = (this.stats.packetsReceived ?? 0) + deltaPacketsReceived;
             if (0 < deltaPacketsSent) this.stats.packetsSent = (this.stats.packetsSent ?? 0) + deltaPacketsSent;
         }

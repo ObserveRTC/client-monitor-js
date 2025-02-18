@@ -24,7 +24,7 @@ export class DryOutboundTrackDetector implements Detector {
 
 	public update() {
 		if (this._evented || this.config.disabled) return;
-		if (this.trackMonitor.getOutboundRtps()?.[0].bytesSent !== 0) return;
+		if (this.trackMonitor.getOutboundRtps()?.[0]?.bytesSent !== 0) return;
 		if (this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
 			this._activatedAt = undefined;
 			return;

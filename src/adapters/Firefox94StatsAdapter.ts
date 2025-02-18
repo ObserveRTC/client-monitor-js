@@ -1,4 +1,5 @@
 import { RtcStats } from "../schema/W3cStatsIdentifiers";
+import * as W3C from "../schema/W3cStatsIdentifiers";
 
 export class Firefox94StatsAdapter {
 	public readonly name = 'firefox94StatsAdapter';
@@ -11,10 +12,10 @@ export class Firefox94StatsAdapter {
 			const rawValue = rtcStatValue as any;
 			if (!rawType || typeof rawType !== "string") continue;
 			if (
-					rawType === "inbound-rtp" ||
-					rawType === "outbound-rtp" ||
-					rawType === "remote-inbound-rtp" ||
-					rawType === "remote-outbound-rtp"
+					rawType === W3C.StatsType.inboundRtp ||
+					rawType === W3C.StatsType.outboundRtp ||
+					rawType === W3C.StatsType.remoteInboundRtp ||
+					rawType === W3C.StatsType.remoteOutboundRtp
 			) {
 					if (rawValue.mediaType && !rawValue.kind) {
 							rawValue.kind = rawValue.mediaType;
