@@ -415,7 +415,7 @@ export class DefaultScoreCalculator {
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
-		console.warn('normalizedBitrate', normalizedBitrate, 'bitrate', bitrate, 'packetLoss', packetLoss);
+		// console.warn('normalizedBitrate', normalizedBitrate, 'bitrate', bitrate, 'packetLoss', packetLoss);
 
 		const lossPenalty = Math.exp(-(packetLoss) / 2); // Exponential decay for packet loss impact
 		const score = Math.max(
