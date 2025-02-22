@@ -59,7 +59,7 @@ export class DefaultScoreCalculator {
 	public static readonly TARGET_AUDIO_BITRATE = 32000; // 64 kbps is a good quality for Opus
 	// public static readonly MAX_AUDIO_BITRATE = 510000; // 510 kbps is a good quality for Opus
 	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
-	private static  readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
+	private static readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
 
 	public currentReasons: DefaultScoreCalculatorSubtractions = {};
 	public totalReasons: DefaultScoreCalculatorSubtractions = {};
@@ -283,41 +283,6 @@ export class DefaultScoreCalculator {
 		trackMonitor.calculatedScore.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
 	}
 
-	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor) {
-		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
-			if (trackMonitor.calculatedScore.appData) {
-				trackMonitor.calculatedScore.appData = undefined;
-			}
-
-			return trackMonitor.calculatedScore.value = undefined;
-		}
-
-		const pcMonitor = trackMonitor.getPeerConnection();
-		const bitrate = trackMonitor.bitrate;
-		const packetLoss = trackMonitor.getInboundRtp().deltaPacketsLost ?? 0;
-		const bufferDelayInMs = trackMonitor.getInboundRtp().deltaJitterBufferDelay ?? 10;
-		const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
-		const dtxMode = trackMonitor.dtxMode;
-		const fec = (trackMonitor.getInboundRtp().fecBytesReceived ?? 0) > 0;
-
-		if (!bitrate) {
-			trackMonitor.calculatedScore.value = undefined;
-			
-			return;
-		}
-
-		trackMonitor.calculatedScore.value = this._getRoundedScore(
-			calculateAudioMOS(
-				bitrate,
-				packetLoss,
-				bufferDelayInMs,
-				roundTripTimeInMs,
-				dtxMode,
-				fec,
-			)
-		);
-	}
-
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor) {
 		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
@@ -418,6 +383,49 @@ export class DefaultScoreCalculator {
 		appData.lastNScores.push(scoreValue);
 
 		score.value = this._calculateFinalScore(appData.lastNScores);
+	}
+
+	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor) {
+		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
+			if (trackMonitor.calculatedScore.appData) {
+				trackMonitor.calculatedScore.appData = undefined;
+			}
+
+			return trackMonitor.calculatedScore.value = undefined;
+		}
+
+		// const pcMonitor = trackMonitor.getPeerConnection();
+		const bitrate = trackMonitor.bitrate;
+		const packetLoss = trackMonitor.getInboundRtp().deltaPacketsLost ?? 0;
+		// const bufferDelayInMs = trackMonitor.getInboundRtp().deltaJitterBufferDelay ?? 10;
+		// const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
+		// const dtxMode = trackMonitor.dtxMode;
+		// const fec = (trackMonitor.getInboundRtp().fecBytesReceived ?? 0) > 0;
+
+		if (!bitrate) {
+			trackMonitor.calculatedScore.value = undefined;
+			
+			return;
+		}
+
+		const normalizedBitrate = Math.log10(
+			Math.max(
+				bitrate, 
+				DefaultScoreCalculator.MIN_AUDIO_BITRATE
+			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
+		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
+
+		console.warn('normalizedBitrate', normalizedBitrate, 'bitrate', bitrate, 'packetLoss', packetLoss);
+
+		const lossPenalty = Math.exp(-(packetLoss) / 2); // Exponential decay for packet loss impact
+		const score = Math.max(
+			DefaultScoreCalculator.MIN_SCORE,
+			Math.min(
+				DefaultScoreCalculator.MAX_SCORE,
+				5 * normalizedBitrate * lossPenalty
+			)
+		);
+		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
 	}
 
 	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor) {

@@ -23,9 +23,9 @@ export class Firefox94StatsAdapter {
 					}
 			}
 			// firefox put the track identifier inside brackets ({})
-			if (rawValue.trackIdentifier) {
-					rawValue.trackIdentifier = rawValue.trackIdentifier.replace("{", "").replace("}", "");
-			}
+			// if (rawValue.trackIdentifier) {
+			// 		rawValue.trackIdentifier = rawValue.trackIdentifier.replace("{", "").replace("}", "");
+			// }
 		}
 
 		return rtcStats;
