@@ -3,7 +3,6 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { TrackMonitor } from "../monitors/TrackMonitor";
-import { calculateAudioMOS } from "./mosScores";
 
 export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 	lastNScores: number[];
