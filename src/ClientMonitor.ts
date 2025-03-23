@@ -415,11 +415,13 @@ export class ClientMonitor extends EventEmitter {
         }
         const constructorName = (source as any)?.constructor?.name;
 
-        if (source instanceof RTCPeerConnection || constructorName === 'RTCPeerConnection') {
+        // console.warn('Adding source', source, constructorName, source instanceof RTCPeerConnection, RTCPeerConnection.name, source instanceof mediasoup.types.Device, mediasoup.types.Device.name, source instanceof mediasoup.types.Transport, mediasoup.types.Transport.name);
+
+        if (source instanceof RTCPeerConnection || constructorName === RTCPeerConnection.name) {
             this._sources.addRTCPeerConnection({ peerConnection: source as RTCPeerConnection });
-        } else if (source instanceof mediasoup.types.Device || constructorName === 'Device') {
+        } else if (source instanceof mediasoup.types.Device || constructorName === mediasoup.types.Device.name) {
             this._sources.addMediasoupDevice(source as mediasoup.types.Device);
-        } else if (source instanceof mediasoup.types.Transport || constructorName === 'Transport') {
+        } else if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
             this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
         } else {
             throw new Error('Unknown source type');
@@ -528,6 +530,8 @@ export class ClientMonitor extends EventEmitter {
             this._samplingTick = Math.max(1, 
                 Math.floor(this.config.samplingPeriodInMs / this.config.collectingPeriodInMs)
             );
+
+            // console.warn('Sampling tick', this._samplingTick);
         }
     }
 }

@@ -29,6 +29,22 @@ export class Sources {
 	) {
 	}
 
+	public isMediasoupDevice(device: unknown): boolean {
+		if (device instanceof mediasoup.types.Device) return true;
+
+		if (device?.constructor?.name?.toLocaleLowerCase().startsWith('device')) return true;
+
+		return false;
+	}
+
+	public isMediasoupTransport(transport: unknown): boolean {
+		if (transport instanceof mediasoup.types.Transport) return true;
+
+		if (transport?.constructor?.name?.toLocaleLowerCase().startsWith('transport')) return true;
+
+		return false;
+	}
+
 	public addRTCPeerConnection(params: {
 		peerConnectionId?: string,
 		peerConnection: RTCPeerConnection,

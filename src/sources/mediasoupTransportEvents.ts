@@ -224,7 +224,10 @@ function listenConsumer(pcMonitor: PeerConnectionMonitor, consumer: mediasoup.ty
 		}
 	});
 
-	listenMediaStreamTrackEvents(pcMonitor, consumer.track);
+	listenMediaStreamTrackEvents(pcMonitor, consumer.track, {
+		consumerId: consumer.id,
+		producerId: consumer.producerId,
+	});
 }
 
 function listenDataConsumer(pcMonitor: PeerConnectionMonitor, dataConsumer: mediasoup.types.DataConsumer, attachments?: Record<string, unknown>) {
