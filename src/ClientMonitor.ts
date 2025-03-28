@@ -15,7 +15,7 @@ import {
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from './schema/ClientEventTypes';
-import { ClientMonitorConfig } from './ClientMonitorConfig';
+import { AppliedClientMonitorConfig, ClientMonitorConfig } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
 import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
@@ -75,7 +75,7 @@ export class ClientMonitor extends EventEmitter {
     private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
-    public readonly config: ClientMonitorConfig;
+    public readonly config: AppliedClientMonitorConfig;
 
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
@@ -130,6 +130,7 @@ export class ClientMonitor extends EventEmitter {
             longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
                 thresholdInMs: 5000,
             },
+            bufferingEventsForSamples: config?.bufferingEventsForSamples ?? false,
         }
 
         this._sources = new Sources(this);
@@ -336,7 +337,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addEvent<Payload = Record<string, unknown>>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
         if (this.closed) return;
-        if (!this._samplingTick) return;
+        if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         const timestamp = event.timestamp ?? Date.now();
         const payload = event.payload ? JSON.stringify(event.payload) : undefined;
@@ -355,7 +356,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
         if (this.closed) return;
-        if (!this._samplingTick) return;
+        if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
         
         const payload = issue.payload ? JSON.stringify(issue.payload) : undefined;
         const timestamp = issue.timestamp ?? Date.now();
@@ -374,7 +375,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {
         if (this.closed) return;
-        if (!this._samplingTick) return;
+        if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         const timestamp = metaData.timestamp ?? Date.now();
 
@@ -393,7 +394,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addExtensionStats(stats: { type: string, payload?: Record<string, unknown>}): void {
         if (this.closed) return;
-        if (!this._samplingTick) return;
+        if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         const payload = stats.payload ? JSON.stringify(stats.payload) : undefined;
         this._extensionStats.push({

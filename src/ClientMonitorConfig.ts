@@ -1,5 +1,5 @@
 
-export type ClientMonitorConfig = {
+export type AppliedClientMonitorConfig = {
     /**
      * A unique identifier for the client. This is typically provided by the application
      * to distinguish the current client instance and added to every sample created by the monitor
@@ -15,6 +15,14 @@ export type ClientMonitorConfig = {
      * OPTIONAL
      */
     callId?: string;
+
+    /**
+     * Flag to decide if the monitor should buffer events for samples even if the samplingPeriodInMs is not set.
+     * 
+     * OPTIONAL 
+     * Default: false
+     */
+    bufferingEventsForSamples?: boolean,
 
     /**
      * Specifies the interval (in milliseconds) at which the observer calls
@@ -248,3 +256,5 @@ export type ClientMonitorConfig = {
      */
     appData?: Record<string, unknown>;
 };
+
+export type ClientMonitorConfig = Partial<AppliedClientMonitorConfig>;
