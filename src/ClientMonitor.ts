@@ -45,7 +45,6 @@ export class ClientMonitor extends EventEmitter {
     
 
     public scoreCalculator: ScoreCalculator;
-    public bufferingSampleData: boolean;
     public closed = false;
     public lastSampledAt = 0;
     public lastCollectingStatsAt = 0;
@@ -140,7 +139,6 @@ export class ClientMonitor extends EventEmitter {
         if (config.samplingPeriodInMs) {
             this.setSamplingPeriod(config.samplingPeriodInMs);
         }
-        this.bufferingSampleData = 0 < this._samplingTick;
 
         if (this.config.addClientJointEventOnCreated === true) {
             this.addClientJoinEvent();
@@ -338,7 +336,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addEvent<Payload = Record<string, unknown>>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
         if (this.closed) return;
-        if (!this.bufferingSampleData) return;
+        if (!this._samplingTick) return;
 
         const timestamp = event.timestamp ?? Date.now();
         const payload = event.payload ? JSON.stringify(event.payload) : undefined;
@@ -357,7 +355,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
         if (this.closed) return;
-        if (!this.bufferingSampleData) return;
+        if (!this._samplingTick) return;
         
         const payload = issue.payload ? JSON.stringify(issue.payload) : undefined;
         const timestamp = issue.timestamp ?? Date.now();
@@ -376,7 +374,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {
         if (this.closed) return;
-        if (!this.bufferingSampleData) return;
+        if (!this._samplingTick) return;
 
         const timestamp = metaData.timestamp ?? Date.now();
 
@@ -395,7 +393,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addExtensionStats(stats: { type: string, payload?: Record<string, unknown>}): void {
         if (this.closed) return;
-        if (!this.bufferingSampleData) return;
+        if (!this._samplingTick) return;
 
         const payload = stats.payload ? JSON.stringify(stats.payload) : undefined;
         this._extensionStats.push({
@@ -513,25 +511,31 @@ export class ClientMonitor extends EventEmitter {
         this._timer = undefined;
         this.config.collectingPeriodInMs = collectingPeriodInMs;
         
-        if (!this.config.collectingPeriodInMs) return;
+        try {
+            if (!this.config.collectingPeriodInMs) return;
 
-        this._timer = setInterval(() => {
-            this.collect().catch(err => logger.error(err));
-        }, this.config.collectingPeriodInMs);
+            this._timer = setInterval(() => {
+                this.collect().catch(err => logger.error(err));
+            }, this.config.collectingPeriodInMs);
+        } finally {
+            this._setSamplingTick();
+        }
     }
 
     public setSamplingPeriod(samplingPeriodInMs: number): void {
         this.config.samplingPeriodInMs = samplingPeriodInMs;
 
-        if (0 < this.config.collectingPeriodInMs && this.config.samplingPeriodInMs !== undefined && 0 < this.config.samplingPeriodInMs) {
-            if (this.config.samplingPeriodInMs % this.config.collectingPeriodInMs !== 0) {
-                logger.warn(`The samplingPeriodInMs (${this.config.samplingPeriodInMs}) should be a multiple of collectingPeriodInMs (${this.config.collectingPeriodInMs}), otherwise the sampling will not be accurate`);
-            }
-            this._samplingTick = Math.max(1, 
-                Math.floor(this.config.samplingPeriodInMs / this.config.collectingPeriodInMs)
-            );
+        this._setSamplingTick();
+    }
 
-            // console.warn('Sampling tick', this._samplingTick);
+    private _setSamplingTick() {
+        if (this.config.collectingPeriodInMs === undefined || this.config.samplingPeriodInMs === undefined) return this._samplingTick = 0;
+        if (this.config.collectingPeriodInMs < 1 || this.config.samplingPeriodInMs < 1) return this._samplingTick = 0;
+        if (this.config.samplingPeriodInMs % this.config.collectingPeriodInMs !== 0) {
+            logger.warn(`The samplingPeriodInMs (${this.config.samplingPeriodInMs}) should be a multiple of collectingPeriodInMs (${this.config.collectingPeriodInMs}), otherwise the sampling will not be accurate`);
         }
+        this._samplingTick = Math.max(1,
+            Math.floor(this.config.samplingPeriodInMs / this.config.collectingPeriodInMs)
+        );
     }
 }
