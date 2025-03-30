@@ -9,7 +9,7 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	transportId?: string | undefined;
 	localCandidateId?: string | undefined;
 	remoteCandidateId?: string | undefined;
-	state?: "new" | "inProgress" | "failed" | "succeeded" | undefined;
+	state?: "new" | "in-progress" | "failed" | "waiting" | "succeeded" | undefined;
 	nominated?: boolean | undefined;
 	packetsSent?: number | undefined;
 	packetsReceived?: number | undefined;

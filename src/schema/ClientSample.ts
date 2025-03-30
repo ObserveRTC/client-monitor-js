@@ -165,7 +165,7 @@ export type IceCandidatePairStats = {
 	*/
 	remoteCandidateId?: string;
 
-	state?: "new" | "inProgress" | "failed" | "succeeded";
+	state?: "new" | "in-progress" | "waiting" | "failed" | "succeeded";
 	/**
 	* Whether this candidate pair has been nominated.
 	*/

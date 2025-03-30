@@ -49,7 +49,6 @@ export class ClientMonitor extends EventEmitter {
     public lastSampledAt = 0;
     public lastCollectingStatsAt = 0;
     
-    
     public cpuPerformanceAlertOn = false;
     
     public sendingAudioBitrate = -1;
@@ -159,9 +158,15 @@ export class ClientMonitor extends EventEmitter {
     }
 
     public get clientId() { return this.config.clientId; }
-    public set clientId(clientId: string | undefined) { this.config.clientId = clientId; }
+    public set clientId(clientId: string | undefined) { 
+        this.config.clientId = clientId; 
+    }
+    
     public get callId() { return this.config.callId; }
-    public set callId(callId: string | undefined) { this.config.callId = callId; }
+    public set callId(callId: string | undefined) { 
+        this.config.callId = callId; 
+    }
+    
     public get appData() { return this.config.appData; }
     public set appData(appData: Record<string, unknown> | undefined) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
