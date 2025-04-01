@@ -82,7 +82,7 @@ export class ClientMonitor extends EventEmitter {
     public attachments?: Record<string, unknown>;
 
     public constructor(
-        config: Partial<ClientMonitorConfig>
+        config?: Partial<ClientMonitorConfig>
     ) {
         super();
         this.config = {
@@ -136,8 +136,8 @@ export class ClientMonitor extends EventEmitter {
         this.scoreCalculator = new DefaultScoreCalculator(this);
         this.setMaxListeners(Infinity);
         this.setCollectingPeriod(this.config.collectingPeriodInMs);
-        if (config.samplingPeriodInMs) {
-            this.setSamplingPeriod(config.samplingPeriodInMs);
+        if (this.config.samplingPeriodInMs) {
+            this.setSamplingPeriod(this.config.samplingPeriodInMs);
         }
 
         if (this.config.addClientJointEventOnCreated === true) {
@@ -166,7 +166,7 @@ export class ClientMonitor extends EventEmitter {
     public set callId(callId: string | undefined) { 
         this.config.callId = callId; 
     }
-    
+
     public get appData() { return this.config.appData; }
     public set appData(appData: Record<string, unknown> | undefined) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
