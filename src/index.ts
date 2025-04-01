@@ -21,7 +21,7 @@ export {
     ClientMonitor,
 } from "./ClientMonitor";
 export type {
-    AppliedClientMonitorConfig as ClientMonitorConfig
+    ClientMonitorConfig
 } from "./ClientMonitorConfig";
 export type {
     ClientEvent,
