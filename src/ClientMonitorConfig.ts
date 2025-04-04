@@ -258,3 +258,4 @@ export type AppliedClientMonitorConfig = {
 };
 
 export type ClientMonitorConfig = Partial<AppliedClientMonitorConfig>;
+export type ClientMonitorSourceType = 'mediasoup-device' | 'RTCPeerConnection' | 'mediasoup-transport';

@@ -19,6 +19,7 @@ export { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 export type { TrackMonitor }  from "./monitors/TrackMonitor";
 export {
     ClientMonitor,
+    
 } from "./ClientMonitor";
 export type {
     ClientMonitorConfig

@@ -15,7 +15,7 @@ import {
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from './schema/ClientEventTypes';
-import { AppliedClientMonitorConfig, ClientMonitorConfig } from './ClientMonitorConfig';
+import { AppliedClientMonitorConfig, ClientMonitorConfig, ClientMonitorSourceType } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
 import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
@@ -26,6 +26,7 @@ import { TrackMonitor } from './monitors/TrackMonitor';
 import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
 import { ScoreCalculator } from "./scores/ScoreCalculator";
 import * as mediasoup from 'mediasoup-client';
+import { inferSourceType } from './sources/inferSourceType';
 
 const logger = createLogger('ClientMonitor');
 
@@ -413,22 +414,29 @@ export class ClientMonitor extends EventEmitter {
         });
     }
 
-    public addSource(source: unknown): void {
+    public addSource(source: unknown, type?: ClientMonitorSourceType): void {
         if (this.closed) {
             return logger.warn('Cannot add source to closed ClientMonitor');
         }
-        const constructorName = (source as any)?.constructor?.name;
 
-        // console.warn('Adding source', source, constructorName, source instanceof RTCPeerConnection, RTCPeerConnection.name, source instanceof mediasoup.types.Device, mediasoup.types.Device.name, source instanceof mediasoup.types.Transport, mediasoup.types.Transport.name);
+        if (!type) {
+            type = inferSourceType(source);
 
-        if (source instanceof RTCPeerConnection || constructorName === RTCPeerConnection.name) {
-            this._sources.addRTCPeerConnection({ peerConnection: source as RTCPeerConnection });
-        } else if (source instanceof mediasoup.types.Device || constructorName === mediasoup.types.Device.name) {
-            this._sources.addMediasoupDevice(source as mediasoup.types.Device);
-        } else if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
-            this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
-        } else {
-            logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
+            if (!type) return logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
+        }
+
+        switch (type) {
+            case 'RTCPeerConnection':
+                this._sources.addRTCPeerConnection({ peerConnection: source as RTCPeerConnection });
+                break;
+            case 'mediasoup-device':
+                this._sources.addMediasoupDevice(source as mediasoup.types.Device);
+                break; 
+            case 'mediasoup-transport':
+                this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
+                break;
+            default:
+                return logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
         }
     }
 
