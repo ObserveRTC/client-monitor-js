@@ -171,7 +171,7 @@ export class ClientMonitor extends EventEmitter {
     public set appData(appData: Record<string, unknown> | undefined) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
         if (this.closed || !browser) return;
-        if (this._browser) throw new Error('Browser info is already set, cannot change it');
+        if (this._browser) logger.warn('Browser info is already set, cannot change it');
         
         this._browser = browser;
 
@@ -204,7 +204,7 @@ export class ClientMonitor extends EventEmitter {
     }
 
     public async collect(): Promise<[string, RTCStats[]][]> {
-        if (this.closed) throw new Error('ClientMonitor is closed');
+        if (this.closed) logger.warn('ClientMonitor is closed, cannot collet stats');
         
         this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
@@ -301,7 +301,7 @@ export class ClientMonitor extends EventEmitter {
     public addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor): void {
         if (this.closed) return;
         if (this.mappedPeerConnections.has(peerConnectionMonitor.peerConnectionId)) {
-            throw new Error(`PeerConnectionMonitor with id ${peerConnectionMonitor.peerConnectionId} already exists`);
+            return logger.warn(`PeerConnectionMonitor with id ${peerConnectionMonitor.peerConnectionId} already exists`);
         }
 
         peerConnectionMonitor.once('close', () => {
@@ -415,7 +415,7 @@ export class ClientMonitor extends EventEmitter {
 
     public addSource(source: unknown): void {
         if (this.closed) {
-            throw new Error('Cannot add source to closed ClientMonitor');
+            return logger.warn('Cannot add source to closed ClientMonitor');
         }
         const constructorName = (source as any)?.constructor?.name;
 
@@ -428,7 +428,7 @@ export class ClientMonitor extends EventEmitter {
         } else if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
             this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
         } else {
-            throw new Error('Unknown source type');
+            logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
         }
     }
 
