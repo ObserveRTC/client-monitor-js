@@ -1,7 +1,6 @@
-import { EventEmitter } from "events";
+import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
-import { CertificateStats, CodecStats, DataChannelStats, IceCandidatePairStats, IceCandidateStats, IceTransportStats, InboundRtpStats, MediaPlayoutStats, MediaSourceStats, OutboundRtpStats, PeerConnectionSample, PeerConnectionTransportStats, RemoteInboundRtpStats, RemoteOutboundRtpStats } from "../schema/ClientSample";
 import * as W3C from "../schema/W3cStatsIdentifiers";
 import { createLogger } from "../utils/logger";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
@@ -25,6 +24,22 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
+import { 
+	CertificateStats, 
+	CodecStats, 
+	DataChannelStats, 
+	IceCandidatePairStats, 
+	IceCandidateStats, 
+	IceTransportStats, 
+	InboundRtpStats, 
+	MediaPlayoutStats, 
+	MediaSourceStats, 
+	OutboundRtpStats, 
+	PeerConnectionSample, 
+	PeerConnectionTransportStats, 
+	RemoteInboundRtpStats, 
+	RemoteOutboundRtpStats 
+} from "../schema/ClientSample";
 
 const logger = createLogger('PeerConnectionMonitor');
 
@@ -35,14 +50,7 @@ export type PeerConnectionMonitorEvents = {
 	'stats': [W3C.RtcStats[]],
 }
 
-export declare interface PeerConnectionMonitor {
-	on<U extends keyof PeerConnectionMonitorEvents>(event: U, listener: (...args: PeerConnectionMonitorEvents[U]) => void): this;
-	once<U extends keyof PeerConnectionMonitorEvents>(event: U, listener: (...args: PeerConnectionMonitorEvents[U]) => void): this;
-	off<U extends keyof PeerConnectionMonitorEvents>(event: U, listener: (...args: PeerConnectionMonitorEvents[U]) => void): this;
-	emit<U extends keyof PeerConnectionMonitorEvents>(event: U, ...args: PeerConnectionMonitorEvents[U]): boolean;
-}
-
-export class PeerConnectionMonitor extends EventEmitter {
+export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEvents> {
 	public readonly statsAdapters = new StatsAdapters();
 
 	public readonly detectors: Detectors;

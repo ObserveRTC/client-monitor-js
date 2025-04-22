@@ -6,7 +6,7 @@ import { ExtensionStat,
     schemaVersion, 
 } from './schema/ClientSample';
 import { createLogger } from "./utils/logger";
-import { EventEmitter } from 'events';
+import EventEmitter from 'eventemitter3';
 import { 
     ClientEvent, 
     ClientIssue, 
@@ -30,14 +30,7 @@ import { inferSourceType } from './sources/inferSourceType';
 
 const logger = createLogger('ClientMonitor');
 
-export declare interface ClientMonitor {
-    on<U extends keyof ClientMonitorEvents>(event: U, listener: (...args: ClientMonitorEvents[U]) => void): this;
-    once<U extends keyof ClientMonitorEvents>(event: U, listener: (...args: ClientMonitorEvents[U]) => void): this;
-    off<U extends keyof ClientMonitorEvents>(event: U, listener: (...args: ClientMonitorEvents[U]) => void): this;
-    emit<U extends keyof ClientMonitorEvents>(event: U, ...args: ClientMonitorEvents[U]): boolean;
-}
-
-export class ClientMonitor extends EventEmitter {
+export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
     // public readonly statsAdapters = new StatsAdapters();
@@ -135,7 +128,6 @@ export class ClientMonitor extends EventEmitter {
 
         this._sources = new Sources(this);
         this.scoreCalculator = new DefaultScoreCalculator(this);
-        this.setMaxListeners(Infinity);
         this.setCollectingPeriod(this.config.collectingPeriodInMs);
         if (this.config.samplingPeriodInMs) {
             this.setSamplingPeriod(this.config.samplingPeriodInMs);
