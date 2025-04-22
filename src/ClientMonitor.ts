@@ -30,6 +30,13 @@ import { inferSourceType } from './sources/inferSourceType';
 
 const logger = createLogger('ClientMonitor');
 
+// export declare interface ClientMonitor {
+//     on<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
+//     once<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
+//     off<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
+//     emit<K extends keyof ClientMonitorEvents>(event: K, ...args: Parameters<ClientMonitorEvents[K]>): boolean;
+// }
+
 export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
@@ -194,6 +201,28 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
         
         this.closed = true;
         this.emit('close');
+    }
+
+    public on<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
+        super.on(event, listener);
+
+        return this;
+    }
+
+    public once<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
+        super.once(event, listener);
+
+        return this;
+    }
+
+    public off<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
+        super.off(event, listener);
+
+        return this;
+    }
+
+    public emit(event: keyof ClientMonitorEvents, ...args: ClientMonitorEvents[typeof event]): boolean {
+        return super.emit(event, ...args);
     }
 
     public async collect(): Promise<[string, RTCStats[]][]> {

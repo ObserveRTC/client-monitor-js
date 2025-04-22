@@ -174,6 +174,28 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public get tracks() {
 		return [ ...this.mappedInboundTracks.values(), ...this.mappedOutboundTracks.values() ];
 	}
+
+	public on<K extends keyof PeerConnectionMonitorEvents>(event: K, listener: (...args: PeerConnectionMonitorEvents[K]) => void): this {
+		super.on(event, listener);
+
+		return this;
+	}
+
+	public once<K extends keyof PeerConnectionMonitorEvents>(event: K, listener: (...args: PeerConnectionMonitorEvents[K]) => void): this {
+		super.once(event, listener);
+
+		return this;
+	}
+
+	public off<K extends keyof PeerConnectionMonitorEvents>(event: K, listener: (...args: PeerConnectionMonitorEvents[K]) => void): this {
+		super.off(event, listener);
+
+		return this;
+	}
+
+	public emit(event: keyof PeerConnectionMonitorEvents, ...args: PeerConnectionMonitorEvents[typeof event]): boolean {
+		return super.emit(event, ...args);
+	}
 	
 	public async collect() {
 		let stats = await this.statsCollector.getStats();
