@@ -989,6 +989,11 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			if (outboundRtp.trackIdentifier !== track.id) continue;
 			trackMonitor.mappedOutboundRtps.set(outboundRtp.ssrc, outboundRtp);
 		}
+
+		this.parent.emit('new-outbound-track-monitor', {
+			clientMonitor: this.parent,
+			outboundTrackMonitor: trackMonitor,
+		});
 	}
 
 	private _createInboundTrackMonitor(track: MediaStreamTrack, inboundRtpMonitor: InboundRtpMonitor, attachments?: Record<string, unknown>) {
@@ -1003,5 +1008,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this._pendingMediaStreamTracks.delete(track.id);
 		this.mappedInboundTracks.set(track.id, trackMonitor);
 		
+		this.parent.emit('new-inbound-track-monitor', {
+			clientMonitor: this.parent,
+			inboundTrackMonitor: trackMonitor,
+		});
 	}
 }

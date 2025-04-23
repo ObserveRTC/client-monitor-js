@@ -119,7 +119,7 @@ export type NewInboundTrackMonitorEventPayload = ClientMonitorBaseEvent & {
 }
 
 export type NewOutboundTrackMonitorEventPayload = ClientMonitorBaseEvent & {
-	outboundTrackMonitor: InboundTrackMonitor,
+	outboundTrackMonitor: OutboundTrackMonitor,
 }
 
 export type NewOutboundRtpMonitorEventPayload = ClientMonitorBaseEvent & {
