@@ -108,6 +108,11 @@ export type NewCodecMonitorEventPayload = ClientMonitorBaseEvent & {
 
 export type NewPeerConnectionMonitorEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
+	// context: {
+	// 	rtcPeerConnection?: RTCPeerConnection,
+	// 	mediasoupTransport?: mediasoup.types.Transport,
+	// 	mediasoupDevice?: mediasoup.types.Device,
+	// }
 }
 
 export type NewInboundRtpMonitorEventPayload = ClientMonitorBaseEvent & {

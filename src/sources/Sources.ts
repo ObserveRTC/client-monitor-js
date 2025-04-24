@@ -1,15 +1,16 @@
 import { ClientMonitor } from "..";
 import { fetchUserAgentData } from "./fetchUserAgentData";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
-import { listenRtcPeerConnectionEvents } from "./rtcEventers";
 import { watchMediaDevices } from "./watchMediaDevice";
 import { createLogger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
-import { listenMediasoupTransport } from "./mediasoupTransportEvents";
 import { RtcPeerConnectionStatsCollector } from "../collectors/RtcPeerConnectionStatsCollector";
 import { MediasoupTransportStatsCollector } from "../collectors/MediasoupTransportStatsCollector";
 import { Firefox94StatsAdapter } from "../adapters/Firefox94StatsAdapter";
 import { FirefoxTransportStatsAdapter } from "../adapters/FirefoxTransportStatsAdapter";
+import { RtcPeerConnectionBinding } from "./RtcPeerConnectionBinding";
+import { MediasoupTransportBinding } from "./MediasoupTransportBinding";
+import { MediasoupDeviceBinding } from "./MediasoupDeviceBinding";
 
 const logger = createLogger('Sources');
 
@@ -19,80 +20,95 @@ export class Sources {
 	public userAgentStatsAdapterAdded = false;
 	public mediasoupStatsAdapterAdded = false;
 
-	private _mediasoupDeviceListeners: {
-		device: mediasoup.types.Device,
-		listener: (transport: mediasoup.types.Transport) => void,
-	}[] = [];
+	private readonly _peerConnectionBindings = new Map<string, RtcPeerConnectionBinding>();
+	private readonly _mediasoupTransportBindings = new Map<string, MediasoupTransportBinding>();
+
+	private _mediasoupDeviceBindings: MediasoupDeviceBinding[] = [];
 
 	public constructor(
 		public readonly monitor: ClientMonitor
 	) {
 	}
 
-	public isMediasoupDevice(device: unknown): boolean {
-		if (device instanceof mediasoup.types.Device) return true;
-
-		if (device?.constructor?.name?.toLocaleLowerCase().startsWith('device')) return true;
-
-		return false;
-	}
-
-	public isMediasoupTransport(transport: unknown): boolean {
-		if (transport instanceof mediasoup.types.Transport) return true;
-
-		if (transport?.constructor?.name?.toLocaleLowerCase().startsWith('transport')) return true;
-
-		return false;
-	}
-
 	public addRTCPeerConnection(params: {
 		peerConnectionId?: string,
 		peerConnection: RTCPeerConnection,
-		attachments?: Record<string, unknown>,
 	}): void {
-		if (this.monitor.closed) throw new Error('Cannot add RTCPeerConnection to closed ClientMonitor');
+		const exists = [...this._peerConnectionBindings.values()].find((binding) => binding.peerConnection === params.peerConnection);
+		
+		if (exists) {
+			return logger.warn('RTCPeerConnection already exists in sources, not adding again');
+		}
+
 		const {
 			peerConnectionId = crypto.randomUUID(),
 			peerConnection,
-			attachments,
 		} = params;
 
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 				peerConnectionId,
 				new RtcPeerConnectionStatsCollector(peerConnection, this.monitor),
 				this.monitor,
-				attachments,
 		);
+		const bindnings = new RtcPeerConnectionBinding(peerConnection, peerConnectionMonitor);
 
-		listenRtcPeerConnectionEvents({
-			monitor: peerConnectionMonitor,
-			peerConnection,
-			peerConnectionId,
+		peerConnectionMonitor.once('close', () => {
+			this._peerConnectionBindings.delete(peerConnectionId);
 		});
+		this._peerConnectionBindings.set(peerConnectionId, bindnings);
 
 		this._addPeerConnectionMonitor(peerConnectionMonitor);
 	}
 
-	public addMediasoupDevice(device: mediasoup.types.Device, attachments?: Record<string, unknown>) {
-		const newTransportListener = (transport: mediasoup.types.Transport) => {
-			this.addMediasoupTransport(transport, attachments);
+	public removeRTCPeerConnection(peerConnection: RTCPeerConnection) {
+		const binding = [...this._peerConnectionBindings.values()].find((binding) => binding.peerConnection === peerConnection);
+
+		if (!binding) {
+			logger.warn('RTCPeerConnection not found in sources, cannot remove');
+			return;
 		}
-		this._mediasoupDeviceListeners.push({ device, listener: newTransportListener });
-		device.observer.on('newtransport', newTransportListener);
+
+		binding.unbind();
 	}
 
-	public removeMediasoupDevice(device: mediasoup.types.Device) {
-		const listener = this._mediasoupDeviceListeners.find((l) => l.device === device);
-		if (!listener) return this;
-		device.observer.off('newtransport', listener.listener);
-		this._mediasoupDeviceListeners = this._mediasoupDeviceListeners.filter((l) => l !== listener);
+	public addMediasoupDevice(device: mediasoup.types.Device) {
+		const exists = this._mediasoupDeviceBindings.find((binding) => binding.device === device);
+
+		if (exists) {
+			logger.warn('Mediasoup device already exists in sources, not adding again');
+			return this;
+		}
+
+		const deviceBinding = new MediasoupDeviceBinding(device, this);
+		this._mediasoupDeviceBindings.push(deviceBinding);
+
+		deviceBinding.bind();
+
 		return this;
 	}
 
-	public addMediasoupTransport(transport: mediasoup.types.Transport, providedAttachemnts?: Record<string, unknown>) {
+	public removeMediasoupDevice(device: mediasoup.types.Device) {
+		const binding = this._mediasoupDeviceBindings.find((binding) => binding.device === device);
+
+		if (!binding) {
+			logger.warn('Mediasoup device not found in sources, cannot remove');
+			return this;
+		}
+
+		binding.unbind();
+		this._mediasoupDeviceBindings = this._mediasoupDeviceBindings.filter((b) => b !== binding);
+
+		return this;
+	}
+
+	public addMediasoupTransport(transport: mediasoup.types.Transport) {
+		if (this._mediasoupTransportBindings.has(transport.id)) {
+			logger.warn(`Mediasoup transport (${transport.id}) already exists in sources, not adding again`);
+			return this;
+		}
+
 		const attachments = {
 			direction: transport.direction,
-			...(providedAttachemnts ?? {}),
 		}
 		const peerConnectionMonitor = new PeerConnectionMonitor(
 			transport.id,
@@ -100,16 +116,31 @@ export class Sources {
 			this.monitor,
 			attachments,
 		);
+		const binding = new MediasoupTransportBinding(transport, peerConnectionMonitor);
 
-		listenMediasoupTransport({
-			monitor: peerConnectionMonitor,
-			transport,
-			attachments,
+		peerConnectionMonitor.once('close', () => {
+			this._mediasoupTransportBindings.delete(transport.id);
 		});
+
+		this._mediasoupTransportBindings.set(transport.id, binding);
+
+		binding.bind();
 
 		this._addPeerConnectionMonitor(peerConnectionMonitor);
 
 		return this;
+	}
+
+	public removeMediasoupTransport(transport: mediasoup.types.Transport) {
+		const binding = this._mediasoupTransportBindings.get(transport.id);
+	
+		if (!binding) {
+			logger.warn(`Mediasoup transport (${transport.id}) not found in sources, cannot remove`);
+			return this;
+		}
+	
+		binding.unbind();
+		this._mediasoupTransportBindings.delete(transport.id);
 	}
 
 	public fetchUserAgentData() {

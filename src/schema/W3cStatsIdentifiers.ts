@@ -47,6 +47,8 @@ export interface RtcStats {
 export type MediaKind = "audio" | "video";
 
 export type RtcPeerConnectionState = "new" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
+                                    //  "new" | "connected" | "disconnected" | "failed" | "closed" | "checking" | "completed"
+                                    
 // export type RtcMediaKind = "audio" | "video";
 // export type RtcQualityLimitationReason = "none" | "cpu" | "bandwidth" | "other";
 // export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";

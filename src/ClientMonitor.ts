@@ -27,6 +27,7 @@ import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
 import { ScoreCalculator } from "./scores/ScoreCalculator";
 import * as mediasoup from 'mediasoup-client';
 import { inferSourceType } from './sources/inferSourceType';
+import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider';
 
 const logger = createLogger('ClientMonitor');
 
@@ -43,7 +44,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     // public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly detectors: Detectors;
-    
+    public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
 
     public scoreCalculator: ScoreCalculator;
     public closed = false;
@@ -458,6 +459,33 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
                 break;
             default:
                 return logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
+        }
+    }
+
+    public removeSource(source: unknown, type?: ClientMonitorSourceType): void {
+        if (this.closed) {
+            return logger.warn('Cannot remove source from closed ClientMonitor');
+        }
+
+        if (!type) {
+            // infer the type of the source
+            type = inferSourceType(source);
+
+            if (!type) return logger.warn('Cannot remove source from ClientMonitor, because it is not a valid source', source);
+        }
+        
+        switch (type) {
+            case 'RTCPeerConnection':
+                this._sources.removeRTCPeerConnection(source as RTCPeerConnection);
+                break;
+            case 'mediasoup-device':
+                this._sources.removeMediasoupDevice(source as mediasoup.types.Device);
+                break; 
+            case 'mediasoup-transport':
+                this._sources.removeMediasoupTransport(source as mediasoup.types.Transport);
+                break;
+            default:
+                return logger.warn('Cannot remove source from ClientMonitor, because it is not a valid source', source);
         }
     }
 

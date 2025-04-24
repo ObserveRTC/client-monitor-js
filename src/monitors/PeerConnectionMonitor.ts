@@ -635,11 +635,14 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 				inboundRtpMonitor,
 			});
 
-			const pendingTrack = this._pendingMediaStreamTracks.get(stats.trackIdentifier ?? '');
+			if (stats.trackIdentifier) {
+				const pendingTrack = this._pendingMediaStreamTracks.get(stats.trackIdentifier);
 
-			if (pendingTrack) {
-				this._createInboundTrackMonitor(pendingTrack.track, inboundRtpMonitor, pendingTrack.attachments);
+				if (pendingTrack) {
+					this._createInboundTrackMonitor(pendingTrack.track, inboundRtpMonitor, pendingTrack.attachments);
+				}
 			}
+			
 		}
 
 		inboundRtpMonitor.accept(stats);
