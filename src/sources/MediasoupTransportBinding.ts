@@ -188,6 +188,10 @@ export class MediasoupTransportBinding {
 			fireEvent: this._fireEvent.bind(this),
 			pcMonitor: this.monitor,
 			track: consumer.track,
+			attachments: {
+				producerId: consumer.producerId,
+				consumerId: consumer.id,
+			}
 		});
 	}
 

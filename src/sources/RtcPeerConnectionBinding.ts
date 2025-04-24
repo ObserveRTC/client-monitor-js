@@ -175,6 +175,7 @@ export function bindMediaStreamTrackEvents(options: {
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
+			...(attachments ?? {}),
 		}
 	)
 
@@ -189,6 +190,7 @@ export function bindMediaStreamTrackEvents(options: {
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
+			...(attachments ?? {}),
 		}
 	)
 
@@ -203,6 +205,7 @@ export function bindMediaStreamTrackEvents(options: {
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
+			...(attachments ?? {}),
 		}
 	)
 
@@ -220,6 +223,7 @@ export function bindMediaStreamTrackEvents(options: {
 			constraints: track.getConstraints(),
 			capabilities: track.getCapabilities(),
 			settings: track.getSettings(),
+			...(attachments ?? {}),
 		}
 	);
 
