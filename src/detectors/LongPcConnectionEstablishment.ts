@@ -36,7 +36,16 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 		clientMonitor.emit('too-long-pc-connection-establishment', {
 			peerConnectionMonitor: this.peerConnection,
 			clientMonitor,
+		});
+
+		if (this.config.createIssue) {
+			clientMonitor.addIssue({
+				type: 'long-pc-connection-establishment',
+				payload: {
+					peerConnectionId: this.peerConnection.peerConnectionId,
+					duration,
+				}
+			})
 		}
-);
 	}
 }

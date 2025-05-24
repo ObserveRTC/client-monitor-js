@@ -58,5 +58,18 @@ export class AudioDesyncDetector implements Detector {
 			clientMonitor: this.peerConnection.parent,
 			trackMonitor: this.trackMonitor,
 		});
+
+		if (this.config.createIssue) {
+			this.peerConnection.parent.addIssue({
+				type: 'audio-desync',
+				payload: {
+					peerConnectionId: this.peerConnection.peerConnectionId,
+					trackId: this.trackMonitor.track.id,
+					dCorrectedSamples,
+					fractionalCorrection
+
+				}
+			})
+		}
 	}
 }

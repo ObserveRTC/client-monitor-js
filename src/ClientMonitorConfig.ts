@@ -1,3 +1,7 @@
+type ReportAsIssueSettings = false | {
+    type?: string;
+    payload?: Record<string, unknown>;
+}
 
 export type AppliedClientMonitorConfig = {
     /**
@@ -72,6 +76,13 @@ export type AppliedClientMonitorConfig = {
          * DEFAULT: false
          */
         disabled?: boolean;
+
+        /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
     };
 
     /**
@@ -84,6 +95,13 @@ export type AppliedClientMonitorConfig = {
          * DEFAULT: false
          */
         disabled?: boolean;
+
+        /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
 
         /**
          * The time threshold (in milliseconds) to determine if an inbound track
@@ -104,6 +122,13 @@ export type AppliedClientMonitorConfig = {
         disabled?: boolean;
 
         /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
+
+        /**
          * The time threshold (in milliseconds) to determine if an inbound track
          * is considered stalled.
          */
@@ -117,6 +142,13 @@ export type AppliedClientMonitorConfig = {
          * DEFAULT: false
          */
         disabled?: boolean;
+
+        /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
 
         /**
          * The low watermark for the skew of frames between the received and rendered
@@ -138,6 +170,13 @@ export type AppliedClientMonitorConfig = {
         disabled?: boolean;
 
         /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
+
+        /**
          * The minimum duration (in milliseconds) for synthesized samples to be considered
          * significant and trigger an alert.
          */
@@ -154,6 +193,13 @@ export type AppliedClientMonitorConfig = {
          * DEFAULT: false
          */
         disabled?: boolean;
+
+        /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
 
         /**
          * The fractional threshold used to determine if audio desynchronization
@@ -190,6 +236,13 @@ export type AppliedClientMonitorConfig = {
         disabled?: boolean;
 
         /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
+
+        /**
          * Specifies the sensitivity level for congestion detection.
          * Accepted values are:
          * - 'low': Less sensitive to congestion changes.
@@ -209,6 +262,13 @@ export type AppliedClientMonitorConfig = {
          * DEFAULT: false
          */
         disabled?: boolean;
+
+        /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
 
         /**
          * Thresholds for detecting frames-per-second (FPS) volatility during monitoring.
@@ -241,6 +301,13 @@ export type AppliedClientMonitorConfig = {
          * DEFAULT: false
          */
         disabled?: boolean;
+
+        /**
+         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * 
+         * DEFAULT: true
+         */
+        createIssue?: boolean
 
         /**
          * The time threshold (in milliseconds) for detecting prolonged

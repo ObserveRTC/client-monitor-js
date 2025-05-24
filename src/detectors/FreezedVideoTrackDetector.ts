@@ -35,7 +35,16 @@ export class FreezedVideoTrackDetector implements Detector {
 			clientMonitor.emit('freezed-video-track', {
 				clientMonitor: this.peerConnection.parent,
 				trackMonitor: this.trackMonitor,
-			})
+			});
+
+			if (this._config.createIssue) {
+				clientMonitor.addIssue({
+					type: 'freezed-video-track',
+					payload: {
+						trackId: inboundRtp.trackIdentifier,
+					}
+				});
+			}
 
 		} else if (wasFreezed && !inboundRtp.isFreezed) {
 			// clientMonitor.addIssue({

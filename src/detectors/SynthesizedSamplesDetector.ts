@@ -31,5 +31,15 @@ export class SynthesizedSamplesDetector implements Detector {
             mediaPlayoutMonitor: this.mediaPlayout,
             clientMonitor: clientMonitor,
         });
+
+        if (this.config.createIssue) {
+            clientMonitor.addIssue({
+                type: 'synthesized-audio',
+                payload: {
+                    // trackId: this.mediaPlayout.
+                    deltaSynthesizedSamplesDuration: this.mediaPlayout.deltaSynthesizedSamplesDuration,
+                }
+            });
+        }
     }
 }

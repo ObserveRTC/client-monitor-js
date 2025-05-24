@@ -88,6 +88,21 @@ export class CongestionDetector implements Detector {
 			maxReceivingBitrate: this._maxSendingBitrate,
 			maxSendingBitrate: this._maxSendingBitrate,
 		});
+		
+		if (this.config.createIssue) {
+			this.peerConnection.parent.addIssue({
+				type: 'congestion',
+				payload: {
+					peerConnectionId: this.peerConnection.peerConnectionId,
+					availableIncomingBitrate,
+					availableOutgoingBitrate,
+					maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
+					maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
+					maxReceivingBitrate: this._maxReceivingBitrate,
+					maxSendingBitrate: this._maxSendingBitrate,
+				}
+			});
+		}
 
 		this._maxAvailableIncomingBitrate = 0;
 		this._maxAvailableOutgoingBitrate = 0;

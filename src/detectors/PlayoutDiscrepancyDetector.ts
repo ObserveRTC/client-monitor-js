@@ -48,5 +48,16 @@ export class PlayoutDiscrepancyDetector implements Detector {
 			trackMonitor: this.trackMonitor,
 			clientMonitor: clientMonitor,
 		});
+
+		if (this.config.createIssue) {
+			clientMonitor.addIssue({
+				type: 'inbound-video-playout-discrepancy',
+				payload: {
+					trackId: this.trackMonitor.track.id,
+					frameSkew,
+					ewmaFps: inboundRtp.ewmaFps,
+				}
+			});
+		}
 	}
 }

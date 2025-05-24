@@ -58,6 +58,12 @@ export class CpuPerformanceDetector {
 				clientMonitor: this.clientMonitor,
 			});
 
+			if (this.config.createIssue) {
+				this.clientMonitor.addIssue({
+					type: 'cpulimitation',
+				});
+			}
+
 		} else {
 			if (!isLimited) return;
 			this.clientMonitor.cpuPerformanceAlertOn = false;

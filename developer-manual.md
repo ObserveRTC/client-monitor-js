@@ -1,9 +1,8 @@
 ## Developer Manual
 
- - appData,
-  - score calculation
-	 - statsAdapters
-	 
+-   appData,
+-   score calculation
+    -   statsAdapters
 
 ## Table of Contents
 
@@ -12,15 +11,15 @@
 3. [Configuration](#configuration)
 4. [ClientMonitor](#client-monitor)
 5. [Detectors](#detectors)
-5. [Collecting and Adapting Stats](#collecting-and-adapting-stats)
-6. [Sampling](#sampling)
-6. [Scores](#scores)
-8. [Events and Issues](#events-and-issues)
-6. [WebRTC Stats Monitors](#webrtc-stats-monitors)
-7. [Examples](#examples)
-9. [Troubleshooting](#troubleshooting)
-10. [Schema compatibility Table](#hamokmessage-compatibility-table)
-11. [FAQ](#faq)
+6. [Collecting and Adapting Stats](#collecting-and-adapting-stats)
+7. [Sampling](#sampling)
+8. [Scores](#scores)
+9. [Events and Issues](#events-and-issues)
+10. [WebRTC Stats Monitors](#webrtc-stats-monitors)
+11. [Examples](#examples)
+12. [Troubleshooting](#troubleshooting)
+13. [Schema compatibility Table](#hamokmessage-compatibility-table)
+14. [FAQ](#faq)
 
 ## Installation
 
@@ -59,13 +58,12 @@ monitor.addSource(myTransport); // your transport created before the device is a
 ClientMonitor by default write logs to the console only on warning and errors.
 If you want to integrate your logger or change the level you can do that by setting up your own logging logis as follows:
 
-
 ```javascript
 import { setLogger, Logger } from "@observertc/client-monitor-js";
 
 let myLogger: Logger = new class implements Logger {
-  trace = () => void 0; 
-  debug = (...args: any[]) => console.debug(...args); 
+  trace = () => void 0;
+  debug = (...args: any[]) => console.debug(...args);
   info = (...args: any[]) => console.info(...args);
   warn = (...args: any[]) => console.warn(...args);
   error = (...args: any[]) => console.error(...args);
@@ -90,6 +88,7 @@ const monitor = createClientMonitor({
     },
 });
 ```
+
 The structure and all otions for the configuration is below:
 
 ```typescript
@@ -109,7 +108,7 @@ export type ClientMonitorConfig = {
      * OPTIONAL
      */
     callId?: string;
-    
+
     /**
      * Specifies the interval (in milliseconds) at which the observer calls
      * the added statsCollectors and pulls the stats.
@@ -235,7 +234,7 @@ export type ClientMonitorConfig = {
          * significant and trigger an alert.
          */
         minSynthesizedSamplesDuration: number;
-    }
+    };
 
     /**
      * Configuration for detecting audio desynchronization during monitoring.
@@ -289,7 +288,7 @@ export type ClientMonitorConfig = {
          * - 'medium': Moderate sensitivity to congestion changes.
          * - 'high': Highly sensitive to congestion changes.
          */
-        sensitivity: 'low' | 'medium' | 'high';
+        sensitivity: "low" | "medium" | "high";
     };
 
     /**
@@ -342,9 +341,9 @@ export type ClientMonitorConfig = {
         thresholdInMs: number;
     };
 
-		/**
+    /**
      * Additional metadata to be included in the client monitor.
-     * 
+     *
      * OPTIONAL
      */
     appData?: Record<string, unknown>;
@@ -359,125 +358,129 @@ The ClientMonitor is the primary tool for collecting stats and useful informatio
 
 Creates a new instance of `ClientMonitor`.
 
-- `config: ClientMonitorConfig`  
-  The configuration object for the client monitor. It contains options such as `clientId`, `callId`, `collectingPeriodInMs`, and other settings.
-
+-   `config: ClientMonitorConfig`  
+    The configuration object for the client monitor. It contains options such as `clientId`, `callId`, `collectingPeriodInMs`, and other settings.
 
 ### **Public Properties**
 
- * **sources**: Manage data sources for the monitor, including integrating RTCPeerConnection, getUserMedia and others. Detailed description about Sources in the [Sources](#sources) section.
- * **statsAdapters**: Adapts browser fetched raw WebRTC stats to a format the Monitor can .
- * **detectors**: Manages detection algorithms, attached to the ClientMonitor. Detailed description in the [Detectors](#detectors) section
- * **scoreCalculator** Handles the calculation of scores. Detailed description in the [Scores](#scores) section.
- * **appData**: Optional application-specific metadata.
- * **bufferingSampleData**: Indicates whether stats data is currently being buffered for sampling.
- * **closed** : Indicates whether the monitor is closed.
- * **lastSampledAt**: Timestamp of the last sampling event.
- * **peerConnections**: An array of `PeerConnectionMonitor` instances, monitoring WebRTC peer connections.
- * **codecs**: An array of `CodecMonitor` instances, tracking audio and video codecs.
- * **inboundRtps**: An array of `InboundRtpMonitor` instances, tracking inbound RTP streams.
- * **outboundRtps**: An array of `OutboundRtpMonitor` instances, tracking outbound RTP streams.
- * **remoteInboundRtps**: An array of `RemoteInboundRtpMonitor` instances, tracking remote inbound RTP streams.
- * **remoteOutboundRtps**: An array of `RemoteOutboundRtpMonitor` instances, tracking remote outbound RTP streams.
- * **tracks**: An array of `TrackMonitor` instances, monitoring audio and video tracks.
- * **mediaSources**: An array of `MediaSourceMonitor` instances, tracking media sources.
- * **mediaPlayouts**: An array of `MediaPlayoutMonitor` instances, monitoring media playouts.
- * **dataChannels**: An array of `DataChannelMonitor` instances, tracking data channels.
- * **iceCandidatePairs**: An array of `IceCandidatePairMonitor` instances, monitoring ICE candidate pairs.
- * **iceTransports**: An array of `IceTransportMonitor` instances, tracking ICE transports.
- * **certificates**: An array of `CertificateMonitor` instances, monitoring certificates.
- * **tracks**: An array of `TrackMonitor` instances, monitoring audio and video tracks.
-
+-   **sources**: Manage data sources for the monitor, including integrating RTCPeerConnection, getUserMedia and others. Detailed description about Sources in the [Sources](#sources) section.
+-   **statsAdapters**: Adapts browser fetched raw WebRTC stats to a format the Monitor can .
+-   **detectors**: Manages detection algorithms, attached to the ClientMonitor. Detailed description in the [Detectors](#detectors) section
+-   **scoreCalculator** Handles the calculation of scores. Detailed description in the [Scores](#scores) section.
+-   **appData**: Optional application-specific metadata.
+-   **bufferingSampleData**: Indicates whether stats data is currently being buffered for sampling.
+-   **closed** : Indicates whether the monitor is closed.
+-   **lastSampledAt**: Timestamp of the last sampling event.
+-   **peerConnections**: An array of `PeerConnectionMonitor` instances, monitoring WebRTC peer connections.
+-   **codecs**: An array of `CodecMonitor` instances, tracking audio and video codecs.
+-   **inboundRtps**: An array of `InboundRtpMonitor` instances, tracking inbound RTP streams.
+-   **outboundRtps**: An array of `OutboundRtpMonitor` instances, tracking outbound RTP streams.
+-   **remoteInboundRtps**: An array of `RemoteInboundRtpMonitor` instances, tracking remote inbound RTP streams.
+-   **remoteOutboundRtps**: An array of `RemoteOutboundRtpMonitor` instances, tracking remote outbound RTP streams.
+-   **tracks**: An array of `TrackMonitor` instances, monitoring audio and video tracks.
+-   **mediaSources**: An array of `MediaSourceMonitor` instances, tracking media sources.
+-   **mediaPlayouts**: An array of `MediaPlayoutMonitor` instances, monitoring media playouts.
+-   **dataChannels**: An array of `DataChannelMonitor` instances, tracking data channels.
+-   **iceCandidatePairs**: An array of `IceCandidatePairMonitor` instances, monitoring ICE candidate pairs.
+-   **iceTransports**: An array of `IceTransportMonitor` instances, tracking ICE transports.
+-   **certificates**: An array of `CertificateMonitor` instances, monitoring certificates.
+-   **tracks**: An array of `TrackMonitor` instances, monitoring audio and video tracks.
 
 #### **Stats Properties**
 
- * **sendingAudioBitrate**: Represents the bitrate (in kbps) of audio being sent from the client.  
- * **sendingVideoBitrate**: Represents the bitrate (in kbps) of video being sent from the client.  
- * **receivingAudioBitrate**: Represents the bitrate (in kbps) of audio being received by the client.  
- * **receivingVideoBitrate**: Represents the bitrate (in kbps) of video being received by the client.  
- * **totalAvailableIncomingBitrate**: The total available bandwidth (in kbps) for incoming data streams.  
- * **totalAvailableOutgoingBitrate**: The total available bandwidth (in kbps) for outgoing data streams.  
- * **avgRttInSec**: The average round-trip time (RTT) for data packets, measured in seconds.  
- * **score**: The current performance score of the WebRTC session, ranging from 0.0 (worst) to 5.0 (best).  
- * **durationOfCollectingStatsInMs**: The duration (in milliseconds) of the last stats collection process.
+-   **sendingAudioBitrate**: Represents the bitrate (in kbps) of audio being sent from the client.
+-   **sendingVideoBitrate**: Represents the bitrate (in kbps) of video being sent from the client.
+-   **receivingAudioBitrate**: Represents the bitrate (in kbps) of audio being received by the client.
+-   **receivingVideoBitrate**: Represents the bitrate (in kbps) of video being received by the client.
+-   **totalAvailableIncomingBitrate**: The total available bandwidth (in kbps) for incoming data streams.
+-   **totalAvailableOutgoingBitrate**: The total available bandwidth (in kbps) for outgoing data streams.
+-   **avgRttInSec**: The average round-trip time (RTT) for data packets, measured in seconds.
+-   **score**: The current performance score of the WebRTC session, ranging from 0.0 (worst) to 5.0 (best).
+-   **durationOfCollectingStatsInMs**: The duration (in milliseconds) of the last stats collection process.
 
 ### **Public Methods**
- * **close(): void**: Closes the `ClientMonitor` instance.  
-   - Stops all periodic tasks and emits a `close` event.  
-   - If configured, creates a final sample and logs a client left event.
- * **collect(): Promise<[string, RTCStats[]][]>**: Collects stats from all monitored peer connections.  
- * **setScore(score: number): void**: Sets the performance score for the client.
- * **createSample(): ClientSample | undefined**: Creates a new client sample, aggregating stats, events, metadata, issues, and scores.  
- * **addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void**: Adds a "client joined" event.
- * **addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void**: Adds a "client left" event.
- * **addEvent(event: PartialBy<ClientEvent, 'timestamp'>): void**: Adds a custom client event.
- * **addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void**: Adds a client issue.
- * **addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void**: Adds metadata to the client monitor.
- * **addSource(source: RTCPeerConnection | MediasoupDevice | MediasoupTransport): void**: Adds a new source to the client monitor to collect stats from.
- * **addExtensionStats(stats: { type: string, payload?: Record<string, unknown> }): void**: Adds extension-specific stats.
- * **setCollectingPeriod(collectingPeriodInMs: number): void**: Sets the interval for stats collection.
- * **setSamplingPeriod(samplingPeriodInMs: number): void**: Sets the interval for stats sampling.
- * **fetchUserAgentData(): void**: Fetches user agent data from the browser.
- * **watchMediaDevices(): void**: Integrates with `navigator.mediaDevices` by patching the `getUserMedia` method and subscribing to the `ondevicechange` event.
- * `getTrackMonitor(trackId: string): TrackMonitor | undefined`: Retrieves a `TrackMonitor` instance by track ID.
 
+-   **close(): void**: Closes the `ClientMonitor` instance.
+    -   Stops all periodic tasks and emits a `close` event.
+    -   If configured, creates a final sample and logs a client left event.
+-   **collect(): Promise<[string, RTCStats[]][]>**: Collects stats from all monitored peer connections.
+-   **setScore(score: number): void**: Sets the performance score for the client.
+-   **createSample(): ClientSample | undefined**: Creates a new client sample, aggregating stats, events, metadata, issues, and scores.
+-   **addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void**: Adds a "client joined" event.
+-   **addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void**: Adds a "client left" event.
+-   **addEvent(event: PartialBy<ClientEvent, 'timestamp'>): void**: Adds a custom client event.
+-   **addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void**: Adds a client issue.
+-   **addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void**: Adds metadata to the client monitor.
+-   **addSource(source: RTCPeerConnection | MediasoupDevice | MediasoupTransport): void**: Adds a new source to the client monitor to collect stats from.
+-   **addExtensionStats(stats: { type: string, payload?: Record<string, unknown> }): void**: Adds extension-specific stats.
+-   **setCollectingPeriod(collectingPeriodInMs: number): void**: Sets the interval for stats collection.
+-   **setSamplingPeriod(samplingPeriodInMs: number): void**: Sets the interval for stats sampling.
+-   **fetchUserAgentData(): void**: Fetches user agent data from the browser.
+-   **watchMediaDevices(): void**: Integrates with `navigator.mediaDevices` by patching the `getUserMedia` method and subscribing to the `ondevicechange` event.
+-   `getTrackMonitor(trackId: string): TrackMonitor | undefined`: Retrieves a `TrackMonitor` instance by track ID.
 
 #### **Event Handling**
 
- * `on(event: string, listener: Function): this`
- * `once(event: string, listener: Function): this`
- * `off(event: string, listener: Function): this`
- * `emit(event: string, ...args: any[]): boolean`
-
+-   `on(event: string, listener: Function): this`
+-   `once(event: string, listener: Function): this`
+-   `off(event: string, listener: Function): this`
+-   `emit(event: string, ...args: any[]): boolean`
 
 ### Events
 
 The `ClientMonitor` class emits various events to notify of significant changes, issues, and detections related to WebRTC connections and monitoring. Each event carries specific data, providing insights into the system's current state and facilitating actions like troubleshooting or triggering other processes.
 
-  * **`sample-created`**: Emitted when a new sample of the client's data is successfully created. A sample aggregates statistics, events, metadata, issues, and performance scores, providing a snapshot of the client’s current state.
-    - **Payload**: `ClientSample` - The newly created sample object.
-	
-  * **`stats-collected`**: Emitted after the `ClientMonitor` collects stats from all monitored peer connections. This event provides insights into the duration of the collection process and the actual stats collected.
-    - **Payload**:
-      - `durationOfCollectingStatsInMs`: The duration of the stats collection process in milliseconds.
-      - `collectedStats`: An array containing pairs of peer connection IDs and their associated RTC stats.
+-   **`sample-created`**: Emitted when a new sample of the client's data is successfully created. A sample aggregates statistics, events, metadata, issues, and performance scores, providing a snapshot of the client’s current state.
+    -   **Payload**: `ClientSample` - The newly created sample object.
+-   **`stats-collected`**: Emitted after the `ClientMonitor` collects stats from all monitored peer connections. This event provides insights into the duration of the collection process and the actual stats collected.
 
-  * **`close`**: Emitted when the `ClientMonitor` instance is closed. This signifies that monitoring has stopped and no further operations will occur.
-    - **Payload**: None
+    -   **Payload**:
+        -   `durationOfCollectingStatsInMs`: The duration of the stats collection process in milliseconds.
+        -   `collectedStats`: An array containing pairs of peer connection IDs and their associated RTC stats.
 
-  * **`issue`**: This event is emitted when a client issue is detected. Issues could relate to performance, connectivity, or other detected problems during monitoring.
-    - **Payload**: `AcceptedClientIssue` - An object describing the issue with a type, optional payload (containing further details), and a timestamp.
+-   **`close`**: Emitted when the `ClientMonitor` instance is closed. This signifies that monitoring has stopped and no further operations will occur.
 
-  * **`congestion`**: Emitted when congestion is detected in a peer connection. Congestion typically occurs when the incoming or outgoing bitrate exceeds the available network bandwidth.
-    - **Payload**:
-      - `peerConnectionMonitor`: The `PeerConnectionMonitor` instance that detected the congestion.
-      - `targetIncomingBitrateAfterCongestion`: The target incoming bitrate after congestion is detected (in kbps).
-      - `targetIncomingBitrateBeforeCongestion`: The target incoming bitrate before congestion was detected.
-      - `targetOutgoingBitrateAfterCongestion`: The target outgoing bitrate after congestion.
-      - `targetOutgoingBitrateBeforeCongestion`: The target outgoing bitrate before congestion was detected.
-      - `highestSeenOutgoingBitrateBeforeCongestion`: The highest outgoing bitrate seen before the congestion event.
-      - `highestSeenIncomingBitrateBeforeCongestion`: The highest incoming bitrate observed before congestion.
+    -   **Payload**: None
 
-  * **`cpulimitation`**: Emitted when the client’s CPU is detected to be overloaded or under stress, potentially affecting performance.
-    - **Payload**: None
+-   **`issue`**: This event is emitted when a client issue is detected. Issues could relate to performance, connectivity, or other detected problems during monitoring.
 
-  * **`audio-desync-track`**: This event is triggered when an inbound audio track experiences a synchronization issue, such as audio and video being out of sync.
-    - **Payload**: `trackMonitor`: The `InboundTrackMonitor` instance responsible for the affected audio track.
+    -   **Payload**: `AcceptedClientIssue` - An object describing the issue with a type, optional payload (containing further details), and a timestamp.
 
-  * **`freezed-video-track`**: Emitted when an inbound video track freezes, meaning the video feed stops updating.
-    - **Payload**: `trackMonitor`: The `InboundTrackMonitor` instance monitoring the affected video track.
+-   **`congestion`**: Emitted when congestion is detected in a peer connection. Congestion typically occurs when the incoming or outgoing bitrate exceeds the available network bandwidth.
 
-  * **`stucked-inbound-track`**: This event occurs when an inbound track (audio or video) becomes "stuck," meaning it stops transmitting data or becomes unresponsive.
-    - **Payload**: `trackMonitor`: The `InboundTrackMonitor` instance responsible for monitoring the stuck track.
+    -   **Payload**:
+        -   `peerConnectionMonitor`: The `PeerConnectionMonitor` instance that detected the congestion.
+        -   `targetIncomingBitrateAfterCongestion`: The target incoming bitrate after congestion is detected (in kbps).
+        -   `targetIncomingBitrateBeforeCongestion`: The target incoming bitrate before congestion was detected.
+        -   `targetOutgoingBitrateAfterCongestion`: The target outgoing bitrate after congestion.
+        -   `targetOutgoingBitrateBeforeCongestion`: The target outgoing bitrate before congestion was detected.
+        -   `highestSeenOutgoingBitrateBeforeCongestion`: The highest outgoing bitrate seen before the congestion event.
+        -   `highestSeenIncomingBitrateBeforeCongestion`: The highest incoming bitrate observed before congestion.
 
-  * **`too-long-pc-connection-establishment`**: Emitted when a peer connection takes too long to establish. This event can help identify connection issues that result in delays.
-    - **Payload**: `peerConnectionMonitor`: The `PeerConnectionMonitor` instance tracking the peer connection establishment process.
+-   **`cpulimitation`**: Emitted when the client’s CPU is detected to be overloaded or under stress, potentially affecting performance.
 
-  * **`score`**: Emitted when the client’s performance score is updated. This event tracks the overall performance of the client, typically based on factors like latency, bitrate, and other monitored parameters.
-    - **Payload**:
-      - `clientScore`: The updated performance score, ranging from 0.0 to 5.0.
-      - `remarks` (Optional): Additional remarks or explanations about the score, providing context for the calculated performance.
+    -   **Payload**: None
 
+-   **`audio-desync-track`**: This event is triggered when an inbound audio track experiences a synchronization issue, such as audio and video being out of sync.
+
+    -   **Payload**: `trackMonitor`: The `InboundTrackMonitor` instance responsible for the affected audio track.
+
+-   **`freezed-video-track`**: Emitted when an inbound video track freezes, meaning the video feed stops updating.
+
+    -   **Payload**: `trackMonitor`: The `InboundTrackMonitor` instance monitoring the affected video track.
+
+-   **`stucked-inbound-track`**: This event occurs when an inbound track (audio or video) becomes "stuck," meaning it stops transmitting data or becomes unresponsive.
+
+    -   **Payload**: `trackMonitor`: The `InboundTrackMonitor` instance responsible for monitoring the stuck track.
+
+-   **`too-long-pc-connection-establishment`**: Emitted when a peer connection takes too long to establish. This event can help identify connection issues that result in delays.
+
+    -   **Payload**: `peerConnectionMonitor`: The `PeerConnectionMonitor` instance tracking the peer connection establishment process.
+
+-   **`score`**: Emitted when the client’s performance score is updated. This event tracks the overall performance of the client, typically based on factors like latency, bitrate, and other monitored parameters.
+    -   **Payload**:
+        -   `clientScore`: The updated performance score, ranging from 0.0 to 5.0.
+        -   `remarks` (Optional): Additional remarks or explanations about the score, providing context for the calculated performance.
 
 ## Detectors
 
@@ -491,14 +494,14 @@ The configuration of built-in detectors can be adjusted via the `ClientMonitor` 
 
 ### Built in detectors:
 
- * `AudioDesyncDetector` is a built-in detector that is attached to a `TrackMonitor` if the track is inbound and has an audio kind. It detects if the played audio accelerates or decelerates, indicating synchronization issues with the corresponding video.
- * `CongestionDetector` is a built-in detector that monitors network congestion issues. It is attached to a PeerConnectionMonitor and helps identify when the network is experiencing high levels of congestion, which can affect the quality of the media being transmitted.
- * `CpuPerformanceDetector` is a built-in detector that monitors the CPU performance of the client. It detects when the CPU is overloaded or under stress, potentially affecting the performance of the WebRTC session.
- * `FreezedVideoTrackDetector` is a built-in detector that identifies when an inbound video track freezes, meaning the video feed stops updating. It is attached to an `InboundTrackMonitor` and helps detect issues with video transmission.
- * `LongPcConnectionEstablishmentDetector` is a built-in detector that identifies when a peer connection takes too long to establish. It helps detect connection issues that result in delays in establishing a connection.
- * `DryInboundTrackDetector` is a built-in detector that identifies when an inbound track (audio or video) does not flow any data from the moment it's activated. It is attached to an `InboundTrackMonitor` and helps detect issues with track transmission.
- * `DryOutboundTrackDetector` is a built-in detector that identifies when an outbound track (audio or video) does not flow any data from the moment it's activated. It is attached to an `OutboundTrackMonitor` and helps detect issues with track transmission.
- * `PlayoutDiscrepancyDetector` is a built-in detector that identifies when there is a discrepancy between the received and rendered media playouts. It is attached to a `MediaPlayoutMonitor` and helps detect issues with media playout synchronization.
+-   `AudioDesyncDetector` is a built-in detector that is attached to a `TrackMonitor` if the track is inbound and has an audio kind. It detects if the played audio accelerates or decelerates, indicating synchronization issues with the corresponding video.
+-   `CongestionDetector` is a built-in detector that monitors network congestion issues. It is attached to a PeerConnectionMonitor and helps identify when the network is experiencing high levels of congestion, which can affect the quality of the media being transmitted.
+-   `CpuPerformanceDetector` is a built-in detector that monitors the CPU performance of the client. It detects when the CPU is overloaded or under stress, potentially affecting the performance of the WebRTC session.
+-   `FreezedVideoTrackDetector` is a built-in detector that identifies when an inbound video track freezes, meaning the video feed stops updating. It is attached to an `InboundTrackMonitor` and helps detect issues with video transmission.
+-   `LongPcConnectionEstablishmentDetector` is a built-in detector that identifies when a peer connection takes too long to establish. It helps detect connection issues that result in delays in establishing a connection.
+-   `DryInboundTrackDetector` is a built-in detector that identifies when an inbound track (audio or video) does not flow any data from the moment it's activated. It is attached to an `InboundTrackMonitor` and helps detect issues with track transmission.
+-   `DryOutboundTrackDetector` is a built-in detector that identifies when an outbound track (audio or video) does not flow any data from the moment it's activated. It is attached to an `OutboundTrackMonitor` and helps detect issues with track transmission.
+-   `PlayoutDiscrepancyDetector` is a built-in detector that identifies when there is a discrepancy between the received and rendered media playouts. It is attached to a `MediaPlayoutMonitor` and helps detect issues with media playout synchronization.
 
 ### Adding / Removing Custom Detectors
 
@@ -533,14 +536,16 @@ Each `PeerConnectionMonitor` instance includes a `getStats()` method that collec
 
 ### Stats Adapters
 
-The `statsAdapters` object handles adapting raw statistics into the monitor's expected format. It includes methods for processing various types of stats, such as:  
-- `RTCIceCandidateStats`  
-- `RTCCodecStats`  
-- `RTCInboundRtpStreamStats`  
+The `statsAdapters` object handles adapting raw statistics into the monitor's expected format. It includes methods for processing various types of stats, such as:
 
-Different `statsAdapters` are applied depending on the browser type, version, and the integration type. For instance:  
-- Firefox may require adapting the `trackIdentifier` field (due to its use of `{` and `}` in the ID string).  
-- Mediasoup integrations may require omitting `inbound-rtp` stats for the `probator` track.  
+-   `RTCIceCandidateStats`
+-   `RTCCodecStats`
+-   `RTCInboundRtpStreamStats`
+
+Different `statsAdapters` are applied depending on the browser type, version, and the integration type. For instance:
+
+-   Firefox may require adapting the `trackIdentifier` field (due to its use of `{` and `}` in the ID string).
+-   Mediasoup integrations may require omitting `inbound-rtp` stats for the `probator` track.
 
 These adaptations are automatically applied if the monitor has information about the browser type and version. For this reason, it's essential to call `monitor.sources.fetchUserAgentData()` to retrieve browser data (enabled by default).
 
@@ -550,8 +555,8 @@ You can define custom stats adapters to address specific requirements:
 
 ```javascript
 monitor.statsAdapters.add((stats) => {
-  // Custom adaptation logic
-  return adaptedStats;
+    // Custom adaptation logic
+    return adaptedStats;
 });
 ```
 
@@ -571,16 +576,15 @@ Without compression, a `ClientSample` can become quite large, particularly when 
 
 Samples are created automatically if the `samplingPeriodInMs` configuration is set in the `ClientMonitor`. This value specifies the interval for processing stats and generating samples.
 
-- **Automatic Sampling:**  
-   To enable automatic sampling, set a positive value for `samplingPeriodInMs`. Ensure that the `collectingPeriod` (used for gathering stats) is also configured with a value greater than 0. Note that `samplingPeriodInMs` should be a multiple of the `collectingPeriod` for consistent behavior. If it isn’t, sampling will occur at the nearest multiple of the `collectingPeriod`.
+-   **Automatic Sampling:**  
+     To enable automatic sampling, set a positive value for `samplingPeriodInMs`. Ensure that the `collectingPeriod` (used for gathering stats) is also configured with a value greater than 0. Note that `samplingPeriodInMs` should be a multiple of the `collectingPeriod` for consistent behavior. If it isn’t, sampling will occur at the nearest multiple of the `collectingPeriod`.
 
-- **Manual Sampling:**  
-   If `samplingPeriodInMs` is set to `0`, samples will not be created automatically. In this case, you must manually call `createSample()` to generate a snapshot. To ensure proper buffering of stats data for sampling, set `clientMonitor.bufferingSampleData` to `true` before invoking `createSample()`.
+-   **Manual Sampling:**  
+     If `samplingPeriodInMs` is set to `0`, samples will not be created automatically. In this case, you must manually call `createSample()` to generate a snapshot. To ensure proper buffering of stats data for sampling, set `clientMonitor.bufferingSampleData` to `true` before invoking `createSample()`.
 
 ### Changing the Sampling Period
 
 The sampling interval can be adjusted dynamically using the `setSamplingPeriodInMs()` method on the `ClientMonitor`. Keep in mind that automatic sampling requires both the `samplingPeriodInMs` and `collectingPeriod` to be properly configured.
-
 
 ## Scores
 
@@ -593,11 +597,12 @@ Score calculation can be customized by extending the `ScoreCalculator` class and
 ### Default Score Calculation
 
 By default the score is calculated as a weight average based on the following factors:
- - peer connection monitor stability score
- - inbound audio track monitor calculated score
- - inbound video track monitor calculated score
- - outbound audio track monitor calculated score
- - outbound video track monitor calculated score
+
+-   peer connection monitor stability score
+-   inbound audio track monitor calculated score
+-   inbound video track monitor calculated score
+-   outbound audio track monitor calculated score
+-   outbound video track monitor calculated score
 
 #### Peer Connection Stability Score Calculation
 
@@ -614,7 +619,7 @@ The `score` property of the inbound audio track monitor represents the calculate
 
 **Inbound Video Track Score Calculation**
 
-The `score` property of the inbound video track monitor represents the calculated score of the inbound video track. The score is based on the video quality, including factors like  frame rate, and fractional dropped frames. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
+The `score` property of the inbound video track monitor represents the calculated score of the inbound video track. The score is based on the video quality, including factors like frame rate, and fractional dropped frames. The score ranges from 0.0 (worst) to 5.0 (best). The score is updated on each stats collection.
 
 **Outbound Audio Track Score Calculation**
 
@@ -626,18 +631,17 @@ The `score` property of the outbound video track monitor represents the calculat
 
 #### Reasons for Scores
 
-The `reasons` property of `calculatedScore` object of the `PeerConnectionMonitor`, 
-and `TrackMonitor` instances provides information about the factors that contributed to the calculated score. 
+The `reasons` property of `calculatedScore` object of the `PeerConnectionMonitor`,
+and `TrackMonitor` instances provides information about the factors that contributed to the calculated score.
 
 ```javascript
 const monitor = new ClientMonitor();
 
-monitor.on('score', (event) => {
-  console.log('Score:', event.payload.clientScore);
-  console.log('Reasons:', event.payload.currentReasons);
-})
+monitor.on("score", (event) => {
+    console.log("Score:", event.payload.clientScore);
+    console.log("Reasons:", event.payload.currentReasons);
+});
 ```
-
 
 ### Custom Score Calculation
 
@@ -647,12 +651,12 @@ You can implement custom score calculation logic by extending the `ScoreCalculat
 import { ScoreCalculator } from "@observertc/client-monitor-js";
 
 class CustomScoreCalculator extends ScoreCalculator {
-  update() {
-    for (const pcMonitor of clientMonitor.peerConnections) {
-      pcMonitor.calculatedScore.value = 1.0
+    update() {
+        for (const pcMonitor of clientMonitor.peerConnections) {
+            pcMonitor.calculatedScore.value = 1.0;
+        }
+        clientMonitor.setScore(1.0);
     }
-    clientMonitor.setScore(1.0);
-  }
 }
 
 clientMonitor.scoreCalculator = new CustomScoreCalculator();
@@ -660,7 +664,7 @@ clientMonitor.scoreCalculator = new CustomScoreCalculator();
 
 ## Events and Issues
 
-The `ClientMonitor` emits events and issues to notify about significant changes, anomalies, and detections related to WebRTC connections and monitoring. These events provide insights into the system's current state and facilitate actions like troubleshooting or triggering other processes. 
+The `ClientMonitor` emits events and issues to notify about significant changes, anomalies, and detections related to WebRTC connections and monitoring. These events provide insights into the system's current state and facilitate actions like troubleshooting or triggering other processes.
 
 When Sampling is enabled, the events and issues are included in the `ClientSample` object, providing a comprehensive snapshot of the client's performance and status.
 
@@ -670,18 +674,17 @@ Custom events and issues can be added to the monitor using the `addEvent()` and 
 
 ```javascript
 monitor.addEvent({
-  type: 'custom-event',
-  payload: { message: 'Custom event added' },
-  timestamp: Date.now(),
+    type: "custom-event",
+    payload: { message: "Custom event added" },
+    timestamp: Date.now(),
 });
 
 monitor.addIssue({
-  type: 'custom-issue',
-  payload: { message: 'Custom issue detected' },
-  timestamp: Date.now(),
+    type: "custom-issue",
+    payload: { message: "Custom issue detected" },
+    timestamp: Date.now(),
 });
 ```
-
 
 ## WebRTC Stats Monitors
 
@@ -693,8 +696,8 @@ In addition to `PeerConnectionMonitor` and related WebRTC Stats Monitors, `Track
 
 ### `appData` and `attachments`
 
-Every Monitor have an `appData` property that can be used to store custom metadata. This property can be used to store additional information about the monitor, such as custom fields, flags, or other data important 
-**for the application** uses the monitor. The `attachments` property is used to store additional data that should be shipped **with the sample**. This data is not used by the monitor itself, but it is included in the sample 
+Every Monitor have an `appData` property that can be used to store custom metadata. This property can be used to store additional information about the monitor, such as custom fields, flags, or other data important
+**for the application** uses the monitor. The `attachments` property is used to store additional data that should be shipped **with the sample**. This data is not used by the monitor itself, but it is included in the sample
 when the sample is created. The `appData` won't be included in the sample, `attachments` will be included.
 
 ### `CertificateMonitor`
@@ -705,22 +708,20 @@ The `CertificateMonitor` is an extension of the `certificate` [stats](https://ww
 
 Contains all the fields of the [certificate](https://www.w3.org/TR/webrtc-stats/#certificatestats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the certificate. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the certificate. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter used by the `PeerConnectionMonitor` to manage the lifecycle of the stats. This tracks whether the certificate stats have been visited.
+-   **`visited`** (`boolean`): A getter used by the `PeerConnectionMonitor` to manage the lifecycle of the stats. This tracks whether the certificate stats have been visited.
 
-* **`createSample(): CertificateStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`createSample(): CertificateStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
 
-* **`accept(stats: Omit<CertificateStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new certificate stats and update the internal fields of the `CertificateMonitor` instance.
-
+-   **`accept(stats: Omit<CertificateStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new certificate stats and update the internal fields of the `CertificateMonitor` instance.
 
 ##### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` that this `CertificateMonitor` belongs to.
-
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` that this `CertificateMonitor` belongs to.
 
 ### `CodecMonitor`
 
@@ -730,20 +731,19 @@ The `CodecMonitor` is an extension of the `CodecStats` collected from the `PeerC
 
 Contains all the fields of the [CodecStats](https://www.w3.org/TR/webrtc-stats/#codecstats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the codec. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the codec. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `CodecMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): CodecStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
-* **`accept(stats: Omit<CodecStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new codec stats and update the internal fields of the `CodecMonitor` instance.
+-   **`visited`** (`boolean`): A getter that returns whether the `CodecMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): CodecStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`accept(stats: Omit<CodecStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new codec stats and update the internal fields of the `CodecMonitor` instance.
 
 ##### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `CodecMonitor` belongs to.
-* **`getIceTransport()`**: Navigates to the corresponding `IceTransportMonitor` based on the codec’s transport ID.
-
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `CodecMonitor` belongs to.
+-   **`getIceTransport()`**: Navigates to the corresponding `IceTransportMonitor` based on the codec’s transport ID.
 
 ### `IceCandidateMonitor`
 
@@ -753,19 +753,19 @@ The `IceCandidateMonitor` is an extension of the `IceCandidateStats` collected f
 
 Contains all the fields of the [IceCandidateStats](https://www.w3.org/TR/webrtc-stats/#icecandidatestats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the ICE candidate. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the ICE candidate. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `IceCandidateMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): IceCandidateStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
-* **`accept(stats: Omit<IceCandidateStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new ICE candidate stats and update the internal fields of the `IceCandidateMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
+-   **`visited`** (`boolean`): A getter that returns whether the `IceCandidateMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): IceCandidateStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`accept(stats: Omit<IceCandidateStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new ICE candidate stats and update the internal fields of the `IceCandidateMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
 
 ##### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `IceCandidateMonitor` belongs to.
-* **`getIceTransport()`**: Navigates to the corresponding `IceTransportMonitor` based on the candidate’s transport ID.
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `IceCandidateMonitor` belongs to.
+-   **`getIceTransport()`**: Navigates to the corresponding `IceTransportMonitor` based on the candidate’s transport ID.
 
 ### `IceCandidatePairMonitor`
 
@@ -775,22 +775,21 @@ The `IceCandidatePairMonitor` tracks information related to pairs of ICE candida
 
 Contains all the fields of the [IceCandidatePairStats](https://www.w3.org/TR/webrtc-stats/#icecandidatepairstats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the ICE candidate pair. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the ICE candidate pair. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `IceCandidatePairMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): IceCandidateStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
-* **`accept(stats: Omit<IceCandidatePairStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new ICE candidate pair stats and update the internal fields of the `IceCandidatePairMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
-
+-   **`visited`** (`boolean`): A getter that returns whether the `IceCandidatePairMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): IceCandidateStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`accept(stats: Omit<IceCandidatePairStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new ICE candidate pair stats and update the internal fields of the `IceCandidatePairMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
 
 ##### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `IceCandidatePairMonitor` belongs to.
-* **`getIceTransport()`**: Navigates to the corresponding `IceTransportMonitor` based on the candidate pair's transport ID.
-* **`getLocalCandidate()`**: Navigates to the `IceCandidateMonitor` corresponding to the local candidate ID.
-* **`getRemoteCandidate()`**: Navigates to the `IceCandidateMonitor` corresponding to the remote candidate ID.
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `IceCandidatePairMonitor` belongs to.
+-   **`getIceTransport()`**: Navigates to the corresponding `IceTransportMonitor` based on the candidate pair's transport ID.
+-   **`getLocalCandidate()`**: Navigates to the `IceCandidateMonitor` corresponding to the local candidate ID.
+-   **`getRemoteCandidate()`**: Navigates to the `IceCandidateMonitor` corresponding to the remote candidate ID.
 
 ### `IceTransportMonitor`
 
@@ -800,19 +799,19 @@ The `IceTransportMonitor` tracks information related to the ICE transport layer 
 
 Contains all the fields of the [IceTransportStats](https://www.w3.org/TR/webrtc-stats/#icetransportstats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the ICE transport. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the ICE transport. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `IceTransportMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): IceTransportStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
-* **`accept(stats: Omit<IceTransportStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new ICE transport stats and update the internal fields of the `IceTransportMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
+-   **`visited`** (`boolean`): A getter that returns whether the `IceTransportMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): IceTransportStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`accept(stats: Omit<IceTransportStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new ICE transport stats and update the internal fields of the `IceTransportMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
 
 ##### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `IceTransportMonitor` belongs to.
-* **`getSelectedCandidatePair()`**: Navigates to the `IceCandidatePairMonitor` corresponding to the selected candidate pair ID.
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `IceTransportMonitor` belongs to.
+-   **`getSelectedCandidatePair()`**: Navigates to the `IceCandidatePairMonitor` corresponding to the selected candidate pair ID.
 
 ### `InboundRtpMonitor`
 
@@ -822,31 +821,30 @@ The `InboundRtpMonitor` tracks information related to inbound RTP streams in a W
 
 Contains all the fields of the [InboundRtpStats](https://www.w3.org/TR/webrtc-stats/#inboundrtpstats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the inbound RTP. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
-* **`bitrate?`** (`number` or `undefined`): The calculated bitrate for the inbound RTP stream, in bits per second.
-* **`isFreezed?`** (`boolean` or `undefined`): Indicates whether the video track is frozen.
-* **`desync?`** (`boolean` or `undefined`): Indicates whether there is audio desynchronization.
-* **`avgFramesPerSec?`** (`number` or `undefined`): The average frames per second of the video track.
-* **`fpsVolatility?`** (`number` or `undefined`): The volatility in frames per second, indicating fluctuations in the video frame rate.
-* **`lastNFramesPerSec?`** (`number[]`): An array holding the last 10 frames per second values to calculate average FPS and volatility.
-* **`fractionLost?`** (`number` or `undefined`): The fraction of packets lost in the stream.
-* **`deltaPacketsLost?`** (`number` or `undefined`): The change in packets lost between the current and previous stats.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the inbound RTP. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`bitrate?`** (`number` or `undefined`): The calculated bitrate for the inbound RTP stream, in bits per second.
+-   **`isFreezed?`** (`boolean` or `undefined`): Indicates whether the video track is frozen.
+-   **`desync?`** (`boolean` or `undefined`): Indicates whether there is audio desynchronization.
+-   **`avgFramesPerSec?`** (`number` or `undefined`): The average frames per second of the video track.
+-   **`fpsVolatility?`** (`number` or `undefined`): The volatility in frames per second, indicating fluctuations in the video frame rate.
+-   **`lastNFramesPerSec?`** (`number[]`): An array holding the last 10 frames per second values to calculate average FPS and volatility.
+-   **`fractionLost?`** (`number` or `undefined`): The fraction of packets lost in the stream.
+-   **`deltaPacketsLost?`** (`number` or `undefined`): The change in packets lost between the current and previous stats.
 
 #### **Methods:**
 
-* **`createSample(): InboundRtpStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
-* **`accept(stats: Omit<InboundRtpStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new inbound RTP stats and update the internal fields of the `InboundRtpMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
+-   **`createSample(): InboundRtpStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`accept(stats: Omit<InboundRtpStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new inbound RTP stats and update the internal fields of the `InboundRtpMonitor` instance. The method ensures that only valid stats with a positive time difference are applied.
 
 #### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Returns the `PeerConnectionMonitor` associated with the `InboundRtpMonitor`. This is used to navigate back to the parent `PeerConnectionMonitor`.
-* **`getRemoteOutboundRtp()`**: Returns the `RemoteOutboundRtpMonitor` associated with the inbound RTP stream, using the SSRC.
-* **`getIceTransport()`**: Retrieves the `IceTransportMonitor` associated with the transport ID.
-* **`getCodec()`**: Retrieves the `CodecMonitor` associated with the codec ID.
-* **`getMediaPlayout()`**: Retrieves the `MediaPlayoutMonitor` associated with the playout ID.
-* **`getTrack()`**: Retrieves the track associated with the `trackIdentifier` from the `PeerConnectionMonitor`.
-
+-   **`getPeerConnection()`**: Returns the `PeerConnectionMonitor` associated with the `InboundRtpMonitor`. This is used to navigate back to the parent `PeerConnectionMonitor`.
+-   **`getRemoteOutboundRtp()`**: Returns the `RemoteOutboundRtpMonitor` associated with the inbound RTP stream, using the SSRC.
+-   **`getIceTransport()`**: Retrieves the `IceTransportMonitor` associated with the transport ID.
+-   **`getCodec()`**: Retrieves the `CodecMonitor` associated with the codec ID.
+-   **`getMediaPlayout()`**: Retrieves the `MediaPlayoutMonitor` associated with the playout ID.
+-   **`getTrack()`**: Retrieves the track associated with the `trackIdentifier` from the `PeerConnectionMonitor`.
 
 ### `InboundTrackMonitor`
 
@@ -854,27 +852,26 @@ The `InboundTrackMonitor` tracks and monitors the inbound media track in a WebRT
 
 #### **Properties:**
 
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
-* **`direction`** (`'inbound'`): Indicates the direction of the media track. For this class, the direction is always inbound.
-* **`detectors`** (`Detectors`): An instance of the `Detectors` class, which manages different detection mechanisms for the track (e.g., stuck tracks, audio desynchronization, and frozen video).
-* **`contentType`** (`'lowmotion' | 'highmotion' | 'standard'`): Defines the type of content in the track based on motion characteristics. Defaults to `'standard'`.
-* **`dtxMode`** (`boolean`): Indicates whether the track is in DTX (Discontinuous Transmission) mode, which is typically used in audio for saving bandwidth when silence is detected.
-* **`calculatedScore`** (`CalculatedScore`): An object holding the calculated score for the track, including the weight, score value, and any remarks.
-* **`score`** (`number | undefined`): A getter that returns the calculated score value for the track.
-* **`kind`** (`MediaKind`): A getter that returns the media kind (audio or video) of the track, sourced from the associated `InboundRtpMonitor`.
-* **`bitrate`** (`number | undefined`): A getter that returns the bitrate of the inbound RTP stream, based on `InboundRtpMonitor`.
-* **`jitter`** (`number | undefined`): A getter that returns the jitter value from the `InboundRtpMonitor`.
-* **`fractionLost`** (`number | undefined`): A getter that returns the packet loss fraction from the `InboundRtpMonitor`.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`direction`** (`'inbound'`): Indicates the direction of the media track. For this class, the direction is always inbound.
+-   **`detectors`** (`Detectors`): An instance of the `Detectors` class, which manages different detection mechanisms for the track (e.g., stuck tracks, audio desynchronization, and frozen video).
+-   **`contentType`** (`'lowmotion' | 'highmotion' | 'standard'`): Defines the type of content in the track based on motion characteristics. Defaults to `'standard'`.
+-   **`dtxMode`** (`boolean`): Indicates whether the track is in DTX (Discontinuous Transmission) mode, which is typically used in audio for saving bandwidth when silence is detected.
+-   **`calculatedScore`** (`CalculatedScore`): An object holding the calculated score for the track, including the weight, score value, and any remarks.
+-   **`score`** (`number | undefined`): A getter that returns the calculated score value for the track.
+-   **`kind`** (`MediaKind`): A getter that returns the media kind (audio or video) of the track, sourced from the associated `InboundRtpMonitor`.
+-   **`bitrate`** (`number | undefined`): A getter that returns the bitrate of the inbound RTP stream, based on `InboundRtpMonitor`.
+-   **`jitter`** (`number | undefined`): A getter that returns the jitter value from the `InboundRtpMonitor`.
+-   **`fractionLost`** (`number | undefined`): A getter that returns the packet loss fraction from the `InboundRtpMonitor`.
 
 #### **Methods:**
 
-* **`update()`**: Calls the `update()` method on the `Detectors` instance to update the status of all active detectors.
+-   **`update()`**: Calls the `update()` method on the `Detectors` instance to update the status of all active detectors.
 
 #### **Navigational Methods:**
 
-* **`getInboundRtp()`**: Returns the `InboundRtpMonitor` instance associated with the track. This method is used to retrieve detailed RTP statistics.
-* **`getPeerConnection()`**: Returns the `PeerConnectionMonitor` from the associated `InboundRtpMonitor`.
-
+-   **`getInboundRtp()`**: Returns the `InboundRtpMonitor` instance associated with the track. This method is used to retrieve detailed RTP statistics.
+-   **`getPeerConnection()`**: Returns the `PeerConnectionMonitor` from the associated `InboundRtpMonitor`.
 
 ### `MediaPlayoutMonitor`
 
@@ -884,18 +881,18 @@ The `MediaPlayoutMonitor` tracks information related to media playout in a WebRT
 
 Contains all the fields of the [MediaPlayout](https://www.w3.org/TR/webrtc-stats/#dom-rtcstatstype-media-playout) stats, plus the following:
 
-* **`appData`** (`Record<string, unknown> | undefined`): Optional application-specific metadata associated with the media playout.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData`** (`Record<string, unknown> | undefined`): Optional application-specific metadata associated with the media playout.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `MediaPlayoutMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): MediaPlayoutStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
-* **`accept(stats: Omit<MediaPlayoutStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new inbound RTP stats and update the internal fields of the `MediaPlayoutStats` instance. The method ensures that only valid stats with a positive time difference are applied.
+-   **`visited`** (`boolean`): A getter that returns whether the `MediaPlayoutMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): MediaPlayoutStats`**: Used by the `ClientMonitor` to create a complete `ClientSample`. More details on sampling can be found in the [sampling](#sampling) section.
+-   **`accept(stats: Omit<MediaPlayoutStats, 'appData'>): void`**: Method called by the `PeerConnectionMonitor` to accept new inbound RTP stats and update the internal fields of the `MediaPlayoutStats` instance. The method ensures that only valid stats with a positive time difference are applied.
 
 #### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Returns the `PeerConnectionMonitor` associated with the `InboundRtpMonitor`. This is used to navigate back to the parent `PeerConnectionMonitor`.
+-   **`getPeerConnection()`**: Returns the `PeerConnectionMonitor` associated with the `InboundRtpMonitor`. This is used to navigate back to the parent `PeerConnectionMonitor`.
 
 ### `MediaSourceMonitor`
 
@@ -905,20 +902,19 @@ The `MediaSourceMonitor` extends the `MediaSourceStats` collected from the `Peer
 
 Contains all the fields of the [MediaSourceStats](https://www.w3.org/TR/webrtc-stats/#mediasourcestats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the media source. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the media source. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `MediaSourceMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): MediaSourceStats`**: Creates and returns a sample of the current media source stats, including the metrics and optional `appData`.
-* **`accept(stats: Omit<MediaSourceStats, 'appData'>): void`**: Method called to accept new media source stats and update the internal fields of the `MediaSourceMonitor` instance. Only stats with a positive time difference are applied.
+-   **`visited`** (`boolean`): A getter that returns whether the `MediaSourceMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): MediaSourceStats`**: Creates and returns a sample of the current media source stats, including the metrics and optional `appData`.
+-   **`accept(stats: Omit<MediaSourceStats, 'appData'>): void`**: Method called to accept new media source stats and update the internal fields of the `MediaSourceMonitor` instance. Only stats with a positive time difference are applied.
 
 ##### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `MediaSourceMonitor` belongs to.
-* **`getTrack()`**: Navigates to the outbound track associated with this media source monitor.
-
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `MediaSourceMonitor` belongs to.
+-   **`getTrack()`**: Navigates to the outbound track associated with this media source monitor.
 
 ### `OutboundRtpMonitor`
 
@@ -928,25 +924,24 @@ The `OutboundRtpMonitor` extends the `OutboundRtpStats` collected from the `Peer
 
 Contains all the fields of the [OutboundRtpStats](https://www.w3.org/TR/webrtc-stats/#outboundrtpstats-dict*) stats, plus the following:
 
-* **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the outbound RTP stats. This data is included in the sample.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
-* **`bitrate?`** (`number` or `undefined`): Derived field representing the bitrate of the outbound RTP stream.
-* **`packetRate?`** (`number` or `undefined`): Derived field representing the packet rate (packets per second) of the outbound RTP stream.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional application-specific metadata associated with the outbound RTP stats. This data is included in the sample.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`bitrate?`** (`number` or `undefined`): Derived field representing the bitrate of the outbound RTP stream.
+-   **`packetRate?`** (`number` or `undefined`): Derived field representing the packet rate (packets per second) of the outbound RTP stream.
 
 #### **Methods:**
 
-* **`visited`** (`boolean`): A getter that returns whether the `OutboundRtpMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-* **`createSample(): OutboundRtpStats`**: Creates and returns a complete `OutboundRtpStats` object, which can be used by the `ClientMonitor` to generate a `ClientSample`.
-* **`accept(stats: Omit<OutboundRtpStats, 'appData'>): void`**: Accepts new `OutboundRtpStats` and updates the internal fields of the `OutboundRtpMonitor` instance, calculating derived values like packet rate.
+-   **`visited`** (`boolean`): A getter that returns whether the `OutboundRtpMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`createSample(): OutboundRtpStats`**: Creates and returns a complete `OutboundRtpStats` object, which can be used by the `ClientMonitor` to generate a `ClientSample`.
+-   **`accept(stats: Omit<OutboundRtpStats, 'appData'>): void`**: Accepts new `OutboundRtpStats` and updates the internal fields of the `OutboundRtpMonitor` instance, calculating derived values like packet rate.
 
 #### **Navigational Methods:**
 
-* **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `OutboundRtpMonitor` belongs to.
-* **`getRemoteInboundRtp()`**: Navigates to the corresponding inbound RTP stats for the remote peer identified by the `ssrc`.
-* **`getCodec()`**: Retrieves the `CodecMonitor` associated with the current `codecId`.
-* **`getMediaSource()`**: Retrieves the `MediaSourceMonitor` associated with the current `mediaSourceId`.
-* **`getTrack()`**: Retrieves the media track associated with this outbound RTP, either through the `MediaSourceMonitor` or from the outbound tracks of the peer connection.
-
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `OutboundRtpMonitor` belongs to.
+-   **`getRemoteInboundRtp()`**: Navigates to the corresponding inbound RTP stats for the remote peer identified by the `ssrc`.
+-   **`getCodec()`**: Retrieves the `CodecMonitor` associated with the current `codecId`.
+-   **`getMediaSource()`**: Retrieves the `MediaSourceMonitor` associated with the current `mediaSourceId`.
+-   **`getTrack()`**: Retrieves the media track associated with this outbound RTP, either through the `MediaSourceMonitor` or from the outbound tracks of the peer connection.
 
 ### `OutboundTrackMonitor`
 
@@ -954,25 +949,25 @@ The `OutboundTrackMonitor` tracks and manages statistics related to an outbound 
 
 #### **Properties:**
 
-* **`direction`** (`'outbound'`): The direction of the track, indicating that this is an outbound monitor.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
-* **`detectors`** (`Detectors`): Instance of the `Detectors` class used for performance monitoring and detecting issues on the track.
-* **`mappedOutboundRtp`** (`Map<number, OutboundRtpMonitor>`): A map of `OutboundRtpMonitor` instances, keyed by the SSRC, to monitor the RTP stats associated with the track.
-* **`contentType`** (`'lowmotion' | 'highmotion' | 'standard'`): The type of content being transmitted on the track, which could impact performance.
-* **`calculatedScore`** (`CalculatedScore`): The calculated score for the track based on various performance metrics, including weight, value, and remarks.
-* **`score`** (`number | undefined`): A derived value representing the current score for the track's performance.
+-   **`direction`** (`'outbound'`): The direction of the track, indicating that this is an outbound monitor.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`detectors`** (`Detectors`): Instance of the `Detectors` class used for performance monitoring and detecting issues on the track.
+-   **`mappedOutboundRtp`** (`Map<number, OutboundRtpMonitor>`): A map of `OutboundRtpMonitor` instances, keyed by the SSRC, to monitor the RTP stats associated with the track.
+-   **`contentType`** (`'lowmotion' | 'highmotion' | 'standard'`): The type of content being transmitted on the track, which could impact performance.
+-   **`calculatedScore`** (`CalculatedScore`): The calculated score for the track based on various performance metrics, including weight, value, and remarks.
+-   **`score`** (`number | undefined`): A derived value representing the current score for the track's performance.
 
 #### **Methods:**
 
-* **`getPeerConnection()`**: Retrieves the `PeerConnectionMonitor` that the track is part of.
-* **`get kind()`**: Retrieves the media kind (audio, video, etc.) of the track from the associated `MediaSourceMonitor`.
-* **`update()`**: Updates the performance statistics for the outbound track, recalculating bitrate, jitter, fraction lost, sending packet rate, and remote received packet rate based on the values from the associated `OutboundRtpMonitor` instances.
-* **`getOutboundRtps()`**: Retrieves an array of all `OutboundRtpMonitor` instances currently mapped to the track.
-* **`getHighestLayer()`**: Retrieves the `OutboundRtpMonitor` with the highest bitrate, representing the highest quality RTP stream on the track.
+-   **`getPeerConnection()`**: Retrieves the `PeerConnectionMonitor` that the track is part of.
+-   **`get kind()`**: Retrieves the media kind (audio, video, etc.) of the track from the associated `MediaSourceMonitor`.
+-   **`update()`**: Updates the performance statistics for the outbound track, recalculating bitrate, jitter, fraction lost, sending packet rate, and remote received packet rate based on the values from the associated `OutboundRtpMonitor` instances.
+-   **`getOutboundRtps()`**: Retrieves an array of all `OutboundRtpMonitor` instances currently mapped to the track.
+-   **`getHighestLayer()`**: Retrieves the `OutboundRtpMonitor` with the highest bitrate, representing the highest quality RTP stream on the track.
 
 #### **Navigational Methods:**
 
-* **`getMediaSource()`**: Retrieves the `MediaSourceMonitor` associated with the track identifier.
+-   **`getMediaSource()`**: Retrieves the `MediaSourceMonitor` associated with the track identifier.
 
 ### `PeerConnectionMonitor`
 
@@ -980,84 +975,84 @@ The `PeerConnectionMonitor` class manages and tracks WebRTC peer connection stat
 
 #### Properties:
 
-- **`appData`** (`Record<string, unknown> | undefined`): Custom application data associated with the peer connection.
-- **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData`** (`Record<string, unknown> | undefined`): Custom application data associated with the peer connection.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
-- **`peerConnectionId`** (`string`): The unique identifier for the peer connection being monitored.
-- **`detectors`** (`Detectors`): An instance of the `Detectors` class used for tracking performance trends, such as connection establishment time and congestion.
-* **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
-- **`mappedCodecMonitors`** (`Map<string, CodecMonitor>`): A map of `CodecMonitor` instances, keyed by codec name, to monitor the RTP codec statistics for the connection.
-- **`mappedInboundRtpMonitors`** (`Map<number, InboundRtpMonitor>`): A map of `InboundRtpMonitor` instances, keyed by SSRC, to monitor incoming RTP streams for the connection.
-- **`mappedRemoteOutboundRtpMonitors`** (`Map<number, RemoteOutboundRtpMonitor>`): A map of `RemoteOutboundRtpMonitor` instances to track remote outbound RTP statistics.
-- **`mappedOutboundRtpMonitors`** (`Map<number, OutboundRtpMonitor>`): A map of `OutboundRtpMonitor` instances to track the outbound RTP streams.
-- **`mappedDataChannelMonitors`** (`Map<string, DataChannelMonitor>`): A map of `DataChannelMonitor` instances, keyed by the data channel ID, to monitor the data channels for the connection.
-- **`mappedMediaSourceMonitors`** (`Map<string, MediaSourceMonitor>`): A map of `MediaSourceMonitor` instances to monitor media sources used in the peer connection.
-- **`mappedMediaPlayoutMonitors`** (`Map<string, MediaPlayoutMonitor>`): A map of `MediaPlayoutMonitor` instances to monitor the playout of media for the connection.
-- **`mappedPeerConnectionTransportMonitors`** (`Map<string, PeerConnectionTransportMonitor>`): A map of `PeerConnectionTransportMonitor` instances, keyed by transport ID, to monitor transport layer statistics.
-- **`mappedIceTransportMonitors`** (`Map<string, IceTransportMonitor>`): A map of `IceTransportMonitor` instances, keyed by transport ID, to monitor ICE transport statistics.
-- **`mappedIceCandidateMonitors`** (`Map<string, IceCandidateMonitor>`): A map of `IceCandidateMonitor` instances to monitor ICE candidates for the connection.
-- **`mappedIceCandidatePairMonitors`** (`Map<string, IceCandidatePairMonitor>`): A map of `IceCandidatePairMonitor` instances to monitor ICE candidate pairs for the connection.
-- **`mappedCertificateMonitors`** (`Map<string, CertificateMonitor>`): A map of `CertificateMonitor` instances to monitor certificates used by the peer connection.
+-   **`peerConnectionId`** (`string`): The unique identifier for the peer connection being monitored.
+-   **`detectors`** (`Detectors`): An instance of the `Detectors` class used for tracking performance trends, such as connection establishment time and congestion.
 
-- **`closed`** (`boolean`): Indicates whether the peer connection has been closed.
-- **`sendingAudioBitrate`** (`number | undefined`): The current bitrate for sending audio.
-- **`sendingVideoBitrate`** (`number | undefined`): The current bitrate for sending video.
-- **`sendingFractionLost`** (`number | undefined`): The fraction of packets lost when sending.
-- **`receivingAudioBitrate`** (`number | undefined`): The current bitrate for receiving audio.
-- **`receivingVideoBitrate`** (`number | undefined`): The current bitrate for receiving video.
-- **`outboundFractionLost`** (`number`): The fraction of packets lost on outbound streams.
-- **`inboundFractionalLost`** (`number`): The fraction of packets lost on inbound streams.
-- **`totalInboundPacketsLost`** (`number`): Total number of inbound packets lost.
-- **`totalInboundPacketsReceived`** (`number`): Total number of inbound packets received.
-- **`totalOutboundPacketsSent`** (`number`): Total number of outbound packets sent.
-- **`totalOutboundPacketsReceived`** (`number`): Total number of outbound packets received.
-- **`totalOutboundPacketsLost`** (`number`): Total number of outbound packets lost.
-- **`totalDataChannelBytesSent`** (`number`): Total number of bytes sent via data channels.
-- **`totalDataChannelBytesReceived`** (`number`): Total number of bytes received via data channels.
-- **`totalSentAudioBytes`** (`number`): Total number of audio bytes sent.
-- **`totalSentVideoBytes`** (`number`): Total number of video bytes sent.
-- **`totalReceivedAudioBytes`** (`number`): Total number of audio bytes received.
-- **`totalReceivedVideoBytes`** (`number`): Total number of video bytes received.
-- **`totalAvailableIncomingBitrate`** (`number | undefined`): The total available incoming bitrate.
-- **`totalAvailableOutgoingBitrate`** (`number | undefined`): The total available outgoing bitrate.
-- **`deltaInboundPacketsLost`** (`number | undefined`): Change in the number of inbound packets lost since the last update.
-- **`deltaInboundPacketsReceived`** (`number | undefined`): Change in the number of inbound packets received since the last update.
-- **`deltaOutboundPacketsSent`** (`number | undefined`): Change in the number of outbound packets sent since the last update.
-- **`deltaOutboundPacketsReceived`** (`number | undefined`): Change in the number of outbound packets received since the last update.
-- **`deltaOutboundPacketsLost`** (`number | undefined`): Change in the number of outbound packets lost since the last update.
-- **`deltaDataChannelBytesSent`** (`number | undefined`): Change in the number of bytes sent via data channels.
-- **`deltaDataChannelBytesReceived`** (`number | undefined`): Change in the number of bytes received via data channels.
-- **`deltaSentAudioBytes`** (`number | undefined`): Change in the number of audio bytes sent.
-- **`deltaSentVideoBytes`** (`number | undefined`): Change in the number of video bytes sent.
-- **`deltaReceivedAudioBytes`** (`number | undefined`): Change in the number of audio bytes received.
-- **`deltaReceivedVideoBytes`** (`number | undefined`): Change in the number of video bytes received.
-- **`highestSeenSendingBitrate`** (`number | undefined`): The highest bitrate seen for sending (audio + video).
-- **`highestSeenReceivingBitrate`** (`number | undefined`): The highest bitrate seen for receiving (audio + video).
-- **`highestSeenAvailableOutgoingBitrate`** (`number | undefined`): The highest available outgoing bitrate seen.
-- **`highestSeenAvailableIncomingBitrate`** (`number | undefined`): The highest available incoming bitrate seen.
-- **`avgRttInSec`** (`number | undefined`): The average round-trip time (RTT) in seconds.
-- **`ewmaRttInSec`** (`number | undefined`): The exponentially weighted moving average (EWMA) of RTT in seconds.
-- **`connectingStartedAt`** (`number | undefined`): The timestamp when the connection started being established.
-- **`connectedAt`** (`number | undefined`): The timestamp when the connection was established.
-- **`iceState`** (`W3C.RtcIceTransportState | undefined`): The current state of the ICE transport.
-- **`usingTURN`** (`boolean | undefined`): Indicates if TURN is being used for the connection.
-- **`usingTCP`** (`boolean | undefined`): Indicates if TCP is being used for the connection.
-- **`calculatedStabilityScore`** (`CalculatedPeerConnectionScores`): The calculated score for the connection's stability, based on various performance metrics.
+*   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
-- **`codecs`** (`CodecMonitor[]`): Returns an array of all `CodecMonitor` instances currently mapped to the peer connection.
-- **`inboundRtps`** (`InboundRtpMonitor[]`): Returns an array of all `InboundRtpMonitor` instances currently mapped to the peer connection.
-- **`remoteOutboundRtps`** (`RemoteOutboundRtpMonitor[]`): Returns an array of all `RemoteOutboundRtpMonitor` instances currently mapped to the peer connection.
-- **`outboundRtps`** (`OutboundRtpMonitor[]`): Returns an array of all `OutboundRtpMonitor` instances currently mapped to the peer connection.
-- **`remoteInboundRtps`** (`RemoteInboundRtpMonitor[]`): Returns an array of all `RemoteInboundRtpMonitor` instances currently mapped to the peer connection.
-- **`mediaSources`** (`MediaSourceMonitor[]`): Returns an array of all `MediaSourceMonitor` instances
+-   **`mappedCodecMonitors`** (`Map<string, CodecMonitor>`): A map of `CodecMonitor` instances, keyed by codec name, to monitor the RTP codec statistics for the connection.
+-   **`mappedInboundRtpMonitors`** (`Map<number, InboundRtpMonitor>`): A map of `InboundRtpMonitor` instances, keyed by SSRC, to monitor incoming RTP streams for the connection.
+-   **`mappedRemoteOutboundRtpMonitors`** (`Map<number, RemoteOutboundRtpMonitor>`): A map of `RemoteOutboundRtpMonitor` instances to track remote outbound RTP statistics.
+-   **`mappedOutboundRtpMonitors`** (`Map<number, OutboundRtpMonitor>`): A map of `OutboundRtpMonitor` instances to track the outbound RTP streams.
+-   **`mappedDataChannelMonitors`** (`Map<string, DataChannelMonitor>`): A map of `DataChannelMonitor` instances, keyed by the data channel ID, to monitor the data channels for the connection.
+-   **`mappedMediaSourceMonitors`** (`Map<string, MediaSourceMonitor>`): A map of `MediaSourceMonitor` instances to monitor media sources used in the peer connection.
+-   **`mappedMediaPlayoutMonitors`** (`Map<string, MediaPlayoutMonitor>`): A map of `MediaPlayoutMonitor` instances to monitor the playout of media for the connection.
+-   **`mappedPeerConnectionTransportMonitors`** (`Map<string, PeerConnectionTransportMonitor>`): A map of `PeerConnectionTransportMonitor` instances, keyed by transport ID, to monitor transport layer statistics.
+-   **`mappedIceTransportMonitors`** (`Map<string, IceTransportMonitor>`): A map of `IceTransportMonitor` instances, keyed by transport ID, to monitor ICE transport statistics.
+-   **`mappedIceCandidateMonitors`** (`Map<string, IceCandidateMonitor>`): A map of `IceCandidateMonitor` instances to monitor ICE candidates for the connection.
+-   **`mappedIceCandidatePairMonitors`** (`Map<string, IceCandidatePairMonitor>`): A map of `IceCandidatePairMonitor` instances to monitor ICE candidate pairs for the connection.
+-   **`mappedCertificateMonitors`** (`Map<string, CertificateMonitor>`): A map of `CertificateMonitor` instances to monitor certificates used by the peer connection.
 
+-   **`closed`** (`boolean`): Indicates whether the peer connection has been closed.
+-   **`sendingAudioBitrate`** (`number | undefined`): The current bitrate for sending audio.
+-   **`sendingVideoBitrate`** (`number | undefined`): The current bitrate for sending video.
+-   **`sendingFractionLost`** (`number | undefined`): The fraction of packets lost when sending.
+-   **`receivingAudioBitrate`** (`number | undefined`): The current bitrate for receiving audio.
+-   **`receivingVideoBitrate`** (`number | undefined`): The current bitrate for receiving video.
+-   **`outboundFractionLost`** (`number`): The fraction of packets lost on outbound streams.
+-   **`inboundFractionalLost`** (`number`): The fraction of packets lost on inbound streams.
+-   **`totalInboundPacketsLost`** (`number`): Total number of inbound packets lost.
+-   **`totalInboundPacketsReceived`** (`number`): Total number of inbound packets received.
+-   **`totalOutboundPacketsSent`** (`number`): Total number of outbound packets sent.
+-   **`totalOutboundPacketsReceived`** (`number`): Total number of outbound packets received.
+-   **`totalOutboundPacketsLost`** (`number`): Total number of outbound packets lost.
+-   **`totalDataChannelBytesSent`** (`number`): Total number of bytes sent via data channels.
+-   **`totalDataChannelBytesReceived`** (`number`): Total number of bytes received via data channels.
+-   **`totalSentAudioBytes`** (`number`): Total number of audio bytes sent.
+-   **`totalSentVideoBytes`** (`number`): Total number of video bytes sent.
+-   **`totalReceivedAudioBytes`** (`number`): Total number of audio bytes received.
+-   **`totalReceivedVideoBytes`** (`number`): Total number of video bytes received.
+-   **`totalAvailableIncomingBitrate`** (`number | undefined`): The total available incoming bitrate.
+-   **`totalAvailableOutgoingBitrate`** (`number | undefined`): The total available outgoing bitrate.
+-   **`deltaInboundPacketsLost`** (`number | undefined`): Change in the number of inbound packets lost since the last update.
+-   **`deltaInboundPacketsReceived`** (`number | undefined`): Change in the number of inbound packets received since the last update.
+-   **`deltaOutboundPacketsSent`** (`number | undefined`): Change in the number of outbound packets sent since the last update.
+-   **`deltaOutboundPacketsReceived`** (`number | undefined`): Change in the number of outbound packets received since the last update.
+-   **`deltaOutboundPacketsLost`** (`number | undefined`): Change in the number of outbound packets lost since the last update.
+-   **`deltaDataChannelBytesSent`** (`number | undefined`): Change in the number of bytes sent via data channels.
+-   **`deltaDataChannelBytesReceived`** (`number | undefined`): Change in the number of bytes received via data channels.
+-   **`deltaSentAudioBytes`** (`number | undefined`): Change in the number of audio bytes sent.
+-   **`deltaSentVideoBytes`** (`number | undefined`): Change in the number of video bytes sent.
+-   **`deltaReceivedAudioBytes`** (`number | undefined`): Change in the number of audio bytes received.
+-   **`deltaReceivedVideoBytes`** (`number | undefined`): Change in the number of video bytes received.
+-   **`highestSeenSendingBitrate`** (`number | undefined`): The highest bitrate seen for sending (audio + video).
+-   **`highestSeenReceivingBitrate`** (`number | undefined`): The highest bitrate seen for receiving (audio + video).
+-   **`highestSeenAvailableOutgoingBitrate`** (`number | undefined`): The highest available outgoing bitrate seen.
+-   **`highestSeenAvailableIncomingBitrate`** (`number | undefined`): The highest available incoming bitrate seen.
+-   **`avgRttInSec`** (`number | undefined`): The average round-trip time (RTT) in seconds.
+-   **`ewmaRttInSec`** (`number | undefined`): The exponentially weighted moving average (EWMA) of RTT in seconds.
+-   **`connectingStartedAt`** (`number | undefined`): The timestamp when the connection started being established.
+-   **`connectedAt`** (`number | undefined`): The timestamp when the connection was established.
+-   **`iceState`** (`W3C.RtcIceTransportState | undefined`): The current state of the ICE transport.
+-   **`usingTURN`** (`boolean | undefined`): Indicates if TURN is being used for the connection.
+-   **`usingTCP`** (`boolean | undefined`): Indicates if TCP is being used for the connection.
+-   **`calculatedStabilityScore`** (`CalculatedPeerConnectionScores`): The calculated score for the connection's stability, based on various performance metrics.
+
+-   **`codecs`** (`CodecMonitor[]`): Returns an array of all `CodecMonitor` instances currently mapped to the peer connection.
+-   **`inboundRtps`** (`InboundRtpMonitor[]`): Returns an array of all `InboundRtpMonitor` instances currently mapped to the peer connection.
+-   **`remoteOutboundRtps`** (`RemoteOutboundRtpMonitor[]`): Returns an array of all `RemoteOutboundRtpMonitor` instances currently mapped to the peer connection.
+-   **`outboundRtps`** (`OutboundRtpMonitor[]`): Returns an array of all `OutboundRtpMonitor` instances currently mapped to the peer connection.
+-   **`remoteInboundRtps`** (`RemoteInboundRtpMonitor[]`): Returns an array of all `RemoteInboundRtpMonitor` instances currently mapped to the peer connection.
+-   **`mediaSources`** (`MediaSourceMonitor[]`): Returns an array of all `MediaSourceMonitor` instances
 
 #### Methods:
 
- * **`getStats()`**: Retrieves and returns the statistics for the peer connection. It emits the `stats` event and updates internal performance metrics.
- * **`accept(stats: W3C.RtcStats[])`**: Accepts an array of `RtcStats` objects and updates the internal state based on the data. It recalculates various metrics like RTT, available bitrates, and packet loss.
- * **`createSample(): PeerConnectionSample`**: Creates and returns a complete `PeerConnectionSample` object, which can be used by the `ClientMonitor` to generate a `ClientSample`.
-
+-   **`getStats()`**: Retrieves and returns the statistics for the peer connection. It emits the `stats` event and updates internal performance metrics.
+-   **`accept(stats: W3C.RtcStats[])`**: Accepts an array of `RtcStats` objects and updates the internal state based on the data. It recalculates various metrics like RTT, available bitrates, and packet loss.
+-   **`createSample(): PeerConnectionSample`**: Creates and returns a complete `PeerConnectionSample` object, which can be used by the `ClientMonitor` to generate a `ClientSample`.
 
 ### `PeerConnectionTransportMonitor`
 
@@ -1067,20 +1062,18 @@ The `PeerConnectionTransportMonitor` class tracks transport layer statistics for
 
 Contains all the fields of the [PeerConnectionTransportStats](https://www.w3.org/TR/webrtc-stats/#peerconnectiontransportstats-dict*) stats, plus the following:
 
-- **`appData?`** (`Record<string, unknown>` or `undefined`): Optional custom application data associated with the transport stats.
-- **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
-
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional custom application data associated with the transport stats.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
 #### **Methods:**
 
-- **`visited`** (`boolean`): A getter that returns whether the `PeerConnectionTransportMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
-- **`accept(stats: Omit<PeerConnectionTransportStats, 'appData'>): void`**: Accepts new `PeerConnectionTransportStats` and updates the internal fields, excluding `appData`. It calculates any derived fields as necessary.
-- **`createSample()`**: Creates and returns a sample of the `PeerConnectionTransportStats` with the current stats.
+-   **`visited`** (`boolean`): A getter that returns whether the `PeerConnectionTransportMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`accept(stats: Omit<PeerConnectionTransportStats, 'appData'>): void`**: Accepts new `PeerConnectionTransportStats` and updates the internal fields, excluding `appData`. It calculates any derived fields as necessary.
+-   **`createSample()`**: Creates and returns a sample of the `PeerConnectionTransportStats` with the current stats.
 
 #### **Navigational Methods:**
 
-- **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this transport monitor belongs to.
-
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this transport monitor belongs to.
 
 ### `RemoteInboundRtpMonitor`
 
@@ -1090,23 +1083,23 @@ The `RemoteInboundRtpMonitor` class tracks the remote inbound RTP statistics for
 
 Contains all the fields of the [RemoteInboundRtpStats](https://www.w3.org/TR/webrtc-stats/#remoteinboundrtpstats-dict*) stats, plus the following:
 
-- **`appData?`** (`Record<string, unknown>` or `undefined`): Optional custom application data associated with the remote inbound RTP stats.
-- **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional custom application data associated with the remote inbound RTP stats.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
-- **`packetRate?`** (`number` or `undefined`): The packet rate (packets per second) for the remote inbound RTP stream.
-- **`deltaPacketsLost?`** (`number` or `undefined`): The change in the number of packets lost since the last update.
-- **`visited`** (`boolean`): A getter that returns whether the monitor has been visited. Initially `true`, it is reset to `false` after being accessed once.
+-   **`packetRate?`** (`number` or `undefined`): The packet rate (packets per second) for the remote inbound RTP stream.
+-   **`deltaPacketsLost?`** (`number` or `undefined`): The change in the number of packets lost since the last update.
+-   **`visited`** (`boolean`): A getter that returns whether the monitor has been visited. Initially `true`, it is reset to `false` after being accessed once.
 
 #### **Methods:**
 
-- **`accept(stats: Omit<RemoteInboundRtpStats, 'appData'>): void`**: Accepts a new set of `RemoteInboundRtpStats` (excluding `appData`) and updates the internal fields of the monitor. It calculates derived values such as packet rate and delta packets lost.
-- **`createSample()`**: Creates and returns a sample of `RemoteInboundRtpStats` with the current statistics.
+-   **`accept(stats: Omit<RemoteInboundRtpStats, 'appData'>): void`**: Accepts a new set of `RemoteInboundRtpStats` (excluding `appData`) and updates the internal fields of the monitor. It calculates derived values such as packet rate and delta packets lost.
+-   **`createSample()`**: Creates and returns a sample of `RemoteInboundRtpStats` with the current statistics.
 
 #### **Navigational Methods:**
 
-- **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `RemoteInboundRtpMonitor` belongs to.
-- **`getOutboundRtp()`**: Navigates to the corresponding outbound RTP stats for the remote peer identified by the `ssrc`.
-- **`getCodec()`**: Retrieves the `CodecMonitor` associated with the current `codecId`.
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this `RemoteInboundRtpMonitor` belongs to.
+-   **`getOutboundRtp()`**: Navigates to the corresponding outbound RTP stats for the remote peer identified by the `ssrc`.
+-   **`getCodec()`**: Retrieves the `CodecMonitor` associated with the current `codecId`.
 
 ### `RemoteOutboundRtpMonitor`
 
@@ -1116,53 +1109,52 @@ Contains all the fields of the [RemoteOutboundRtpStats](https://www.w3.org/TR/we
 
 #### **Properties:**
 
-- **`appData?`** (`Record<string, unknown>` or `undefined`): Optional custom application data associated with the outbound RTP stats.
-- **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
+-   **`appData?`** (`Record<string, unknown>` or `undefined`): Optional custom application data associated with the outbound RTP stats.
+-   **`attachments?`** (`Record<string, unknown>` or `undefined`): Optional additional data to be included in the sample. This data is not used by the monitor but is included in the sample.
 
-- **`bitrate?`** (`number` or `undefined`): Derived field representing the bitrate of the remote outbound RTP stream.
-- **`visited`** (`boolean`): A getter that returns whether the `RemoteOutboundRtpMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
+-   **`bitrate?`** (`number` or `undefined`): Derived field representing the bitrate of the remote outbound RTP stream.
+-   **`visited`** (`boolean`): A getter that returns whether the `RemoteOutboundRtpMonitor` has been visited. It is used to manage the lifecycle of stats and is reset after each access.
 
 #### **Methods:**
 
-- **`accept(stats: Omit<RemoteOutboundRtpStats, 'appData'>): void`**: Accepts new `RemoteOutboundRtpStats` and updates the internal fields, excluding `appData`. It calculates any derived fields as necessary.
-- **`createSample()`**: Creates and returns a sample of the `RemoteOutboundRtpStats` with the current stats.
+-   **`accept(stats: Omit<RemoteOutboundRtpStats, 'appData'>): void`**: Accepts new `RemoteOutboundRtpStats` and updates the internal fields, excluding `appData`. It calculates any derived fields as necessary.
+-   **`createSample()`**: Creates and returns a sample of the `RemoteOutboundRtpStats` with the current stats.
 
 #### **Navigational Methods:**
 
-- **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this remote outbound RTP monitor belongs to.
-- **`getInboundRtp()`**: Retrieves the corresponding inbound RTP stats for the remote peer identified by the `ssrc`.
-- **`getCodec()`**: Retrieves the `CodecMonitor` associated with the current `codecId`.
-
+-   **`getPeerConnection()`**: Navigates to the `PeerConnectionMonitor` this remote outbound RTP monitor belongs to.
+-   **`getInboundRtp()`**: Retrieves the corresponding inbound RTP stats for the remote peer identified by the `ssrc`.
+-   **`getCodec()`**: Retrieves the `CodecMonitor` associated with the current `codecId`.
 
 ## Examples
 
 ### Show key metrics on a call
 
-An instantiated client monitor can be used to access key metrics for a call, 
-such as audio and video bitrate, packet loss, and round-trip time (RTT). 
+An instantiated client monitor can be used to access key metrics for a call,
+such as audio and video bitrate, packet loss, and round-trip time (RTT).
 The following example demonstrates how to access these metrics using the client monitor:
 
 ```javascript
 const monitor = new ClientMonitor();
 
-monitor.on('stats-collected', (event) => {
-  const { clientMonitor } = event;
+monitor.on("stats-collected", (event) => {
+    const { clientMonitor } = event;
 
-  const audioBitrate = clientMonitor.sendingAudioBitrate;
-  const videoBitrate = clientMonitor.sendingVideoBitrate;
-  const packetLoss = clientMonitor.sendingFractionLost;
-  const rtt = clientMonitor.avgRttInSec;
+    const audioBitrate = clientMonitor.sendingAudioBitrate;
+    const videoBitrate = clientMonitor.sendingVideoBitrate;
+    const packetLoss = clientMonitor.sendingFractionLost;
+    const rtt = clientMonitor.avgRttInSec;
 
-  console.log(`Audio Bitrate: ${audioBitrate} bps`);
-  console.log(`Video Bitrate: ${videoBitrate} bps`);
-  console.log(`Packet Loss: ${packetLoss}%`);
-  console.log(`Round-Trip Time: ${rtt} seconds`);
-})
+    console.log(`Audio Bitrate: ${audioBitrate} bps`);
+    console.log(`Video Bitrate: ${videoBitrate} bps`);
+    console.log(`Packet Loss: ${packetLoss}%`);
+    console.log(`Round-Trip Time: ${rtt} seconds`);
+});
 ```
 
-Each monitor instance provides access to stats related to its specific area of monitoring. 
-For example `InboundRtpMonitor` provides access to inbound RTP stats, additionally there 
-are derivated metrics calculated each time new stats assigned to the monitor, 
+Each monitor instance provides access to stats related to its specific area of monitoring.
+For example `InboundRtpMonitor` provides access to inbound RTP stats, additionally there
+are derivated metrics calculated each time new stats assigned to the monitor,
 For example `bitrate` is calculated between two inbound rtp stats `bytesReceived` property.
 
 ### Detect network issues
@@ -1174,19 +1166,19 @@ detect network congestion:
 ```javascript
 const monitor = new ClientMonitor();
 
-monitor.on('congestion', (event) => {
-  const { 
-    peerConnectionMonitor, 
-    availableOutgoingBitrate,
-    availableIncomingBitrate,
-    maxAvailableOutgoingBitrate,
-    maxAvailableIncomingBitrate,
-    maxSendingBitrate,
-    maxReceivingBitrate, 
-  } = event;
+monitor.on("congestion", (event) => {
+    const {
+        peerConnectionMonitor,
+        availableOutgoingBitrate,
+        availableIncomingBitrate,
+        maxAvailableOutgoingBitrate,
+        maxAvailableIncomingBitrate,
+        maxSendingBitrate,
+        maxReceivingBitrate,
+    } = event;
 
-  console.log(
-    `
+    console.log(
+        `
     Network congestion detected on peer connection ${peerConnectionMonitor.peerConnectionId}.
     The highest estimated available outgoing bitrate was ${maxAvailableOutgoingBitrate} bps.
     The highest estimated available incoming bitrate was ${maxAvailableIncomingBitrate} bps.
@@ -1195,7 +1187,7 @@ monitor.on('congestion', (event) => {
     The current available outgoing bitrate is ${availableOutgoingBitrate} bps.
     The current available incoming bitrate is ${availableIncomingBitrate} bps.
     `
-  );
+    );
 });
 ```
 
@@ -1208,26 +1200,24 @@ If `visited` is `false`, the underlying media entity is considered to be outdate
 
 The `ClientMonitor` emits events when new monitor is added.
 
-
-
 ```javascript
-import { ClientMonitor } from 'webrtc-monitor';
+import { ClientMonitor } from "webrtc-monitor";
 
 const monitor = new ClientMonitor();
 
-monitor.on('new-codec-monitor', (event) => {
-  const { codecMonitor } = event;
-  console.log(`New codec monitor added: ${codecMonitor.id}`);
+monitor.on("new-codec-monitor", (event) => {
+    const { codecMonitor } = event;
+    console.log(`New codec monitor added: ${codecMonitor.id}`);
 });
 
-monitor.on('new-inbound-rtp-monitor', (event) => {
-  const { inboundRtpMonitor } = event;
-  console.log(`New inbound RTP monitor added: ${inboundRtpMonitor.id}`);
+monitor.on("new-inbound-rtp-monitor", (event) => {
+    const { inboundRtpMonitor } = event;
+    console.log(`New inbound RTP monitor added: ${inboundRtpMonitor.id}`);
 });
 
-monitor.on('new-inbound-track-monitor', (event) => {
-  const { inboundTrackMonitor } = event;
-  console.log(`New inbound Track monitor added. trackId: ${inboundTrackMonitor.track.id}`);
+monitor.on("new-inbound-track-monitor", (event) => {
+    const { inboundTrackMonitor } = event;
+    console.log(`New inbound Track monitor added. trackId: ${inboundTrackMonitor.track.id}`);
 });
 ```
 
@@ -1254,9 +1244,9 @@ monitor.on('new-inbound-track-monitor', (event) => {
             bitrate: inboundTrackMonitor.bitrate,
           }
         });
-      } 
+      }
       // Custom logic to detect issues
-      
+
     }
   }());
 });
@@ -1265,26 +1255,23 @@ monitor.on('new-inbound-track-monitor', (event) => {
 The above example demonstrates how to add a custom detector to an `InboundTrackMonitor` instance.
 The detector checks if the bitrate of the track is below a certain threshold and adds an issue to the `ClientMonitor` if the condition is met.
 
-
 ### Show reasons for a low score
-
-
 
 ### Add `appData` and `attachments`
 
 ```javascript
-monitor.on('new-inbound-track-monitor', (event) => {
-  const { clientMonitor, inboundTrackMonitor } = event;
+monitor.on("new-inbound-track-monitor", (event) => {
+    const { clientMonitor, inboundTrackMonitor } = event;
 
-  // Add custom data to the inbound track monitor used by the application
-  inboundTrackMonitor.appData = {
-    mediaElement: MediaElementRef
-  };
+    // Add custom data to the inbound track monitor used by the application
+    inboundTrackMonitor.appData = {
+        mediaElement: MediaElementRef,
+    };
 
-  // Add attachments to the inbound track monitor will be attached to the sample
-  inboundTrackMonitor.attachments = {
-    customData: 'customValue'
-  };
+    // Add attachments to the inbound track monitor will be attached to the sample
+    inboundTrackMonitor.attachments = {
+        customData: "customValue",
+    };
 });
 ```
 
@@ -1292,18 +1279,18 @@ monitor.on('new-inbound-track-monitor', (event) => {
 
 ### No stats received
 
-Check if peer connection is added to the `ClientMonitor` instance. 
+Check if peer connection is added to the `ClientMonitor` instance.
 
 ```javascript
 const monitor = new ClientMonitor();
 
-console.log('Peer connections:', monitor.peerConnections);
+console.log("Peer connections:", monitor.peerConnections);
 ```
 
 If there are peer connections ensure the `collect()` method is called on the `ClientMonitor` instance to collect the stats. You can check the last time stats were collected using the `lastCollectingStatsAt` property.
 
 ```javascript
-console.log('Last stats collected at:', monitor.lastCollectingStatsAt);
+console.log("Last stats collected at:", monitor.lastCollectingStatsAt);
 ```
 
 ## Sampling Schema
@@ -1312,12 +1299,11 @@ The `createSample()` method is used by the `ClientMonitor` to generate a `Client
 
 ```javascript
 console.log(ClientMonitor.samplingSchemaVersion);
-``` 
+```
 
-The schema is developer [here](https://github.com/observertc/schema), and converted to 
-different language bindings. If you maintain a server and client side of the application, 
+The schema is developer [here](https://github.com/observertc/schema), and converted to
+different language bindings. If you maintain a server and client side of the application,
 you need to ensure the schema versions are compatible between the server and client.
-
 
 ## FAQ
 
@@ -1336,7 +1322,3 @@ The `ClientMonitor` instance emits `sample` event with the sample object, which 
 The samples can be serialized using JSON.stringify() or any other serialization mechanism. The samples are plain JavaScript objects that can be easily serialized and sent over the network.
 
 `@observertc/samples-encoder` and `@observertc/samples-decoder` packages are provided to encode and decode the samples developed by the `@observertc/schema` package.
-
-
-
-

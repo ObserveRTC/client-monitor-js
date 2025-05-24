@@ -141,7 +141,7 @@ export class ClientEventPayloadProvider {
 			case ClientEventTypes.DATA_CHANNEL_ERROR:
 				return this.createDataChannelErrorEventPayload(input as DataChannelErrorEventPayload);
 			case ClientEventTypes.NEGOTIATION_NEEDED:
-				return this.createNegotiationNeededEventPayload(input as PeerConnectionClosedEventPayload);
+				return this.createNegotiationNeededEventPayload(input as NegotiationNeededEventPayload);
 			case ClientEventTypes.SIGNALING_STATE_CHANGE:
 				return this.createSignalingStateChangedEventPayload(input as SignalingStateChangedEventPayload);
 			case ClientEventTypes.ICE_CANDIDATE:

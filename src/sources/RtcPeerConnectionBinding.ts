@@ -1,6 +1,5 @@
-import { ClientMonitor } from "..";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
-import { ClientEventTypes, IceCandidateErrorEventPayload, MediaTrackAddedEventPayload, MediaTrackMutedEventPayload, MediaTrackRemovedEventPayload, PeerConnectionClosedEventPayload, PeerConnectionOpenedEventPayload } from "../schema/ClientEventTypes";
+import { ClientEventTypes, IceCandidateErrorEventPayload } from "../schema/ClientEventTypes";
 import { ClientEventPayloadMap } from "./ClientEventPayloadProvider";
 
 export type RtcPeerConnectionEventerContext = {
@@ -73,7 +72,15 @@ export class RtcPeerConnectionBinding {
 	}
 
 	private _onIceCandidateError(evt: unknown) {
-		const event = evt as Partial<IceCandidateErrorEventPayload>;
+		// Type guard for RTCPeerConnectionIceErrorEvent properties
+		const event = evt as {
+			errorCode?: number;
+			errorText?: string;
+			address?: string | null;
+			port?: number | null;
+			url?: string | null;
+		};
+		
 		return this._fireEvent(ClientEventTypes.ICE_CANDIDATE_ERROR, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			errorCode: event?.errorCode,
@@ -113,7 +120,6 @@ export class RtcPeerConnectionBinding {
 	}
 
 	private _onIceCandidate(event: RTCPeerConnectionIceEvent) {
-		event.candidate?.address
 		return this._fireEvent(ClientEventTypes.ICE_CANDIDATE, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			...event.candidate,
@@ -141,8 +147,14 @@ export class RtcPeerConnectionBinding {
 	}
 
 	private _onTrack(event: RTCTrackEvent) {
-		event.track;
+		const track = event.track;
+		if (!track) return;
 
+		bindMediaStreamTrackEvents({
+			pcMonitor: this.monitor,
+			track: track,
+			fireEvent: this._fireEvent.bind(this),
+		});
 	}
 	
 
@@ -238,10 +250,10 @@ export function bindRtcDataChannelEvents(options: {
 	const { monitor, dataChannel, fireEvent } = options;
 	
 	dataChannel.onclose = () => fireEvent(ClientEventTypes.DATA_CHANNEL_CLOSED, {
+		peerConnectionId: monitor.peerConnectionId,
+		dataChannelId: dataChannel.id,
 		label: dataChannel.label,
 		readyState: dataChannel.readyState,
-		dataChannelId: dataChannel.id,
-		peerConnectionId: monitor.peerConnectionId,
 	});
 
 	dataChannel.onerror = (err) => {
@@ -249,10 +261,10 @@ export function bindRtcDataChannelEvents(options: {
 		fireEvent(
 			ClientEventTypes.DATA_CHANNEL_ERROR,
 			{
+				peerConnectionId: monitor.peerConnectionId,
+				dataChannelId: dataChannel.id,
 				label: dataChannel.label,
 				readyState: dataChannel.readyState,
-				dataChannelId: dataChannel.id,
-				peerConnectionId: monitor.peerConnectionId,
 				error: error?.error?.message,
 			}
 		);
@@ -261,10 +273,10 @@ export function bindRtcDataChannelEvents(options: {
 	dataChannel.onopen = () => fireEvent(
 		ClientEventTypes.DATA_CHANNEL_OPEN,
 		{
+			peerConnectionId: monitor.peerConnectionId,
+			dataChannelId: dataChannel.id,
 			label: dataChannel.label,
 			readyState: dataChannel.readyState,
-			dataChannelId: dataChannel.id,
-			peerConnectionId: monitor.peerConnectionId,
 		}
 	);
 

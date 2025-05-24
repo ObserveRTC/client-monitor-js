@@ -46,5 +46,15 @@ export class DryInboundTrackDetector implements Detector {
 			trackMonitor: this.trackMonitor,
 			clientMonitor: clientMonitor,
 		});
+
+		if (this.config.createIssue) {
+			clientMonitor.addIssue({
+				type: 'dry-inbound-track',
+				payload: {
+					trackId: this.trackMonitor.track.id,
+					duration,
+				}
+			});
+		}
 	}
 }

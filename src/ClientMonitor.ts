@@ -97,16 +97,20 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
             addClientLeftEventOnClose: config?.addClientLeftEventOnClose ?? true,
     
             videoFreezesDetector: config?.videoFreezesDetector ?? {
+                createIssue: true,
             },
             dryInboundTrackDetector: config?.dryInboundTrackDetector ?? {
                 thresholdInMs: 5000,
+                createIssue: true,
             },
             dryOutboundTrackDetector: config?.dryOutboundTrackDetector ?? {
                 thresholdInMs: 5000,
+                createIssue: true,
             },
             audioDesyncDetector: config?.audioDesyncDetector ?? {
                 fractionalCorrectionAlertOffThreshold: 0.1,
                 fractionalCorrectionAlertOnThreshold: 0.05,
+                createIssue: true,
             },
             syntheticSamplesDetector: {
                 minSynthesizedSamplesDuration: 0,
@@ -123,13 +127,16 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
                     lowWatermark: 5000,
                     highWatermark: 10000,
                 },
+                createIssue: true,
             },
             playoutDiscrepancyDetector: {
                 lowSkewThreshold: 2,
                 highSkewThreshold: 5,
+                createIssue: true,
             },
             longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
                 thresholdInMs: 5000,
+                createIssue: true,
             },
             bufferingEventsForSamples: config?.bufferingEventsForSamples ?? false,
         }
