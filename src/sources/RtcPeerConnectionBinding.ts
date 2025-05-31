@@ -1,5 +1,5 @@
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
-import { ClientEventTypes, IceCandidateErrorEventPayload } from "../schema/ClientEventTypes";
+import { ClientEventTypes } from "../schema/ClientEventTypes";
 import { ClientEventPayloadMap } from "./ClientEventPayloadProvider";
 
 export type RtcPeerConnectionEventerContext = {

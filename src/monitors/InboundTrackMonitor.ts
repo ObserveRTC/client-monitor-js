@@ -4,7 +4,7 @@ import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetecto
 import { DryInboundTrackDetector } from "../detectors/DryInboundTrackDetector";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
-import { OutboundTrackSample } from "../schema/ClientSample";
+import { InboundTrackSample } from "../schema/ClientSample";
 import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetector";
 
 export class InboundTrackMonitor {
@@ -84,7 +84,7 @@ export class InboundTrackMonitor {
 		this.detectors.update();
 	}
 
-	public createSample(): OutboundTrackSample {
+	public createSample(): InboundTrackSample {
 			let scoreReasons: string | undefined;
 			if (this.kind === 'audio') {
 				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundAudioScoreReasons?.(this.calculatedScore.reasons);

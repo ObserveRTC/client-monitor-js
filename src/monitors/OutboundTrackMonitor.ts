@@ -1,6 +1,6 @@
 import { Detectors } from "../detectors/Detectors";
 import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector";
-import { InboundTrackSample } from "../schema/ClientSample";
+import { OutboundTrackSample } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -98,7 +98,7 @@ export class OutboundTrackMonitor {
 		return highestLayer;
 	}
 
-	public createSample(): InboundTrackSample {
+	public createSample(): OutboundTrackSample {
 		let scoreReasons: string | undefined;
 		if (this.kind === 'audio') {
 			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundAudioScoreReasons?.(this.calculatedScore.reasons);

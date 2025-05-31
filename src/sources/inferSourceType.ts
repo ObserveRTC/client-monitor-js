@@ -8,14 +8,14 @@ export function inferSourceType(source: unknown): ClientMonitorSourceType | unde
     return undefined;
 }
 
-function isMediasoupTransport(source: any): boolean {
-    const constructorName = source?.constructor?.name;
+function isMediasoupTransport(source: unknown): boolean {
+    const constructorName = (source as any)?.constructor?.name;
 
     if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
         return true;
     }
 
-    if (typeof source !== 'object') {
+    if (typeof source !== 'object' || source === null) {
         return false;
     }
 
@@ -23,28 +23,28 @@ function isMediasoupTransport(source: any): boolean {
     
 }
 
-function isMediasoupDevice(source: any): boolean {
-    const constructorName = source?.constructor?.name;
+function isMediasoupDevice(source: unknown): boolean {
+    const constructorName = (source as any)?.constructor?.name;
 
     if (source instanceof mediasoup.types.Device || constructorName === mediasoup.types.Device.name) {
         return true;
     }
 
-    if (typeof source !== 'object') {
+    if (typeof source !== 'object' || source === null) {
         return false;
     }
 
     return 'handlerName' in source
 }
 
-function isRTCPeerConnection(source: any): boolean {
-    const constructorName = source?.constructor?.name;
+function isRTCPeerConnection(source: unknown): boolean {
+    const constructorName = (source as any)?.constructor?.name;
 
     if (source instanceof RTCPeerConnection || constructorName === RTCPeerConnection.name) {
         return true;
     }
 
-    if (typeof source !== 'object') {
+    if (typeof source !== 'object' || source === null) {
         return false;
     }
 

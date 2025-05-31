@@ -1,8 +1,3 @@
-type ReportAsIssueSettings = false | {
-    type?: string;
-    payload?: Record<string, unknown>;
-}
-
 export type AppliedClientMonitorConfig = {
     /**
      * A unique identifier for the client. This is typically provided by the application
