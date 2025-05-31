@@ -99,12 +99,20 @@ export class OutboundTrackMonitor {
 	}
 
 	public createSample(): InboundTrackSample {
+		let scoreReasons: string | undefined;
+		if (this.kind === 'audio') {
+			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundAudioScoreReasons?.(this.calculatedScore.reasons);
+		} else if (this.kind === 'video') {
+			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundVideoScoreReasons?.(this.calculatedScore.reasons);
+		}
+
 		return {
 			id: this.track.id,
 			kind: this.kind,
 			timestamp: Date.now(),
 			attachments: this.attachments,
 			score: this.score,
+			scoreReasons,
 		};
 	}
 }

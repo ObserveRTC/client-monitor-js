@@ -400,6 +400,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			inboundTracks: [ ...this.mappedInboundTracks.values() ].map(inboundTrack => inboundTrack.createSample()),
 			outboundTracks: [ ...this.mappedOutboundTracks.values() ].map(outboundTrack => outboundTrack.createSample()),
 			score: this.score,
+			scoreReasons: this.parent.scoreCalculator.encodePeerConnectionScoreReasons?.(this.calculatedStabilityScore.reasons)
 		}
 	}
 

@@ -62,6 +62,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     
     public avgRttInSec = -1;
     public score = 5.0;
+    public scoreReasons?: Record<string, number>;
     
     private _browser?: {
         name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown';
@@ -288,6 +289,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
         if (this.closed) return;
         
         this.score = score;
+        
         this.emit('score', {
             clientMonitor: this,
             clientScore: score,
@@ -309,6 +311,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
+            scoreReasons: this.scoreCalculator.encodeClientScoreReasons?.(this.scoreReasons),
         };
         this._clientEvents = [];
         this._clientMetaItems = [];

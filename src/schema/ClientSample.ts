@@ -96,7 +96,7 @@ export type ClientEvent = {
 }
 
 /**
-* Certificates
+* Certificate Stats
 */
 export type CertificateStats = {
 	/**
@@ -125,7 +125,7 @@ export type CertificateStats = {
 	base64Certificate?: string;
 
 	/**
-	* The certificate ID of the issuer (nullable).
+	* The certificate ID of the issuer.
 	*/
 	issuerCertificateId?: string;
 
@@ -146,7 +146,7 @@ export type IceCandidatePairStats = {
 	id: string;
 
 	/**
-	* The timestamp of when the stats were recorded, in seconds.
+	* The timestamp of when the stats were recorded, in milliseconds.
 	*/
 	timestamp: number;
 
@@ -165,7 +165,7 @@ export type IceCandidatePairStats = {
 	*/
 	remoteCandidateId?: string;
 
-	state?: "new" | "in-progress" | "waiting" | "failed" | "succeeded";
+	state?: "new" | "in-progress" | "waiting" | "failed" | "succeeded" | "cancelled" | "inprogress";
 	/**
 	* Whether this candidate pair has been nominated.
 	*/
@@ -283,7 +283,7 @@ export type IceCandidateStats = {
 	transportId?: string;
 
 	/**
-	* The IP address of the ICE candidate (nullable).
+	* The IP address of the ICE candidate.
 	*/
 	address?: string;
 
@@ -670,7 +670,7 @@ export type MediaSourceStats = {
 }
 
 /**
-* Remote Outbound RTPs
+* Remote Outbound RTP Stats
 */
 export type RemoteOutboundRtpStats = {
 	/**
@@ -777,7 +777,7 @@ export type QualityLimitationDurations = {
 }
 
 /**
-* Outbound RTPs
+* Outbound RTP Stats
 */
 export type OutboundRtpStats = {
 	/**
@@ -951,7 +951,7 @@ export type OutboundRtpStats = {
 	encoderImplementation?: string;
 
 	/**
-	* Indicates whether the encoder is power efficient.
+	* Indicates whether the encoder is power-efficient.
 	*/
 	powerEfficientEncoder?: boolean;
 
@@ -978,7 +978,7 @@ export type OutboundRtpStats = {
 }
 
 /**
-* Remote Inbound RTPs
+* Remote Inbound RTP Stats
 */
 export type RemoteInboundRtpStats = {
 	/**
@@ -1059,7 +1059,7 @@ export type RemoteInboundRtpStats = {
 }
 
 /**
-* Inbound RTPs
+* Inbound RTP Stats
 */
 export type InboundRtpStats = {
 	/**
@@ -1113,7 +1113,7 @@ export type InboundRtpStats = {
 	jitter?: number;
 
 	/**
-	* The MediaStream ID of the RTP stream.
+	* The media stream identification tag from the SDP media section.
 	*/
 	mid?: string;
 
@@ -1233,17 +1233,17 @@ export type InboundRtpStats = {
 	bytesReceived?: number;
 
 	/**
-	* Number of NACKs sent.
+	* Number of NACKs received.
 	*/
 	nackCount?: number;
 
 	/**
-	* Number of Full Intra Requests sent.
+	* Number of Full Intra Requests received.
 	*/
 	firCount?: number;
 
 	/**
-	* Number of Picture Loss Indications sent.
+	* Number of Picture Loss Indications received.
 	*/
 	pliCount?: number;
 
@@ -1465,9 +1465,14 @@ export type OutboundTrackSample = {
 	kind: string;
 
 	/**
-	* Calculated score for track (details should be added to attachments)
+	* Calculated score for track (details should be added to scoreReasons)
 	*/
 	score?: number;
+
+	/**
+	* Details for score calculation
+	*/
+	scoreReasons?: string;
 
 	/**
 	* Additional information attached to this stats
@@ -1496,9 +1501,14 @@ export type InboundTrackSample = {
 	kind: string;
 
 	/**
-	* Calculated score for track (details should be added to attachments)
+	* Calculated score for track (details should be added to scoreReasons)
 	*/
 	score?: number;
+
+	/**
+	* Details for score calculation
+	*/
+	scoreReasons?: string;
 
 	/**
 	* Additional information attached to this stats
@@ -1508,7 +1518,7 @@ export type InboundTrackSample = {
 }
 
 /**
-* docs
+* A sample containing statistics and metrics for a WebRTC peer connection
 */
 export type PeerConnectionSample = {
 	/**
@@ -1522,9 +1532,14 @@ export type PeerConnectionSample = {
 	attachments?: Record<string, unknown>;
 
 	/**
-	* Calculated score for peer connection (details should be added to attachments)
+	* Calculated score for peer connection (details should be added to scoreReasons)
 	*/
 	score?: number;
+
+	/**
+	* Details for score calculation
+	*/
+	scoreReasons?: string;
 
 	/**
 	* Inbound Track Stats items
@@ -1542,22 +1557,22 @@ export type PeerConnectionSample = {
 	codecs?: CodecStats[];
 
 	/**
-	* Inbound RTPs
+	* Inbound RTP Stats
 	*/
 	inboundRtps?: InboundRtpStats[];
 
 	/**
-	* Remote Inbound RTPs
+	* Remote Inbound RTP Stats
 	*/
 	remoteInboundRtps?: RemoteInboundRtpStats[];
 
 	/**
-	* Outbound RTPs
+	* Outbound RTP Stats
 	*/
 	outboundRtps?: OutboundRtpStats[];
 
 	/**
-	* Remote Outbound RTPs
+	* Remote Outbound RTP Stats
 	*/
 	remoteOutboundRtps?: RemoteOutboundRtpStats[];
 
@@ -1597,7 +1612,7 @@ export type PeerConnectionSample = {
 	iceCandidatePairs?: IceCandidatePairStats[];
 
 	/**
-	* Certificates
+	* Certificate Stats
 	*/
 	certificates?: CertificateStats[];
 
@@ -1628,9 +1643,14 @@ export type ClientSample = {
 	attachments?: Record<string, unknown>;
 
 	/**
-	* Calculated score for client (details should be added to attachments)
+	* Calculated score for client (details should be added to scoreReasons)
 	*/
 	score?: number;
+
+	/**
+	* Details for score calculation
+	*/
+	scoreReasons?: string;
 
 	/**
 	* Samples taken PeerConnections

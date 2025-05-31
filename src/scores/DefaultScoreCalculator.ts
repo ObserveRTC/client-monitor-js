@@ -78,6 +78,10 @@ export class DefaultScoreCalculator {
 		this._calculateClientMonitorScore();
 	}
 
+	public encodeScoreReasons<T extends Record<string, number>>(reasons?: T): string {
+        return JSON.stringify(reasons ?? '{}');
+    }
+
 	public _calculateClientMonitorScore() {
 		const clientMonitor: ClientMonitor = this.clientMonitor;
 		let clientTotalScore = 0;
