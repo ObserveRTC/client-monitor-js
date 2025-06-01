@@ -207,13 +207,14 @@ export class DefaultScoreCalculator {
 		}
 	}
 
-	private _calculateInboundVideoTrackScore(trackMonitor: InboundTrackMonitor) {
+	private _calculateInboundVideoTrackScore(trackMonitor: InboundTrackMonitor): void {
 		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
 
-			return trackMonitor.calculatedScore.value = undefined;
+			trackMonitor.calculatedScore.value = undefined;
+			return;
 		}
 
 		// fps volatility
@@ -224,7 +225,6 @@ export class DefaultScoreCalculator {
 
 		if (!inboundRtp) {
 			trackMonitor.calculatedScore.value = undefined;
-
 			return;
 		}
 		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalculatorInboundVideoTrackScoreAppData | undefined;
@@ -286,20 +286,20 @@ export class DefaultScoreCalculator {
 		trackMonitor.calculatedScore.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
 	}
 
-	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor) {
+	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {
 		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
 
-			return trackMonitor.calculatedScore.value = undefined;
+			trackMonitor.calculatedScore.value = undefined;
+			return;
 		}
 
 		const outboundRtp = trackMonitor.getHighestLayer();
 	
 		if (!outboundRtp) {
 			trackMonitor.calculatedScore.value = undefined;
-
 			return;
 		}
 		const score = trackMonitor.calculatedScore;
@@ -388,13 +388,14 @@ export class DefaultScoreCalculator {
 		score.value = this._calculateFinalScore(appData.lastNScores);
 	}
 
-	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor) {
+	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor): void {
 		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
 
-			return trackMonitor.calculatedScore.value = undefined;
+			trackMonitor.calculatedScore.value = undefined;
+			return;
 		}
 
 		// const pcMonitor = trackMonitor.getPeerConnection();
@@ -407,7 +408,6 @@ export class DefaultScoreCalculator {
 
 		if (!bitrate) {
 			trackMonitor.calculatedScore.value = undefined;
-			
 			return;
 		}
 
@@ -431,20 +431,20 @@ export class DefaultScoreCalculator {
 		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
 	}
 
-	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor) {
+	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor): void {
 		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
 			if (trackMonitor.calculatedScore.appData) {
 				trackMonitor.calculatedScore.appData = undefined;
 			}
 
-			return trackMonitor.calculatedScore.value = undefined;
+			trackMonitor.calculatedScore.value = undefined;
+			return;
 		}
 
 		const outboundRtp = trackMonitor.getOutboundRtps()?.[0];
 
 		if (!outboundRtp ||outboundRtp.bitrate === undefined) {
 			trackMonitor.calculatedScore.value = undefined;
-
 			return;
 		}
 

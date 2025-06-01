@@ -131,7 +131,7 @@ export class Sources {
 		return this;
 	}
 
-	public removeMediasoupTransport(transport: mediasoup.types.Transport) {
+	public removeMediasoupTransport(transport: mediasoup.types.Transport): this {
 		const binding = this._mediasoupTransportBindings.get(transport.id);
 	
 		if (!binding) {
@@ -141,6 +141,8 @@ export class Sources {
 	
 		binding.unbind();
 		this._mediasoupTransportBindings.delete(transport.id);
+		
+		return this;
 	}
 
 	public fetchUserAgentData() {

@@ -601,9 +601,15 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
         this._setSamplingTick();
     }
 
-    private _setSamplingTick() {
-        if (this.config.collectingPeriodInMs === undefined || this.config.samplingPeriodInMs === undefined) return this._samplingTick = 0;
-        if (this.config.collectingPeriodInMs < 1 || this.config.samplingPeriodInMs < 1) return this._samplingTick = 0;
+    private _setSamplingTick(): void {
+        if (this.config.collectingPeriodInMs === undefined || this.config.samplingPeriodInMs === undefined) {
+            this._samplingTick = 0;
+            return;
+        }
+        if (this.config.collectingPeriodInMs < 1 || this.config.samplingPeriodInMs < 1) {
+            this._samplingTick = 0;
+            return;
+        }
         if (this.config.samplingPeriodInMs % this.config.collectingPeriodInMs !== 0) {
             logger.warn(`The samplingPeriodInMs (${this.config.samplingPeriodInMs}) should be a multiple of collectingPeriodInMs (${this.config.collectingPeriodInMs}), otherwise the sampling will not be accurate`);
         }

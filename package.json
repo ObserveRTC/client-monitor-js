@@ -5,18 +5,22 @@
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "engines": {
-    "node": ">=10"
+    "node": ">=14"
   },
   "files": [
-    "lib"
+    "lib",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "prepare": "npm run build",
     "prepublish": "pkgfiles",
-    "prepublishOnly": "npm run lint",
+    "prepublishOnly": "npm run lint && npm run test",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.js src/*",
-    "build": "tsc",
+    "build": "npm run build:clean && npm run build:tsc",
+    "build:clean": "rm -rf lib",
+    "build:tsc": "tsc",
     "test": "jest --config jest.config.js"
   },
   "keywords": [
@@ -24,7 +28,10 @@
     "getStats",
     "observertc",
     "client",
-    "integration"
+    "integration",
+    "monitoring",
+    "telemetry",
+    "performance"
   ],
   "author": "Balazs Kreith",
   "license": "Apache-2.0",
@@ -52,5 +59,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/observertc/client-monitor-js"
-  }
+  },
+  "sideEffects": false
 }

@@ -1,17 +1,26 @@
 {
 	"compileOnSave": true,
-	"compilerOptions":
-	{
-		"lib": [ "es2019", "dom" ],
+	"compilerOptions": {
+		"lib": ["es2020", "dom"],
 		"target": "ES2020",
-		"module": "ES2020",
+		"module": "CommonJS",
 		"moduleResolution": "node",
 		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
 		"isolatedModules": true,
 		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
 		"outDir": "lib",
 		"declaration": true,
-		"declarationMap": true
+		"declarationMap": false,
+		"removeComments": true,
+		"importHelpers": false,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true
 	},
-	"include": [ "src" ]
+	"include": ["src"],
+	"exclude": ["node_modules", "lib", "tests", "**/*.test.ts", "**/*.spec.ts"]
 }

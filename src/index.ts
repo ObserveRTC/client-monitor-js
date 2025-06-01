@@ -1,5 +1,3 @@
-import { ClientMonitor } from "./ClientMonitor";
-
 export { CertificateMonitor } from "./monitors/CertificateMonitor";
 export { CodecMonitor } from "./monitors/CodecMonitor";
 export { DataChannelMonitor } from "./monitors/DataChannelMonitor";

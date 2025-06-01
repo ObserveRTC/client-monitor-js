@@ -1,14 +1,41 @@
-package-lock.json
-node_modules/
-dist/
-lib/
-keys/
-draft.md
-*.md
-
+# Source files
+src/
+tests/
 docs/
 figures/
-tests/
+
+# Development files  
 .vscode/
 .github/
+.git/
+.gitignore
+*.config.js
+*.config.ts
+rollup.config.js
+webpack.config.js
+tsconfig.json
+jest.config.js
+.eslintrc.js
+.prettierrc
+.prettierignore
+tslint.json
+
+# Package files
+package-lock.json
 yarn.lock
+node_modules/
+
+# Documentation (keep only README)
+*.md
+!README.md
+shell.md
+CONTRIBUTING.md
+draft.md
+LIBRARY_OPTIMIZATION_ANALYSIS.md
+
+# Other
+keys/
+
+# Only keep essential lib files
+lib/*.d.ts.map
+lib/**/*.d.ts.map
