@@ -20,11 +20,13 @@
 9. [Sampling](#sampling)
 10. [Events and Issues](#events-and-issues)
 11. [WebRTC Stats Monitors](#webrtc-stats-monitors)
-12. [Schema Reference](#schema-reference)
-13. [Examples](#examples)
-14. [Troubleshooting](#troubleshooting)
-15. [API Reference](#api-reference)
-16. [FAQ](#faq)
+12. [Stats Adapters](#stats-adapters)
+13. [Derived Metrics](#derived-metrics)
+14. [Schema Reference](#schema-reference)
+15. [Examples](#examples)
+16. [Troubleshooting](#troubleshooting)
+17. [API Reference](#api-reference)
+18. [FAQ](#faq)
 
 ## Installation
 
