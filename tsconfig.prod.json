@@ -5,6 +5,11 @@
 		"sourceMap": false,
 		"removeComments": true,
 		"incremental": false,
-		"tsBuildInfoFile": null
+		"tsBuildInfoFile": null,
+		"importHelpers": false,
+		"inlineSourceMap": false,
+		"inlineSources": false,
+		"stripInternal": true,
+		"useDefineForClassFields": true
 	}
 } 

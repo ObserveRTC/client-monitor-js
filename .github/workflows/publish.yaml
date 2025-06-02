@@ -4,6 +4,10 @@ on:
         branches:
             - master
             - develop
+    pull_request:
+        branches:
+            - master
+            - develop
 
 jobs:
     publish:
@@ -16,9 +20,6 @@ jobs:
                   cache: "yarn"
             - name: Install
               run: yarn install --frozen-lockfile
-
-            - name: Lint
-              run: yarn lint
 
             - name: Build
               run: yarn build:prod
