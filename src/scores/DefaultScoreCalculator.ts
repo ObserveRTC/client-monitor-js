@@ -447,6 +447,12 @@ export class DefaultScoreCalculator {
 			trackMonitor.calculatedScore.value = undefined;
 			return;
 		}
+		const audioLevel =  outboundRtp.getMediaSource()?.audioLevel;
+		if (audioLevel !== undefined && audioLevel < 0.01) {
+			trackMonitor.calculatedScore.value = undefined;
+
+			return;
+		}
 
 		const normalizedBitrate = Math.log10(
 			Math.max(
