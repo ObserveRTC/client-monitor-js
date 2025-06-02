@@ -39,14 +39,9 @@ export enum ClientEventTypes {
 	DATA_CONSUMER_CLOSED = 'DATA_CONSUMER_CLOSED',
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface ClientJoinedEventPayload extends Record<string, unknown> {
-	// empty
-}
+export type ClientJoinedEventPayload = Record<string, unknown>;
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface ClientLeftEventPayload extends Record<string, unknown> {
-}
+export type ClientLeftEventPayload = Record<string, unknown>;
 
 export interface PeerConnectionOpenedEventPayload extends Record<string, unknown> {
 	peerConnectionId: string;

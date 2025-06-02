@@ -9,7 +9,7 @@ export function inferSourceType(source: unknown): ClientMonitorSourceType | unde
 }
 
 function isMediasoupTransport(source: unknown): boolean {
-    const constructorName = (source as any)?.constructor?.name;
+    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
 
     if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
         return true;
@@ -24,7 +24,7 @@ function isMediasoupTransport(source: unknown): boolean {
 }
 
 function isMediasoupDevice(source: unknown): boolean {
-    const constructorName = (source as any)?.constructor?.name;
+    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
 
     if (source instanceof mediasoup.types.Device || constructorName === mediasoup.types.Device.name) {
         return true;
@@ -38,7 +38,7 @@ function isMediasoupDevice(source: unknown): boolean {
 }
 
 function isRTCPeerConnection(source: unknown): boolean {
-    const constructorName = (source as any)?.constructor?.name;
+    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
 
     if (source instanceof RTCPeerConnection || constructorName === RTCPeerConnection.name) {
         return true;

@@ -1,10 +1,10 @@
 {
 	"compileOnSave": true,
 	"compilerOptions": {
-		"lib": ["es2020", "dom"],
-		"target": "ES2020",
-		"module": "CommonJS",
-		"moduleResolution": "node",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
 		"isolatedModules": true,
@@ -13,14 +13,24 @@
 		"noUnusedParameters": true,
 		"noImplicitReturns": true,
 		"noFallthroughCasesInSwitch": true,
-		"outDir": "lib",
+		"exactOptionalPropertyTypes": false,
+		"noUncheckedIndexedAccess": true,
+		"outDir": "dist",
 		"declaration": true,
-		"declarationMap": false,
-		"removeComments": true,
-		"importHelpers": false,
+		"declarationMap": true,
+		"sourceMap": true,
+		"removeComments": false,
+		"importHelpers": true,
 		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true
+		"forceConsistentCasingInFileNames": true,
+		"allowImportingTsExtensions": false,
+		"verbatimModuleSyntax": false,
+		"resolveJsonModule": true,
+		"allowJs": false,
+		"noEmit": false,
+		"incremental": true,
+		"tsBuildInfoFile": "./dist/.tsbuildinfo"
 	},
 	"include": ["src"],
-	"exclude": ["node_modules", "lib", "tests", "**/*.test.ts", "**/*.spec.ts"]
+	"exclude": ["node_modules", "dist", "tests", "**/*.test.ts", "**/*.spec.ts"]
 }

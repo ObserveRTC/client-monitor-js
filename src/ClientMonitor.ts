@@ -580,7 +580,9 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     }
 
     public setCollectingPeriod(collectingPeriodInMs: number): void {
-        this._timer && clearInterval(this._timer);
+        if (this._timer) {
+            clearInterval(this._timer);
+        }
         this._timer = undefined;
         this.config.collectingPeriodInMs = collectingPeriodInMs;
         
