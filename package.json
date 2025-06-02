@@ -12,8 +12,6 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "unpkg": "./dist/index.bundle.min.js",
-  "jsdelivr": "./dist/index.bundle.min.js",
   "files": [
     "dist",
     "README.md",
@@ -26,12 +24,9 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.cjs src/*",
     "build": "npm run build:dev",
-    "build:dev": "npm run build:clean && npm run build:tsc:dev",
-    "build:prod": "npm run build:clean && npm run build:tsc:prod && npm run build:bundle",
+    "build:dev": "npm run build:clean && tsc",
+    "build:prod": "npm run build:clean && tsc -p tsconfig.prod.json",
     "build:clean": "rm -rf dist",
-    "build:tsc:dev": "tsc",
-    "build:tsc:prod": "tsc -p tsconfig.prod.json",
-    "build:bundle": "rollup -c --config-build=bundle",
     "build:watch": "tsc --watch",
     "test": "jest --config jest.config.js"
   },
@@ -54,10 +49,6 @@
   },
   "devDependencies": {
     "@jest/globals": "^29.6.2",
-    "@rollup/plugin-commonjs": "^28.0.3",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-terser": "^0.4.4",
-    "@rollup/plugin-typescript": "^12.1.2",
     "@types/jest": "^29.5.3",
     "@types/ua-parser-js": "^0.7.39",
     "@typescript-eslint/eslint-plugin": "^8.33.0",
@@ -67,9 +58,6 @@
     "jest": "^29.6.2",
     "mediasoup-client": "^3.7.16",
     "pkgfiles": "^2.3.2",
-    "rollup": "^4.41.1",
-    "rollup-plugin-dts": "^6.2.1",
-    "ts-jest": "^29.1.1",
     "tslib": "^2.8.1",
     "typescript": "^5.8.3",
     "utf-8-validate": "^5.0.8"

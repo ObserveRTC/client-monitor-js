@@ -20,7 +20,7 @@ jobs:
             - name: Lint
               run: yarn lint
 
-            - name: Build Production
+            - name: Build
               run: yarn build:prod
 
             - name: Test
