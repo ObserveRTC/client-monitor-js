@@ -12,7 +12,7 @@ export class OutboundTrackMonitor {
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 
 	public calculatedScore: CalculatedScore = {
-		weight: this.kind === 'audio' ? 1 : 2,
+		weight: 0,
 		value: undefined,
 	};
 
@@ -40,6 +40,9 @@ export class OutboundTrackMonitor {
 		this.detectors = new Detectors(
 			new DryOutboundTrackDetector(this),
 		);
+
+		if (this.kind === 'audio') this.calculatedScore.weight = 1;
+		else if (this.kind === 'video') this.calculatedScore.weight = 2;
 	}
 
 
@@ -48,7 +51,7 @@ export class OutboundTrackMonitor {
 	}
 
 	public get kind() {
-		return this._mediaSource.kind;
+		return this.track.kind;
 	}
 
 	bitrate?: number;

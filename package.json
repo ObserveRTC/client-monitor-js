@@ -3,17 +3,16 @@
   "version": "4.0.0",
   "description": "ObserveRTC Client Integration Javascript Library",
   "type": "module",
-  "main": "./dist/index.cjs",
+  "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
       "types": "./dist/index.d.ts"
     }
   },
-  "browser": "./dist/index.browser.js",
+  "browser": "./dist/index.browser.min.js",
   "unpkg": "./dist/index.browser.min.js",
   "jsdelivr": "./dist/index.browser.min.js",
   "files": [
@@ -48,8 +47,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "eventemitter3": "^5.0.1",
-    "ua-parser-js": "^1.0.37",
-    "uuid": "^8.3.2"
+    "ua-parser-js": "^1.0.37"
   },
   "devDependencies": {
     "@jest/globals": "^29.6.2",
@@ -59,7 +57,6 @@
     "@rollup/plugin-typescript": "^12.1.2",
     "@types/jest": "^29.5.3",
     "@types/ua-parser-js": "^0.7.39",
-    "@types/uuid": "^8.3.4",
     "@typescript-eslint/eslint-plugin": "^8.33.0",
     "@typescript-eslint/parser": "^8.33.0",
     "bufferutil": "^4.0.6",

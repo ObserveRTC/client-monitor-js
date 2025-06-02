@@ -18,8 +18,7 @@ const banner = `/**
 
 const external = [
   'eventemitter3',
-  'ua-parser-js', 
-  'uuid'
+  'ua-parser-js'
 ];
 
 // Base configuration
@@ -42,7 +41,7 @@ const baseConfig = {
 };
 
 export default defineConfig([
-  // ESM build
+  // ESM build (for modern bundlers)
   {
     ...baseConfig,
     output: {
@@ -53,45 +52,7 @@ export default defineConfig([
     },
   },
 
-  // CommonJS build
-  {
-    ...baseConfig,
-    output: {
-      file: 'dist/index.cjs',
-      format: 'cjs',
-      sourcemap: true,
-      banner,
-      exports: 'named',
-    },
-  },
-
-  // Browser UMD build
-  {
-    ...baseConfig,
-    external: [], // Bundle all dependencies for browser
-    plugins: [
-      nodeResolve({
-        browser: true,
-        preferBuiltins: false,
-      }),
-      commonjs(),
-      typescript({
-        tsconfig: './tsconfig.json',
-        declaration: false,
-        declarationMap: false,
-        sourceMap: true,
-      }),
-    ],
-    output: {
-      file: 'dist/index.browser.js',
-      format: 'umd',
-      name: 'ObserveRTCClientMonitor',
-      sourcemap: true,
-      banner,
-    },
-  },
-
-  // Browser UMD minified build
+  // Browser UMD minified build (for CDN usage)
   {
     ...baseConfig,
     external: [], // Bundle all dependencies for browser
@@ -109,43 +70,24 @@ export default defineConfig([
       }),
       terser({
         format: {
-          comments: false,
+          comments: /^!/,
         },
         compress: {
           drop_console: true,
           drop_debugger: true,
+          pure_funcs: ['console.log', 'console.debug'],
+          passes: 2,
+        },
+        mangle: {
+          properties: {
+            regex: /^_/,
+          },
         },
       }),
     ],
     output: {
       file: 'dist/index.browser.min.js',
       format: 'umd',
-      name: 'ObserveRTCClientMonitor',
-      sourcemap: true,
-      banner,
-    },
-  },
-
-  // IIFE build for direct browser usage
-  {
-    ...baseConfig,
-    external: [], // Bundle all dependencies for browser
-    plugins: [
-      nodeResolve({
-        browser: true,
-        preferBuiltins: false,
-      }),
-      commonjs(),
-      typescript({
-        tsconfig: './tsconfig.json',
-        declaration: false,
-        declarationMap: false,
-        sourceMap: true,
-      }),
-    ],
-    output: {
-      file: 'dist/index.iife.js',
-      format: 'iife',
       name: 'ObserveRTCClientMonitor',
       sourcemap: true,
       banner,
