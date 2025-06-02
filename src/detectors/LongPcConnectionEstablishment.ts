@@ -20,8 +20,9 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 		if (this.config.disabled) return;
 		if (this.peerConnection.connectionState !== 'connecting') {
 			if (this._evented && this.peerConnection.connectionState === 'connected') {
-				this._evented = false;
+				return (this._evented = false, void 0)
 			}
+			return;
 		}
 		if (this._evented) return;
 		if (this.peerConnection.connectingStartedAt === undefined) return;
