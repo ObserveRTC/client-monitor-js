@@ -138,7 +138,6 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		value: undefined,
 	}
 
-
 	/**
 	 * Additional data attached to this stats, will not be shipped to the server, 
 	 * but can be used by the application
@@ -161,6 +160,10 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	public get score() {
 		return this.calculatedStabilityScore.value;
+	}
+
+	public get scoreReasons() {
+		return this.calculatedStabilityScore.reasons;
 	}
 
 	public get receivingBitrate() {

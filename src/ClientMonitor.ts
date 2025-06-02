@@ -289,7 +289,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
         if (this.closed) return;
         
         this.score = score;
-        
+
         this.emit('score', {
             clientMonitor: this,
             clientScore: score,

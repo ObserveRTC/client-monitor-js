@@ -20,6 +20,9 @@ export class OutboundTrackMonitor {
 		return this.calculatedScore.value;
 	}
 
+	public get scoreReasons() {
+		return this.calculatedScore.reasons;
+	}
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
