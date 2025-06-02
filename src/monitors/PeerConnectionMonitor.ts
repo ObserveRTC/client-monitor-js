@@ -517,6 +517,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		for (const [id, monitor] of this.mappedInboundRtpMonitors) {
 			if (monitor.visited) continue;
 			this.mappedInboundRtpMonitors.delete(id);
+			this.mappedInboundTracks.delete(monitor.trackIdentifier ?? '');
 		}
 
 		for (const [id, monitor] of this.mappedRemoteOutboundRtpMonitors) {
@@ -538,6 +539,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		for (const [id, monitor] of this.mappedMediaSourceMonitors) {
 			if (monitor.visited) continue;
 			this.mappedMediaSourceMonitors.delete(id);
+			this.mappedOutboundTracks.delete(monitor.trackIdentifier ?? '');
 		}
 
 		for (const [id, monitor] of this.mappedMediaPlayoutMonitors) {

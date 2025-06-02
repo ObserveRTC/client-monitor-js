@@ -443,7 +443,7 @@ export class DefaultScoreCalculator {
 
 		const outboundRtp = trackMonitor.getOutboundRtps()?.[0];
 
-		if (!outboundRtp ||outboundRtp.bitrate === undefined) {
+		if (!outboundRtp || outboundRtp.bitrate === undefined) {
 			trackMonitor.calculatedScore.value = undefined;
 			return;
 		}
