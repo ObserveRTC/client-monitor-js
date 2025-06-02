@@ -15,7 +15,7 @@ export class InboundTrackMonitor {
 	public remoteOutboundTrackPaused = false;
 
 	public calculatedScore: CalculatedScore = {
-		weight: this.kind === 'audio' ? 1 : 2,
+		weight: 0,
 		value: undefined,
 	};
 
@@ -45,9 +45,11 @@ export class InboundTrackMonitor {
 
 		if (this.kind === 'audio') {
 			this.detectors.add(new AudioDesyncDetector(this));
+			this.calculatedScore.weight = 1;
 		} else if (this.kind === 'video') {
 			this.detectors.add(new FreezedVideoTrackDetector(this));
 			this.detectors.add(new PlayoutDiscrepancyDetector(this));
+			this.calculatedScore.weight = 2;
 		}
 		
 		// for mediasoup probator we don't need to run detectors

@@ -12,9 +12,8 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "browser": "./dist/index.browser.min.js",
-  "unpkg": "./dist/index.browser.min.js",
-  "jsdelivr": "./dist/index.browser.min.js",
+  "unpkg": "./dist/index.bundle.min.js",
+  "jsdelivr": "./dist/index.bundle.min.js",
   "files": [
     "dist",
     "README.md",
@@ -26,10 +25,11 @@
     "prepublishOnly": "npm run lint && npm run test",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.cjs src/*",
-    "build": "npm run build:clean && npm run build:rollup",
+    "build": "npm run build:clean && npm run build:tsc",
     "build:clean": "rm -rf dist",
-    "build:rollup": "rollup -c",
-    "build:watch": "rollup -c --watch",
+    "build:tsc": "tsc",
+    "build:bundle": "rollup -c --config-build=bundle",
+    "build:watch": "tsc --watch",
     "test": "jest --config jest.config.js"
   },
   "keywords": [

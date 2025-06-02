@@ -3,7 +3,6 @@ import typescript from '@rollup/plugin-typescript';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import terser from '@rollup/plugin-terser';
-import dts from 'rollup-plugin-dts';
 import { readFileSync } from 'fs';
 
 const packageJson = JSON.parse(
@@ -16,46 +15,11 @@ const banner = `/**
  * @license Apache-2.0
  */`;
 
-const external = [
-  'eventemitter3',
-  'ua-parser-js'
-];
-
-// Base configuration
-const baseConfig = {
-  input: 'src/index.ts',
-  external,
-  plugins: [
-    nodeResolve({
-      browser: true,
-      preferBuiltins: false,
-    }),
-    commonjs(),
-    typescript({
-      tsconfig: './tsconfig.json',
-      declaration: false,
-      declarationMap: false,
-      sourceMap: true,
-    }),
-  ],
-};
-
+// Only create bundled version for CDN usage
 export default defineConfig([
-  // ESM build (for modern bundlers)
   {
-    ...baseConfig,
-    output: {
-      file: 'dist/index.js',
-      format: 'es',
-      sourcemap: true,
-      banner,
-    },
-  },
-
-  // Browser UMD minified build (for CDN usage)
-  {
-    ...baseConfig,
-    external: [], // Bundle all dependencies for browser
+    input: 'src/index.ts',
+    external: [], // Bundle all dependencies for standalone usage
     plugins: [
       nodeResolve({
         browser: true,
@@ -66,7 +30,7 @@ export default defineConfig([
         tsconfig: './tsconfig.json',
         declaration: false,
         declarationMap: false,
-        sourceMap: true,
+        sourceMap: false,
       }),
       terser({
         format: {
@@ -77,6 +41,7 @@ export default defineConfig([
           drop_debugger: true,
           pure_funcs: ['console.log', 'console.debug'],
           passes: 2,
+          unused: true,
         },
         mangle: {
           properties: {
@@ -86,21 +51,7 @@ export default defineConfig([
       }),
     ],
     output: {
-      file: 'dist/index.browser.min.js',
-      format: 'umd',
-      name: 'ObserveRTCClientMonitor',
-      sourcemap: true,
-      banner,
-    },
-  },
-
-  // TypeScript declarations
-  {
-    input: 'src/index.ts',
-    external,
-    plugins: [dts()],
-    output: {
-      file: 'dist/index.d.ts',
+      file: 'dist/index.bundle.min.js',
       format: 'es',
       banner,
     },
