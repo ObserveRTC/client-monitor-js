@@ -20,14 +20,17 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "npm run build",
+    "prepare": "npm run build:prod",
     "prepublish": "pkgfiles",
     "prepublishOnly": "npm run lint && npm run test",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.cjs src/*",
-    "build": "npm run build:clean && npm run build:tsc",
+    "build": "npm run build:dev",
+    "build:dev": "npm run build:clean && npm run build:tsc:dev",
+    "build:prod": "npm run build:clean && npm run build:tsc:prod && npm run build:bundle",
     "build:clean": "rm -rf dist",
-    "build:tsc": "tsc",
+    "build:tsc:dev": "tsc",
+    "build:tsc:prod": "tsc -p tsconfig.prod.json",
     "build:bundle": "rollup -c --config-build=bundle",
     "build:watch": "tsc --watch",
     "test": "jest --config jest.config.js"
