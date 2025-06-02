@@ -104,7 +104,7 @@ export class DefaultScoreCalculator {
 				trackTotalWeight += trackScore.weight;
 				noTrack = false;
 
-				accumulateSubtractions(this.currentReasons, trackScore.appData?.subtractions ?? {});
+				accumulateSubtractions(this.currentReasons, trackScore.reasons ?? {});
 			}
 
 			
@@ -120,7 +120,7 @@ export class DefaultScoreCalculator {
 			clientTotalScore += totalPcScore * pcMonitor.calculatedStabilityScore.weight;
 			clientTotalWeight += pcMonitor.calculatedStabilityScore.weight;
 
-			accumulateSubtractions(this.currentReasons, pcMonitor.calculatedStabilityScore?.appData?.subtractions ?? {});
+			accumulateSubtractions(this.currentReasons, pcMonitor.scoreReasons ?? {});
 		}
 
 		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);

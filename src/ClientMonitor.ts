@@ -289,7 +289,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
         if (this.closed) return;
         
         this.score = score;
-
+        this.scoreReasons = reasons;
         this.emit('score', {
             clientMonitor: this,
             clientScore: score,
@@ -311,7 +311,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
-            scoreReasons: this.scoreCalculator.encodeClientScoreReasons?.(this.scoreReasons),
+            // scoreReasons: this.scoreCalculator.encodeClientScoreReasons?.(this.scoreReasons),
         };
         this._clientEvents = [];
         this._clientMetaItems = [];
