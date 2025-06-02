@@ -30,7 +30,7 @@
     "build:clean": "rm -rf dist",
     "build:watch": "tsc --watch",
     "test": "jest",
-    "minify": "find dist -name '*.js' -exec terser {} -o {} -c -m --toplevel \\;"
+    "minify": "find dist -name '*.js' -exec terser {} -o {} -c -m --module \\;"
   },
   "keywords": [
     "webrtc",
