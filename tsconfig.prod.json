@@ -1,0 +1,15 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"declarationMap": false,
+		"sourceMap": false,
+		"removeComments": true,
+		"incremental": false,
+		"tsBuildInfoFile": null,
+		"importHelpers": false,
+		"inlineSourceMap": false,
+		"inlineSources": false,
+		"stripInternal": true,
+		"useDefineForClassFields": true
+	}
+} 

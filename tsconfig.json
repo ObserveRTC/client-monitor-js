@@ -1,18 +1,36 @@
 {
 	"compileOnSave": true,
-	"compilerOptions":
-	{
-		"lib": [ "es2019", "dom" ],
-		"target": "ES2020",
-		"module": "commonjs",
-		"moduleResolution": "node",
+	"compilerOptions": {
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
 		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
 		"isolatedModules": true,
 		"strict": true,
-		"outDir": "lib",
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"exactOptionalPropertyTypes": false,
+		"noUncheckedIndexedAccess": true,
+		"outDir": "dist",
 		"declaration": true,
-		"declarationMap": true
+		"declarationMap": true,
+		"sourceMap": true,
+		"removeComments": false,
+		"importHelpers": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"allowImportingTsExtensions": false,
+		"verbatimModuleSyntax": false,
+		"resolveJsonModule": true,
+		"allowJs": false,
+		"noEmit": false,
+		"incremental": true,
+		"tsBuildInfoFile": "./dist/.tsbuildinfo"
 	},
-	"include": [ "src" ]
+	"include": ["src"],
+	"exclude": ["node_modules", "dist", "tests", "**/*.test.ts", "**/*.spec.ts"]
 }
-

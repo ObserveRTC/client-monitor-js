@@ -1,129 +1,146 @@
-import EventEmitter from "events";
-import { AlertState, ClientMonitor } from "../ClientMonitor";
-import { InboundRtpEntry } from "../entries/StatsEntryInterfaces";
 import { Detector } from "./Detector";
+import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 
 /**
- * Configuration object for the AudioDesyncDetector function.
+ * Audio Desynchronization Detector
+ * 
+ * Detects audio synchronization issues by monitoring the rate of sample corrections
+ * (acceleration/deceleration) applied to inbound audio tracks. When audio frames arrive
+ * at incorrect rates, the audio subsystem compensates by inserting or removing samples,
+ * which can indicate timing issues between audio and video streams.
+ * 
+ * **Detection Logic:**
+ * - Monitors `insertedSamplesForDeceleration` and `removedSamplesForAcceleration` from WebRTC stats
+ * - Calculates fractional correction rate: corrected_samples / (corrected_samples + received_samples)
+ * - Uses hysteresis thresholds to prevent oscillation between alert states
+ * - Triggers on sustained high correction rates, clears on sustained low correction rates
+ * 
+ * **Configuration Options:**
+ * - `disabled`: Boolean to enable/disable the detector
+ * - `createIssue`: Whether to create ClientIssue when audio desync is detected
+ * - `fractionalCorrectionAlertOnThreshold`: Correction rate threshold to trigger alert (default: 0.1)
+ * - `fractionalCorrectionAlertOffThreshold`: Correction rate threshold to clear alert (default: 0.05)
+ * 
+ * **Events Emitted:**
+ * - `audio-desync-track`: Emitted when audio desync is first detected
+ * 
+ * **Issues Created:**
+ * - Type: `audio-desync`
+ * - Payload: `{ peerConnectionId, trackId, dCorrectedSamples, fractionalCorrection }`
+ * 
+ * @example
+ * ```typescript
+ * // Configuration
+ * const config = {
+ *   audioDesyncDetector: {
+ *     disabled: false,
+ *     createIssue: true,
+ *     fractionalCorrectionAlertOnThreshold: 0.1,  // 10% correction rate triggers alert
+ *     fractionalCorrectionAlertOffThreshold: 0.05  // 5% correction rate clears alert
+ *   }
+ * };
+ * 
+ * // Listen for audio desync events
+ * monitor.on('audio-desync-track', ({ trackMonitor }) => {
+ *   console.log('Audio desync detected on track:', trackMonitor.track.id);
+ * });
+ * ```
  */
-export type AudioDesyncDetectorConfig = {
+export class AudioDesyncDetector implements Detector {
+	/** Unique identifier for this detector type */
+	public readonly name = 'audio-desync-detector';
+	
 	/**
-	 * The fractional threshold used to determine if the audio desynchronization
-	 * correction is considered significant or not.
-	 * It represents the minimum required ratio of corrected samples to total samples.
-	 * For example, a value of 0.1 means that if the corrected samples ratio
-	 * exceeds 0.1, it will be considered a significant audio desynchronization issue.
+	 * Creates a new AudioDesyncDetector instance
+	 * @param trackMonitor - The inbound track monitor to analyze for audio desync
 	 */
-	fractionalCorrectionAlertOnThreshold: number;
-	/**
-	 * The fractional threshold used to determine if the audio desynchronization
-	 * correction is considered negligible and the alert should be turned off.
-	 * It represents the maximum allowed ratio of corrected samples to total samples.
-	 * For example, a value of 0.05 means that if the corrected samples ratio
-	 * falls below 0.05, the audio desynchronization alert will be turned off.
-	 */
-	fractionalCorrectionAlertOffThreshold: number;
-};
-
-export type AudioDesyncDetectorEvents = {
-	'alert-state': [AlertState],
-	desync: [string],
-	sync: [string],
-	statechanged: [{ trackId: string, state: 'sync' | 'desync' }],
-	close: [],
-}
-
-type AudioSyncTrace = {
-	correctedSamples: number,
-	prevCorrectedSamples: number,
-	desync: boolean,
-	visited: boolean,
-	inboundRtp: InboundRtpEntry,
-}
-
-export declare interface AudioDesyncDetector extends Detector {
-	on<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
-	off<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
-	once<K extends keyof AudioDesyncDetectorEvents>(event: K, listener: (...events: AudioDesyncDetectorEvents[K]) => void): this;
-	emit<K extends keyof AudioDesyncDetectorEvents>(event: K, ...events: AudioDesyncDetectorEvents[K]): boolean;
-}
-
-export class AudioDesyncDetector extends EventEmitter {
-	private _closed = false;
-	private readonly _states = new Map<number, AudioSyncTrace>();
-
 	public constructor(
-		private readonly config: AudioDesyncDetectorConfig
+		public readonly trackMonitor: InboundTrackMonitor,
 	) {
-		super();
-		this.setMaxListeners(Infinity);
 		
 	}
+
+	/** Duration of the last detected desync period in milliseconds */
+	public lastDesyncDuration?: number;
+
+	/** Timestamp when current desync period started */
+	private _startedDesyncAt?: number;
+
+	/** Previous corrected samples count for delta calculation */
+	private _prevCorrectedSamples = 0;
 	
-	public get closed() {
-		return this._closed;
+	/** Gets the detector configuration from the client monitor */
+	private get config() {
+		return this.peerConnection.parent.config.audioDesyncDetector;
 	}
 
-	public close() {
-		if (this._closed) return;
-		this._closed = true;
-
-		this._states.clear();
-		this.emit('close');
+	/** Gets the peer connection monitor that owns this track */
+	private get peerConnection() {
+		return this.trackMonitor.getPeerConnection();
 	}
 
-	public update(inboundRtps: IterableIterator<InboundRtpEntry>) {
-		for (const inboundRtp of inboundRtps) {
-			const stats = inboundRtp.stats;
-			const ssrc = stats.ssrc;
-			if (stats.kind !== 'audio' || inboundRtp.getTrackId() === undefined) {
-				continue;
-			}
+	/**
+	 * Updates the detector state and checks for audio desynchronization
+	 * 
+	 * This method is called periodically during stats collection to analyze
+	 * the current state of audio sample corrections and determine if the
+	 * track is experiencing desynchronization issues.
+	 * 
+	 * **Processing Steps:**
+	 * 1. Validates that this is an audio track with valid stats
+	 * 2. Calculates the rate of sample corrections in the current period
+	 * 3. Applies hysteresis logic to determine alert state transitions
+	 * 4. Emits events and creates issues when desync is detected
+	 * 5. Tracks desync duration for reporting
+	 */
+	public update() {
+		const inboundRtp = this.trackMonitor.getInboundRtp();
+		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
+		if (this.config.disabled) return;
 
-			let state = this._states.get(ssrc);
-			if (!state) {
-				state = {
-					correctedSamples: 0,
-					prevCorrectedSamples: 0,
-					visited: false,
-					desync: false,
-					inboundRtp,
-				};
-				this._states.set(ssrc, state);
-			}
+		const correctedSamples = (inboundRtp.insertedSamplesForDeceleration ?? 0) + (inboundRtp.removedSamplesForAcceleration ?? 0);
+		const dCorrectedSamples = correctedSamples - this._prevCorrectedSamples;
 
-			state.visited = true;
-			state.correctedSamples = (stats.insertedSamplesForDeceleration ?? 0) + (stats.removedSamplesForAcceleration ?? 0);
-			const dCorrectedSamples = state.correctedSamples - state.prevCorrectedSamples;
-			if (dCorrectedSamples < 1 || (inboundRtp.receivedSamples ?? 0) < 1) {
-				continue;
-			}
-			const wasDesync = state.desync;
-			const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + (inboundRtp.receivedSamples ?? 0));
+		if (dCorrectedSamples < 1 || (inboundRtp.receivingAudioSamples ?? 0) < 1) return;
 
-			if (wasDesync) {
-				state.desync = this.config.fractionalCorrectionAlertOffThreshold < fractionalCorrection;
-			} else {
-				state.desync = this.config.fractionalCorrectionAlertOnThreshold < fractionalCorrection;
-			}
+		const fractionalCorrection = dCorrectedSamples / (dCorrectedSamples + (inboundRtp.receivingAudioSamples ?? 0));
 
-			if (wasDesync !== state.desync) {
-				const trackId = inboundRtp.getTrackId();
-				if (trackId) {
-					const actualState = state.desync ? 'desync' : 'sync';
-					this.emit(actualState, trackId);
-					this.emit('statechanged', { trackId, state: actualState });
-					actualState === 'desync' ? this.emit('alert-state', 'on') : this.emit('alert-state', 'off');
-				}
-			}
+		const wasDesync = inboundRtp.desync;
+		if (inboundRtp.desync) {
+			inboundRtp.desync = this.config.fractionalCorrectionAlertOffThreshold < fractionalCorrection;
+		} else {
+			inboundRtp.desync = this.config.fractionalCorrectionAlertOnThreshold < fractionalCorrection;
 		}
 
-		for (const state of this._states.values()) {
-			if (state.visited === false) {
-				this._states.delete(state.inboundRtp.stats.ssrc);
+		if (!inboundRtp.desync) {
+			if (wasDesync) {
+				if (this._startedDesyncAt) {
+					this.lastDesyncDuration = Date.now() - this._startedDesyncAt;
+				}
+				this._startedDesyncAt = undefined;
 			}
-			state.prevCorrectedSamples = state.correctedSamples;
-			state.visited = false;
+			return;
+		} else if (wasDesync) {
+			return;
+		}
+
+		this._startedDesyncAt = Date.now();
+		this.peerConnection.parent.emit('audio-desync-track', {
+			clientMonitor: this.peerConnection.parent,
+			trackMonitor: this.trackMonitor,
+		});
+
+		if (this.config.createIssue) {
+			this.peerConnection.parent.addIssue({
+				type: 'audio-desync',
+				payload: {
+					peerConnectionId: this.peerConnection.peerConnectionId,
+					trackId: this.trackMonitor.track.id,
+					dCorrectedSamples,
+					fractionalCorrection
+
+				}
+			})
 		}
 	}
 }

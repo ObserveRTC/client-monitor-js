@@ -1,120 +1,100 @@
-import { CustomCallEvent } from "../schema/Samples";
-import { 
-	createMediaTrackRemovedEvent, 
-	createMediaTrackMutedEvent, 
-	createMediaTrackUnmutedEvent, 
-	createMediaTrackAddedEvent, 
-	createDataChannelCloseEvent, 
-	createDataChannelErrorEvent, 
-	createDataChannelOpenEvent 
-} from "../utils/callEvents";
+import * as W3C from '../schema/W3cStatsIdentifiers'
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('StatsCollector');
+
+export function convertRTCStatsReport(input: RTCStatsReport) {
+    const result: W3C.RtcStats[] = [];
+    
+    try {
+        input.forEach(report => {
+
+            if (!report.id) return;
+            if (!report.timestamp) return;
+            if (!report.type) return;
+
+            result.push(report);
+        });
 
 
-export function listenTrackEvents(context: {
-	track: MediaStreamTrack,
-	peerConnectionId: string,
-	direction?: 'outbound' | 'inbound',
-	added?: number,
-	sfuStreamId?: string,
-	sfuSinkId?: string,
-	emitCallEvent: ((event: CustomCallEvent) => void);
-}) {
-	const {
-			track,
-			peerConnectionId,
-			direction,
-			sfuSinkId,
-			sfuStreamId,
-			emitCallEvent,
-	} = context;
+        // legacy support
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // if ((stats as any).values) {
+        //     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        //     const rtcStats = stats as any;
+        //     if (rtcStats.values || typeof rtcStats.values === "function") {
+        //         for (const rtcStatValue of rtcStats.values()) {
+        //             if (
+        //                 !rtcStatValue ||
+        //                 !rtcStatValue.type ||
+        //                 typeof rtcStatValue.type !== "string" ||
+        //                 !rtcStatValue.id ||
+        //                 !rtcStatValue.timestamp ||
+        //                 false
+        //             ) {
+        //                 continue;
+        //             }
+        //             result.push(rtcStatValue);
+        //         }
 
-	if (!track.id) {
-			return;
-	}
+        //         return result;
+        //     }
+        // }
 
-	const attachments = JSON.stringify({
-			kind: track.kind,
-			direction,
-			sfuStreamId,
-			sfuSinkId,
-	});
-	track.onended = () => {
-			emitCallEvent(
-					createMediaTrackRemovedEvent({
-							peerConnectionId,
-							mediaTrackId: track.id,
-							attachments,
-					})
-			);
-	};
-	track.onmute = () => {
-			emitCallEvent(
-					createMediaTrackMutedEvent({
-							peerConnectionId,
-							mediaTrackId: track.id,
-							attachments,
-					})
-			);
-	};
-	track.onunmute = () => {
-			emitCallEvent(
-					createMediaTrackUnmutedEvent({
-							peerConnectionId,
-							mediaTrackId: track.id,
-							attachments,
-					})
-			);
-	};
+        // stats.forEach((report) => {
+            
+        // });
+    } catch (err) {
+        logger.error('Error getting stats report', err);
+    }
 
-	emitCallEvent(
-			createMediaTrackAddedEvent({
-					peerConnectionId,
-					mediaTrackId: track.id,
-					attachments,
-					timestamp: context.added,
-			})
-	);
+    return result;
 }
 
-export function listenDataChannelEvents(context: {
-	dataChannel: RTCDataChannel,
-	peerConnectionId: string,
-	emitCallEvent: ((event: CustomCallEvent) => void);
-}) {
-	const {
-			dataChannel,
-			peerConnectionId,
-			emitCallEvent,
-	} = context;
-	dataChannel.onclose = () => {
-			emitCallEvent(
-					createDataChannelCloseEvent({
-							peerConnectionId,
-							attachments: JSON.stringify({
-									label: dataChannel.label,
-							}),
-					})
-			);
-	};
-	dataChannel.onerror = (error) => {
-			emitCallEvent(
-					createDataChannelErrorEvent({
-							peerConnectionId,
-							attachments: JSON.stringify({
-									label: dataChannel.label,
-									error: `${error}`
-							}),
-					})
-			);
-	};
-	dataChannel.onopen = () => {
-			emitCallEvent(
-					createDataChannelOpenEvent({
-							peerConnectionId,
-							attachments: JSON.stringify({
-									label: dataChannel.label,
-							}),
-					})
-			);
-	};
-}
+
+// export function createStatsFromRTCStatsReportProvider(statsProvider: () => Promise<RTCStatsReport>) {
+//     return async () => {
+//         try {
+//             const stats = await statsProvider();
+    
+//             const result: W3C.RtcStats[] = [];
+
+//             // legacy support
+//             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+//             if ((stats as any).values) {
+//                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+//                 const rtcStats = stats as any;
+//                 if (rtcStats.values || typeof rtcStats.values === "function") {
+//                     for (const rtcStatValue of rtcStats.values()) {
+//                         if (
+//                             !rtcStatValue ||
+//                             !rtcStatValue.type ||
+//                             typeof rtcStatValue.type !== "string" ||
+//                             !rtcStatValue.id ||
+//                             !rtcStatValue.timestamp ||
+//                             false
+//                         ) {
+//                             continue;
+//                         }
+//                         result.push(rtcStatValue);
+//                     }
+        
+//                     return result;
+//                 }
+//             }
+        
+//             stats.forEach((report) => {
+//                 if (!report.id) return;
+//                 if (!report.timestamp) return;
+//                 if (!report.type) return;
+        
+//                 result.push(report);
+//             });
+        
+//             return result;
+//         } catch (err) {
+//             logger.error('Error getting stats report', err);
+//             return [];
+//         }
+//     }
+// }

@@ -2,6 +2,13 @@ package-lock.json
 node_modules/
 dist/
 lib/
+*.log
+.DS_Store
+.env
+.env.local
+.vscode/
+coverage/
+*.tsbuildinfo
 keys/
 draft.md
 yarn-error.log

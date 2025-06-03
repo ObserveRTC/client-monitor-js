@@ -1,190 +1,193 @@
-import EventEmitter from "events";
-import { IceCandidatePairEntry, PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
 import { Detector } from "./Detector";
-import { AlertState } from "../ClientMonitor";
+import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
+import { ClientMonitorEvents } from "../ClientMonitorEvents";
 
-type PeerConnectionState = {
-	peerConnectionId: string;
-	ewmaRttInS?: number;
-	ewmaFl?: number;
+export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
 
-	congested: boolean;
-	outgoingBitrateBeforeCongestion?: number;
-	outgoingBitrateAfterCongestion?: number;
-	incomingBitrateBeforeCongestion?: number;
-	incomingBitrateAfterCongestion?: number;		
-}
+/**
+ * Network Congestion Detector
+ * 
+ * Detects network congestion conditions by analyzing bandwidth limitations, RTT variations,
+ * and packet loss patterns. The detector uses configurable sensitivity levels to balance
+ * between early detection and false positives.
+ * 
+ * **Detection Logic:**
+ * - Monitors `qualityLimitationReason` on outbound RTP streams for bandwidth limitations
+ * - Analyzes RTT variations (difference between current and EWMA RTT values)
+ * - Considers packet loss rates in conjunction with bandwidth limitations
+ * - Uses sensitivity-based thresholds to determine congestion state
+ * 
+ * **Sensitivity Levels:**
+ * - `high`: Triggers on any bandwidth limitation (most sensitive, may have false positives)
+ * - `medium`: Requires bandwidth limitation + significant RTT increase (balanced approach)
+ * - `low`: Requires bandwidth limitation + packet loss > 5% (least sensitive, high confidence)
+ * 
+ * **Configuration Options:**
+ * - `disabled`: Boolean to enable/disable the detector
+ * - `createIssue`: Whether to create ClientIssue when congestion is detected
+ * - `sensitivity`: Detection sensitivity level ('low', 'medium', 'high')
+ * 
+ * **Events Emitted:**
+ * - `congestion`: Emitted when network congestion is first detected
+ * 
+ * **Issues Created:**
+ * - Type: `congestion`
+ * - Payload: Includes current and historical bandwidth/bitrate metrics
+ * 
+ * @example
+ * ```typescript
+ * // Configuration
+ * const config = {
+ *   congestionDetector: {
+ *     disabled: false,
+ *     createIssue: true,
+ *     sensitivity: 'medium'  // 'low', 'medium', 'high'
+ *   }
+ * };
+ * 
+ * // Listen for congestion events
+ * monitor.on('congestion', ({ peerConnectionMonitor, availableIncomingBitrate }) => {
+ *   console.log('Congestion detected on PC:', peerConnectionMonitor.peerConnectionId);
+ *   console.log('Available bandwidth:', availableIncomingBitrate, 'bps');
+ * });
+ * ```
+ */
+export class CongestionDetector implements Detector {
+	/** Unique identifier for this detector type */
+	public readonly name = 'congestion-detector';
+	
+	/** Maximum available incoming bitrate observed during non-congested periods */
+	private _maxAvailableIncomingBitrate = 0;
 
-export type CongestionDetectorEvents = {
-	'alert-state': [AlertState];
-	congestion: [{
-		peerConnectionIds: string[],
-		outgoingBitrateBeforeCongestion?: number;
-		outgoingBitrateAfterCongestion?: number;
-		incomingBitrateBeforeCongestion?: number;
-		incomingBitrateAfterCongestion?: number;
-	}];
-	close: [];
-}
+	/** Maximum receiving bitrate observed during non-congested periods */
+	private _maxReceivingBitrate = 0;
 
-export type CongestionDetectorConfig = {
-	sensitivity: 'high' | 'medium' | 'low';
-}
+	/** Maximum available outgoing bitrate observed during non-congested periods */
+	private _maxAvailableOutgoingBitrate = 0;
 
-export declare interface CongestionDetector extends Detector {
-	on<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
-	off<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
-	once<K extends keyof CongestionDetectorEvents>(event: K, listener: (...events: CongestionDetectorEvents[K]) => void): this;
-	emit<K extends keyof CongestionDetectorEvents>(event: K, ...events: CongestionDetectorEvents[K]): boolean;
-}
+	/** Maximum sending bitrate observed during non-congested periods */
+	private _maxSendingBitrate = 0;
 
-export class CongestionDetector extends EventEmitter {
-	private _closed = false;
-	private _states = new Map<string, PeerConnectionState>();
-
+	/**
+	 * Creates a new CongestionDetector instance
+	 * @param peerConnection - The peer connection monitor to analyze for congestion
+	 */
 	public constructor(
-		public readonly config: CongestionDetectorConfig
+		public readonly peerConnection: PeerConnectionMonitor
 	) {
-		super();
-		this.setMaxListeners(Infinity);
 	}
 
-	public get states(): ReadonlyMap<string, PeerConnectionState> {
-		return this._states;
+	/** Gets the detector configuration from the client monitor */
+	private get config() {
+		return this.peerConnection.parent.config.congestionDetector;
 	}
 
-	public update(peerConnections: IterableIterator<PeerConnectionEntry>) {
-		const visitedPeerConnectionIds = new Set<string>();
-		let gotCongested = false;
+	/**
+	 * Updates the detector state and checks for network congestion
+	 * 
+	 * This method analyzes various network quality indicators to determine if the
+	 * peer connection is experiencing congestion. The detection logic varies based
+	 * on the configured sensitivity level.
+	 * 
+	 * **Processing Steps:**
+	 * 1. Checks for bandwidth-limited outbound RTP streams
+	 * 2. Calculates RTT variation from EWMA baseline
+	 * 3. Applies sensitivity-specific logic to determine congestion state
+	 * 4. Updates historical maximums during non-congested periods
+	 * 5. Emits events and creates issues when congestion is detected
+	 * 6. Resets historical maximums after congestion detection for next cycle
+	 * 
+	 * **Sensitivity Logic:**
+	 * - **High**: Any bandwidth limitation triggers congestion
+	 * - **Medium**: Bandwidth limitation + RTT increase > 33% of current EWMA RTT (min 50ms, max 150ms)
+	 * - **Low**: Bandwidth limitation + outbound packet loss > 5%
+	 */
+	public update() {
+		if (this.config.disabled) return;
 
-		for (const peerConnection of peerConnections) {
-			const { peerConnectionId } = peerConnection;
-			let state = this._states.get(peerConnectionId);
+		let hasBwLimitedOutboundRtp = false;
 
-			visitedPeerConnectionIds.add(peerConnectionId);
+		for (const outboundRtp of this.peerConnection.outboundRtps) {
+			hasBwLimitedOutboundRtp ||= outboundRtp.qualityLimitationReason === 'bandwidth';
+			// isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
+		}
 
-			if (!state) {
-				state = {
-					peerConnectionId,
-					congested: false,
-					// outgoingBitrateBeforeCongestion: 0,
-					// outgoingBitrateAfterCongestion: 0,
-					// incomingBitrateBeforeCongestion: 0,
-					// incomingBitrateAfterCongestion: 0,
-				};
-				this._states.set(peerConnectionId, state);
-			}
-			const wasCongested = state.congested;
-			let hasBwLimitedOutboundRtp = false;
-			
-			for (const outboundRtp of peerConnection.outboundRtps()) {
-				hasBwLimitedOutboundRtp ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
-				// isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
-			}
-			
-			let rttDiffInS = 0;
-			if (peerConnection.avgRttInS !== undefined) {
-				if (state.ewmaRttInS === undefined) {
-					state.ewmaRttInS = peerConnection.avgRttInS;
-				}
-				rttDiffInS = Math.abs(peerConnection.avgRttInS - state.ewmaRttInS);
-			}
-			
-			let isCongested = false;
-			switch (this.config.sensitivity) {
-				case 'high':
-					isCongested = hasBwLimitedOutboundRtp;
-					break;
-				case 'medium': {
-					if (!state.ewmaRttInS) break;
-					
-					const rttDiffThreshold = Math.min(0.15, Math.max(0.05, state.ewmaRttInS * 0.33));
-					
-					isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold;
-
-					break;
-				}
-				case 'low': {
-					if (!state.ewmaRttInS || !peerConnection.sendingFractionalLoss) break;
-					
-					isCongested = hasBwLimitedOutboundRtp && peerConnection.sendingFractionalLoss > 0.05;
-					break;
-				}
-			}
-
-			if (peerConnection.avgRttInS && state.ewmaRttInS) {
-				const alpha = isCongested ? 0.02 : 0.1;
-				
-				state.ewmaRttInS = ((1.0 - alpha) * state.ewmaRttInS) + (alpha * peerConnection.avgRttInS);
-			}
-
-			peerConnection.sendingFractionalLoss;
-
-			let selectedCandidatePair: IceCandidatePairEntry | undefined;
-			for (const transport of peerConnection.transports()) {
-				selectedCandidatePair = transport.getSelectedIceCandidatePair();
-				if (selectedCandidatePair) break;
-			}
-
-			if (!selectedCandidatePair) {
-				selectedCandidatePair = Array.from(peerConnection.iceCandidatePairs()).find(pair => pair.stats.nominated === true);
-			}
-
-			selectedCandidatePair?.stats.availableIncomingBitrate;
-			selectedCandidatePair?.stats.availableOutgoingBitrate;
-
-			if (isCongested) {
-				state.incomingBitrateAfterCongestion = selectedCandidatePair?.stats.availableIncomingBitrate ?? state.incomingBitrateAfterCongestion;
-				state.outgoingBitrateAfterCongestion = selectedCandidatePair?.stats.availableOutgoingBitrate ?? state.outgoingBitrateAfterCongestion;
-				state.congested = true;
-			} else {
-				state.incomingBitrateBeforeCongestion = selectedCandidatePair?.stats.availableIncomingBitrate ?? state.incomingBitrateBeforeCongestion;
-				state.outgoingBitrateBeforeCongestion = selectedCandidatePair?.stats.availableOutgoingBitrate ?? state.outgoingBitrateBeforeCongestion;
-				state.congested = false;
-			}
-			
-			if (wasCongested === isCongested) {
-				if (isCongested) {
-					state.incomingBitrateBeforeCongestion = undefined;
-					state.outgoingBitrateBeforeCongestion = undefined;
-				} else {
-					state.incomingBitrateAfterCongestion = undefined;
-					state.outgoingBitrateAfterCongestion = undefined;
-				}
-			} else if (!wasCongested && isCongested) {
-				gotCongested = true;
-				this.emit('alert-state', 'on');
-			} else if (wasCongested && !isCongested) {
-				this.emit('alert-state', 'off');
+		let rttDiffInS = 0;
+		if (this.peerConnection.avgRttInSec !== undefined) {
+			if (this.peerConnection.ewmaRttInSec !== undefined) {
+				rttDiffInS = Math.abs(this.peerConnection.avgRttInSec - this.peerConnection.ewmaRttInSec);
 			}
 		}
 
-		if (gotCongested) {
-			this.emit('congestion', {
-				peerConnectionIds: Array.from(this._states.values()).filter(s => s.congested).map(s => s.peerConnectionId),
-				incomingBitrateAfterCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.incomingBitrateAfterCongestion ?? 0), 0),
-				outgoingBitrateAfterCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.outgoingBitrateAfterCongestion ?? 0), 0),
-				incomingBitrateBeforeCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.incomingBitrateBeforeCongestion ?? 0), 0),
-				outgoingBitrateBeforeCongestion: Array.from(this._states.values()).reduce((acc, s) => acc + (s.outgoingBitrateBeforeCongestion ?? 0), 0),
+		let isCongested = false;
+		switch (this.config.sensitivity) {
+			case 'high':
+				isCongested = hasBwLimitedOutboundRtp;
+				break;
+			case 'medium': {
+				if (!this.peerConnection.ewmaRttInSec) break;
+				
+				const rttDiffThreshold = Math.min(0.15, Math.max(0.05, this.peerConnection.ewmaRttInSec * 0.33));
+				
+				isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold;
+
+				break;
+			}
+			case 'low': {
+				if (!this.peerConnection.ewmaRttInSec || !this.peerConnection.outboundFractionLost) break;
+				
+				isCongested = hasBwLimitedOutboundRtp && this.peerConnection.outboundFractionLost > 0.05;
+				break;
+			}
+		}
+		const availableIncomingBitrate = this.peerConnection.totalAvailableIncomingBitrate;
+		const availableOutgoingBitrate = this.peerConnection.totalAvailableOutgoingBitrate;
+
+		if (!isCongested) {
+			if (this.peerConnection.congested) {
+				this.peerConnection.congested = false;
+			}
+			this._maxAvailableIncomingBitrate = Math.max(this._maxAvailableIncomingBitrate, availableIncomingBitrate);
+			this._maxAvailableOutgoingBitrate = Math.max(this._maxAvailableOutgoingBitrate, availableOutgoingBitrate);
+			this._maxReceivingBitrate = Math.max(this._maxReceivingBitrate, this.peerConnection.receivingBitrate);
+			this._maxSendingBitrate = Math.max(this._maxSendingBitrate, this.peerConnection.sendingBitrate);
+
+			return;
+		} else if (this.peerConnection.congested) {
+			return;
+		}
+
+		// congestion is detected
+		this.peerConnection.congested = true;
+		this.peerConnection.parent.emit('congestion', {
+			clientMonitor: this.peerConnection.parent,
+			peerConnectionMonitor: this.peerConnection,
+			availableIncomingBitrate,
+			availableOutgoingBitrate,
+			maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
+			maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
+			maxReceivingBitrate: this._maxSendingBitrate,
+			maxSendingBitrate: this._maxSendingBitrate,
+		});
+		
+		if (this.config.createIssue) {
+			this.peerConnection.parent.addIssue({
+				type: 'congestion',
+				payload: {
+					peerConnectionId: this.peerConnection.peerConnectionId,
+					availableIncomingBitrate,
+					availableOutgoingBitrate,
+					maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
+					maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
+					maxReceivingBitrate: this._maxReceivingBitrate,
+					maxSendingBitrate: this._maxSendingBitrate,
+				}
 			});
 		}
-		// gotCongested && this.emit('congestion', Array.from(this._states.values()));
 
-		for (const [peerConnectionId] of Array.from(this._states)) {
-			if (!visitedPeerConnectionIds.has(peerConnectionId)) {
-				this._states.delete(peerConnectionId);
-			}
-		}
-	}
-
-	public get closed() {
-		return this._closed;
-	}
-
-	public close() {
-		if (this._closed) return;
-		this._closed = true;
-
-		this.emit('close');
+		this._maxAvailableIncomingBitrate = 0;
+		this._maxAvailableOutgoingBitrate = 0;
+		this._maxReceivingBitrate = 0;
+		this._maxSendingBitrate = 0;
 	}
 }

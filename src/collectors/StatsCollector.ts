@@ -1,15 +1,7 @@
+import { RtcStats } from "../schema/W3cStatsIdentifiers";
+
 export interface StatsCollector {
-    /**
-     * THe identifier of the stats collector
-     */
-    readonly id: string;
-    
-    readonly closed: boolean;
+	lastStats: RtcStats[];
 
-    /**
-     * close and removes the stats collector from the collectors.
-     */
-    close(): void;
+	getStats(): Promise<RtcStats[]>;
 }
-
-

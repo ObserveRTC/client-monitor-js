@@ -1,3 +1,29 @@
+## 4.0.0
+
+### Breaking Changes
+ * **Schema v3.0.0**: Upgraded to use schema version 3.0.0 for sampling with new data structures
+ * **API Refactor**: Complete ClientMonitor API refactor with breaking changes
+ * **Detector Architecture**: Rewritten detector and monitor system for better performance
+
+### Major Features
+ * **Enhanced Detectors**: Added comprehensive documentation and unit tests for all detectors
+ * **Score System**: Improved scoring system with detailed score reasons for tracks and connections
+ * **Event Handling**: Enhanced event system with better payload handling and new event listeners
+ * **Stats Adapters**: Refactored stats adapter architecture for improved statistics collection
+ * **Issue Creation**: Added configurable `createIssue` flag across all detectors
+
+### Configuration & Build
+ * **Build Process**: Updated to TypeScript compiler with ES module support and minification
+ * **Package Config**: Enhanced package.json with better entry points and Node.js 14+ requirement
+ * **Documentation**: Restructured documentation with comprehensive README and examples
+
+### Migration Notes
+This is a major version with breaking changes. Applications using v3.x will need to update API usage, detector configurations, and event handlers to work with the new architecture.
+
+## 3.0.0
+
+ * The ClientMonitor API is simplified and refactored.
+
 ## 2.3.0
  * refactored collectors and sampler
  * `clientMontior.os` is moved to `clientMonitor.meta.operationSystem`

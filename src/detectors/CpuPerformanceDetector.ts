@@ -1,73 +1,80 @@
-import EventEmitter from "events";
-import { AlertState } from "../ClientMonitor";
-import { PeerConnectionEntry } from "../entries/StatsEntryInterfaces";
-import { Detector } from "./Detector";
+import { ClientMonitor } from "..";
 
-export type CpuPerformanceDetectorConfig = {
-	// fpsVolatilityHighWatermarkThreshold: number;
-	// fpsVolatilityLowWatermarkThreshold: number;
-	fpsVolatilityThresholds?: {
-		lowWatermark: number,
-		highWatermark: number,
-	},
-	durationOfCollectingStatsThreshold?: {
-		lowWatermark: number,
-		highWatermark: number,
-	}
-	// durationOfCollectingStatsHighWatermarkThresholdInMs?: number;
-	// durationOfCollectingStatsLowWatermarkThresholdInMs?: number;
-}
-
-export type CpuPerformanceDetectorEvents = {
-	'alert-state': [AlertState],
-	statechanged: [AlertState],
-	close: [],
-}
-
-export declare interface CpuPerformanceDetector extends Detector {
-	on<K extends keyof CpuPerformanceDetectorEvents>(event: K, listener: (...events: CpuPerformanceDetectorEvents[K]) => void): this;
-	off<K extends keyof CpuPerformanceDetectorEvents>(event: K, listener: (...events: CpuPerformanceDetectorEvents[K]) => void): this;
-	once<K extends keyof CpuPerformanceDetectorEvents>(event: K, listener: (...events: CpuPerformanceDetectorEvents[K]) => void): this;
-	emit<K extends keyof CpuPerformanceDetectorEvents>(event: K, ...events: CpuPerformanceDetectorEvents[K]): boolean;
-}
-
-export class CpuPerformanceDetector extends EventEmitter {
-	private _closed = false;
-	private _alertState: AlertState = 'off';
+/**
+ * Detects CPU performance limitations affecting WebRTC quality.
+ * 
+ * This detector monitors various indicators of CPU performance issues that can
+ * degrade WebRTC call quality, including quality limitation reasons, FPS volatility,
+ * and stats collection duration. It uses hysteresis behavior with different
+ * thresholds for alerting on and off to prevent flapping.
+ * 
+ * **Detection Criteria:**
+ * - Outbound RTP quality limitation reason is 'cpu'
+ * - FPS volatility exceeds configured thresholds (with hysteresis)
+ * - Stats collection duration exceeds thresholds (indicating processing delays)
+ * 
+ * **Configuration Options:**
+ * - `disabled`: Whether the detector is disabled (default: false)
+ * - `createIssue`: Whether to create an issue when CPU limitation is detected
+ * - `fpsVolatilityThresholds`: High/low watermarks for FPS volatility detection
+ * - `durationOfCollectingStatsThreshold`: High/low watermarks for stats collection duration
+ * 
+ * **Events Emitted:**
+ * - `cpulimitation`: Emitted when CPU performance limitation is detected
+ * 
+ * **Usage Example:**
+ * ```typescript
+ * const detector = new CpuPerformanceDetector(clientMonitor);
+ * 
+ * clientMonitor.on('cpulimitation', (event) => {
+ *   console.log('CPU performance limitation detected');
+ *   // Take action to reduce CPU load
+ * });
+ * ```
+ * 
+ * **Behavior:**
+ * - Uses hysteresis to prevent alert flapping
+ * - Monitors multiple CPU performance indicators simultaneously
+ * - Only considers inbound tracks with sufficient FPS (>= 10) for volatility analysis
+ * - Automatically clears alert when conditions improve
+ */
+export class CpuPerformanceDetector {
+	public readonly name = 'cpu-performance-detector';
 
 	public constructor(
-		public readonly config: CpuPerformanceDetectorConfig
+		public readonly clientMonitor: ClientMonitor,
 	) {
-		super();
-		this.setMaxListeners(Infinity);
+	}
+
+	private get config() {
+		return this.clientMonitor.config.cpuPerformanceDetector;
 	}
 
 
-	public update(peerConnections: IterableIterator<PeerConnectionEntry>, durationOfCollectingStatsInMs: number) {
-		const isLimited = this._alertState === 'on';
+	public update() {
+		const isLimited = this.clientMonitor.cpuPerformanceAlertOn;
 		let gotLimited = false;
 		const { lowWatermark: lowFpsVolatility, highWatermark: highFpsVolatility } = this.config.fpsVolatilityThresholds ?? {};
+		
 		
 		if (this.config.durationOfCollectingStatsThreshold) {
 			const { lowWatermark, highWatermark } = this.config.durationOfCollectingStatsThreshold;
 			
 			if (isLimited) {
-				gotLimited = lowWatermark < durationOfCollectingStatsInMs;
+				gotLimited = lowWatermark < this.clientMonitor.durationOfCollectingStatsInMs;
 			} else {
-				if (highWatermark < durationOfCollectingStatsInMs) {
+				if (highWatermark < this.clientMonitor.durationOfCollectingStatsInMs) {
 					gotLimited = true;
 				}
 			}
 		}
 
-		if (!gotLimited) for (const peerConnection of peerConnections) {
-			for (const outboundRtp of peerConnection.outboundRtps()) {
-				gotLimited ||= outboundRtp.stats.qualityLimitationReason === 'cpu';
+		for (const outboundRtp of this.clientMonitor.outboundRtps) {
+			gotLimited ||= outboundRtp.qualityLimitationReason === 'cpu';
+		}
 
-				outboundRtp.stats.framesEncoded
-			}
-
-			if (lowFpsVolatility && highFpsVolatility) for (const inboundRtp of peerConnection.inboundRtps()) {
+		if (lowFpsVolatility && highFpsVolatility) {
+			for (const inboundRtp of this.clientMonitor.inboundRtps) {
 				if (gotLimited) continue;
 				if (!inboundRtp.fpsVolatility) continue;
 				if (!inboundRtp.avgFramesPerSec || inboundRtp.avgFramesPerSec < 10) continue;
@@ -78,26 +85,32 @@ export class CpuPerformanceDetector extends EventEmitter {
 						gotLimited = true;
 					}
 				}
-				
 			}
 		}
 
-		
-		this._alertState = gotLimited ? 'on' : 'off';
+		if (gotLimited) {
+			if (isLimited) return;
+			this.clientMonitor.cpuPerformanceAlertOn = true;
 
-		if (isLimited !== gotLimited) {
-			this.emit('statechanged', this._alertState);
-			this.emit('alert-state', this._alertState);
+			this.clientMonitor.emit('cpulimitation', {
+				clientMonitor: this.clientMonitor,
+			});
+
+			if (this.config.createIssue) {
+				this.clientMonitor.addIssue({
+					type: 'cpulimitation',
+				});
+			}
+
+		} else {
+			if (!isLimited) return;
+			this.clientMonitor.cpuPerformanceAlertOn = false;
+			// this.clientMonitor.addIssue({
+			// 	type: 'cpulimitation',
+			// 	payload: {
+			// 		issueContext: this._issueContext,
+			// 	},
+			// });
 		}
-	}
-
-	public get closed() {
-		return this._closed;
-	}
-
-	public close() {
-		if (this._closed) return;
-		this._closed = true;
-		this.emit('close');
 	}
 }

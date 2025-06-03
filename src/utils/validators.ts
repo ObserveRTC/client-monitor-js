@@ -6,7 +6,8 @@ export function isValidUuid(str: string): boolean {
 export function isValidJsonString(str: string) {
     try {
         JSON.parse(str);
-    } catch (e) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_e) {
         return false;
     }
     return true;
