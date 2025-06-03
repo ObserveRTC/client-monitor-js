@@ -38,7 +38,7 @@ export class IceTupleChangeDetector implements Detector {
 			}
 
 			if (wasEmpty || !changed) return;
-
+			
 			this.pcMonitor.parent.emit('ice-tuple-changed', {
 				clientMonitor: this.pcMonitor.parent,
 				peerConnectionMonitor: this.pcMonitor,

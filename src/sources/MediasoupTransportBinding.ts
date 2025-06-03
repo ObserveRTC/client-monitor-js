@@ -229,7 +229,6 @@ export class MediasoupTransportBinding {
 	
 	private _connectionStateChanged(...args: mediasoup.types.TransportEvents['connectionstatechange']) {
 		this.monitor.connectionState = args[0];
-
 		return this._fireEvent(ClientEventTypes.PEER_CONNECTION_STATE_CHANGED, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			connectionState: args[0],
