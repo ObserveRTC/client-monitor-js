@@ -11,7 +11,7 @@ import {
     ClientEvent, 
     ClientIssue, 
     ClientMetaData, 
-    ClientMonitorEvents 
+    ClientMonitorEvents, 
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from './schema/ClientEventTypes';
@@ -188,6 +188,23 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
             this._sources.addStatsAdapters(peerConnection);
         }
     }
+
+    public set onsamplecreated(listener: (...args: ClientMonitorEvents['sample-created']) => void) {
+        this.on('sample-created', listener);
+    }
+
+    public set onstatscollected(listener: (...args: ClientMonitorEvents['stats-collected']) => void) {
+        this.on('stats-collected', listener);
+    }
+
+    public set onclientevent(listener: (...args: ClientMonitorEvents['client-event']) => void) {
+        this.on('client-event', listener);
+    }
+
+    public set onissue(listener: (...args: ClientMonitorEvents['issue']) => void) {
+        this.on('issue', listener);
+    }
+    
 
     public get browser() {
         return this._browser;

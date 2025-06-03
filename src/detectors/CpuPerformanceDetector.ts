@@ -1,5 +1,43 @@
 import { ClientMonitor } from "..";
 
+/**
+ * Detects CPU performance limitations affecting WebRTC quality.
+ * 
+ * This detector monitors various indicators of CPU performance issues that can
+ * degrade WebRTC call quality, including quality limitation reasons, FPS volatility,
+ * and stats collection duration. It uses hysteresis behavior with different
+ * thresholds for alerting on and off to prevent flapping.
+ * 
+ * **Detection Criteria:**
+ * - Outbound RTP quality limitation reason is 'cpu'
+ * - FPS volatility exceeds configured thresholds (with hysteresis)
+ * - Stats collection duration exceeds thresholds (indicating processing delays)
+ * 
+ * **Configuration Options:**
+ * - `disabled`: Whether the detector is disabled (default: false)
+ * - `createIssue`: Whether to create an issue when CPU limitation is detected
+ * - `fpsVolatilityThresholds`: High/low watermarks for FPS volatility detection
+ * - `durationOfCollectingStatsThreshold`: High/low watermarks for stats collection duration
+ * 
+ * **Events Emitted:**
+ * - `cpulimitation`: Emitted when CPU performance limitation is detected
+ * 
+ * **Usage Example:**
+ * ```typescript
+ * const detector = new CpuPerformanceDetector(clientMonitor);
+ * 
+ * clientMonitor.on('cpulimitation', (event) => {
+ *   console.log('CPU performance limitation detected');
+ *   // Take action to reduce CPU load
+ * });
+ * ```
+ * 
+ * **Behavior:**
+ * - Uses hysteresis to prevent alert flapping
+ * - Monitors multiple CPU performance indicators simultaneously
+ * - Only considers inbound tracks with sufficient FPS (>= 10) for volatility analysis
+ * - Automatically clears alert when conditions improve
+ */
 export class CpuPerformanceDetector {
 	public readonly name = 'cpu-performance-detector';
 
