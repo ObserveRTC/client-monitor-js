@@ -38,7 +38,7 @@ const logger = createLogger('ClientMonitor');
 //     emit<K extends keyof ClientMonitorEvents>(event: K, ...args: Parameters<ClientMonitorEvents[K]>): boolean;
 // }
 
-export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
+export class ClientMonitor<AppData extends Record<string, number> = Record<string, number>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
     // public readonly statsAdapters = new StatsAdapters();
@@ -77,7 +77,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
-    public readonly config: AppliedClientMonitorConfig;
+    public readonly config: AppliedClientMonitorConfig<AppData>;
 
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
@@ -85,7 +85,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
     public attachments?: Record<string, unknown>;
 
     public constructor(
-        config?: Partial<ClientMonitorConfig>
+        config?: Partial<ClientMonitorConfig<AppData>>
     ) {
         super();
         this.config = {
@@ -140,6 +140,7 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
                 createIssue: true,
             },
             bufferingEventsForSamples: config?.bufferingEventsForSamples ?? false,
+            appData: config?.appData ?? {} as AppData,
         }
 
         this._sources = new Sources(this);
@@ -176,8 +177,8 @@ export class ClientMonitor extends EventEmitter<ClientMonitorEvents> {
         this.config.callId = callId; 
     }
 
-    public get appData() { return this.config.appData; }
-    public set appData(appData: Record<string, unknown> | undefined) { this.config.appData = appData; }
+    public get appData(): AppData { return this.config.appData ; }
+    public set appData(appData: AppData) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
         if (this.closed || !browser) return;
         if (this._browser) logger.warn('Browser info is already set, cannot change it');

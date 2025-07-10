@@ -1,4 +1,4 @@
-export type AppliedClientMonitorConfig = {
+export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
      * A unique identifier for the client. This is typically provided by the application
      * to distinguish the current client instance and added to every sample created by the monitor
@@ -316,8 +316,8 @@ export type AppliedClientMonitorConfig = {
      * 
      * OPTIONAL
      */
-    appData?: Record<string, unknown>;
+    appData: AppData;
 };
 
-export type ClientMonitorConfig = Partial<AppliedClientMonitorConfig>;
+export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = Partial<AppliedClientMonitorConfig<AppData>>;
 export type ClientMonitorSourceType = 'mediasoup-device' | 'RTCPeerConnection' | 'mediasoup-transport';
