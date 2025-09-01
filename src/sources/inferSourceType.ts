@@ -1,5 +1,4 @@
 import { ClientMonitorSourceType } from "../ClientMonitorConfig";
-import * as mediasoup from "mediasoup-client";
 
 export function inferSourceType(source: unknown): ClientMonitorSourceType | undefined {
     if (isMediasoupTransport(source)) return 'mediasoup-transport';
@@ -9,9 +8,9 @@ export function inferSourceType(source: unknown): ClientMonitorSourceType | unde
 }
 
 function isMediasoupTransport(source: unknown): boolean {
-    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
+    const obj = source as Record<string, unknown>;
 
-    if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
+    if (obj.handler && obj.direction) {
         return true;
     }
 
@@ -24,11 +23,9 @@ function isMediasoupTransport(source: unknown): boolean {
 }
 
 function isMediasoupDevice(source: unknown): boolean {
-    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
+    const obj = source as Record<string, unknown>;
 
-    if (source instanceof mediasoup.types.Device || constructorName === mediasoup.types.Device.name) {
-        return true;
-    }
+    if (obj.handlerName && obj.loaded !== undefined) return true;
 
     if (typeof source !== 'object' || source === null) {
         return false;
