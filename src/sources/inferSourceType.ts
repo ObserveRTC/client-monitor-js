@@ -8,42 +8,25 @@ export function inferSourceType(source: unknown): ClientMonitorSourceType | unde
 }
 
 function isMediasoupTransport(source: unknown): boolean {
+    if (!source) return false;
+
     const obj = source as Record<string, unknown>;
 
-    if (obj.handler && obj.direction) {
-        return true;
-    }
-
-    if (typeof source !== 'object' || source === null) {
-        return false;
-    }
-
-    return 'direction' in source
-    
+    return Boolean(obj?.handler) && Boolean(obj?.direction);
 }
 
 function isMediasoupDevice(source: unknown): boolean {
+    if (!source) return false;
+
     const obj = source as Record<string, unknown>;
 
-    if (obj.handlerName && obj.loaded !== undefined) return true;
-
-    if (typeof source !== 'object' || source === null) {
-        return false;
-    }
-
-    return 'handlerName' in source
+    return Boolean(obj?.handlerName) && Boolean(obj?.loaded);
 }
 
 function isRTCPeerConnection(source: unknown): boolean {
-    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
+    if (!source) return false;
 
-    if (source instanceof RTCPeerConnection || constructorName === RTCPeerConnection.name) {
-        return true;
-    }
+    const obj = source as Record<string, unknown>;
 
-    if (typeof source !== 'object' || source === null) {
-        return false;
-    }
-
-    return 'setLocalDescription' in source
+    return Boolean(obj?.setLocalDescription);
 }
