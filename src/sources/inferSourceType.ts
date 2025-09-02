@@ -1,5 +1,4 @@
 import { ClientMonitorSourceType } from "../ClientMonitorConfig";
-import * as mediasoup from "mediasoup-client";
 
 export function inferSourceType(source: unknown): ClientMonitorSourceType | undefined {
     if (isMediasoupTransport(source)) return 'mediasoup-transport';
@@ -9,44 +8,25 @@ export function inferSourceType(source: unknown): ClientMonitorSourceType | unde
 }
 
 function isMediasoupTransport(source: unknown): boolean {
-    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
+    if (!source) return false;
 
-    if (source instanceof mediasoup.types.Transport || constructorName === mediasoup.types.Transport.name) {
-        return true;
-    }
+    const obj = source as Record<string, unknown>;
 
-    if (typeof source !== 'object' || source === null) {
-        return false;
-    }
-
-    return 'direction' in source
-    
+    return Boolean(obj.direction);
 }
 
 function isMediasoupDevice(source: unknown): boolean {
-    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
+    if (!source) return false;
 
-    if (source instanceof mediasoup.types.Device || constructorName === mediasoup.types.Device.name) {
-        return true;
-    }
+    const obj = source as Record<string, unknown>;
 
-    if (typeof source !== 'object' || source === null) {
-        return false;
-    }
-
-    return 'handlerName' in source
+    return Boolean(obj.handlerName);
 }
 
 function isRTCPeerConnection(source: unknown): boolean {
-    const constructorName = (source as Record<string, unknown>)?.constructor?.name;
+    if (!source) return false;
 
-    if (source instanceof RTCPeerConnection || constructorName === RTCPeerConnection.name) {
-        return true;
-    }
+    const obj = source as Record<string, unknown>;
 
-    if (typeof source !== 'object' || source === null) {
-        return false;
-    }
-
-    return 'setLocalDescription' in source
+    return Boolean(obj.setLocalDescription);
 }
