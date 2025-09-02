@@ -38,7 +38,7 @@ const logger = createLogger('ClientMonitor');
 //     emit<K extends keyof ClientMonitorEvents>(event: K, ...args: Parameters<ClientMonitorEvents[K]>): boolean;
 // }
 
-export class ClientMonitor<AppData extends Record<string, number> = Record<string, number>> extends EventEmitter<ClientMonitorEvents> {
+export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
     // public readonly statsAdapters = new StatsAdapters();
