@@ -109,8 +109,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 createIssue: true,
             },
             audioDesyncDetector: config?.audioDesyncDetector ?? {
-                fractionalCorrectionAlertOffThreshold: 0.1,
-                fractionalCorrectionAlertOnThreshold: 0.05,
+                fractionalCorrectionAlertOffThreshold: 0.25,
+                fractionalCorrectionAlertOnThreshold: 0.5,
                 createIssue: true,
             },
             syntheticSamplesDetector: {

@@ -107,7 +107,9 @@ export class AudioDesyncDetector implements Detector {
 
 		const wasDesync = inboundRtp.desync;
 		if (inboundRtp.desync) {
-			inboundRtp.desync = this.config.fractionalCorrectionAlertOffThreshold < fractionalCorrection;
+			if (fractionalCorrection < this.config.fractionalCorrectionAlertOffThreshold) {
+				inboundRtp.desync = false;
+			}
 		} else {
 			inboundRtp.desync = this.config.fractionalCorrectionAlertOnThreshold < fractionalCorrection;
 		}
