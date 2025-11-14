@@ -179,7 +179,7 @@ export class DefaultScoreCalculator {
 		
 		const finalScore = this._calculateFinalScore(appData.lastNScores);
 
-		score.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
+		score.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	public _calculateTrackScore(trackMonitor: TrackMonitor) {
@@ -283,7 +283,7 @@ export class DefaultScoreCalculator {
 		
 		const finalScore = this._calculateFinalScore(appData.lastNScores)
 
-		trackMonitor.calculatedScore.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
+		trackMonitor.calculatedScore.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {
