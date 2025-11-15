@@ -191,18 +191,22 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     public set onsamplecreated(listener: (...args: ClientMonitorEvents['sample-created']) => void) {
+        this.once('close', () => (this.off('sample-created', listener)));
         this.on('sample-created', listener);
     }
 
     public set onstatscollected(listener: (...args: ClientMonitorEvents['stats-collected']) => void) {
+        this.once('close', () => (this.off('stats-collected', listener)));
         this.on('stats-collected', listener);
     }
 
     public set onclientevent(listener: (...args: ClientMonitorEvents['client-event']) => void) {
+        this.once('close', () => (this.off('client-event', listener)));
         this.on('client-event', listener);
     }
 
     public set onissue(listener: (...args: ClientMonitorEvents['issue']) => void) {
+        this.once('close', () => (this.off('issue', listener)));
         this.on('issue', listener);
     }
     

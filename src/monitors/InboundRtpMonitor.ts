@@ -84,7 +84,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	fpsVolatility?: number;
 	lastNFramesPerSec: number[] = [];
 	receivingAudioSamples?: number;
-	fractionLost?: number;
+	totalFractionLost?: number;
 	bitPerPixel?: number;
 	packetRate?: number | undefined;
 	ewmaFps?: number;
@@ -209,7 +209,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		}
 
 		if (this.packetsReceived !== undefined && this.packetsLost !== undefined) {
-			this.fractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
+			this.totalFractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
 				? (this.packetsLost) / (this.packetsLost + this.packetsReceived) : 0.0;
 		}
 		if (this.deltaPacketsReceived !== undefined && this.deltaPacketsLost !== undefined) {
