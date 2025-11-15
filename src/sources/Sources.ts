@@ -52,6 +52,7 @@ export class Sources {
 		);
 		const bindnings = new RtcPeerConnectionBinding(peerConnection, peerConnectionMonitor);
 
+		bindnings.bind();
 		peerConnectionMonitor.once('close', () => {
 			this._peerConnectionBindings.delete(peerConnectionId);
 		});
