@@ -135,7 +135,7 @@ export class DefaultScoreCalculator {
 		const score = pcMonitor.calculatedStabilityScore;
 		const rttInMs = (pcMonitor.avgRttInSec ?? 0) * 1000;
 		const fractionLost = 
-			(pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)
+			(pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.deltaFractionLost ?? 0), 0)
 			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)) 
 		
 		let scoreValue = 5.0;
@@ -179,7 +179,7 @@ export class DefaultScoreCalculator {
 		
 		const finalScore = this._calculateFinalScore(appData.lastNScores);
 
-		score.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
+		score.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	public _calculateTrackScore(trackMonitor: TrackMonitor) {
@@ -283,7 +283,7 @@ export class DefaultScoreCalculator {
 		
 		const finalScore = this._calculateFinalScore(appData.lastNScores)
 
-		trackMonitor.calculatedScore.value = finalScore ? this._getRoundedScore(finalScore) : undefined;
+		trackMonitor.calculatedScore.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {

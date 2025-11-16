@@ -259,7 +259,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 								break;
 						}
 	
-						this.inboundFractionalLost += monitor?.fractionLost ?? 0.0;
+						this.inboundFractionalLost += monitor?.deltaFractionLost ?? 0.0;
 						this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
 						this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
 						break;
