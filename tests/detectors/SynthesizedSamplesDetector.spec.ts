@@ -52,6 +52,11 @@ class MockClientMonitor {
     clearIssues() {
         this.issues = [];
     }
+
+    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
+        // Mock implementation for resolving active issues
+        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
+    }
 }
 
 class MockPeerConnectionMonitor {

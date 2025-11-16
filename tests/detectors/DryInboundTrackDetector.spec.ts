@@ -18,6 +18,7 @@ interface EventHandler {
 
 interface InboundRtpStats {
     bytesReceived?: number;
+    deltaBytesReceived?: number;
 }
 
 // Mock dependencies
@@ -55,6 +56,11 @@ class MockClientMonitor {
 
     clearIssues() {
         this.issues = [];
+    }
+
+    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
+        // Mock implementation for resolving active issues
+        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
     }
 }
 
@@ -120,7 +126,7 @@ describe('DryInboundTrackDetector', () => {
     describe('update() - Basic validation', () => {
         it('should return early if detector is disabled', () => {
             mockClientMonitor.config.dryInboundTrackDetector.disabled = true;
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             // Advance time beyond threshold
             jest.advanceTimersByTime(6000);
@@ -130,14 +136,14 @@ describe('DryInboundTrackDetector', () => {
         });
 
         it('should return early if track is receiving data', () => {
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 1000 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 1000, deltaBytesReceived: 100 });
 
             detector.update();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
         it('should return early if remote track is paused', () => {
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
             mockTrackMonitor.setRemoteOutboundTrackPaused(true);
 
             // Advance time beyond threshold
@@ -155,7 +161,7 @@ describe('DryInboundTrackDetector', () => {
         });
 
         it('should start timing when track stops receiving data', () => {
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             detector.update();
 
@@ -173,7 +179,7 @@ describe('DryInboundTrackDetector', () => {
             const eventSpy = jest.fn();
             mockClientMonitor.on('dry-inbound-track', eventSpy);
 
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             // Start the timer
             detector.update();
@@ -197,7 +203,7 @@ describe('DryInboundTrackDetector', () => {
         });
 
         it('should reset timer when remote track becomes paused', () => {
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             // Start timing
             detector.update();
@@ -218,30 +224,35 @@ describe('DryInboundTrackDetector', () => {
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
-        it('should only trigger once per dry period', () => {
+        it('should trigger event and create issue multiple times per dry period', () => {
             const eventSpy = jest.fn();
             mockClientMonitor.on('dry-inbound-track', eventSpy);
 
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             detector.update();
             jest.advanceTimersByTime(6000);
             detector.update();
 
             expect(eventSpy).toHaveBeenCalledTimes(1);
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
-            // Additional calls should not trigger events
+            // Additional calls should trigger more events and create more issues
             jest.advanceTimersByTime(5000);
             detector.update();
 
-            expect(eventSpy).toHaveBeenCalledTimes(1);
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            expect(eventSpy).toHaveBeenCalledTimes(2);
+            expect(mockClientMonitor.getIssues()).toHaveLength(2);
+            
+            // Verify the duration is updated in the second issue
+            expect(mockClientMonitor.getIssues()[0].payload.duration).toBe(6000);
+            expect(mockClientMonitor.getIssues()[1].payload.duration).toBe(11000);
         });
 
         it('should use custom threshold from configuration', () => {
             mockClientMonitor.config.dryInboundTrackDetector.thresholdInMs = 10000; // 10 seconds
 
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             detector.update();
 
@@ -256,8 +267,8 @@ describe('DryInboundTrackDetector', () => {
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
 
-        it('should not reset timer when track starts receiving data - once evented, stays evented', () => {
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+        it('should reset when track starts receiving data but not trigger new issue until recovered', () => {
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             // Start timing
             detector.update();
@@ -266,19 +277,25 @@ describe('DryInboundTrackDetector', () => {
 
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
-            // Track starts receiving data
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 1000 });
+            // Track starts receiving data - this resets the evented flag and resolves the issue
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 1000, deltaBytesReceived: 100 });
             detector.update();
+
+            // Issue should be resolved
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
             // Later, track stops receiving data again
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
             detector.update();
 
-            // Should not trigger again since detector is already evented
-            jest.advanceTimersByTime(10000);
+            // Should not create new issue yet - needs to wait for threshold again
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            // After threshold, should create new issue
+            jest.advanceTimersByTime(6000);
             detector.update();
 
-            expect(mockClientMonitor.getIssues()).toHaveLength(1); // Still only 1 issue
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
     });
 
@@ -293,7 +310,7 @@ describe('DryInboundTrackDetector', () => {
             const eventSpy = jest.fn();
             mockClientMonitor.on('dry-inbound-track', eventSpy);
 
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             detector.update();
             jest.advanceTimersByTime(6000);
@@ -306,7 +323,7 @@ describe('DryInboundTrackDetector', () => {
         });
 
         it('should create issue with correct duration', () => {
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0 });
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             detector.update();
             jest.advanceTimersByTime(7500); // 7.5 seconds
