@@ -45,6 +45,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly detectors: Detectors;
     public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
+    public activeIssues: Record<string, ClientIssue[]> = {};
 
     public scoreCalculator: ScoreCalculator;
     public closed = false;
@@ -78,7 +79,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
-
+    
+    
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
      */
@@ -181,7 +183,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public set appData(appData: AppData) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
         if (this.closed || !browser) return;
-        if (this._browser) logger.warn('Browser info is already set, cannot change it');
+        if (this._browser) logger.warn('Browser info is already set on ClientMonitor, overwriting it');
         
         this._browser = browser;
 
@@ -414,22 +416,59 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
+    public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>, addActiveIssue = true): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
         
         const payload = issue.payload ? JSON.stringify(issue.payload) : undefined;
         const timestamp = issue.timestamp ?? Date.now();
+
         this._clientIssues.push({
             ...issue,
             payload,
             timestamp,
         });
 
+         if (addActiveIssue) {
+            this.activeIssues[issue.type] = this.activeIssues[issue.type] || [];
+            this.activeIssues[issue.type]?.push({
+                ...issue,
+                payload,
+                timestamp,
+            });
+        }
+
         this.emit('issue', {
             ...issue,
             payload: issue.payload,
             timestamp
+        });
+    }
+
+    public resolveActiveIssues(type: string, filter: (issue: ClientIssue) => boolean, comment?: string): void {
+        if (this.closed) return;
+
+        const issues = this.activeIssues[type];
+        if (!issues) return;
+
+        const resolvedIssues: ClientIssue[] = [];
+        const remainingIssues: ClientIssue[] = [];
+
+        for (const issue of issues) {
+
+            if (filter(issue)) resolvedIssues.push(issue);
+            else remainingIssues.push(issue);
+        }
+
+        if (remainingIssues.length === 0) delete this.activeIssues[type];
+        else this.activeIssues[type] = remainingIssues;
+
+        resolvedIssues.forEach(issue => {
+            this.emit('resolved-issue', {
+                ...issue,
+                resolvedAt: Date.now(),
+                comment,
+            });
         });
     }
 

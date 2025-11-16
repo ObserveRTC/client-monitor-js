@@ -53,6 +53,7 @@ export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
  * ```
  */
 export class CongestionDetector implements Detector {
+	public static readonly ISSUE_TYPE = 'congestion';
 	/** Unique identifier for this detector type */
 	public readonly name = 'congestion-detector';
 	
@@ -146,6 +147,7 @@ export class CongestionDetector implements Detector {
 		if (!isCongested) {
 			if (this.peerConnection.congested) {
 				this.peerConnection.congested = false;
+				this._resolveIssue();
 			}
 			this._maxAvailableIncomingBitrate = Math.max(this._maxAvailableIncomingBitrate, availableIncomingBitrate);
 			this._maxAvailableOutgoingBitrate = Math.max(this._maxAvailableOutgoingBitrate, availableOutgoingBitrate);
@@ -172,7 +174,7 @@ export class CongestionDetector implements Detector {
 		
 		if (this.config.createIssue) {
 			this.peerConnection.parent.addIssue({
-				type: 'congestion',
+				type: CongestionDetector.ISSUE_TYPE,
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,
 					availableIncomingBitrate,
@@ -190,4 +192,13 @@ export class CongestionDetector implements Detector {
 		this._maxReceivingBitrate = 0;
 		this._maxSendingBitrate = 0;
 	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.peerConnection.parent;
+
+		return clientMonitor.resolveActiveIssues(CongestionDetector.ISSUE_TYPE, (issue) => {
+			return (issue.payload as Record<string, unknown>)?.peerConnectionId === this.peerConnection.peerConnectionId;
+		});
+	}
+
 }

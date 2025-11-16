@@ -47,6 +47,7 @@ import { Detector } from "./Detector";
  * ```
  */
 export class PlayoutDiscrepancyDetector implements Detector {
+	public static readonly ISSUE_TYPE = 'inbound-video-playout-discrepancy';
 	/** Unique identifier for this detector type */
 	public readonly name = 'playout-discrepancy-detector';
 	
@@ -96,6 +97,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 
 		if (this.active) {
 			if (frameSkew < this.config.lowSkewThreshold) {
+				this._resolveIssue();
 				this.active = false;
 				return;
 			}
@@ -109,14 +111,14 @@ export class PlayoutDiscrepancyDetector implements Detector {
 
 		const clientMonitor = this.peerConnection.parent;
 
-		clientMonitor.emit('inbound-video-playout-discrepancy', {
+		clientMonitor.emit(PlayoutDiscrepancyDetector.ISSUE_TYPE, {
 			trackMonitor: this.trackMonitor,
 			clientMonitor: clientMonitor,
 		});
 
 		if (this.config.createIssue) {
 			clientMonitor.addIssue({
-				type: 'inbound-video-playout-discrepancy',
+				type: PlayoutDiscrepancyDetector.ISSUE_TYPE,
 				payload: {
 					trackId: this.trackMonitor.track.id,
 					frameSkew,
@@ -124,5 +126,13 @@ export class PlayoutDiscrepancyDetector implements Detector {
 				}
 			});
 		}
+	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.peerConnection.parent;
+
+		clientMonitor.resolveActiveIssues(PlayoutDiscrepancyDetector.ISSUE_TYPE, (issue) => {
+			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		});
 	}
 }

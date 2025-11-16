@@ -42,6 +42,7 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
  * ```
  */
 export class FreezedVideoTrackDetector implements Detector {
+	public static readonly ISSUE_TYPE = 'freezed-video-track';
 	/** Unique identifier for this detector type */
 	public readonly name = 'freezed-video-track-detector';
 	
@@ -100,7 +101,7 @@ export class FreezedVideoTrackDetector implements Detector {
 
 			if (this._config.createIssue) {
 				clientMonitor.addIssue({
-					type: 'freezed-video-track',
+					type: FreezedVideoTrackDetector.ISSUE_TYPE,
 					payload: {
 						trackId: inboundRtp.trackIdentifier,
 					}
@@ -108,16 +109,15 @@ export class FreezedVideoTrackDetector implements Detector {
 			}
 
 		} else if (wasFreezed && !inboundRtp.isFreezed) {
-			// clientMonitor.addIssue({
-			// 	type: 'freezed-video-track',
-			// 	payload: {
-			// 		peerConnectionId: this.peerConnection.peerConnectionId,
-			// 		trackId: inboundRtp.trackIdentifier,
-			// 		ssrc: inboundRtp.ssrc,
-			// 		duration: Date.now() - this._startedFreezeAt,
-			// 		issueContext,
-			// 	}
-			// });
+			this._resolveIssue();
 		}
+	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.peerConnection.parent;
+
+		return clientMonitor.resolveActiveIssues(FreezedVideoTrackDetector.ISSUE_TYPE, (issue) => {
+			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		});
 	}
 }

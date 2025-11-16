@@ -45,6 +45,7 @@ import { Detector } from "./Detector";
  * ```
  */
 export class DryInboundTrackDetector implements Detector {
+	public static readonly ISSUE_TYPE = 'dry-inbound-track';
 	/** Unique identifier for this detector type */
 	public readonly name = 'dry-inbound-track-detector';
 	
@@ -88,10 +89,19 @@ export class DryInboundTrackDetector implements Detector {
 	 * 6. Emit event and create issue when dry condition is detected
 	 */
 	public update() {
-		if (this._evented || this.config.disabled) return;
-		if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
+		if (this.config.disabled) return;
+		// if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
 		if (this.trackMonitor.remoteOutboundTrackPaused) {
 			this._activatedAt = undefined;
+			return;
+		}
+
+		if (this.trackMonitor.getInboundRtp()?.deltaBytesReceived !== 0) {
+			this._activatedAt = undefined;
+			if (this._evented) {
+				this._resolveIssue();
+				this._evented = false;
+			}
 			return;
 		}
 
@@ -100,12 +110,9 @@ export class DryInboundTrackDetector implements Detector {
 		}
 
 		const duration = Date.now() - this._activatedAt;
+		const clientMonitor = this.peerConnection.parent;
 
 		if (duration < this.config.thresholdInMs) return;
-
-		this._evented = true;
-
-		const clientMonitor = this.peerConnection.parent;
 
 		clientMonitor.emit('dry-inbound-track', {
 			trackMonitor: this.trackMonitor,
@@ -114,12 +121,22 @@ export class DryInboundTrackDetector implements Detector {
 
 		if (this.config.createIssue) {
 			clientMonitor.addIssue({
-				type: 'dry-inbound-track',
+				type: DryInboundTrackDetector.ISSUE_TYPE,
 				payload: {
 					trackId: this.trackMonitor.track.id,
 					duration,
 				}
 			});
 		}
+		this._evented = true;
+	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.peerConnection.parent;
+		if (!this.config.createIssue) return;
+
+		clientMonitor.resolveActiveIssues(DryInboundTrackDetector.ISSUE_TYPE, (issue) => {
+			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		});
 	}
 }

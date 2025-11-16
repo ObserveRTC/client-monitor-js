@@ -83,8 +83,6 @@ export class SynthesizedSamplesDetector implements Detector {
         if (this.mediaPlayout.deltaSynthesizedSamplesDuration <= this.config.minSynthesizedSamplesDuration) {
             return;
         }
-
-
         const clientMonitor = this.peerConnection.parent;
 
         clientMonitor.emit('synthesized-audio', {
@@ -99,7 +97,7 @@ export class SynthesizedSamplesDetector implements Detector {
                     // trackId: this.mediaPlayout.
                     deltaSynthesizedSamplesDuration: this.mediaPlayout.deltaSynthesizedSamplesDuration,
                 }
-            });
+            }, false);
         }
     }
 }
