@@ -46,6 +46,7 @@ import { Detector } from "./Detector";
  * ```
  */
 export class DryOutboundTrackDetector implements Detector {
+	public static readonly ISSUE_TYPE = 'dry-outbound-track';
 	/** Unique identifier for this detector type */
 	public readonly name = 'dry-outbound-track-detector';
 	
@@ -88,10 +89,18 @@ export class DryOutboundTrackDetector implements Detector {
 	 * 5. Emit event and create issue (one-time only)
 	 */
 	public update() {
-		if (this._evented || this.config.disabled) return;
-		if (this.trackMonitor.getOutboundRtps()?.[0]?.bytesSent !== 0) return;
+		if (this.config.disabled) return;
 		if (this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
 			this._activatedAt = undefined;
+			return;
+		}
+
+		if (this.trackMonitor.getOutboundRtps()?.[0]?.deltaBytesSent !== 0) {
+			this._activatedAt = undefined;
+			if (this._evented) {
+				this._resolveIssue();
+				this._evented = false;
+			}
 			return;
 		}
 
@@ -121,5 +130,13 @@ export class DryOutboundTrackDetector implements Detector {
 				}
 			});
 		}
+	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.peerConnection.parent;
+
+		return clientMonitor.resolveActiveIssues(DryOutboundTrackDetector.ISSUE_TYPE, (issue) => {
+			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		});
 	}
 }

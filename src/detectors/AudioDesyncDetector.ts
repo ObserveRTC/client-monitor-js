@@ -47,6 +47,7 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
  * ```
  */
 export class AudioDesyncDetector implements Detector {
+	public static readonly ISSUE_TYPE = 'audio-desync';
 	/** Unique identifier for this detector type */
 	public readonly name = 'audio-desync-detector';
 	
@@ -118,6 +119,7 @@ export class AudioDesyncDetector implements Detector {
 			if (wasDesync) {
 				if (this._startedDesyncAt) {
 					this.lastDesyncDuration = Date.now() - this._startedDesyncAt;
+					this._resolveIssue();
 				}
 				this._startedDesyncAt = undefined;
 			}
@@ -134,7 +136,7 @@ export class AudioDesyncDetector implements Detector {
 
 		if (this.config.createIssue) {
 			this.peerConnection.parent.addIssue({
-				type: 'audio-desync',
+				type: AudioDesyncDetector.ISSUE_TYPE,
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,
 					trackId: this.trackMonitor.track.id,
@@ -144,5 +146,13 @@ export class AudioDesyncDetector implements Detector {
 				}
 			})
 		}
+	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.peerConnection.parent;
+
+		return clientMonitor.resolveActiveIssues(AudioDesyncDetector.ISSUE_TYPE, (issue) => {
+			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		});
 	}
 }

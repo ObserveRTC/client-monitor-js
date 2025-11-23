@@ -80,7 +80,7 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 					peerConnectionId: this.peerConnection.peerConnectionId,
 					duration,
 				}
-			})
+			}, false)
 		}
 	}
 }

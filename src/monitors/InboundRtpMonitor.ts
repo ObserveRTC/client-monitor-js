@@ -84,7 +84,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	fpsVolatility?: number;
 	lastNFramesPerSec: number[] = [];
 	receivingAudioSamples?: number;
-	fractionLost?: number;
+	totalFractionLost?: number;
 	bitPerPixel?: number;
 	packetRate?: number | undefined;
 	ewmaFps?: number;
@@ -94,6 +94,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaBytesReceived?: number;
 	deltaJitterBufferDelay?: number;
 	deltaCorruptionProbability?: number;
+	deltaFractionLost?: number;
 	deltaFramesDecoded?: number;
 	deltaFramesReceived?: number;
 	deltaFramesRendered?: number;
@@ -208,8 +209,12 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		}
 
 		if (this.packetsReceived !== undefined && this.packetsLost !== undefined) {
-			this.fractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
+			this.totalFractionLost = 0 < this.packetsReceived && 0 < this.packetsLost
 				? (this.packetsLost) / (this.packetsLost + this.packetsReceived) : 0.0;
+		}
+		if (this.deltaPacketsReceived !== undefined && this.deltaPacketsLost !== undefined) {
+			this.deltaFractionLost = 0 < this.deltaPacketsReceived && 0 < this.deltaPacketsLost
+				? (this.deltaPacketsLost) / (this.deltaPacketsLost + this.deltaPacketsReceived) : 0.0;
 		}
 		if (this.framesDecoded !== undefined) {
 			this.ewmaFps = this.ewmaFps ? 0.9 * this.ewmaFps + 0.1 * this.framesDecoded : this.framesDecoded;
