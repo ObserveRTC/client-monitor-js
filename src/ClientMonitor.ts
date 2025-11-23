@@ -445,11 +445,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    public resolveActiveIssues(type: string, filter: (issue: ClientIssue) => boolean, comment?: string): void {
-        if (this.closed) return;
+    public resolveActiveIssues(type: string, filterOrIssue: ClientIssue | ((issue: ClientIssue) => boolean), comment?: string): ClientIssue[] {
+        if (this.closed) return [];
 
         const issues = this.activeIssues[type];
-        if (!issues) return;
+        if (!issues) return [];
+
+        const filter = typeof filterOrIssue === 'function' ? filterOrIssue : (issue: ClientIssue) => issue === filterOrIssue;
 
         const resolvedIssues: ClientIssue[] = [];
         const remainingIssues: ClientIssue[] = [];
@@ -470,6 +472,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 comment,
             });
         });
+
+        return this.activeIssues[type] || [];
     }
 
     public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {
