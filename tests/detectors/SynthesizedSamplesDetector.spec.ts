@@ -3,11 +3,11 @@ import { SynthesizedSamplesDetector } from "../../src/detectors/SynthesizedSampl
 // Types for test mocks
 interface SyntheticSamplesConfig {
     disabled: boolean;
-    createIssue: boolean;
+    createEvent: boolean;
     minSynthesizedSamplesDuration: number;
 }
 
-interface TestIssue {
+interface TestEvent {
     type: string;
     payload: Record<string, unknown>;
 }
@@ -21,13 +21,13 @@ class MockClientMonitor {
     public config = {
         syntheticSamplesDetector: {
             disabled: false,
-            createIssue: true,
+            createEvent: true,
             minSynthesizedSamplesDuration: 100
         } as SyntheticSamplesConfig
     };
     
     private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private issues: TestIssue[] = [];
+    private events: TestEvent[] = [];
 
     emit(eventName: string, eventData: Record<string, unknown>) {
         const handlers = this.eventHandlers[eventName] || [];
@@ -41,16 +41,16 @@ class MockClientMonitor {
         this.eventHandlers[eventName].push(handler);
     }
 
-    addIssue(issue: TestIssue) {
-        this.issues.push(issue);
+    addEvent(event: TestEvent) {
+        this.events.push(event);
     }
 
-    getIssues() {
-        return this.issues;
+    getEvents() {
+        return this.events;
     }
 
-    clearIssues() {
-        this.issues = [];
+    clearEvents() {
+        this.events = [];
     }
 }
 
@@ -104,7 +104,7 @@ describe('SynthesizedSamplesDetector', () => {
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(200); // Above threshold
 
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
         });
 
         it('should return early if synthesized samples duration is below threshold', () => {
@@ -112,7 +112,7 @@ describe('SynthesizedSamplesDetector', () => {
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(50); // Below threshold
 
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
         });
 
         it('should return early if synthesized samples duration equals threshold', () => {
@@ -120,7 +120,7 @@ describe('SynthesizedSamplesDetector', () => {
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(100); // Equal to threshold
 
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
         });
     });
 
@@ -142,9 +142,9 @@ describe('SynthesizedSamplesDetector', () => {
                 mediaPlayoutMonitor: mockMediaPlayout,
                 clientMonitor: mockClientMonitor
             });
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
-                type: 'synthesized-audio',
+            expect(mockClientMonitor.getEvents()).toHaveLength(1);
+            expect(mockClientMonitor.getEvents()[0]).toEqual({
+                type: 'EXCESSIVE_SYNTHESIZED_AUDIO',
                 payload: {
                     deltaSynthesizedSamplesDuration: 150
                 }
@@ -157,12 +157,12 @@ describe('SynthesizedSamplesDetector', () => {
             // Should not trigger at 150ms (below 200ms threshold)
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(150);
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
 
             // Should trigger at 250ms (above 200ms threshold)
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(250);
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            expect(mockClientMonitor.getEvents()).toHaveLength(1);
         });
 
         it('should trigger multiple times for consecutive detections', () => {
@@ -179,18 +179,18 @@ describe('SynthesizedSamplesDetector', () => {
             detector.update();
             expect(eventSpy).toHaveBeenCalledTimes(2);
 
-            expect(mockClientMonitor.getIssues()).toHaveLength(2);
+            expect(mockClientMonitor.getEvents()).toHaveLength(2);
         });
     });
 
-    describe('update() - Issue creation', () => {
+    describe('update() - Event creation', () => {
         beforeEach(() => {
             mockClientMonitor.config.syntheticSamplesDetector.disabled = false;
             mockClientMonitor.config.syntheticSamplesDetector.minSynthesizedSamplesDuration = 100;
         });
 
-        it('should not create issue when createIssue is false', () => {
-            mockClientMonitor.config.syntheticSamplesDetector.createIssue = false;
+        it('should not create event when createEvent is false', () => {
+            mockClientMonitor.config.syntheticSamplesDetector.createEvent = false;
             const eventSpy = jest.fn();
             mockClientMonitor.on('synthesized-audio', eventSpy);
 
@@ -199,17 +199,17 @@ describe('SynthesizedSamplesDetector', () => {
 
             // Event should still be emitted
             expect(eventSpy).toHaveBeenCalled();
-            // But no issue should be created
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            // But no record event should be created
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
         });
 
-        it('should create issue with correct payload', () => {
+        it('should create event with correct payload', () => {
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(275);
             detector.update();
 
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
-                type: 'synthesized-audio',
+            expect(mockClientMonitor.getEvents()).toHaveLength(1);
+            expect(mockClientMonitor.getEvents()[0]).toEqual({
+                type: 'EXCESSIVE_SYNTHESIZED_AUDIO',
                 payload: {
                     deltaSynthesizedSamplesDuration: 275
                 }
@@ -222,14 +222,14 @@ describe('SynthesizedSamplesDetector', () => {
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(0);
 
             expect(() => detector.update()).not.toThrow();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
         });
 
         it('should handle negative synthesized samples duration', () => {
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(-50);
 
             expect(() => detector.update()).not.toThrow();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockClientMonitor.getEvents()).toHaveLength(0);
         });
 
         it('should handle very large synthesized samples duration', () => {
@@ -240,8 +240,8 @@ describe('SynthesizedSamplesDetector', () => {
 
             expect(() => detector.update()).not.toThrow();
             expect(eventSpy).toHaveBeenCalled();
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0].payload.deltaSynthesizedSamplesDuration).toBe(999999);
+            expect(mockClientMonitor.getEvents()).toHaveLength(1);
+            expect(mockClientMonitor.getEvents()[0].payload.deltaSynthesizedSamplesDuration).toBe(999999);
         });
     });
 }); 

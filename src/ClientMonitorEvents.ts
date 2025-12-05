@@ -24,6 +24,11 @@ export type ClientIssue = {
 	timestamp: number,
 }
 
+export type ResolvedClientIssue = ClientIssue & {
+    resolvedAt: number;
+	comment?: string;
+}
+
 export type ClientEvent = {
 	type: string,
 	payload?: Record<string, unknown> | boolean | string | number,
@@ -178,6 +183,7 @@ export type ClientMonitorEvents = {
 	"stats-collected": [StatsCollectedEventPayload],
 	'close': [],
 	'issue': [ClientIssue],
+	'resolved-issue': [ResolvedClientIssue],
 	'client-event': [ClientEvent],
 	'meta': [ClientMetaData],
 	'extension-stats': [ExtensionStat],

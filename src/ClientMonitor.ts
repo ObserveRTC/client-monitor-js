@@ -31,6 +31,7 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const logger = createLogger('ClientMonitor');
 
+export type ExtensionStatProvider = () => { type: string, payload?: Record<string, unknown>} | Promise<{ type: string, payload?: Record<string, unknown>}>;
 // export declare interface ClientMonitor {
 //     on<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
 //     once<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
@@ -45,6 +46,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly detectors: Detectors;
     public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
+    public readonly extensionStatsProviders = new Set<ExtensionStatProvider>();
+    public readonly activeIssues: Record<string, ClientIssue[]> = {};
 
     public scoreCalculator: ScoreCalculator;
     public closed = false;
@@ -78,7 +81,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
-
+    
+    
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
      */
@@ -137,7 +141,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             },
             longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
                 thresholdInMs: 5000,
-                createIssue: true,
+                createEvent: true,
             },
             bufferingEventsForSamples: config?.bufferingEventsForSamples ?? false,
             appData: config?.appData ?? {} as AppData,
@@ -181,7 +185,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public set appData(appData: AppData) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
         if (this.closed || !browser) return;
-        if (this._browser) logger.warn('Browser info is already set, cannot change it');
+        if (this._browser) logger.warn('Browser info is already set on ClientMonitor, overwriting it');
         
         this._browser = browser;
 
@@ -191,18 +195,22 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     public set onsamplecreated(listener: (...args: ClientMonitorEvents['sample-created']) => void) {
+        this.once('close', () => (this.off('sample-created', listener)));
         this.on('sample-created', listener);
     }
 
     public set onstatscollected(listener: (...args: ClientMonitorEvents['stats-collected']) => void) {
+        this.once('close', () => (this.off('stats-collected', listener)));
         this.on('stats-collected', listener);
     }
 
     public set onclientevent(listener: (...args: ClientMonitorEvents['client-event']) => void) {
+        this.once('close', () => (this.off('client-event', listener)));
         this.on('client-event', listener);
     }
 
     public set onissue(listener: (...args: ClientMonitorEvents['issue']) => void) {
+        this.once('close', () => (this.off('issue', listener)));
         this.on('issue', listener);
     }
     
@@ -258,15 +266,25 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
         
-        await Promise.allSettled(this.peerConnections.map(async (peerConnection) => {
-            try {
-                const collectedStats = await peerConnection.collect();
-    
-                result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
-            } catch (err) {
-                logger.error(`Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
-            }
-        }));
+        await Promise.all(
+            [...this.peerConnections.map(async (peerConnection) => {
+                try {
+                    const collectedStats = await peerConnection.collect();
+        
+                    result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
+                } catch (err) {
+                    logger.error(`Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
+                }
+            }),
+            ...[...this.extensionStatsProviders.values()].map(provider => async () => {
+                try {
+                    const extStat = await provider();
+                    this.addExtensionStats(extStat);
+                } catch (err) {
+                    logger.error('Failed to get extension stats', err);
+                }
+            })
+        ]);
 
         this.sendingAudioBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.sendingAudioBitrate ?? 0), 0);
         this.sendingVideoBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.sendingVideoBitrate ?? 0), 0);
@@ -416,7 +434,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         
         const payload = issue.payload ? JSON.stringify(issue.payload) : undefined;
         const timestamp = issue.timestamp ?? Date.now();
+
         this._clientIssues.push({
+            ...issue,
+            payload,
+            timestamp,
+        });
+
+        this.activeIssues[issue.type] = this.activeIssues[issue.type] || [];
+        this.activeIssues[issue.type]?.push({
             ...issue,
             payload,
             timestamp,
@@ -427,6 +453,37 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             payload: issue.payload,
             timestamp
         });
+    }
+
+    public resolveActiveIssues(type: string, issueOrFilter: ClientIssue | ((issue: ClientIssue) => boolean), comment?: string): ClientIssue[] {
+        if (this.closed) return [];
+
+        const issues = this.activeIssues[type];
+        if (!issues) return [];
+
+        const filter = typeof issueOrFilter === 'function' ? issueOrFilter : (issue: ClientIssue) => issue === issueOrFilter;
+
+        const resolvedIssues: ClientIssue[] = [];
+        const remainingIssues: ClientIssue[] = [];
+
+        for (const issue of issues) {
+
+            if (filter(issue)) resolvedIssues.push(issue);
+            else remainingIssues.push(issue);
+        }
+
+        if (remainingIssues.length === 0) delete this.activeIssues[type];
+        else this.activeIssues[type] = remainingIssues;
+
+        resolvedIssues.forEach(issue => {
+            this.emit('resolved-issue', {
+                ...issue,
+                resolvedAt: Date.now(),
+                comment,
+            });
+        });
+
+        return this.activeIssues[type] || [];
     }
 
     public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {

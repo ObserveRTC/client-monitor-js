@@ -73,7 +73,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the video freezes detector should create an issue and add it to the monitor
          * 
          * DEFAULT: true
          */
@@ -92,7 +92,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the dry inbound track detector should create an issue and add it to the monitor
          * 
          * DEFAULT: true
          */
@@ -106,25 +106,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     };
 
     /**
-     * Configuration for detecting inbound track stalling during monitoring.
+     * Configuration for detecting outbound track stalling during monitoring.
      */
     dryOutboundTrackDetector: {
         /**
-         * If true, the detection of stalled inbound tracks is disabled.
+         * If true, the detection of stalled outbound tracks is disabled.
          *
          * DEFAULT: false
          */
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the dry outbound track detector should create an issue and add it to the monitor
          * 
          * DEFAULT: true
          */
         createIssue?: boolean
 
         /**
-         * The time threshold (in milliseconds) to determine if an inbound track
+         * The time threshold (in milliseconds) to determine if an outbound track
          * is considered stalled.
          */
         thresholdInMs: number;
@@ -139,7 +139,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the playout discrepancy detector should create an issue and add it to the monitor
          * 
          * DEFAULT: true
          */
@@ -165,11 +165,11 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the synthesized samples detector should create an event and add it to the monitor
          * 
          * DEFAULT: true
          */
-        createIssue?: boolean
+        createEvent?: boolean
 
         /**
          * The minimum duration (in milliseconds) for synthesized samples to be considered
@@ -190,7 +190,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the audio desync detector should create an issue and add it to the monitor
          * 
          * DEFAULT: true
          */
@@ -231,7 +231,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the congestion detector should create an issue and add it to the monitor
          * 
          * DEFAULT: true
          */
@@ -298,11 +298,11 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         disabled?: boolean;
 
         /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
+         * Flag to indicate if the long PC connection establishment detector should create an event and add it to the monitor
          * 
          * DEFAULT: true
          */
-        createIssue?: boolean
+        createEvent?: boolean
 
         /**
          * The time threshold (in milliseconds) for detecting prolonged
@@ -321,3 +321,4 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
 export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = Partial<AppliedClientMonitorConfig<AppData>>;
 export type ClientMonitorSourceType = 'mediasoup-device' | 'RTCPeerConnection' | 'mediasoup-transport';
+

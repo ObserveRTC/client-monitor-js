@@ -39,6 +39,8 @@ import { ClientMonitor } from "..";
  * - Automatically clears alert when conditions improve
  */
 export class CpuPerformanceDetector {
+	public static readonly ISSUE_TYPE = 'cpulimitation';
+
 	public readonly name = 'cpu-performance-detector';
 
 	public constructor(
@@ -98,19 +100,20 @@ export class CpuPerformanceDetector {
 
 			if (this.config.createIssue) {
 				this.clientMonitor.addIssue({
-					type: 'cpulimitation',
+					type: CpuPerformanceDetector.ISSUE_TYPE,
 				});
 			}
 
 		} else {
 			if (!isLimited) return;
 			this.clientMonitor.cpuPerformanceAlertOn = false;
-			// this.clientMonitor.addIssue({
-			// 	type: 'cpulimitation',
-			// 	payload: {
-			// 		issueContext: this._issueContext,
-			// 	},
-			// });
+			this._resolveIssue();
 		}
+	}
+
+	private _resolveIssue() {
+		const clientMonitor = this.clientMonitor;
+
+		return clientMonitor.resolveActiveIssues(CpuPerformanceDetector.ISSUE_TYPE, () => true);
 	}
 }

@@ -83,7 +83,7 @@ export class InboundTrackMonitor {
 	}
 
 	public get fractionLost() {
-		return this._inboundRtp.fractionLost;
+		return this._inboundRtp.deltaFractionLost;
 	}
 
 	public update() {
