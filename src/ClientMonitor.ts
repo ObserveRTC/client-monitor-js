@@ -47,7 +47,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public readonly detectors: Detectors;
     public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
     public readonly extensionStatsProviders = new Set<ExtensionStatProvider>();
-    public activeIssues: Record<string, ClientIssue[]> = {};
+    public readonly activeIssues: Record<string, ClientIssue[]> = {};
 
     public scoreCalculator: ScoreCalculator;
     public closed = false;
@@ -141,7 +141,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             },
             longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
                 thresholdInMs: 5000,
-                createIssue: true,
+                createEvent: true,
             },
             bufferingEventsForSamples: config?.bufferingEventsForSamples ?? false,
             appData: config?.appData ?? {} as AppData,
@@ -428,7 +428,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>, addActiveIssue = true): void {
+    public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
         
@@ -441,14 +441,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             timestamp,
         });
 
-         if (addActiveIssue) {
-            this.activeIssues[issue.type] = this.activeIssues[issue.type] || [];
-            this.activeIssues[issue.type]?.push({
-                ...issue,
-                payload,
-                timestamp,
-            });
-        }
+        this.activeIssues[issue.type] = this.activeIssues[issue.type] || [];
+        this.activeIssues[issue.type]?.push({
+            ...issue,
+            payload,
+            timestamp,
+        });
 
         this.emit('issue', {
             ...issue,
@@ -457,13 +455,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    public resolveActiveIssues(type: string, filterOrIssue: ClientIssue | ((issue: ClientIssue) => boolean), comment?: string): ClientIssue[] {
+    public resolveActiveIssues(type: string, issueOrFilter: ClientIssue | ((issue: ClientIssue) => boolean), comment?: string): ClientIssue[] {
         if (this.closed) return [];
 
         const issues = this.activeIssues[type];
         if (!issues) return [];
 
-        const filter = typeof filterOrIssue === 'function' ? filterOrIssue : (issue: ClientIssue) => issue === filterOrIssue;
+        const filter = typeof issueOrFilter === 'function' ? issueOrFilter : (issue: ClientIssue) => issue === issueOrFilter;
 
         const resolvedIssues: ClientIssue[] = [];
         const remainingIssues: ClientIssue[] = [];

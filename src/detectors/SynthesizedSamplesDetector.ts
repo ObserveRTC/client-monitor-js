@@ -90,14 +90,14 @@ export class SynthesizedSamplesDetector implements Detector {
             clientMonitor: clientMonitor,
         });
 
-        if (this.config.createIssue) {
-            clientMonitor.addIssue({
-                type: 'synthesized-audio',
+        if (this.config.createEvent) {
+            clientMonitor.addEvent({
+                type: 'EXCESSIVE_SYNTHESIZED_AUDIO',
                 payload: {
                     // trackId: this.mediaPlayout.
                     deltaSynthesizedSamplesDuration: this.mediaPlayout.deltaSynthesizedSamplesDuration,
                 }
-            }, false);
+            });
         }
     }
 }

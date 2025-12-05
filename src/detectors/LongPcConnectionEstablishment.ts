@@ -73,14 +73,14 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 			clientMonitor,
 		});
 
-		if (this.config.createIssue) {
-			clientMonitor.addIssue({
-				type: 'long-pc-connection-establishment',
+		if (this.config.createEvent) {
+			clientMonitor.addEvent({
+				type: 'LONG_PC_CONNECTION_ESTABLISHMENT',
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,
 					duration,
 				}
-			}, false)
+			})
 		}
 	}
 }
