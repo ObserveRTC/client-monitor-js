@@ -17,8 +17,8 @@ export { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 export type { TrackMonitor }  from "./monitors/TrackMonitor";
 export {
     ClientMonitor,
-    
 } from "./ClientMonitor";
+export type { ExtensionStatProvider } from "./ClientMonitor";
 export type {
     ClientMonitorConfig
 } from "./ClientMonitorConfig";
@@ -66,7 +66,6 @@ export {
 export type { 
     ScoreCalculator 
 } from './scores/ScoreCalculator';
-
 
 export type { 
     DefaultScoreCalculator,

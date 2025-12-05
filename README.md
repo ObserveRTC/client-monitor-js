@@ -740,6 +740,64 @@ monitor.statsAdapters.add((stats) => {
 });
 ```
 
+### Extension Stats Providers
+
+Extension stats providers allow you to inject custom application-specific statistics into the monitoring pipeline. These providers are called during each stats collection cycle and can return either synchronous or asynchronous results.
+
+**What are Extension Stats?**
+
+Extension stats are custom key-value pairs that you define to track application-specific metrics alongside WebRTC statistics. They are included in every sample created by the monitor and allow you to correlate WebRTC quality metrics with your own application data.
+
+**Adding Extension Stats Providers:**
+
+```javascript
+// Synchronous provider
+monitor.extensionStatsProviders.add(() => ({
+    type: "my-custom-metric",
+    payload: {
+        fps: currentFps,
+        bandwidth: availableBandwidth,
+        userEngagement: engagementScore,
+    },
+}));
+
+// Asynchronous provider
+monitor.extensionStatsProviders.add(async () => {
+    const cpuUsage = await getCpuUsageMetrics();
+    return {
+        type: "system-metrics",
+        payload: {
+            cpu: cpuUsage,
+            memory: performance.memory?.usedJSHeapSize || 0,
+        },
+    };
+});
+```
+
+**Provider Characteristics:**
+
+-   **Type**: Each provider must return an object with a `type` field (string identifier)
+-   **Payload**: Optional custom data object containing your metrics
+-   **Timing**: Providers are called during every stats collection cycle
+-   **Async Support**: Providers can be async and return promises
+-   **Error Handling**: Errors in providers are logged but don't stop the monitoring process
+
+**Sample Integration:**
+
+Extension stats are automatically included in every created sample:
+
+```javascript
+monitor.on("sample-created", (sample) => {
+    // sample.extensionStats contains all extension stats
+    // Example output:
+    // [
+    //   { type: "my-custom-metric", payload: { fps: 30, bandwidth: 5000, ... } },
+    //   { type: "system-metrics", payload: { cpu: 45, memory: 52428800 } }
+    // ]
+    console.log("Extension stats:", sample.extensionStats);
+});
+```
+
 ### Available WebRTC Stats
 
 The monitor collects and processes all standard WebRTC statistics:

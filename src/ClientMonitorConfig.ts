@@ -321,3 +321,4 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
 export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = Partial<AppliedClientMonitorConfig<AppData>>;
 export type ClientMonitorSourceType = 'mediasoup-device' | 'RTCPeerConnection' | 'mediasoup-transport';
+

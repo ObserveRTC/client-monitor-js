@@ -31,6 +31,7 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const logger = createLogger('ClientMonitor');
 
+export type ExtensionStatProvider = () => { type: string, payload?: Record<string, unknown>} | Promise<{ type: string, payload?: Record<string, unknown>}>;
 // export declare interface ClientMonitor {
 //     on<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
 //     once<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
@@ -45,6 +46,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly detectors: Detectors;
     public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
+    public readonly extensionStatsProviders = new Set<ExtensionStatProvider>();
     public activeIssues: Record<string, ClientIssue[]> = {};
 
     public scoreCalculator: ScoreCalculator;
@@ -264,15 +266,25 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
         
-        await Promise.allSettled(this.peerConnections.map(async (peerConnection) => {
-            try {
-                const collectedStats = await peerConnection.collect();
-    
-                result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
-            } catch (err) {
-                logger.error(`Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
-            }
-        }));
+        await Promise.all(
+            [...this.peerConnections.map(async (peerConnection) => {
+                try {
+                    const collectedStats = await peerConnection.collect();
+        
+                    result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
+                } catch (err) {
+                    logger.error(`Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
+                }
+            }),
+            ...[...this.extensionStatsProviders.values()].map(provider => async () => {
+                try {
+                    const extStat = await provider();
+                    this.addExtensionStats(extStat);
+                } catch (err) {
+                    logger.error('Failed to get extension stats', err);
+                }
+            })
+        ]);
 
         this.sendingAudioBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.sendingAudioBitrate ?? 0), 0);
         this.sendingVideoBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.sendingVideoBitrate ?? 0), 0);
