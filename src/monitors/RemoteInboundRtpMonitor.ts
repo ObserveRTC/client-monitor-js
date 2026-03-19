@@ -11,6 +11,10 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	transportId?: string | undefined;
 	codecId?: string | undefined;
 	packetsReceived?: number | undefined;
+	packetsReceivedWithEct1?: number | undefined;
+	packetsReceivedWithCe?: number | undefined;
+	packetsReportedAsLost?: number | undefined;
+	packetsReportedAsLostButRecovered?: number | undefined;
 	packetsLost?: number | undefined;
 	jitter?: number | undefined;
 	localId?: string | undefined;
@@ -18,11 +22,14 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	totalRoundTripTime?: number | undefined;
 	fractionLost?: number | undefined;
 	roundTripTimeMeasurements?: number | undefined;
+	packetsWithBleachedEct1Marking?: number | undefined;
 
 	// derived fields
 	packetRate?: number;
-	
+
 	deltaPacketsLost?: number;
+	deltaPacketsReceived?: number;
+	deltaFractionLost?: number;
 
 
 	/**
@@ -30,11 +37,11 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
-	
+
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: RemoteInboundRtpStats,
@@ -50,7 +57,7 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
@@ -72,16 +79,21 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
 		const elapsedInSeconds = elapsedInMs / 1000;
 
 		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
-			this.packetRate = (stats.packetsReceived - this.packetsReceived) / elapsedInSeconds;
+			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
+			this.packetRate = this.deltaPacketsReceived / elapsedInSeconds;
 		}
 		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
 			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
+		}
+		if (this.deltaPacketsReceived !== undefined && this.deltaPacketsLost !== undefined) {
+			const totalDelta = this.deltaPacketsReceived + this.deltaPacketsLost;
+			this.deltaFractionLost = totalDelta > 0 ? this.deltaPacketsLost / totalDelta : 0.0;
 		}
 
 		Object.assign(this, stats);
@@ -97,6 +109,10 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 			transportId: this.transportId,
 			codecId: this.codecId,
 			packetsReceived: this.packetsReceived,
+			packetsReceivedWithEct1: this.packetsReceivedWithEct1,
+			packetsReceivedWithCe: this.packetsReceivedWithCe,
+			packetsReportedAsLost: this.packetsReportedAsLost,
+			packetsReportedAsLostButRecovered: this.packetsReportedAsLostButRecovered,
 			packetsLost: this.packetsLost,
 			jitter: this.jitter,
 			localId: this.localId,
@@ -104,7 +120,8 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 			totalRoundTripTime: this.totalRoundTripTime,
 			fractionLost: this.fractionLost,
 			roundTripTimeMeasurements: this.roundTripTimeMeasurements,
-			
+			packetsWithBleachedEct1Marking: this.packetsWithBleachedEct1Marking,
+
 			attachments: this.attachments,
 		};
 	}

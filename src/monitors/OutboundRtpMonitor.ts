@@ -1,4 +1,4 @@
-import { OutboundRtpStats, QualityLimitationDurations } from "../schema/ClientSample";
+import { OutboundRtpStats, PsnrSum, QualityLimitationDurations } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
@@ -18,6 +18,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	mediaSourceId?: string | undefined;
 	remoteId?: string | undefined;
 	rid?: string | undefined;
+	encodingIndex?: number | undefined;
 	headerBytesSent?: number | undefined;
 	retransmittedPacketsSent?: number | undefined;
 	retransmittedBytesSent?: number | undefined;
@@ -32,6 +33,8 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	framesEncoded?: number | undefined;
 	keyFramesEncoded?: number | undefined;
 	qpSum?: number | undefined;
+	psnrSum?: PsnrSum | undefined;
+	psnrMeasurements?: number | undefined;
 	totalEncodeTime?: number | undefined;
 	totalPacketSendDelay?: number | undefined;
 	qualityLimitationReason?: string | undefined;
@@ -43,13 +46,14 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	powerEfficientEncoder?: boolean | undefined;
 	active?: boolean | undefined;
 	scalabilityMode?: string | undefined;
+	packetsSentWithEct1?: number | undefined;
 
 	// derived fields
 	bitrate?: number | undefined;
 	payloadBitrate?: number | undefined;
 	packetRate?: number | undefined;
 	bitPerPixel?: number | undefined;
-	
+
 	deltaPacketsSent?: number | undefined;
 	deltaBytesSent?: number | undefined;
 
@@ -58,7 +62,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
@@ -77,7 +81,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
@@ -105,7 +109,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	}
 
 	public getTrack() {
-		return this.getMediaSource()?.getTrack() ?? 
+		return this.getMediaSource()?.getTrack() ??
 			this._peerConnection.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
@@ -113,7 +117,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
 		const elapsedInSec = elapsedInMs / 1000;
@@ -125,8 +129,8 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		if (stats.bytesSent !== undefined && this.bytesSent !== undefined) {
 			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 			this.bitrate = Math.max(0, this.deltaBytesSent * 8 / (elapsedInSec));
-			
-			if (stats.headerBytesSent !== undefined && 
+
+			if (stats.headerBytesSent !== undefined &&
 				this.headerBytesSent !== undefined
 			) {
 				const headerBytesSent = stats.headerBytesSent - this.headerBytesSent;
@@ -159,6 +163,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 			mediaSourceId: this.mediaSourceId,
 			remoteId: this.remoteId,
 			rid: this.rid,
+			encodingIndex: this.encodingIndex,
 			headerBytesSent: this.headerBytesSent,
 			retransmittedPacketsSent: this.retransmittedPacketsSent,
 			retransmittedBytesSent: this.retransmittedBytesSent,
@@ -173,6 +178,8 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 			framesEncoded: this.framesEncoded,
 			keyFramesEncoded: this.keyFramesEncoded,
 			qpSum: this.qpSum,
+			psnrSum: this.psnrSum,
+			psnrMeasurements: this.psnrMeasurements,
 			totalEncodeTime: this.totalEncodeTime,
 			totalPacketSendDelay: this.totalPacketSendDelay,
 			qualityLimitationReason: this.qualityLimitationReason,
@@ -184,6 +191,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 			powerEfficientEncoder: this.powerEfficientEncoder,
 			active: this.active,
 			scalabilityMode: this.scalabilityMode,
+			packetsSentWithEct1: this.packetsSentWithEct1,
 			attachments: this.attachments,
 		};
 	}

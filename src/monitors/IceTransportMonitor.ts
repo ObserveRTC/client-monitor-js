@@ -22,6 +22,8 @@ export class IceTransportMonitor implements IceTransportStats {
 	dtlsRole?: string | undefined;
 	srtpCipher?: string | undefined;
 	selectedCandidatePairChanges?: number | undefined;
+	ccfbMessagesSent?: number | undefined;
+	ccfbMessagesReceived?: number | undefined;
 
 	deltaPacketsSent?: number | undefined;
 	deltaPacketsReceived?: number | undefined;
@@ -35,18 +37,18 @@ export class IceTransportMonitor implements IceTransportStats {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
-	
+
 	public constructor(
 		private readonly _peerConnection: PeerConnectionMonitor,
 		options: IceTransportStats,
 	) {
 		this.id = options.id;
 		this.timestamp = options.timestamp;
-	
+
 		Object.assign(this, options);
 	}
 
@@ -76,17 +78,17 @@ export class IceTransportMonitor implements IceTransportStats {
 			return; // logger?
 		}
 
-		if (this.packetsSent && stats.packetsSent) {
+		if (this.packetsSent !== undefined && stats.packetsSent !== undefined) {
 			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
 		}
-		if (this.packetsReceived && stats.packetsReceived) {
+		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
 			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
 		}
-		if (this.bytesSent && stats.bytesSent) {
+		if (this.bytesSent !== undefined && stats.bytesSent !== undefined) {
 			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 			this.sendingBitrate = (this.deltaBytesSent * 8) / elapsedInSec;
 		}
-		if (this.bytesReceived && stats.bytesReceived) {
+		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 			this.receivingBitrate = (this.deltaBytesReceived * 8) / elapsedInSec;
 		}
@@ -114,6 +116,8 @@ export class IceTransportMonitor implements IceTransportStats {
 			dtlsRole: this.dtlsRole,
 			srtpCipher: this.srtpCipher,
 			selectedCandidatePairChanges: this.selectedCandidatePairChanges,
+			ccfbMessagesSent: this.ccfbMessagesSent,
+			ccfbMessagesReceived: this.ccfbMessagesReceived,
 			attachments: this.attachments,
 		};
 	}

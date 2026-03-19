@@ -73,7 +73,7 @@ export class OutboundTrackMonitor {
 		for (const outboundRtp of this.mappedOutboundRtps.values()) {
 			this.bitrate += outboundRtp.bitrate ?? 0;
 			this.jitter += outboundRtp.getRemoteInboundRtp()?.jitter ?? 0;
-			this.fractionLost += outboundRtp.getRemoteInboundRtp()?.fractionLost ?? 0;
+			this.fractionLost += outboundRtp.getRemoteInboundRtp()?.deltaFractionLost ?? 0;
 			this.sendingPacketRate += outboundRtp.packetRate ?? 0;
 			this.remoteReceivedPacketRate += outboundRtp.getRemoteInboundRtp()?.packetRate ?? 0;
 		}

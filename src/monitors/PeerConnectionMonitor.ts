@@ -24,21 +24,21 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
-import { 
-	CertificateStats, 
-	CodecStats, 
-	DataChannelStats, 
-	IceCandidatePairStats, 
-	IceCandidateStats, 
-	IceTransportStats, 
-	InboundRtpStats, 
-	MediaPlayoutStats, 
-	MediaSourceStats, 
-	OutboundRtpStats, 
-	PeerConnectionSample, 
-	PeerConnectionTransportStats, 
-	RemoteInboundRtpStats, 
-	RemoteOutboundRtpStats 
+import {
+	CertificateStats,
+	CodecStats,
+	DataChannelStats,
+	IceCandidatePairStats,
+	IceCandidateStats,
+	IceTransportStats,
+	InboundRtpStats,
+	MediaPlayoutStats,
+	MediaSourceStats,
+	OutboundRtpStats,
+	PeerConnectionSample,
+	PeerConnectionTransportStats,
+	RemoteInboundRtpStats,
+	RemoteOutboundRtpStats
 } from "../schema/ClientSample";
 
 const logger = createLogger('PeerConnectionMonitor');
@@ -79,9 +79,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	// indexes
 	// public readonly ωindexedCodecIdToInboundRtps = new Map<string, InboundRtpMonitor[]>();
 	// public readonly ωindexedMediaSourceIdToOutboundRtps = new Map<string, OutboundRtpMonitor[]>();
-	
+
 	public closed = false;
-	
+
 	public sendingAudioBitrate = 0;
 	public sendingVideoBitrate = 0;
 	public receivingAudioBitrate = 0;
@@ -130,7 +130,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public connectedAt?: number;
 	private _connectionState?: W3C.RtcPeerConnectionState;
 	public iceState?: W3C.RtcIceTransportState;
-	
+
 	public usingTURN?: boolean;
 	public usingTCP?: boolean;
 	public calculatedStabilityScore: CalculatedScore = {
@@ -139,7 +139,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
@@ -169,7 +169,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public get receivingBitrate() {
 		return (this.receivingAudioBitrate ?? 0) + (this.receivingVideoBitrate ?? 0);
 	}
-	
+
 	public get sendingBitrate() {
 		return (this.sendingAudioBitrate ?? 0) + (this.sendingVideoBitrate ?? 0);
 	}
@@ -199,10 +199,10 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public emit(event: keyof PeerConnectionMonitorEvents, ...args: PeerConnectionMonitorEvents[typeof event]): boolean {
 		return super.emit(event, ...args);
 	}
-	
+
 	public async collect() {
 		let stats = await this.statsCollector.getStats();
-		
+
 		stats = this.statsAdapters.adapt(stats);
 
 		this.emit('stats', stats);
@@ -242,12 +242,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 			for (const statsItem of input) {
 				switch (statsItem.type) {
-					case W3C.StatsType.codec: 
+					case W3C.StatsType.codec:
 						this._updateCodec(statsItem);
 						break;
 					case W3C.StatsType.inboundRtp: {
 						const monitor = this._updateInboundRtp(statsItem);
-	
+
 						switch (monitor?.kind) {
 							case 'audio':
 								this.receivingAudioBitrate += monitor?.bitrate ?? 0;
@@ -258,7 +258,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 								this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
 								break;
 						}
-	
+
 						this.inboundFractionalLost += monitor?.deltaFractionLost ?? 0.0;
 						this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
 						this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
@@ -266,7 +266,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 					}
 					case W3C.StatsType.remoteOutboundRtp: {
 						const monitor = this._updateRemoteOutboundRtp(statsItem);
-						
+
 						if (monitor?.roundTripTime !== undefined) {
 							sumOfRttInS += monitor.roundTripTime;
 							++rttMeasurementsCounter;
@@ -275,7 +275,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 					}
 					case W3C.StatsType.outboundRtp: {
 						const monitor = this._updateOutboundRtp(statsItem);
-						
+
 						switch (monitor?.kind) {
 							case 'audio':
 								this.sendingAudioBitrate += monitor?.bitrate ?? 0;
@@ -289,23 +289,24 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
 						break;
 					}
-						
+
 					case W3C.StatsType.remoteInboundRtp: {
 						const monitor = this._updateRemoteInboundRtp(statsItem);
-	
-						this.outboundFractionLost += monitor?.fractionLost ?? 0.0;
-						// this.ΔoutboundPacketsLost += monitor?.ΔpacketsLost ?? 0;
+
+						this.outboundFractionLost += monitor?.deltaFractionLost ?? 0.0;
+						this.deltaOutboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
+						this.deltaOutboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
 						break;
 					}
-						
+
 					case W3C.StatsType.dataChannel: {
 						const monitor = this._updateDataChannel(statsItem);
-						
+
 						this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
 						this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
 						break;
 					}
-					case W3C.StatsType.mediaSource: 
+					case W3C.StatsType.mediaSource:
 						this._updateMediaSource(statsItem);
 						break;
 					case W3C.StatsType.mediaPlayout:
@@ -314,17 +315,17 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 					case W3C.StatsType.transport: {
 						const monitor = this._updateIceTransport(statsItem);
 						const selectedPair = monitor?.getSelectedCandidatePair();
-						
+
 						this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
 						this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
-	
+
 						if (selectedPair?.currentRoundTripTime !== undefined) {
 							sumOfRttInS += selectedPair.currentRoundTripTime;
 							++rttMeasurementsCounter;
 						}
 						break;
 					}
-						
+
 					case W3C.StatsType.peerConnection:
 						this._updatePeerConnectionTransport(statsItem);
 						break;
@@ -345,7 +346,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 			input = this.statsAdapters.postAdapt(input);
 		}
-		
+
 		this._checkVisited();
 
 		if (0 < rttMeasurementsCounter) {
@@ -385,7 +386,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public createSample(): PeerConnectionSample {
 		return {
 			peerConnectionId: this.peerConnectionId,
-			
+
 			attachments: this.attachments,
 
 			codecs: this.codecs.map(codec => codec.createSample()),
@@ -416,13 +417,13 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		});
 
 		const mediaSource = this.mediaSources.find(mediaSource => mediaSource.trackIdentifier === track.id);
-		
+
 		if (mediaSource) {
 			return this._createOutboundTrackMonitor(track, mediaSource, attachments);
 		}
 
 		const inboundRtp = this.inboundRtps.find(inboundRtp => inboundRtp.trackIdentifier === track.id);
-		
+
 		if (inboundRtp) {
 			return this._createInboundTrackMonitor(track, inboundRtp, attachments);
 		}
@@ -493,7 +494,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public set connectionState(state: W3C.RtcPeerConnectionState | undefined) {
 		if (this._connectionState === state) return;
 		this._connectionState = state;
-		
+
 		if (state === 'connecting') {
 			this.connectingStartedAt = Date.now();
 		} else if (state === 'connected') {
@@ -602,7 +603,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as CodecStats;
-		
+
 		let codecMonitor = this.mappedCodecMonitors.get(stats.id);
 		if (!codecMonitor) {
 			codecMonitor = new CodecMonitor(this, stats);
@@ -630,12 +631,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as InboundRtpStats;
-		
+
 		let inboundRtpMonitor = this.mappedInboundRtpMonitors.get(stats.ssrc);
 		if (!inboundRtpMonitor) {
 			inboundRtpMonitor = new InboundRtpMonitor(this, stats);
 			this.mappedInboundRtpMonitors.set(stats.ssrc, inboundRtpMonitor);
-			
+
 			this.parent.emit('new-inbound-rtp-monitor', {
 				clientMonitor: this.parent,
 				inboundRtpMonitor,
@@ -648,7 +649,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 					this._createInboundTrackMonitor(pendingTrack.track, inboundRtpMonitor, pendingTrack.attachments);
 				}
 			}
-			
+
 		}
 
 		inboundRtpMonitor.accept(stats);
@@ -667,7 +668,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as DataChannelStats;
-		
+
 		let dataChannelMonitor = this.mappedDataChannelMonitors.get(stats.id);
 		if (!dataChannelMonitor) {
 			dataChannelMonitor = new DataChannelMonitor(this, stats);
@@ -696,7 +697,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as RemoteOutboundRtpStats;
-		
+
 		let remoteOutboundRtpMonitor = this.mappedRemoteOutboundRtpMonitors.get(stats.ssrc);
 		if (!remoteOutboundRtpMonitor) {
 			remoteOutboundRtpMonitor = new RemoteOutboundRtpMonitor(this, stats);
@@ -725,7 +726,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as OutboundRtpStats;
-		
+
 		let outboundRtpMonitor = this.mappedOutboundRtpMonitors.get(stats.ssrc);
 		if (!outboundRtpMonitor) {
 			outboundRtpMonitor = new OutboundRtpMonitor(this, stats);
@@ -742,7 +743,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 				track.mappedOutboundRtps.set(stats.ssrc, outboundRtpMonitor);
 			}
 		}
-		
+
 
 		outboundRtpMonitor.accept(stats);
 
@@ -761,7 +762,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as RemoteInboundRtpStats;
-		
+
 		let remoteInboundRtpMonitor = this.mappedRemoteInboundRtpMonitors.get(stats.ssrc);
 		if (!remoteInboundRtpMonitor) {
 			remoteInboundRtpMonitor = new RemoteInboundRtpMonitor(this, stats);
@@ -790,7 +791,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as MediaSourceStats;
-		
+
 		let mediaSourceMonitor = this.mappedMediaSourceMonitors.get(stats.id);
 		if (!mediaSourceMonitor) {
 			mediaSourceMonitor = new MediaSourceMonitor(this, stats);
@@ -825,7 +826,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as MediaPlayoutStats;
-		
+
 		let mediaPlayoutMonitor = this.mappedMediaPlayoutMonitors.get(stats.id);
 		if (!mediaPlayoutMonitor) {
 			mediaPlayoutMonitor = new MediaPlayoutMonitor(this, stats);
@@ -854,7 +855,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as PeerConnectionTransportStats;
-		
+
 		let peerConnectionTransportMonitor = this.mappedPeerConnectionTransportMonitors.get(stats.id);
 		if (!peerConnectionTransportMonitor) {
 			peerConnectionTransportMonitor = new PeerConnectionTransportMonitor(this, stats);
@@ -867,7 +868,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		peerConnectionTransportMonitor.accept(stats);
-		
+
 		return peerConnectionTransportMonitor;
 	}
 
@@ -881,7 +882,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as IceTransportStats;
-		
+
 		let iceTransportMonitor = this.mappedIceTransportMonitors.get(stats.id);
 		if (!iceTransportMonitor) {
 			iceTransportMonitor = new IceTransportMonitor(this, stats);
@@ -909,7 +910,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as IceCandidateStats;
-		
+
 		let iceCandidateMonitor = this.mappedIceCandidateMonitors.get(stats.id);
 		if (!iceCandidateMonitor) {
 			iceCandidateMonitor = new IceCandidateMonitor(this, stats);
@@ -937,7 +938,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as IceCandidatePairStats;
-		
+
 		let iceCandidatePairMonitor = this.mappedIceCandidatePairMonitors.get(stats.id);
 		if (!iceCandidatePairMonitor) {
 			iceCandidatePairMonitor = new IceCandidatePairMonitor(this, stats);
@@ -966,7 +967,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		const stats = input as CertificateStats;
-		
+
 		let certificateMonitor = this.mappedCertificateMonitors.get(stats.id);
 		if (!certificateMonitor) {
 			certificateMonitor = new CertificateMonitor(this, stats);
@@ -979,7 +980,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		certificateMonitor.accept(stats);
-	
+
 		return certificateMonitor;
 	}
 
@@ -1007,7 +1008,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	private _createInboundTrackMonitor(track: MediaStreamTrack, inboundRtpMonitor: InboundRtpMonitor, attachments?: Record<string, unknown>) {
 		if (this.mappedInboundTracks.has(track.id)) return;
-	
+
 		const trackMonitor = new InboundTrackMonitor(
 			track,
 			inboundRtpMonitor,
@@ -1016,7 +1017,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		this._pendingMediaStreamTracks.delete(track.id);
 		this.mappedInboundTracks.set(track.id, trackMonitor);
-		
+
 		this.parent.emit('new-inbound-track-monitor', {
 			clientMonitor: this.parent,
 			inboundTrackMonitor: trackMonitor,

@@ -63,10 +63,10 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		if (elapsedInMs <= 0) { 
 			return; // logger?
 		}
-		if (this.synthesizedSamplesDuration && stats.synthesizedSamplesDuration) {
+		if (this.synthesizedSamplesDuration !== undefined && stats.synthesizedSamplesDuration !== undefined) {
 			this.deltaSynthesizedSamplesDuration = stats.synthesizedSamplesDuration - this.synthesizedSamplesDuration;
 		}
-		if (this.totalSamplesDuration && stats.totalSamplesDuration) {
+		if (this.totalSamplesDuration !== undefined && stats.totalSamplesDuration !== undefined) {
 			this.deltaSamplesDuration = stats.totalSamplesDuration - this.totalSamplesDuration;
 		}
 
