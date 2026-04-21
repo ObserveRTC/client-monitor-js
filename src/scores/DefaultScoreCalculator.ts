@@ -33,7 +33,6 @@ export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
 
 export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
 	lastNScores: number[];
-	ewmaFps?: number;
 }
 
 export type DefaultScoreCalculatorPeerConnectionScoreAppData = {
@@ -238,24 +237,18 @@ export class DefaultScoreCalculator {
 		}
 		trackMonitor.calculatedScore.reasons = subtractions;
 
-		if (inboundRtp.framesPerSecond) {
-			inboundRtp.lastNFramesPerSec.push(inboundRtp.framesPerSecond);
+		if (inboundRtp.framesPerSecond && inboundRtp.ewmaFps && inboundRtp.lastNFramesPerSec.length >= 2) {
+			const n = inboundRtp.lastNFramesPerSec.length;
+			const mean = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + fps, 0) / n;
+			const variance = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + Math.pow(fps - mean, 2), 0) / n;
+			const stdDev = Math.sqrt(variance);
+			const volatility = stdDev / inboundRtp.ewmaFps;
 
-			if (!appData.ewmaFps) {
-				appData.ewmaFps = inboundRtp.framesPerSecond;
-			} else {
-				appData.ewmaFps = 0.9 * appData.ewmaFps + 0.1 * inboundRtp.framesPerSecond;
-			}
+			// console.warn('volatility', volatility, 'stdDev', stdDev, 'mean', mean, 'ewmaFps', inboundRtp.ewmaFps);
 
-			const avgFpsSqueres = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + (fps * fps), 0) / inboundRtp.lastNFramesPerSec.length;
-			const stdDev = Math.sqrt(avgFpsSqueres);
-			const volatility = stdDev / appData.ewmaFps;
-
-			// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgFpsSqueres', avgFpsSqueres);
-
-			if (1.1 < volatility && volatility < 1.2) {
+			if (0.1 < volatility && volatility < 0.2) {
 				subtractions["volatile-fps"] = 1.0;
-			} else if (1.2 < volatility) {
+			} else if (0.2 <= volatility) {
 				subtractions["volatile-fps"] = 2.0;
 			}
 		}
