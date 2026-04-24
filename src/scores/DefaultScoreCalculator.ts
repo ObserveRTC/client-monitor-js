@@ -11,16 +11,16 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 	ewmaBitrate?: number;
 }
 
-export type DefaultScoreCalculatorSubtractionReason = 
-	'high-rtt' | 
+export type DefaultScoreCalculatorSubtractionReason =
+	'high-rtt' |
 	'very-high-rtt' |
-	'high-packetloss' | 
-	'low-fps' | 
+	'high-packetloss' |
+	'low-fps' |
 	'volatile-fps' |
-	'dropped-video-frames' | 
-	'video-frame-corruptions' | 
-	'high-deviation-from-target-bitrate' | 
-	'cpu-limitation' | 
+	'dropped-video-frames' |
+	'video-frame-corruptions' |
+	'high-deviation-from-target-bitrate' |
+	'cpu-limitation' |
 	'high-volatile-bitrate';
 
 export type DefaultScoreCalculatorSubtractions = {
@@ -61,7 +61,7 @@ export class DefaultScoreCalculator {
 
 	public currentReasons: DefaultScoreCalculatorSubtractions = {};
 	public totalReasons: DefaultScoreCalculatorSubtractions = {};
-	
+
 	public constructor(
 		private readonly clientMonitor: ClientMonitor,
 	) {
@@ -86,7 +86,7 @@ export class DefaultScoreCalculator {
 		let clientTotalScore = 0;
 		let clientTotalWeight = 0;
 		this.currentReasons = {};
-		
+
 		for (const pcMonitor of clientMonitor.peerConnections) {
 			if (pcMonitor.calculatedStabilityScore.value === undefined) continue;
 
@@ -96,9 +96,9 @@ export class DefaultScoreCalculator {
 
 			for (const trackMonitor of pcMonitor.tracks) {
 				const trackScore = trackMonitor.calculatedScore;
-				
+
 				if (trackScore.value === undefined) continue;
-				
+
 				trackTotalScore += trackScore.value * trackScore.weight;
 				trackTotalWeight += trackScore.weight;
 				noTrack = false;
@@ -106,16 +106,16 @@ export class DefaultScoreCalculator {
 				accumulateSubtractions(this.currentReasons, trackScore.reasons ?? {});
 			}
 
-			
+
 			const weightedTrackScore = noTrack ? DefaultScoreCalculator.MAX_SCORE : trackTotalScore / Math.max(trackTotalWeight, 1);
 			const normalizedPcScore = Math.max(
 				DefaultScoreCalculator.MIN_SCORE,
 				pcMonitor.calculatedStabilityScore.value
 			) / DefaultScoreCalculator.MAX_SCORE;
 			const totalPcScore = weightedTrackScore * normalizedPcScore;
-			
+
 			// console.warn('trackTotalScore', trackTotalScore, 'trackTotalWeight', trackTotalWeight, 'weightedTrackScore', weightedTrackScore, 'normalizedPcScore', normalizedPcScore, pcMonitor.attachments?.direaction);
-			
+
 			clientTotalScore += totalPcScore * pcMonitor.calculatedStabilityScore.weight;
 			clientTotalWeight += pcMonitor.calculatedStabilityScore.weight;
 
@@ -133,10 +133,10 @@ export class DefaultScoreCalculator {
 		// we use RTT and lost packets to calculate the base score for the connection
 		const score = pcMonitor.calculatedStabilityScore;
 		const rttInMs = (pcMonitor.avgRttInSec ?? 0) * 1000;
-		const fractionLost = 
+		const fractionLost =
 			(pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.deltaFractionLost ?? 0), 0)
-			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0)) 
-		
+			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0))
+
 		let scoreValue = 5.0;
 		let appData = score.appData as DefaultScoreCalculatorPeerConnectionScoreAppData | undefined;
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
@@ -175,7 +175,7 @@ export class DefaultScoreCalculator {
 		);
 
 		appData.lastNScores.push(scoreValue);
-		
+
 		const finalScore = this._calculateFinalScore(appData.lastNScores);
 
 		score.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
@@ -273,7 +273,7 @@ export class DefaultScoreCalculator {
 		);
 
 		appData.lastNScores.push(scoreValue);
-		
+
 		const finalScore = this._calculateFinalScore(appData.lastNScores)
 
 		trackMonitor.calculatedScore.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
@@ -290,7 +290,7 @@ export class DefaultScoreCalculator {
 		}
 
 		const outboundRtp = trackMonitor.getHighestLayer();
-	
+
 		if (!outboundRtp) {
 			trackMonitor.calculatedScore.value = undefined;
 			return;
@@ -312,63 +312,68 @@ export class DefaultScoreCalculator {
 		// target deviation penalty: 0-2
 		// cpu limitation penalty: 0-1
 		// bitrate volatility penalty: 0-2
-		
-		// consider to take: 
+
+		// consider to take:
 		// plicount
 		// qpSum
-
-		if (outboundRtp.targetBitrate) {
-			// funny thing, encoder target from a layer is for the encoder, but the bitrate is for that particular layer
-			const payloadBitrate = [...trackMonitor.mappedOutboundRtps.values()].reduce((acc, rtp) => acc + (rtp.payloadBitrate ?? 0), 0);
-			
-			if (payloadBitrate) {
-				const deviation = outboundRtp.targetBitrate - payloadBitrate;
-				const percentage = deviation / outboundRtp.targetBitrate;
-				const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
-
-				if (0 < deviation && lowThreshold < deviation) {
-					
-					if (0.05 <= percentage && percentage < 0.15) {
-						subtractions['high-deviation-from-target-bitrate'] = 1.0;
-					} else if (0.15 <= percentage) {
-						subtractions['high-deviation-from-target-bitrate'] = 2.0;
-					}
-				}	
-			}
-		}
 
 		if (outboundRtp.qualityLimitationReason === 'cpu') {
 			subtractions['cpu-limitation'] = 2.0;
 		}
 
-		if (outboundRtp.bitrate) {
-			if (!appData.ewmaBitrate) {
-				appData.ewmaBitrate = outboundRtp.bitrate;
-			} else {
-				appData.ewmaBitrate = 0.9 * appData.ewmaBitrate + 0.1 * outboundRtp.bitrate;
-			}
-			if (appData.lastBitrate) {
-				const diffBitrate = Math.abs(appData.lastBitrate - outboundRtp.bitrate);
+		if (trackMonitor.track.contentHint !== 'screen') {
+			// for screen share we are not calculating bitrate volatility.
 
-				appData.diffBitrateSquares.push(diffBitrate * diffBitrate);
-				
-				while (appData.diffBitrateSquares.length > 10) {
-					appData.diffBitrateSquares.shift();
+			if (outboundRtp.targetBitrate) {
+				// funny thing, encoder target from a layer is for the encoder, but the bitrate is for that particular layer
+				const payloadBitrate = [...trackMonitor.mappedOutboundRtps.values()].reduce((acc, rtp) => acc + (rtp.payloadBitrate ?? 0), 0);
+
+				if (payloadBitrate) {
+					const deviation = outboundRtp.targetBitrate - payloadBitrate;
+					const percentage = deviation / outboundRtp.targetBitrate;
+					const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
+
+					if (0 < deviation && lowThreshold < deviation) {
+
+						if (0.05 <= percentage && percentage < 0.15) {
+							subtractions['high-deviation-from-target-bitrate'] = 1.0;
+						} else if (0.15 <= percentage) {
+							subtractions['high-deviation-from-target-bitrate'] = 2.0;
+						}
+					}
 				}
 			}
-			if (appData.diffBitrateSquares.length > 3) {
-				const avgBitrateSquare = appData.diffBitrateSquares.reduce((acc, square) => acc + square, 0) / appData.diffBitrateSquares.length;
-				const stdDev = Math.sqrt(avgBitrateSquare);
-				const volatility = stdDev / appData.ewmaBitrate;
 
-				// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgBitrateSquare', avgBitrateSquare);
-				if (0.1 < volatility && volatility < 0.2) {
-					subtractions['high-volatile-bitrate'] = 1.0;
-				} else if (0.2 < volatility) {
-					subtractions['high-volatile-bitrate'] = 2.0;
+			if (outboundRtp.bitrate) {
+				if (!appData.ewmaBitrate) {
+					appData.ewmaBitrate = outboundRtp.bitrate;
+				} else {
+					appData.ewmaBitrate = 0.9 * appData.ewmaBitrate + 0.1 * outboundRtp.bitrate;
 				}
+				if (appData.lastBitrate) {
+					const diffBitrate = Math.abs(appData.lastBitrate - outboundRtp.bitrate);
+
+					appData.diffBitrateSquares.push(diffBitrate * diffBitrate);
+
+					while (appData.diffBitrateSquares.length > 10) {
+						appData.diffBitrateSquares.shift();
+					}
+				}
+				if (appData.diffBitrateSquares.length > 3) {
+					const avgBitrateSquare = appData.diffBitrateSquares.reduce((acc, square) => acc + square, 0) / appData.diffBitrateSquares.length;
+					const stdDev = Math.sqrt(avgBitrateSquare);
+					const volatility = stdDev / appData.ewmaBitrate;
+
+					// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgBitrateSquare', avgBitrateSquare);
+					if (0.1 < volatility && volatility < 0.2) {
+						subtractions['high-volatile-bitrate'] = 1.0;
+					} else if (0.2 < volatility) {
+						subtractions['high-volatile-bitrate'] = 2.0;
+					}
+				}
+				appData.lastBitrate = outboundRtp.bitrate;
 			}
-			appData.lastBitrate = outboundRtp.bitrate;
+
 		}
 
 		const scoreValue = Math.max(
@@ -406,7 +411,7 @@ export class DefaultScoreCalculator {
 
 		const normalizedBitrate = Math.log10(
 			Math.max(
-				bitrate, 
+				bitrate,
 				DefaultScoreCalculator.MIN_AUDIO_BITRATE
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
@@ -449,7 +454,7 @@ export class DefaultScoreCalculator {
 
 		const normalizedBitrate = Math.log10(
 			Math.max(
-				outboundRtp.bitrate, 
+				outboundRtp.bitrate,
 				DefaultScoreCalculator.MIN_AUDIO_BITRATE
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
@@ -481,7 +486,7 @@ export class DefaultScoreCalculator {
 			counter += weight;
 			totalScore += weight * score;
 		}
-		
+
 		return totalScore / counter;
 	}
 
@@ -492,7 +497,7 @@ export class DefaultScoreCalculator {
 	private _getTotalSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
 		let result = 0;
 		for (const key of Object.keys(subtractions)) {
-			const value = subtractions[key as DefaultScoreCalculatorSubtractionReason];	
+			const value = subtractions[key as DefaultScoreCalculatorSubtractionReason];
 			if (typeof value !== 'number') continue;
 
 			result += value;
