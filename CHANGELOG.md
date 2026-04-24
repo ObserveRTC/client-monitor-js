@@ -1,3 +1,23 @@
+## Unreleased
+
+### Breaking Changes
+
+-   **Logger API Refactor**: Removed the global `setLogger` API in favor of instance-level logger injection via `ClientMonitor`
+
+### Improvements
+
+-   **Logger Propagation**: `ClientMonitor` now propagates the same logger instance to sources and monitors
+-   **Module-Prefixed Logs**: Internal logs now include module prefixes such as `[ClientMonitor]:` and `[Sources]:` for easier filtering
+
+### Bug Fixes
+
+-   **Extension Stats Providers**: Fixed provider execution in `collect()` so configured extension stat providers are executed and appended to samples correctly
+
+### Documentation
+
+-   **README Logging Section**: Expanded logging documentation with basic, production-adapter, and no-op logger examples
+-   **Score Calculation Notes**: Documented outbound video scoring behavior for screen-share tracks (`contentHint: 'screen'`)
+
 ## 4.1.0
 
 ### Major Features

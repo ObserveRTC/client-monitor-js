@@ -84,12 +84,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public constructor(
         config?: Partial<ClientMonitorConfig<AppData>>,
-        logger?: Logger,
     ) {
         super();
         const monitorConfig = config ?? {};
 
-        this.logger = logger ?? monitorConfig.logger ?? createLogger();
+        this.logger = monitorConfig.logger ?? createLogger();
 
         this.config = {
             ...monitorConfig,
