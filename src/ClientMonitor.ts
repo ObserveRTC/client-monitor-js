@@ -275,7 +275,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                     this.logger.error(`[${MODULE_NAME}]:`, `Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
                 }
             }),
-            ...[...this.extensionStatsProviders.values()].map(provider => async () => {
+            ...[...this.extensionStatsProviders.values()].map(async (provider) => {
                 try {
                     const extStat = await provider();
                     this.addExtensionStats(extStat);
