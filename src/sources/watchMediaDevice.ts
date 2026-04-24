@@ -1,30 +1,30 @@
 import { ClientMonitor } from "../ClientMonitor";
-import { createLogger } from "../utils/logger";
+import { Logger } from "../utils/logger";
 import { ClientMetaTypes } from "../schema/ClientMetaTypes";
 
-const logger = createLogger('utils');
+const MODULE_NAME = 'utils';
 
-export function watchMediaDevices(monitor: ClientMonitor) {
+export function watchMediaDevices(monitor: ClientMonitor, baseLogger: Logger) {
 
 	/* eslint-disable @typescript-eslint/no-explicit-any */
 	let outerNavigator: typeof navigator | undefined = undefined;
 	if (navigator !== undefined) outerNavigator = navigator;
 	else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
-	else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
+	else return baseLogger.error(`[${MODULE_NAME}]:`, 'Cannot integrate navigator.mediaDevices, because navigator is not available');
 
 	const browsermediaDevice = outerNavigator.mediaDevices;
 
 	if (!browsermediaDevice) {
-			return logger.error('Cannot integrate navigator.mediaDevices, because navigator.mediaDevices is not available');
+			return baseLogger.error(`[${MODULE_NAME}]:`, 'Cannot integrate navigator.mediaDevices, because navigator.mediaDevices is not available');
 	}
 
 	if (browsermediaDevice.getUserMedia === undefined || typeof browsermediaDevice.getUserMedia !== 'function') {
-			return logger.error('Cannot integrate navigator.mediaDevices.getUserMedia, because getUserMedia is not a function');
+			return baseLogger.error(`[${MODULE_NAME}]:`, 'Cannot integrate navigator.mediaDevices.getUserMedia, because getUserMedia is not a function');
 	}
-		
+
 		const mediaDevices = browsermediaDevice as MediaDevices;
 		const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
-		
+
 		mediaDevices.getUserMedia = async (constraints?: MediaStreamConstraints): Promise<MediaStream> => {
 				try {
 						const result = await originalGetUserMedia(constraints);
@@ -51,9 +51,9 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 						}
 				})
 		} catch (err) {
-				logger.warn('Cannot get supported constraints', err);
+				baseLogger.warn(`[${MODULE_NAME}]:`, 'Cannot get supported constraints', err);
 		}
-		
+
 		const reportedDeviceIds = new Set<string>();
 		const onDeviceChange = async () => {
 				try {
@@ -62,7 +62,7 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 						for (const mediaDevice of enumeratedMediaDevices) {
 								const deviceId = `${mediaDevice.groupId}-${mediaDevice.deviceId}-${mediaDevice.kind}-${mediaDevice.label}`;
 								if (reportedDeviceIds.has(deviceId)) continue;
-								
+
 								monitor.addMetaData({
 										type: ClientMetaTypes.MEDIA_DEVICE,
 										payload: mediaDevice.toJSON()
@@ -71,10 +71,10 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 								reportedDeviceIds.add(deviceId);
 						}
 				} catch (err) {
-						logger.error('Cannot enumerate media devices', err);
+								baseLogger.error(`[${MODULE_NAME}]:`, 'Cannot enumerate media devices', err);
 				}
 		};
-		
+
 		monitor.once('close', () => {
 				mediaDevices.getUserMedia = originalGetUserMedia;
 				mediaDevices.removeEventListener('devicechange', onDeviceChange);
@@ -82,6 +82,6 @@ export function watchMediaDevices(monitor: ClientMonitor) {
 		mediaDevices.addEventListener('devicechange', onDeviceChange);
 
 		onDeviceChange().catch((err) => {
-				logger.warn('Cannot enumerate media devices', err);
+				baseLogger.warn(`[${MODULE_NAME}]:`, 'Cannot enumerate media devices', err);
 		});
 }

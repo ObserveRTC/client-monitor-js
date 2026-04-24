@@ -1,5 +1,5 @@
 
-export const schemaVersion = "3.0.0";
+export const schemaVersion = "3.2.0";
 
 /**
 * The WebRTC app provided custom stats payload
@@ -165,7 +165,7 @@ export type IceCandidatePairStats = {
 	*/
 	remoteCandidateId?: string;
 
-	state?: "new" | "in-progress" | "waiting" | "failed" | "succeeded" | "cancelled" | "inprogress";
+	state?: "new" | "frozen" | "in-progress" | "waiting" | "failed" | "succeeded" | "cancelled" | "inprogress";
 	/**
 	* Whether this candidate pair has been nominated.
 	*/
@@ -444,7 +444,17 @@ export type IceTransportStats = {
 	selectedCandidatePairChanges?: number;
 
 	/**
-	* Additional information attached to this stats
+	* Number of congestion control feedback (CCFB) messages sent on this transport.
+	*/
+	ccfbMessagesSent?: number;
+
+	/**
+	* Number of congestion control feedback (CCFB) messages received on this transport.
+	*/
+	ccfbMessagesReceived?: number;
+
+	/**
+	* Additional information attached to this stats.
 	*/
 	attachments?: Record<string, unknown>;
 
@@ -777,6 +787,27 @@ export type QualityLimitationDurations = {
 }
 
 /**
+* Cumulative PSNR measurements for Y, U, V components.
+*/
+export type PsnrSum = {
+	/**
+	* PSNR value for the Y (luminance) component.
+	*/
+	y: number;
+
+	/**
+	* PSNR value for the U (chrominance) component.
+	*/
+	u: number;
+
+	/**
+	* PSNR value for the V (chrominance) component.
+	*/
+	v: number;
+
+}
+
+/**
 * Outbound RTP Stats
 */
 export type OutboundRtpStats = {
@@ -839,6 +870,11 @@ export type OutboundRtpStats = {
 	* The RID value of the RTP stream.
 	*/
 	rid?: string;
+
+	/**
+	* Index of the encoding in the encoding array.
+	*/
+	encodingIndex?: number;
 
 	/**
 	* The total number of header bytes sent on this stream.
@@ -911,6 +947,16 @@ export type OutboundRtpStats = {
 	qpSum?: number;
 
 	/**
+	* Cumulative PSNR measurements for Y, U, V components.
+	*/
+	psnrSum?: PsnrSum;
+
+	/**
+	* Total number of PSNR measurements collected.
+	*/
+	psnrMeasurements?: number;
+
+	/**
 	* The total time spent encoding frames on this stream in seconds.
 	*/
 	totalEncodeTime?: number;
@@ -921,9 +967,14 @@ export type OutboundRtpStats = {
 	totalPacketSendDelay?: number;
 
 	/**
-	* The reason for any quality limitation on this stream.
+	* The reason for any quality limitation on this stream (e.g., 'cpu', 'bandwidth', 'other').
 	*/
 	qualityLimitationReason?: string;
+
+	/**
+	* The duration of quality limitation reasons categorized by type.
+	*/
+	qualityLimitationDurations?: QualityLimitationDurations;
 
 	/**
 	* The number of resolution changes due to quality limitations.
@@ -966,9 +1017,9 @@ export type OutboundRtpStats = {
 	scalabilityMode?: string;
 
 	/**
-	* The duration of quality limitation reasons categorized by type.
+	* Number of packets sent with ECT(1) congestion marking.
 	*/
-	qualityLimitationDurations?: QualityLimitationDurations;
+	packetsSentWithEct1?: number;
 
 	/**
 	* Additional information attached to this stats.
@@ -1017,6 +1068,26 @@ export type RemoteInboundRtpStats = {
 	packetsReceived?: number;
 
 	/**
+	* Total number of RTP packets received for this SSRC marked with the ECT(1) marking.
+	*/
+	packetsReceivedWithEct1?: number;
+
+	/**
+	* Total number of RTP packets received for this SSRC marked with the CE marking.
+	*/
+	packetsReceivedWithCe?: number;
+
+	/**
+	* Total number of RTP packets for which an RFC8888 report has been sent with a zero R bit.
+	*/
+	packetsReportedAsLost?: number;
+
+	/**
+	* Total number of RTP packets reported as lost but later recovered in a subsequent RFC8888 report.
+	*/
+	packetsReportedAsLostButRecovered?: number;
+
+	/**
 	* The total number of packets lost on this stream.
 	*/
 	packetsLost?: number;
@@ -1050,6 +1121,11 @@ export type RemoteInboundRtpStats = {
 	* The total number of RTT measurements for this stream.
 	*/
 	roundTripTimeMeasurements?: number;
+
+	/**
+	* Number of packets with ECT(1) marking that were bleached by a middlebox.
+	*/
+	packetsWithBleachedEct1Marking?: number;
 
 	/**
 	* Additional information attached to this stats
@@ -1101,6 +1177,26 @@ export type InboundRtpStats = {
 	* Number of packets received on the RTP stream.
 	*/
 	packetsReceived?: number;
+
+	/**
+	* Total number of RTP packets received for this SSRC marked with the ECT(1) marking.
+	*/
+	packetsReceivedWithEct1?: number;
+
+	/**
+	* Total number of RTP packets received for this SSRC marked with the CE marking.
+	*/
+	packetsReceivedWithCe?: number;
+
+	/**
+	* Total number of RTP packets for which an RFC8888 report has been sent with a zero R bit.
+	*/
+	packetsReportedAsLost?: number;
+
+	/**
+	* Total number of RTP packets reported as lost but later recovered in a subsequent RFC8888 report.
+	*/
+	packetsReportedAsLostButRecovered?: number;
 
 	/**
 	* Number of packets lost on the RTP stream.

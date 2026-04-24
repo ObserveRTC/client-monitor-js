@@ -4,9 +4,9 @@ import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
 
 export class InboundRtpMonitor implements InboundRtpStats {
-	// field indicate that this object was visited by accepting stats 
+	// field indicate that this object was visited by accepting stats
 	private _visited = true;
-	
+
 	public addedAt = Date.now();
 
 	// fields from InboundRtpStats
@@ -18,6 +18,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	transportId?: string | undefined;
 	codecId?: string | undefined;
 	packetsReceived?: number | undefined;
+	packetsReceivedWithEct1?: number | undefined;
+	packetsReceivedWithCe?: number | undefined;
+	packetsReportedAsLost?: number | undefined;
+	packetsReportedAsLostButRecovered?: number | undefined;
 	packetsLost?: number | undefined;
 	jitter?: number | undefined;
 	mid?: string | undefined;
@@ -105,7 +109,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
@@ -125,7 +129,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
@@ -139,7 +143,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		if (elapsedInMs <= 0) {
 			Object.assign(this, stats);
 
 			return; // logger?
@@ -147,10 +151,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		const elapsedInSec = elapsedInMs / 1000;
 
 		// before we assign let's update delta fields
-		if (this.totalSamplesReceived && stats.totalSamplesReceived) {
+		if (this.totalSamplesReceived !== undefined && stats.totalSamplesReceived !== undefined) {
 			this.receivingAudioSamples = stats.totalSamplesReceived - this.totalSamplesReceived;
 		}
-		if (this.bytesReceived && stats.bytesReceived) {
+		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 			this.bitrate = Math.max(0, this.deltaBytesReceived * 8 / (elapsedInSec));
 		}
@@ -161,7 +165,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
 			this.packetRate = this.deltaPacketsReceived / elapsedInSec;
 		}
-		if (this.totalCorruptionProbability !== undefined && 
+		if (this.totalCorruptionProbability !== undefined &&
 			stats.totalCorruptionProbability !== undefined &&
 			this.corruptionMeasurements !== undefined &&
 			stats.corruptionMeasurements !== undefined
@@ -169,7 +173,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			const deltaCoruption = stats.totalCorruptionProbability - this.totalCorruptionProbability;
 			const deltaMeasurements = Math.max(1, stats.corruptionMeasurements - this.corruptionMeasurements);
 			this.deltaCorruptionProbability = Math.max(
-				0, 
+				0,
 				deltaCoruption / deltaMeasurements
 			);
 		}
@@ -199,12 +203,12 @@ export class InboundRtpMonitor implements InboundRtpStats {
 
 			const avgFramesPerSec = this.lastNFramesPerSec.reduce((acc, fps) => acc + fps, 0) / this.lastNFramesPerSec.length;
 			const avgDiff = this.lastNFramesPerSec.reduce((acc, fps) => acc + Math.abs(fps - avgFramesPerSec), 0) / this.lastNFramesPerSec.length
-	
+
 			this.avgFramesPerSec = avgFramesPerSec;
 			this.fpsVolatility = avgDiff / avgFramesPerSec;
 
 			if (this.bitrate && this.frameWidth && this.frameHeight) {
-				this.bitPerPixel = this.bitrate / (this.frameWidth * this.frameHeight);
+				this.bitPerPixel = this.bitrate / (this.frameWidth * this.frameHeight * this.framesPerSecond);
 			}
 		}
 
@@ -216,8 +220,8 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.deltaFractionLost = 0 < this.deltaPacketsReceived && 0 < this.deltaPacketsLost
 				? (this.deltaPacketsLost) / (this.deltaPacketsLost + this.deltaPacketsReceived) : 0.0;
 		}
-		if (this.framesDecoded !== undefined) {
-			this.ewmaFps = this.ewmaFps ? 0.9 * this.ewmaFps + 0.1 * this.framesDecoded : this.framesDecoded;
+		if (this.framesPerSecond !== undefined) {
+			this.ewmaFps = this.ewmaFps ? 0.9 * this.ewmaFps + 0.1 * this.framesPerSecond : this.framesPerSecond;
 		}
 	}
 
@@ -251,6 +255,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			transportId: this.transportId,
 			codecId: this.codecId,
 			packetsReceived: this.packetsReceived,
+			packetsReceivedWithEct1: this.packetsReceivedWithEct1,
+			packetsReceivedWithCe: this.packetsReceivedWithCe,
+			packetsReportedAsLost: this.packetsReportedAsLost,
+			packetsReportedAsLostButRecovered: this.packetsReportedAsLostButRecovered,
 			packetsLost: this.packetsLost,
 			jitter: this.jitter,
 			mid: this.mid,

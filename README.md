@@ -110,10 +110,15 @@ monitor.addSource(transport);
 
 ### Logger Integration
 
-Customize logging behavior by providing your own logger:
+Customize logging behavior by providing your own logger to `ClientMonitor`.
+The same logger instance is propagated to source and monitor internals.
+Log messages include module prefixes such as `[ClientMonitor]:` and `[Sources]:`.
+If no logger is provided, the default logger logs `warn` and `error` to console and treats `trace`/`debug`/`info` as no-op.
+
+#### Basic Custom Logger
 
 ```javascript
-import { setLogger, Logger } from "@observertc/client-monitor-js";
+import { ClientMonitor, Logger } from "@observertc/client-monitor-js";
 
 const customLogger: Logger = {
     trace: (...args) => console.trace(...args),
@@ -123,7 +128,46 @@ const customLogger: Logger = {
     error: (...args) => console.error(...args),
 };
 
-setLogger(customLogger);
+const monitor = new ClientMonitor({
+    logger: customLogger,
+});
+```
+
+#### Production Logger Adapter
+
+Map your existing app logger to the `Logger` interface:
+
+```javascript
+import { ClientMonitor } from "@observertc/client-monitor-js";
+import pino from "pino";
+
+const appLogger = pino({ level: "info" });
+
+const monitor = new ClientMonitor({
+    logger: {
+        trace: (...args) => appLogger.trace(...args),
+        debug: (...args) => appLogger.debug(...args),
+        info: (...args) => appLogger.info(...args),
+        warn: (...args) => appLogger.warn(...args),
+        error: (...args) => appLogger.error(...args),
+    },
+});
+```
+
+#### Disable Logging
+
+```javascript
+const noop = () => {};
+
+const monitor = new ClientMonitor({
+    logger: {
+        trace: noop,
+        debug: noop,
+        info: noop,
+        warn: noop,
+        error: noop,
+    },
+});
 ```
 
 ## Configuration
@@ -586,6 +630,7 @@ score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty);
 -   Bitrate deviation from target penalties
 -   CPU limitation penalties
 -   Bitrate volatility penalties
+-   If `track.contentHint === 'screen'`, bitrate deviation and volatility penalties are skipped to better fit screen-share traffic patterns
 
 ### Score Reasons
 
@@ -1986,17 +2031,19 @@ monitor.on("stats-collected", ({ collectedStats }) => {
 
 ### Debug Information
 
-Enable debug logging:
+Enable full debug logging:
 
 ```javascript
-import { setLogger } from "@observertc/client-monitor-js";
+import { ClientMonitor } from "@observertc/client-monitor-js";
 
-setLogger({
-    trace: console.trace,
-    debug: console.debug,
-    info: console.info,
-    warn: console.warn,
-    error: console.error,
+const monitor = new ClientMonitor({
+    logger: {
+        trace: (...args) => console.trace(...args),
+        debug: (...args) => console.debug(...args),
+        info: (...args) => console.info(...args),
+        warn: (...args) => console.warn(...args),
+        error: (...args) => console.error(...args),
+    },
 });
 ```
 

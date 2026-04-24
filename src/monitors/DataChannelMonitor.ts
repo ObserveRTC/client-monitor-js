@@ -60,10 +60,10 @@ export class DataChannelMonitor implements DataChannelStats {
 			return; // logger?
 		}
 
-		if (this.bytesSent && stats.bytesSent) {
+		if (this.bytesSent !== undefined && stats.bytesSent !== undefined) {
 			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 		}
-		if (this.bytesReceived && stats.bytesReceived) {
+		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 

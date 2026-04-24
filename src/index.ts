@@ -39,7 +39,7 @@ export type {
     TooLongPcConnectionEstablishmentEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
-    
+
     NewCertificateMonitorEventPayload,
     NewCodecMonitorEventPayload,
     NewDataChannelMonitorEventPayload,
@@ -57,17 +57,17 @@ export type {
     NewRemoteOutboundRtpMonitorEventPayload,
     NewPeerConnectionMonitorEventPayload,
 } from "./ClientMonitorEvents";
-export type { 
+export type {
     Detector,
 } from './detectors/Detector';
 export {
     Detectors
 } from './detectors/Detectors';
-export type { 
-    ScoreCalculator 
+export type {
+    ScoreCalculator
 } from './scores/ScoreCalculator';
 
-export type { 
+export type {
     DefaultScoreCalculator,
     DefaultScoreCalculatorInboundVideoTrackScoreAppData,
     DefaultScoreCalculatorOutboundAudioTrackScoreAppData,
@@ -78,7 +78,7 @@ export type {
     DefaultScoreCalculatorPeerConnectionScoreAppData
 } from './scores/DefaultScoreCalculator';
 
-export type { 
+export type {
 	ClientSample,
 	ExtensionStat,
 	PeerConnectionTransportStats,
@@ -93,8 +93,8 @@ export type {
     RemoteOutboundRtpStats,
 } from './schema/ClientSample';
 
-export {
-    setLogger,
+export type {
+    Logger,
 } from "./utils/logger";
 
 // export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {

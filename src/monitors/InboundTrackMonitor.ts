@@ -32,7 +32,7 @@ export class InboundTrackMonitor {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
@@ -55,7 +55,7 @@ export class InboundTrackMonitor {
 			this.detectors.add(new PlayoutDiscrepancyDetector(this));
 			this.calculatedScore.weight = 2;
 		}
-		
+
 		// for mediasoup probator we don't need to run detectors
 		if (this.track.id === 'probator') {
 			this.detectors.clear();
@@ -97,7 +97,7 @@ export class InboundTrackMonitor {
 			} else if (this.kind === 'video') {
 				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundVideoScoreReasons?.(this.calculatedScore.reasons);
 			}
-			
+
 			return {
 				id: this.track.id,
 				kind: this.track.kind,

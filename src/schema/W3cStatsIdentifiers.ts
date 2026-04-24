@@ -3,7 +3,7 @@ type RtcStatsVersion = {
 }
 
 export const version: RtcStatsVersion = {
-    date: new Date("2024-11-07"),
+    date: new Date("2025-09-25"),
 }
 
 export enum StatsType {
@@ -14,26 +14,26 @@ export enum StatsType {
     remoteOutboundRtp = "remote-outbound-rtp",
     mediaSource = "media-source",
     mediaPlayout = "media-playout",
-    peerConnection = "peer-connection", 
+    peerConnection = "peer-connection",
     dataChannel = "data-channel",
     transport = "transport",
     candidatePair = "candidate-pair",
     localCandidate = "local-candidate",
     remoteCandidate = "remote-candidate",
     certificate = "certificate",
-    
+
     // Deprecated 2021
     // -----------------
-    stream = "stream", 
+    stream = "stream",
     track = "track",
 
     // Deprecated 2022-09-21
     // ----------------------
     transceiver = "transceiver",
-    csrc = "csrc", 
-    sender = "sender", 
-    receiver = "receiver", 
-    sctpTransport = "sctp-transport", 
+    csrc = "csrc",
+    sender = "sender",
+    receiver = "receiver",
+    sctpTransport = "sctp-transport",
     iceServer = "ice-server",
 }
 
@@ -48,7 +48,7 @@ export type MediaKind = "audio" | "video";
 
 export type RtcPeerConnectionState = "new" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
                                     //  "new" | "connected" | "disconnected" | "failed" | "closed" | "checking" | "completed"
-                                    
+
 // export type RtcMediaKind = "audio" | "video";
 // export type RtcQualityLimitationReason = "none" | "cpu" | "bandwidth" | "other";
 // export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";

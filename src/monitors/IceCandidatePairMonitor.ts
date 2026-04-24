@@ -75,16 +75,16 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		this.deltaPacketsReceived = 0;
 		this.deltaPacketsSent = 0;
 
-		if (this.packetsSent && stats.packetsSent) {
+		if (this.packetsSent !== undefined && stats.packetsSent !== undefined) {
 			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
 		}
-		if (this.packetsReceived && stats.packetsReceived) {
+		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
 			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
 		}
-		if (this.bytesSent && stats.bytesSent) {
+		if (this.bytesSent !== undefined && stats.bytesSent !== undefined) {
 			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 		}
-		if (this.bytesReceived && stats.bytesReceived) {
+		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 
