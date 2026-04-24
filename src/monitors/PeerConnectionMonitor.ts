@@ -2,7 +2,7 @@ import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
 import * as W3C from "../schema/W3cStatsIdentifiers";
-import { createLogger } from "../utils/logger";
+import { Logger } from "../utils/logger";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -41,8 +41,7 @@ import {
 	RemoteOutboundRtpStats
 } from "../schema/ClientSample";
 
-const logger = createLogger('PeerConnectionMonitor');
-
+const MODULE_NAME = 'PeerConnectionMonitor';
 
 export type PeerConnectionMonitorEvents = {
 	'close': [],
@@ -51,7 +50,7 @@ export type PeerConnectionMonitorEvents = {
 }
 
 export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEvents> {
-	public readonly statsAdapters = new StatsAdapters();
+	public readonly statsAdapters: StatsAdapters;
 
 	public readonly detectors: Detectors;
 	public readonly mappedCodecMonitors = new Map<string, CodecMonitor>();
@@ -148,9 +147,11 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		public readonly peerConnectionId: string,
 		public readonly statsCollector: StatsCollector,
 		public readonly parent: ClientMonitor,
+		private readonly logger: Logger,
 		public attachments?: Record<string, unknown>,
 	) {
 		super();
+		this.statsAdapters = new StatsAdapters(logger);
 		this.detectors = new Detectors(
 			new LongPcConnectionEstablishmentDetector(this),
 			new CongestionDetector(this),
@@ -340,7 +341,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						this._updateCertificate(statsItem);
 						break;
 					default:
-						logger.debug('Unknown stats type', statsItem);
+						this.logger.debug(`[${MODULE_NAME}]:`, 'Unknown stats type', statsItem);
 				}
 			}
 
@@ -599,7 +600,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.payloadType === undefined ||
 			input.mimeType === undefined
 		) {
-			return logger.warn('Invalid codec stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid codec stats', input);
 		}
 
 		const stats = input as CodecStats;
@@ -627,7 +628,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.kind === undefined ||
 			input.trackIdentifier === undefined
 		) {
-			return logger.warn('Invalid inboundRtp stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid inboundRtp stats', input);
 		}
 
 		const stats = input as InboundRtpStats;
@@ -664,7 +665,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.timestamp === undefined ||
 			input.label === undefined
 		) {
-			return logger.warn('Invalid dataChannel stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid dataChannel stats', input);
 		}
 
 		const stats = input as DataChannelStats;
@@ -693,7 +694,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.ssrc === undefined ||
 			input.kind === undefined
 		) {
-			return logger.warn('Invalid remoteOutboundRtp stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid remoteOutboundRtp stats', input);
 		}
 
 		const stats = input as RemoteOutboundRtpStats;
@@ -722,7 +723,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.ssrc === undefined ||
 			input.kind === undefined
 		) {
-			return logger.warn('Invalid outboundRtp stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid outboundRtp stats', input);
 		}
 
 		const stats = input as OutboundRtpStats;
@@ -758,7 +759,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.ssrc === undefined ||
 			input.kind === undefined
 		) {
-			return logger.warn('Invalid remoteInboundRtp stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid remoteInboundRtp stats', input);
 		}
 
 		const stats = input as RemoteInboundRtpStats;
@@ -787,7 +788,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.trackIdentifier === undefined ||
 			input.kind === undefined
 		) {
-			return logger.warn('Invalid mediaSource stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid mediaSource stats', input);
 		}
 
 		const stats = input as MediaSourceStats;
@@ -822,7 +823,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.timestamp === undefined ||
 			input.kind === undefined
 		) {
-			return logger.warn('Invalid mediaPlayout stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid mediaPlayout stats', input);
 		}
 
 		const stats = input as MediaPlayoutStats;
@@ -851,7 +852,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.dataChannelsOpened === undefined ||
 			input.dataChannelsClosed === undefined
 		) {
-			return logger.warn('Invalid peerConnectionTransport stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid peerConnectionTransport stats', input);
 		}
 
 		const stats = input as PeerConnectionTransportStats;
@@ -878,7 +879,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.id === undefined ||
 			input.timestamp === undefined
 		) {
-			return logger.warn('Invalid iceTransport stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid iceTransport stats', input);
 		}
 
 		const stats = input as IceTransportStats;
@@ -906,7 +907,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.timestamp === undefined ||
 			input.protocol === undefined
 		) {
-			return logger.warn('Invalid iceCandidate stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid iceCandidate stats', input);
 		}
 
 		const stats = input as IceCandidateStats;
@@ -934,7 +935,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.timestamp === undefined ||
 			input.state === undefined
 		) {
-			return logger.warn('Invalid iceCandidatePair stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid iceCandidatePair stats', input);
 		}
 
 		const stats = input as IceCandidatePairStats;
@@ -963,7 +964,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			input.fingerprint === undefined ||
 			input.fingerprintAlgorithm === undefined
 		) {
-			return logger.warn('Invalid certificate stats', input);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Invalid certificate stats', input);
 		}
 
 		const stats = input as CertificateStats;

@@ -29,11 +29,11 @@ export class OutboundTrackMonitor {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
-	
+
 	public constructor(
 		public readonly track: MediaStreamTrack,
 		private _mediaSource: MediaSourceMonitor,
@@ -79,8 +79,8 @@ export class OutboundTrackMonitor {
 		}
 
 		this.detectors.update();
-	} 
-	
+	}
+
 	public getOutboundRtps() {
 		return Array.from(this.mappedOutboundRtps.values());
 	}

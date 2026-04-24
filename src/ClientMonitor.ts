@@ -1,17 +1,17 @@
-import { ExtensionStat, 
-    ClientSample, 
-    ClientEvent as ClientSampleClientEvent, 
-    ClientMetaData as ClientSampleClientMetaData, 
+import { ExtensionStat,
+    ClientSample,
+    ClientEvent as ClientSampleClientEvent,
+    ClientMetaData as ClientSampleClientMetaData,
     ClientIssue as ClientSampleClientIssue,
-    schemaVersion, 
+    schemaVersion,
 } from './schema/ClientSample';
-import { createLogger } from "./utils/logger";
+import { createLogger, Logger } from "./utils/logger";
 import EventEmitter from 'eventemitter3';
-import { 
-    ClientEvent, 
-    ClientIssue, 
-    ClientMetaData, 
-    ClientMonitorEvents, 
+import {
+    ClientEvent,
+    ClientIssue,
+    ClientMetaData,
+    ClientMonitorEvents,
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from './schema/ClientEventTypes';
@@ -29,15 +29,9 @@ import * as mediasoup from 'mediasoup-client';
 import { inferSourceType } from './sources/inferSourceType';
 import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider';
 
-const logger = createLogger('ClientMonitor');
+const MODULE_NAME = 'ClientMonitor';
 
 export type ExtensionStatProvider = () => { type: string, payload?: Record<string, unknown>} | Promise<{ type: string, payload?: Record<string, unknown>}>;
-// export declare interface ClientMonitor {
-//     on<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
-//     once<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
-//     off<K extends keyof ClientMonitorEvents>(event: K, listener: ClientMonitorEvents[K]): this;
-//     emit<K extends keyof ClientMonitorEvents>(event: K, ...args: Parameters<ClientMonitorEvents[K]>): boolean;
-// }
 
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
@@ -50,23 +44,24 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public readonly activeIssues: Record<string, ClientIssue[]> = {};
 
     public scoreCalculator: ScoreCalculator;
+    public readonly logger: Logger;
     public closed = false;
     public lastSampledAt = 0;
     public lastCollectingStatsAt = 0;
-    
+
     public cpuPerformanceAlertOn = false;
-    
+
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
     public receivingAudioBitrate = -1;
     public receivingVideoBitrate = -1;
     public totalAvailableIncomingBitrate = -1;
     public totalAvailableOutgoingBitrate = -1;
-    
+
     public avgRttInSec = -1;
     public score = 5.0;
     public scoreReasons?: Record<string, number>;
-    
+
     private _browser?: {
         name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown';
         version: string;
@@ -81,38 +76,42 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
-    
-    
+
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
      */
     public attachments?: Record<string, unknown>;
 
     public constructor(
-        config?: Partial<ClientMonitorConfig<AppData>>
+        config?: Partial<ClientMonitorConfig<AppData>>,
+        logger?: Logger,
     ) {
         super();
+        const monitorConfig = config ?? {};
+
+        this.logger = logger ?? monitorConfig.logger ?? createLogger();
+
         this.config = {
-            ...config,
-            collectingPeriodInMs: config?.collectingPeriodInMs ?? 2000,
-            samplingPeriodInMs: config?.samplingPeriodInMs ?? 8000,
-            
-            integrateNavigatorMediaDevices: config?.integrateNavigatorMediaDevices ?? true,
-            addClientJointEventOnCreated: config?.addClientJointEventOnCreated ?? true,
-            addClientLeftEventOnClose: config?.addClientLeftEventOnClose ?? true,
-    
-            videoFreezesDetector: config?.videoFreezesDetector ?? {
+            ...monitorConfig,
+            collectingPeriodInMs: monitorConfig.collectingPeriodInMs ?? 2000,
+            samplingPeriodInMs: monitorConfig.samplingPeriodInMs ?? 8000,
+
+            integrateNavigatorMediaDevices: monitorConfig.integrateNavigatorMediaDevices ?? true,
+            addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
+            addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
+
+            videoFreezesDetector: monitorConfig.videoFreezesDetector ?? {
                 createIssue: true,
             },
-            dryInboundTrackDetector: config?.dryInboundTrackDetector ?? {
+            dryInboundTrackDetector: monitorConfig.dryInboundTrackDetector ?? {
                 thresholdInMs: 5000,
                 createIssue: true,
             },
-            dryOutboundTrackDetector: config?.dryOutboundTrackDetector ?? {
+            dryOutboundTrackDetector: monitorConfig.dryOutboundTrackDetector ?? {
                 thresholdInMs: 5000,
                 createIssue: true,
             },
-            audioDesyncDetector: config?.audioDesyncDetector ?? {
+            audioDesyncDetector: monitorConfig.audioDesyncDetector ?? {
                 fractionalCorrectionAlertOffThreshold: 0.25,
                 fractionalCorrectionAlertOnThreshold: 0.5,
                 createIssue: true,
@@ -120,10 +119,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             syntheticSamplesDetector: {
                 minSynthesizedSamplesDuration: 0,
             },
-            congestionDetector: config?.congestionDetector ?? {
+            congestionDetector: monitorConfig.congestionDetector ?? {
                 sensitivity: 'medium',
             },
-            cpuPerformanceDetector: config?.cpuPerformanceDetector ?? {
+            cpuPerformanceDetector: monitorConfig.cpuPerformanceDetector ?? {
                 fpsVolatilityThresholds: {
                     lowWatermark: 0.1,
                     highWatermark: 0.3,
@@ -139,15 +138,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 highSkewThreshold: 5,
                 createIssue: true,
             },
-            longPcConnectionEstablishmentDetector: config?.longPcConnectionEstablishmentDetector ?? {
+            longPcConnectionEstablishmentDetector: monitorConfig.longPcConnectionEstablishmentDetector ?? {
                 thresholdInMs: 5000,
                 createEvent: true,
             },
-            bufferingEventsForSamples: config?.bufferingEventsForSamples ?? false,
-            appData: config?.appData ?? {} as AppData,
+            bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
+            appData: monitorConfig.appData ?? {} as AppData,
         }
 
-        this._sources = new Sources(this);
+        this._sources = new Sources(this, this.logger);
         this.scoreCalculator = new DefaultScoreCalculator(this);
         this.setCollectingPeriod(this.config.collectingPeriodInMs);
         if (this.config.samplingPeriodInMs) {
@@ -163,30 +162,30 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         try {
             this._sources.fetchUserAgentData();
         } catch (err) {
-            logger.error('Failed to fetch user agent data', err);
+            this.logger.error(`[${MODULE_NAME}]:`, 'Failed to fetch user agent data', err);
         }
-        
+
         this.detectors = new Detectors(
             new CpuPerformanceDetector(this),
         );
     }
 
     public get clientId() { return this.config.clientId; }
-    public set clientId(clientId: string | undefined) { 
-        this.config.clientId = clientId; 
+    public set clientId(clientId: string | undefined) {
+        this.config.clientId = clientId;
     }
-    
+
     public get callId() { return this.config.callId; }
-    public set callId(callId: string | undefined) { 
-        this.config.callId = callId; 
+    public set callId(callId: string | undefined) {
+        this.config.callId = callId;
     }
 
     public get appData(): AppData { return this.config.appData ; }
     public set appData(appData: AppData) { this.config.appData = appData; }
     public set browser(browser: { name: 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera' | 'unknown', version: string } | undefined) {
         if (this.closed || !browser) return;
-        if (this._browser) logger.warn('Browser info is already set on ClientMonitor, overwriting it');
-        
+        if (this._browser) this.logger.warn(`[${MODULE_NAME}]:`, 'Browser info is already set on ClientMonitor, overwriting it');
+
         this._browser = browser;
 
         for (const peerConnection of this.peerConnections) {
@@ -213,7 +212,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.once('close', () => (this.off('issue', listener)));
         this.on('issue', listener);
     }
-    
+
 
     public get browser() {
         return this._browser;
@@ -233,7 +232,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             // create the last sample before close
             this.createSample();
         }
-        
+
         this.closed = true;
         this.emit('close');
     }
@@ -261,19 +260,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     public async collect(): Promise<[string, RTCStats[]][]> {
-        if (this.closed) logger.warn('ClientMonitor is closed, cannot collet stats');
-        
+        if (this.closed) this.logger.warn(`[${MODULE_NAME}]:`, 'ClientMonitor is closed, cannot collet stats');
+
         this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
-        
+
         await Promise.all(
             [...this.peerConnections.map(async (peerConnection) => {
                 try {
                     const collectedStats = await peerConnection.collect();
-        
+
                     result.push([peerConnection.peerConnectionId, collectedStats as RTCStats[]]);
                 } catch (err) {
-                    logger.error(`Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
+                    this.logger.error(`[${MODULE_NAME}]:`, `Failed to get stats from peer connection ${peerConnection.peerConnectionId}`, err);
                 }
             }),
             ...[...this.extensionStatsProviders.values()].map(provider => async () => {
@@ -281,7 +280,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                     const extStat = await provider();
                     this.addExtensionStats(extStat);
                 } catch (err) {
-                    logger.error('Failed to get extension stats', err);
+                    this.logger.error(`[${MODULE_NAME}]:`, 'Failed to get extension stats', err);
                 }
             })
         ]);
@@ -294,7 +293,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.totalAvailableOutgoingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableOutgoingBitrate ?? 0), 0);
         this.avgRttInSec = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length;
         this.durationOfCollectingStatsInMs = Date.now() - this.lastCollectingStatsAt;
-        
+
         this.tracks.forEach(track => track.update());
         this.detectors.update();
         this.scoreCalculator.update();
@@ -305,7 +304,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             collectedStats: result,
             durationOfCollectingStatsInMs: this.durationOfCollectingStatsInMs,
         });
-        
+
         if (0 < this._samplingTick) {
             const doSample = ++this._collectingCounter % this._samplingTick === 0;
 
@@ -313,7 +312,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 this.createSample();
             }
         }
-        
+
         return result;
     }
 
@@ -323,7 +322,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public setScore<T extends Record<string, number>>(score: number, reasons?: T): void {
         if (this.closed) return;
-        
+
         this.score = score;
         this.scoreReasons = reasons;
         this.emit('score', {
@@ -370,14 +369,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor): void {
         if (this.closed) return;
         if (this.mappedPeerConnections.has(peerConnectionMonitor.peerConnectionId)) {
-            return logger.warn(`PeerConnectionMonitor with id ${peerConnectionMonitor.peerConnectionId} already exists`);
+            return this.logger.warn(`[${MODULE_NAME}]:`, `PeerConnectionMonitor with id ${peerConnectionMonitor.peerConnectionId} already exists`);
         }
 
         peerConnectionMonitor.once('close', () => {
             this.mappedPeerConnections.delete(peerConnectionMonitor.peerConnectionId);
         })
         this.mappedPeerConnections.set(peerConnectionMonitor.peerConnectionId, peerConnectionMonitor);
-        
+
         this.emit('new-peerconnnection-monitor', {
             peerConnectionMonitor,
             clientMonitor: this,
@@ -420,7 +419,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             payload,
             timestamp,
         });
-    
+
         this.emit('client-event', {
             ...event,
             payload: event.payload,
@@ -431,7 +430,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
-        
+
         const payload = issue.payload ? JSON.stringify(issue.payload) : undefined;
         const timestamp = issue.timestamp ?? Date.now();
 
@@ -523,13 +522,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public addSource(source: unknown, type?: ClientMonitorSourceType): void {
         if (this.closed) {
-            return logger.warn('Cannot add source to closed ClientMonitor');
+            return this.logger.warn(`[${MODULE_NAME}]:`, 'Cannot add source to closed ClientMonitor');
         }
 
         if (!type) {
             type = inferSourceType(source);
 
-            if (!type) return logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
+            if (!type) return this.logger.warn(`[${MODULE_NAME}]:`, 'Cannot add source to ClientMonitor, because it is not a valid source', source);
         }
 
         switch (type) {
@@ -538,39 +537,39 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 break;
             case 'mediasoup-device':
                 this._sources.addMediasoupDevice(source as mediasoup.types.Device);
-                break; 
+                break;
             case 'mediasoup-transport':
                 this._sources.addMediasoupTransport(source as mediasoup.types.Transport);
                 break;
             default:
-                return logger.warn('Cannot add source to ClientMonitor, because it is not a valid source', source);
+                return this.logger.warn(`[${MODULE_NAME}]:`, 'Cannot add source to ClientMonitor, because it is not a valid source', source);
         }
     }
 
     public removeSource(source: unknown, type?: ClientMonitorSourceType): void {
         if (this.closed) {
-            return logger.warn('Cannot remove source from closed ClientMonitor');
+            return this.logger.warn(`[${MODULE_NAME}]:`, 'Cannot remove source from closed ClientMonitor');
         }
 
         if (!type) {
             // infer the type of the source
             type = inferSourceType(source);
 
-            if (!type) return logger.warn('Cannot remove source from ClientMonitor, because it is not a valid source', source);
+            if (!type) return this.logger.warn(`[${MODULE_NAME}]:`, 'Cannot remove source from ClientMonitor, because it is not a valid source', source);
         }
-        
+
         switch (type) {
             case 'RTCPeerConnection':
                 this._sources.removeRTCPeerConnection(source as RTCPeerConnection);
                 break;
             case 'mediasoup-device':
                 this._sources.removeMediasoupDevice(source as mediasoup.types.Device);
-                break; 
+                break;
             case 'mediasoup-transport':
                 this._sources.removeMediasoupTransport(source as mediasoup.types.Transport);
                 break;
             default:
-                return logger.warn('Cannot remove source from ClientMonitor, because it is not a valid source', source);
+                return this.logger.warn(`[${MODULE_NAME}]:`, 'Cannot remove source from ClientMonitor, because it is not a valid source', source);
         }
     }
 
@@ -581,7 +580,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public watchNavigatorMediaDevices() {
         this._sources.watchNavigatorMediaDevices();
     }
-    
+
     public get peerConnections() {
         return [...this.mappedPeerConnections.values()];
     }
@@ -643,13 +642,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     public getInboundTrackMonitor(trackId: string): InboundTrackMonitor | undefined {
-        return this.peerConnections.find(peerConnection => 
+        return this.peerConnections.find(peerConnection =>
             peerConnection.mappedInboundTracks.has(trackId)
         )?.mappedInboundTracks.get(trackId);
     }
 
     public getOutboundTrackMonitor(trackId: string): OutboundTrackMonitor | undefined {
-        return this.peerConnections.find(peerConnection => 
+        return this.peerConnections.find(peerConnection =>
             peerConnection.mappedOutboundTracks.has(trackId)
         )?.mappedOutboundTracks.get(trackId);
     }
@@ -660,12 +659,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         }
         this._timer = undefined;
         this.config.collectingPeriodInMs = collectingPeriodInMs;
-        
+
         try {
             if (!this.config.collectingPeriodInMs) return;
 
             this._timer = setInterval(() => {
-                this.collect().catch(err => logger.error(err));
+                this.collect().catch(err => this.logger.error(`[${MODULE_NAME}]:`, err));
             }, this.config.collectingPeriodInMs);
         } finally {
             this._setSamplingTick();
@@ -688,7 +687,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             return;
         }
         if (this.config.samplingPeriodInMs % this.config.collectingPeriodInMs !== 0) {
-            logger.warn(`The samplingPeriodInMs (${this.config.samplingPeriodInMs}) should be a multiple of collectingPeriodInMs (${this.config.collectingPeriodInMs}), otherwise the sampling will not be accurate`);
+            this.logger.warn(`[${MODULE_NAME}]:`, `The samplingPeriodInMs (${this.config.samplingPeriodInMs}) should be a multiple of collectingPeriodInMs (${this.config.collectingPeriodInMs}), otherwise the sampling will not be accurate`);
         }
         this._samplingTick = Math.max(1,
             Math.floor(this.config.samplingPeriodInMs / this.config.collectingPeriodInMs)

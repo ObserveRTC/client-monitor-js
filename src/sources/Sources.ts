@@ -2,7 +2,7 @@ import { ClientMonitor } from "..";
 import { fetchUserAgentData } from "./fetchUserAgentData";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { watchMediaDevices } from "./watchMediaDevice";
-import { createLogger } from "../utils/logger";
+import { Logger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { RtcPeerConnectionStatsCollector } from "../collectors/RtcPeerConnectionStatsCollector";
 import { MediasoupTransportStatsCollector } from "../collectors/MediasoupTransportStatsCollector";
@@ -12,7 +12,7 @@ import { RtcPeerConnectionBinding } from "./RtcPeerConnectionBinding";
 import { MediasoupTransportBinding } from "./MediasoupTransportBinding";
 import { MediasoupDeviceBinding } from "./MediasoupDeviceBinding";
 
-const logger = createLogger('Sources');
+const MODULE_NAME = 'Sources';
 
 export class Sources {
 	public mediaDevicesAreWatched = false;
@@ -26,7 +26,8 @@ export class Sources {
 	private _mediasoupDeviceBindings: MediasoupDeviceBinding[] = [];
 
 	public constructor(
-		public readonly monitor: ClientMonitor
+		public readonly monitor: ClientMonitor,
+		private readonly logger: Logger,
 	) {
 	}
 
@@ -35,9 +36,9 @@ export class Sources {
 		peerConnection: RTCPeerConnection,
 	}): void {
 		const exists = [...this._peerConnectionBindings.values()].find((binding) => binding.peerConnection === params.peerConnection);
-		
+
 		if (exists) {
-			return logger.warn('RTCPeerConnection already exists in sources, not adding again');
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'RTCPeerConnection already exists in sources, not adding again');
 		}
 
 		const {
@@ -49,6 +50,7 @@ export class Sources {
 				peerConnectionId,
 				new RtcPeerConnectionStatsCollector(peerConnection, this.monitor),
 				this.monitor,
+				this.logger,
 		);
 		const bindnings = new RtcPeerConnectionBinding(peerConnection, peerConnectionMonitor);
 
@@ -65,7 +67,7 @@ export class Sources {
 		const binding = [...this._peerConnectionBindings.values()].find((binding) => binding.peerConnection === peerConnection);
 
 		if (!binding) {
-			logger.warn('RTCPeerConnection not found in sources, cannot remove');
+			this.logger.warn(`[${MODULE_NAME}]:`, 'RTCPeerConnection not found in sources, cannot remove');
 			return;
 		}
 
@@ -76,7 +78,7 @@ export class Sources {
 		const exists = this._mediasoupDeviceBindings.find((binding) => binding.device === device);
 
 		if (exists) {
-			logger.warn('Mediasoup device already exists in sources, not adding again');
+			this.logger.warn(`[${MODULE_NAME}]:`, 'Mediasoup device already exists in sources, not adding again');
 			return this;
 		}
 
@@ -92,7 +94,7 @@ export class Sources {
 		const binding = this._mediasoupDeviceBindings.find((binding) => binding.device === device);
 
 		if (!binding) {
-			logger.warn('Mediasoup device not found in sources, cannot remove');
+			this.logger.warn(`[${MODULE_NAME}]:`, 'Mediasoup device not found in sources, cannot remove');
 			return this;
 		}
 
@@ -104,7 +106,7 @@ export class Sources {
 
 	public addMediasoupTransport(transport: mediasoup.types.Transport) {
 		if (this._mediasoupTransportBindings.has(transport.id)) {
-			logger.warn(`Mediasoup transport (${transport.id}) already exists in sources, not adding again`);
+			this.logger.warn(`[${MODULE_NAME}]:`, `Mediasoup transport (${transport.id}) already exists in sources, not adding again`);
 			return this;
 		}
 
@@ -115,6 +117,7 @@ export class Sources {
 			transport.id,
 			new MediasoupTransportStatsCollector(transport, this.monitor),
 			this.monitor,
+			this.logger,
 			attachments,
 		);
 		const binding = new MediasoupTransportBinding(transport, peerConnectionMonitor);
@@ -134,21 +137,21 @@ export class Sources {
 
 	public removeMediasoupTransport(transport: mediasoup.types.Transport): this {
 		const binding = this._mediasoupTransportBindings.get(transport.id);
-	
+
 		if (!binding) {
-			logger.warn(`Mediasoup transport (${transport.id}) not found in sources, cannot remove`);
+			this.logger.warn(`[${MODULE_NAME}]:`, `Mediasoup transport (${transport.id}) not found in sources, cannot remove`);
 			return this;
 		}
-	
+
 		binding.unbind();
 		this._mediasoupTransportBindings.delete(transport.id);
-		
+
 		return this;
 	}
 
 	public fetchUserAgentData() {
-		const userAgentData = fetchUserAgentData();
-		
+		const userAgentData = fetchUserAgentData(this.logger);
+
 		if (!userAgentData) return;
 
 		if (!this.userAgentMetaDataSent) {
@@ -188,10 +191,10 @@ export class Sources {
 		if (this.mediaDevicesAreWatched) return;
 
 		try {
-			watchMediaDevices(this.monitor);
+			watchMediaDevices(this.monitor, this.logger);
 			this.mediaDevicesAreWatched = true;
 		} catch (err) {
-			logger.error('Failed to watch media devices', err);
+			this.logger.error(`[${MODULE_NAME}]:`, 'Failed to watch media devices', err);
 		}
 	}
 

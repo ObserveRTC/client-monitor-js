@@ -113,7 +113,7 @@ monitor.addSource(transport);
 Customize logging behavior by providing your own logger:
 
 ```javascript
-import { setLogger, Logger } from "@observertc/client-monitor-js";
+import { ClientMonitor, Logger } from "@observertc/client-monitor-js";
 
 const customLogger: Logger = {
     trace: (...args) => console.trace(...args),
@@ -123,7 +123,9 @@ const customLogger: Logger = {
     error: (...args) => console.error(...args),
 };
 
-setLogger(customLogger);
+const monitor = new ClientMonitor({
+    logger: customLogger,
+});
 ```
 
 ## Configuration
@@ -1989,14 +1991,16 @@ monitor.on("stats-collected", ({ collectedStats }) => {
 Enable debug logging:
 
 ```javascript
-import { setLogger } from "@observertc/client-monitor-js";
+import { ClientMonitor } from "@observertc/client-monitor-js";
 
-setLogger({
-    trace: console.trace,
-    debug: console.debug,
-    info: console.info,
-    warn: console.warn,
-    error: console.error,
+const monitor = new ClientMonitor({
+    logger: {
+        trace: console.trace,
+        debug: console.debug,
+        info: console.info,
+        warn: console.warn,
+        error: console.error,
+    },
 });
 ```
 

@@ -1,19 +1,19 @@
 import * as UAParser from "ua-parser-js";
-import { createLogger } from "../utils/logger";
+import { Logger } from "../utils/logger";
 
-const logger = createLogger('FetchNavigatorData');
+const MODULE_NAME = 'FetchNavigatorData';
 
-export function fetchUserAgentData(): ReturnType<typeof UAParser.UAParser.prototype.getResult> | undefined {
+export function fetchUserAgentData(baseLogger: Logger): ReturnType<typeof UAParser.UAParser.prototype.getResult> | undefined {
 	try {
 		let outerNavigator: typeof navigator | undefined = undefined;
 		if (navigator !== undefined) outerNavigator = navigator;
 		else if (window !== undefined && window.navigator !== undefined) outerNavigator = window.navigator;
-		else return logger.error('Cannot integrate navigator.mediaDevices, because navigator is not available');
-		
+		else return baseLogger.error(`[${MODULE_NAME}]:`, 'Cannot integrate navigator.mediaDevices, because navigator is not available');
+
 		const parser = new UAParser.UAParser(outerNavigator.userAgent);
 		return parser.getResult();
-		
+
 	} catch (err) {
-		logger.warn('Cannot collect Navigator data', err);
+		baseLogger.warn(`[${MODULE_NAME}]:`, 'Cannot collect Navigator data', err);
 	}
 }

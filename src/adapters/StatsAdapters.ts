@@ -1,15 +1,18 @@
 import * as W3CStats from '../schema/W3cStatsIdentifiers';
-import { createLogger } from '../utils/logger';
+import { createLogger, Logger } from '../utils/logger';
 import { StatsAdapter } from './StatsAdapter';
 
-const logger = createLogger('StatsAdapter');
+const MODULE_NAME = 'StatsAdapter';
 
 export class StatsAdapters {
 	public readonly adapters = new Map<string, StatsAdapter>();
 
+	public constructor(private readonly logger: Logger = createLogger()) {
+	}
+
 	public add(adapter: StatsAdapter) {
 		if (this.adapters.has(adapter.name)) {
-			return logger.warn('Adapter with name already exists', adapter.name);
+			return this.logger.warn(`[${MODULE_NAME}]:`, 'Adapter with name already exists', adapter.name);
 		}
 
 		this.adapters.set(adapter.name, adapter);
@@ -29,7 +32,7 @@ export class StatsAdapters {
 			try {
 				result = adapter.adapt(result);
 			} catch (err) {
-				logger.warn('Error adapting stats', err);
+				this.logger.warn(`[${MODULE_NAME}]:`, 'Error adapting stats', err);
 			}
 		}
 
@@ -44,7 +47,7 @@ export class StatsAdapters {
 			try {
 				result = adapter.postAdapt(result);
 			} catch (err) {
-				logger.warn('Error post adapting stats', err);
+				this.logger.warn(`[${MODULE_NAME}]:`, 'Error post adapting stats', err);
 			}
 		}
 

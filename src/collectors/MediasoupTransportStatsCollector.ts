@@ -1,12 +1,12 @@
 import { ClientMonitor, CodecStats, InboundRtpStats, MediaSourceStats, OutboundRtpStats } from "..";
 import { RtcStats } from "../schema/W3cStatsIdentifiers";
 import { StatsCollector } from "./StatsCollector";
-import { createLogger } from "../utils/logger";
+import { Logger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { convertRTCStatsReport } from "./utils";
 import * as W3C from '../schema/W3cStatsIdentifiers';
 
-const logger = createLogger('MediasoupTransportStatsCollector');
+const MODULE_NAME = 'MediasoupTransportStatsCollector';
 
 export class MediasoupTransportStatsCollector implements StatsCollector {
 	public lastStats: RtcStats[] = [];
@@ -14,16 +14,16 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 	public readonly producers = new Map<string, mediasoup.types.Producer>();
 
 	public get browser() {
-		return this.clientMonitor.browser 
+		return this.clientMonitor.browser
 	}
 
 	public constructor(
 		public readonly transport: mediasoup.types.Transport,
 		public readonly clientMonitor: ClientMonitor,
+		private readonly logger: Logger = clientMonitor.logger,
 	) {
-		// empty
 		this._newProducers = this._newProducers.bind(this);
-		
+
 		this.transport.observer.once('close', () => {
 			this.transport.observer.off('newproducer', this._newProducers);
 		});
@@ -32,7 +32,7 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 
 	public async getStats(): Promise<RtcStats[]> {
 		try {
-			this.lastStats = convertRTCStatsReport(await this.transport.getStats());
+			this.lastStats = convertRTCStatsReport(await this.transport.getStats(), this.logger);
 			this._stats = [];
 
 			// rip out the probator
@@ -47,13 +47,13 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 			try {
 				await this._extend();
 			} catch (err) {
-				logger.error('Error extending stats', err);
+				this.logger.error(`[${MODULE_NAME}]:`, 'Error extending stats', err);
 			}
-	
+
 			return this._stats;
 
 		} catch (err) {
-				logger.error('Error getting stats report', err);
+				this.logger.error(`[${MODULE_NAME}]:`, 'Error getting stats report', err);
 				return [];
 		}
 	}
@@ -112,7 +112,7 @@ export class MediasoupTransportStatsCollector implements StatsCollector {
 
 				if (!stat) continue;
 
-				
+
 				stat.codecId = codecStats?.id;
 				stat.mediaSourceId = mediaSourceStat?.id;
 			}

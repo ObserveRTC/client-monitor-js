@@ -16,7 +16,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	totalSamplesDuration?: number | undefined;
 	totalPlayoutDelay?: number | undefined;
 	totalSamplesCount?: number | undefined;
-	
+
 	public deltaSynthesizedSamplesDuration = 0;
 	public deltaSamplesDuration = 0;
 	/**
@@ -24,7 +24,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
@@ -46,7 +46,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
@@ -60,7 +60,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
 		if (this.synthesizedSamplesDuration !== undefined && stats.synthesizedSamplesDuration !== undefined) {

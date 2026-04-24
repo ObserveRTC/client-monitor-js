@@ -11,27 +11,17 @@ export interface Logger {
   error(...args: any[]): void;
 }
 
-let logger: Logger = new class implements Logger {
-  trace = () => void 0; 
+export const defaultLogger: Logger = new class implements Logger {
+  trace = () => void 0;
   debug = () => void 0;
   info = () => void 0;
-  // debug = (...args: any[]) => console.debug(...args); 
+  // debug = (...args: any[]) => console.debug(...args);
   // info = (...args: any[]) => console.info(...args);
   warn = (...args: any[]) => console.warn(...args);
   error = (...args: any[]) => console.error(...args);
 };
 
-export function setLogger(newLogger: Logger): void {
-  logger = newLogger;
-}
-
-export function createLogger(module: string): Logger {
-  return {
-    trace: (...args: any[]) => logger.trace(module, ...args),
-    debug: (...args: any[]) => logger.debug(module, ...args),
-    info: (...args: any[]) => logger.info(module, ...args),
-    warn: (...args: any[]) => logger.warn(module, ...args),
-    error: (...args: any[]) => logger.error(module, ...args),
-  }
+export function createLogger(baseLogger: Logger = defaultLogger): Logger {
+  return baseLogger;
 }
 

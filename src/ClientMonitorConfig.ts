@@ -1,3 +1,5 @@
+import { Logger } from "./utils/logger";
+
 export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
      * A unique identifier for the client. This is typically provided by the application
@@ -17,8 +19,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Flag to decide if the monitor should buffer events for samples even if the samplingPeriodInMs is not set.
-     * 
-     * OPTIONAL 
+     *
+     * OPTIONAL
      * Default: false
      */
     bufferingEventsForSamples?: boolean,
@@ -74,7 +76,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the video freezes detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -93,7 +95,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the dry inbound track detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -118,7 +120,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the dry outbound track detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -140,7 +142,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the playout discrepancy detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -166,7 +168,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the synthesized samples detector should create an event and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createEvent?: boolean
@@ -191,7 +193,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the audio desync detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -232,7 +234,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the congestion detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -260,7 +262,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createIssue?: boolean
@@ -299,7 +301,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
         /**
          * Flag to indicate if the long PC connection establishment detector should create an event and add it to the monitor
-         * 
+         *
          * DEFAULT: true
          */
         createEvent?: boolean
@@ -313,12 +315,14 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Additional metadata to be included in the client monitor.
-     * 
+     *
      * OPTIONAL
      */
     appData: AppData;
 };
 
-export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = Partial<AppliedClientMonitorConfig<AppData>>;
+export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = Partial<AppliedClientMonitorConfig<AppData>> & {
+    logger?: Logger;
+};
 export type ClientMonitorSourceType = 'mediasoup-device' | 'RTCPeerConnection' | 'mediasoup-transport';
 

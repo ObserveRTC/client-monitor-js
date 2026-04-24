@@ -1,11 +1,11 @@
 import * as W3C from '../schema/W3cStatsIdentifiers'
-import { createLogger } from '../utils/logger';
+import { Logger } from '../utils/logger';
 
-const logger = createLogger('StatsCollector');
+const MODULE_NAME = 'StatsCollector';
 
-export function convertRTCStatsReport(input: RTCStatsReport) {
+export function convertRTCStatsReport(input: RTCStatsReport, baseLogger: Logger) {
     const result: W3C.RtcStats[] = [];
-    
+
     try {
         input.forEach(report => {
 
@@ -42,10 +42,10 @@ export function convertRTCStatsReport(input: RTCStatsReport) {
         // }
 
         // stats.forEach((report) => {
-            
+
         // });
     } catch (err) {
-        logger.error('Error getting stats report', err);
+        baseLogger.error(`[${MODULE_NAME}]:`, 'Error getting stats report', err);
     }
 
     return result;
@@ -56,7 +56,7 @@ export function convertRTCStatsReport(input: RTCStatsReport) {
 //     return async () => {
 //         try {
 //             const stats = await statsProvider();
-    
+
 //             const result: W3C.RtcStats[] = [];
 
 //             // legacy support
@@ -78,19 +78,19 @@ export function convertRTCStatsReport(input: RTCStatsReport) {
 //                         }
 //                         result.push(rtcStatValue);
 //                     }
-        
+
 //                     return result;
 //                 }
 //             }
-        
+
 //             stats.forEach((report) => {
 //                 if (!report.id) return;
 //                 if (!report.timestamp) return;
 //                 if (!report.type) return;
-        
+
 //                 result.push(report);
 //             });
-        
+
 //             return result;
 //         } catch (err) {
 //             logger.error('Error getting stats report', err);
