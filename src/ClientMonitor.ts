@@ -8,10 +8,13 @@ import { ExtensionStat,
 import { createLogger, Logger } from "./utils/logger";
 import EventEmitter from 'eventemitter3';
 import {
+    AddedClientIssue,
     ClientEvent,
-    ClientIssue,
+    ClientIssuePayload,
     ClientMetaData,
     ClientMonitorEvents,
+    RaisedClientIssue,
+    ResolvedClientIssue,
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from './schema/ClientEventTypes';
@@ -41,7 +44,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public readonly detectors: Detectors;
     public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
     public readonly extensionStatsProviders = new Set<ExtensionStatProvider>();
-    public readonly activeIssues: Record<string, ClientIssue[]> = {};
+    /**
+     * Stateful issues currently in-flight, keyed by their `key`. Populated by
+     * `raiseIssue`, cleared by `resolveIssue`. One-shot issues created via
+     * `addIssue` are NOT stored here.
+     *
+     * External read access is encouraged via `getActiveIssues` /
+     * `isIssueActive`; this map is exposed read-only for advanced use cases
+     * but should not be mutated directly.
+     */
+    public readonly activeIssues = new Map<string, RaisedClientIssue>();
 
     public scoreCalculator: ScoreCalculator;
     public readonly logger: Logger;
@@ -90,6 +102,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         this.logger = monitorConfig.logger ?? createLogger();
 
+        // Defaults are applied only when the user did not specify the key
+        // (undefined). Explicit `null` means "disable this detector entirely"
+        // and is preserved — the corresponding detector won't be instantiated.
+        const detectorDefault = <T>(value: T | null | undefined, fallback: T): T | null =>
+            value === undefined ? fallback : value;
+
         this.config = {
             ...monitorConfig,
             collectingPeriodInMs: monitorConfig.collectingPeriodInMs ?? 2000,
@@ -99,29 +117,24 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
 
-            videoFreezesDetector: monitorConfig.videoFreezesDetector ?? {
-                createIssue: true,
-            },
-            dryInboundTrackDetector: monitorConfig.dryInboundTrackDetector ?? {
+            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {}),
+            dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
                 thresholdInMs: 5000,
-                createIssue: true,
-            },
-            dryOutboundTrackDetector: monitorConfig.dryOutboundTrackDetector ?? {
+            }),
+            dryOutboundTrackDetector: detectorDefault(monitorConfig.dryOutboundTrackDetector, {
                 thresholdInMs: 5000,
-                createIssue: true,
-            },
-            audioDesyncDetector: monitorConfig.audioDesyncDetector ?? {
+            }),
+            audioDesyncDetector: detectorDefault(monitorConfig.audioDesyncDetector, {
                 fractionalCorrectionAlertOffThreshold: 0.25,
                 fractionalCorrectionAlertOnThreshold: 0.5,
-                createIssue: true,
-            },
-            syntheticSamplesDetector: {
+            }),
+            syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
                 minSynthesizedSamplesDuration: 0,
-            },
-            congestionDetector: monitorConfig.congestionDetector ?? {
+            }),
+            congestionDetector: detectorDefault(monitorConfig.congestionDetector, {
                 sensitivity: 'medium',
-            },
-            cpuPerformanceDetector: monitorConfig.cpuPerformanceDetector ?? {
+            }),
+            cpuPerformanceDetector: detectorDefault(monitorConfig.cpuPerformanceDetector, {
                 fpsVolatilityThresholds: {
                     lowWatermark: 0.1,
                     highWatermark: 0.3,
@@ -130,17 +143,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                     lowWatermark: 5000,
                     highWatermark: 10000,
                 },
-                createIssue: true,
-            },
-            playoutDiscrepancyDetector: {
+            }),
+            playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
                 lowSkewThreshold: 2,
                 highSkewThreshold: 5,
-                createIssue: true,
-            },
-            longPcConnectionEstablishmentDetector: monitorConfig.longPcConnectionEstablishmentDetector ?? {
+            }),
+            longPcConnectionEstablishmentDetector: detectorDefault(monitorConfig.longPcConnectionEstablishmentDetector, {
                 thresholdInMs: 5000,
                 createEvent: true,
-            },
+            }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             appData: monitorConfig.appData ?? {} as AppData,
         }
@@ -164,9 +175,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             this.logger.error(`[${MODULE_NAME}]:`, 'Failed to fetch user agent data', err);
         }
 
-        this.detectors = new Detectors(
-            new CpuPerformanceDetector(this),
-        );
+        this.detectors = new Detectors();
+        if (this.config.cpuPerformanceDetector !== null) {
+            this.detectors.add(new CpuPerformanceDetector(this));
+        }
     }
 
     public get clientId() { return this.config.clientId; }
@@ -223,6 +235,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         }
         clearInterval(this._timer);
         this._timer = undefined;
+
+        // Auto-resolve any stateful issues so consumers see a clean lifecycle
+        // and don't leak entries past monitor close. Done before `closed = true`
+        // so resolveIssue still runs.
+        for (const key of [...this.activeIssues.keys()]) {
+            this.resolveIssue(key, {
+                comment: 'monitor closed before issue could be resolved',
+            });
+        }
 
         if (this.config.addClientLeftEventOnClose) {
             this.addClientLeftEvent({});
@@ -426,62 +447,131 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    public addIssue(issue: PartialBy<ClientIssue, 'timestamp'>): void {
-        if (this.closed) return;
-        if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
+    /**
+     * Fire-and-forget issue. Emits `'issue'` and buffers an entry into the
+     * next ClientSample. Does NOT enter the active store and cannot be
+     * resolved — use this for one-shot, non-stateful issues like
+     * `USER_MEDIA_ERROR` where there is no "ended" condition.
+     *
+     * For stateful issues that should live until resolved, use `raiseIssue`.
+     */
+    public addIssue<T extends ClientIssuePayload = ClientIssuePayload>(input: {
+        type: string;
+        payload?: T;
+        timestamp?: number;
+    }): AddedClientIssue<T> | undefined {
+        if (this.closed) return undefined;
 
-        const payload = issue.payload ? JSON.stringify(issue.payload) : undefined;
-        const timestamp = issue.timestamp ?? Date.now();
-
-        this._clientIssues.push({
-            ...issue,
-            payload,
+        const timestamp = input.timestamp ?? Date.now();
+        const issue: AddedClientIssue<T> = {
+            type: input.type,
+            payload: input.payload,
             timestamp,
-        });
+        };
 
-        this.activeIssues[issue.type] = this.activeIssues[issue.type] || [];
-        this.activeIssues[issue.type]?.push({
-            ...issue,
-            payload,
-            timestamp,
-        });
+        this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        this.emit('issue', issue);
 
-        this.emit('issue', {
-            ...issue,
-            payload: issue.payload,
-            timestamp
-        });
+        return issue;
     }
 
-    public resolveActiveIssues(type: string, issueOrFilter: ClientIssue | ((issue: ClientIssue) => boolean), comment?: string): ClientIssue[] {
-        if (this.closed) return [];
+    /**
+     * Raise (or refresh) a stateful issue. `key` is mandatory and is the
+     * global identity within this monitor — pass the same `key` to
+     * `resolveIssue` to clear the issue. Re-raising with an already-active
+     * `key` updates the existing entry in place (payload refreshed,
+     * `updatedAt` bumped) and emits `'issue-updated'` instead of `'issue'`.
+     *
+     * Returns the resulting `RaisedClientIssue` (new or updated).
+     */
+    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: { type: string, payload?: T, timestamp?: number }): RaisedClientIssue<T> | undefined {
+        if (this.closed) return undefined;
 
-        const issues = this.activeIssues[type];
-        if (!issues) return [];
+        const now = input.timestamp ?? Date.now();
+        const existing = this.activeIssues.get(key) as RaisedClientIssue<T> | undefined;
 
-        const filter = typeof issueOrFilter === 'function' ? issueOrFilter : (issue: ClientIssue) => issue === issueOrFilter;
+        if (existing) {
+            existing.type = input.type;
+            existing.payload = input.payload;
+            existing.updatedAt = now;
 
-        const resolvedIssues: ClientIssue[] = [];
-        const remainingIssues: ClientIssue[] = [];
-
-        for (const issue of issues) {
-
-            if (filter(issue)) resolvedIssues.push(issue);
-            else remainingIssues.push(issue);
+            this.emit('issue-updated', existing);
+            return existing;
         }
 
-        if (remainingIssues.length === 0) delete this.activeIssues[type];
-        else this.activeIssues[type] = remainingIssues;
+        const issue: RaisedClientIssue<T> = {
+            type: input.type,
+            key,
+            payload: input.payload,
+            raisedAt: now,
+            updatedAt: now,
+        };
 
-        resolvedIssues.forEach(issue => {
-            this.emit('resolved-issue', {
-                ...issue,
-                resolvedAt: Date.now(),
-                comment,
-            });
+        this.activeIssues.set(issue.key, issue);
+
+        this._bufferIssueForSample(issue.type, issue.payload, now);
+        this.emit('issue', issue);
+
+        return issue;
+    }
+
+    /**
+     * Resolve a stateful issue by its `key`. Returns the resolved issue
+     * (with `resolvedAt` and optional `comment`), or `undefined` if no
+     * active issue with that key exists.
+     */
+    public resolveIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: {
+        comment?: string,
+        payload?: T,
+        resolvedAt?: number,
+    }): ResolvedClientIssue | undefined {
+        if (this.closed) return undefined;
+
+        const issue = this.activeIssues.get(key);
+        if (!issue) return undefined;
+
+        this.activeIssues.delete(key);
+
+        if (input.payload) {
+            issue.payload = input.payload;
+        }
+
+        const resolution: ResolvedClientIssue = {
+            ...issue,
+            resolvedAt: input.resolvedAt ?? Date.now(),
+            comment: input.comment,
+        };
+        this.emit('issue-resolved', resolution);
+
+        return resolution;
+    }
+
+    /** Snapshot of currently active (raised) issues, optionally filtered by type. */
+    public getActiveIssuesByType(type?: string): RaisedClientIssue[] {
+        const result: RaisedClientIssue[] = [];
+
+        for (const issue of this.activeIssues.values()) {
+            if (type === undefined || issue.type === type) result.push(issue);
+        }
+        return result;
+    }
+
+    /** True if a raised issue with the given `key` is currently active. */
+    public isIssueActive(key: string): boolean {
+        return this.activeIssues.has(key);
+    }
+
+    private _bufferIssueForSample(type: string, payload: ClientIssuePayload | undefined, timestamp: number): void {
+        // Only buffer when sampling is configured (or explicitly requested),
+        // matching the existing behavior of other addX methods. Event emission
+        // is unconditional. Listeners always see the issue.
+        if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
+
+        this._clientIssues.push({
+            type,
+            payload: payload === undefined ? undefined : JSON.stringify(payload),
+            timestamp,
         });
-
-        return this.activeIssues[type] || [];
     }
 
     public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {

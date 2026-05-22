@@ -1,6 +1,13 @@
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { Detector } from "./Detector";
 
+export type PlayoutDiscrepancyIssuePayload = {
+	trackId: string;
+	frameSkew: number;
+	ewmaFps: number;
+	durationInMs?: number;
+}
+
 /**
  * Playout Discrepancy Detector
  * 
@@ -16,7 +23,6 @@ import { Detector } from "./Detector";
  * 
  * **Configuration Options:**
  * - `disabled`: Boolean to enable/disable the detector
- * - `createIssue`: Whether to create ClientIssue when playout discrepancy is detected
  * - `highSkewThreshold`: Frame skew threshold to trigger detection
  * - `lowSkewThreshold`: Frame skew threshold to clear detection (hysteresis)
  * 
@@ -33,7 +39,6 @@ import { Detector } from "./Detector";
  * const config = {
  *   playoutDiscrepancyDetector: {
  *     disabled: false,
- *     createIssue: true,
  *     highSkewThreshold: 10,  // Trigger when 10+ frames are skewed
  *     lowSkewThreshold: 3     // Clear when skew drops below 3 frames
  *   }
@@ -50,7 +55,14 @@ export class PlayoutDiscrepancyDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'inbound-video-playout-discrepancy';
 	/** Unique identifier for this detector type */
 	public readonly name = 'playout-discrepancy-detector';
+	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+	public disabled = false;
 	
+	private readonly issueKey: string;
+
+	/** Timestamp when the current discrepancy episode started. */
+	private _startedDiscrepancyAt?: number;
+
 	/**
 	 * Creates a new PlayoutDiscrepancyDetector instance
 	 * @param trackMonitor - The inbound track monitor to analyze for playout discrepancies
@@ -58,6 +70,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
 	) {
+		this.issueKey = `${PlayoutDiscrepancyDetector.ISSUE_TYPE}-track-${trackMonitor.track.id}`;
 	}
 
 	/** Gets the peer connection monitor that owns this track */
@@ -67,7 +80,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 
 	/** Gets the detector configuration from the client monitor */
 	private get config() {
-		return this.peerConnection.parent.config.playoutDiscrepancyDetector;
+		return this.peerConnection.parent.config.playoutDiscrepancyDetector!;
 	}
 
 	/** Flag indicating if playout discrepancy is currently active */
@@ -87,8 +100,8 @@ export class PlayoutDiscrepancyDetector implements Detector {
 	 * 5. Track active state to prevent duplicate alerts
 	 */
 	public update() {
-		if (this.config.disabled) return;
 
+		if (this.disabled) return;
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		if (!inboundRtp || !inboundRtp.deltaFramesReceived || !inboundRtp.deltaFramesRendered || !inboundRtp.ewmaFps) return;
@@ -97,7 +110,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 
 		if (this.active) {
 			if (frameSkew < this.config.lowSkewThreshold) {
-				this._resolveIssue();
+				this._resolve('playout discrepancy ended');
 				this.active = false;
 				return;
 			}
@@ -116,23 +129,40 @@ export class PlayoutDiscrepancyDetector implements Detector {
 			clientMonitor: clientMonitor,
 		});
 
-		if (this.config.createIssue) {
-			clientMonitor.addIssue({
-				type: PlayoutDiscrepancyDetector.ISSUE_TYPE,
-				payload: {
-					trackId: this.trackMonitor.track.id,
-					frameSkew,
-					ewmaFps: inboundRtp.ewmaFps,
-				}
-			});
-		}
+		this._raise({
+			trackId: this.trackMonitor.track.id,
+			frameSkew,
+			ewmaFps: inboundRtp.ewmaFps,
+		});
 	}
 
-	private _resolveIssue() {
-		const clientMonitor = this.peerConnection.parent;
+	private _raise(payload: PlayoutDiscrepancyIssuePayload) {
+		this._startedDiscrepancyAt = Date.now();
 
-		clientMonitor.resolveActiveIssues(PlayoutDiscrepancyDetector.ISSUE_TYPE, (issue) => {
-			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		this.peerConnection.parent.raiseIssue<PlayoutDiscrepancyIssuePayload>(this.issueKey, {
+			type: PlayoutDiscrepancyDetector.ISSUE_TYPE,
+			payload,
 		});
+	}
+
+	private _resolve(comment?: string) {
+		const clientMonitor = this.peerConnection.parent;
+		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		let payload: PlayoutDiscrepancyIssuePayload | undefined;
+
+		if (issue) {
+			payload = {
+				...(issue.payload as PlayoutDiscrepancyIssuePayload),
+				durationInMs: this._startedDiscrepancyAt ? Date.now() - this._startedDiscrepancyAt : undefined,
+			};
+		}
+
+		clientMonitor.resolveIssue<PlayoutDiscrepancyIssuePayload>(this.issueKey, {
+			comment,
+			payload,
+			resolvedAt: Date.now(),
+		});
+
+		this._startedDiscrepancyAt = undefined;
 	}
 }

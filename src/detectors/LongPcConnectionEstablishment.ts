@@ -12,7 +12,6 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
  * **Configuration Options:**
  * - `disabled`: Whether the detector is disabled (default: false)
  * - `thresholdInMs`: Maximum allowed duration for connection establishment in milliseconds
- * - `createIssue`: Whether to create an issue when long establishment is detected
  * 
  * **Events Emitted:**
  * - `too-long-pc-connection-establishment`: Emitted when connection establishment exceeds threshold
@@ -34,9 +33,11 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
  */
 export class LongPcConnectionEstablishmentDetector implements Detector{
 	public readonly name = 'long-pc-connection-establishment-detector';
+	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+	public disabled = false;
 	
 	private get config() {
-		return this.peerConnection.parent.config.longPcConnectionEstablishmentDetector;
+		return this.peerConnection.parent.config.longPcConnectionEstablishmentDetector!;
 	}
 
 	/**
@@ -51,7 +52,7 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 	}
 
 	public update(): void {
-		if (this.config.disabled) return;
+		if (this.disabled) return;
 		if (this.peerConnection.connectionState !== 'connecting') {
 			if (this._evented && this.peerConnection.connectionState === 'connected') {
 				return (this._evented = false, void 0)

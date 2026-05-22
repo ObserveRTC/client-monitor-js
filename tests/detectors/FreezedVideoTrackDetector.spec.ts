@@ -3,11 +3,12 @@ import { FreezedVideoTrackDetector } from "../../src/detectors/FreezedVideoTrack
 // Types for test mocks
 interface VideoFreezesConfig {
     disabled: boolean;
-    createIssue: boolean;
 }
 
 interface TestIssue {
+    id: string;
     type: string;
+    key?: string;
     payload: Record<string, unknown>;
 }
 
@@ -26,12 +27,12 @@ class MockClientMonitor {
     public config = {
         videoFreezesDetector: {
             disabled: false,
-            createIssue: true
         } as VideoFreezesConfig
     };
     
     private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private issues: TestIssue[] = [];
+    public readonly activeIssues = new Map<string, TestIssue>();
+    private nextId = 0;
 
     emit(eventName: string, eventData: Record<string, unknown>) {
         const handlers = this.eventHandlers[eventName] || [];
@@ -45,21 +46,56 @@ class MockClientMonitor {
         this.eventHandlers[eventName].push(handler);
     }
 
-    addIssue(issue: TestIssue) {
-        this.issues.push(issue);
+    addIssue(input: { type: string; payload?: Record<string, unknown> }) {
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            payload: input.payload ?? {},
+        };
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
     }
 
+    raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
+        const existing = this.activeIssues.get(key);
+        if (existing) {
+            existing.payload = input.payload ?? {};
+            existing.type = input.type;
+            this.emit('issue-updated', existing as unknown as Record<string, unknown>);
+            return existing;
+        }
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            key,
+            payload: input.payload ?? {},
+        };
+        this.activeIssues.set(key, issue);
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
+    }
+
+    resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
+        const found = this.activeIssues.get(key);
+        if (!found) return undefined;
+        this.activeIssues.delete(key);
+        const resolved = {
+            ...found,
+            payload: opts?.payload ?? found.payload,
+            resolvedAt: opts?.resolvedAt ?? Date.now(),
+            comment: opts?.comment,
+        };
+        this.emit('issue-resolved', resolved as unknown as Record<string, unknown>);
+        return resolved;
+    }
+
+    // Compatibility helpers used by existing test assertions.
     getIssues() {
-        return this.issues;
+        return [...this.activeIssues.values()];
     }
 
     clearIssues() {
-        this.issues = [];
-    }
-
-    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
-        // Mock implementation for resolving active issues
-        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
+        this.activeIssues.clear();
     }
 }
 
@@ -128,7 +164,7 @@ describe('FreezedVideoTrackDetector', () => {
         });
 
         it('should return early if detector is disabled', () => {
-            mockClientMonitor.config.videoFreezesDetector.disabled = true;
+            detector.disabled = true;
             mockTrackMonitor.setInboundRtp({
                 freezeCount: 5,
                 trackIdentifier: 'test-track'
@@ -141,7 +177,7 @@ describe('FreezedVideoTrackDetector', () => {
 
     describe('update() - Freeze detection logic', () => {
         beforeEach(() => {
-            mockClientMonitor.config.videoFreezesDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should detect new freeze when freeze count increases', () => {
@@ -171,7 +207,7 @@ describe('FreezedVideoTrackDetector', () => {
                 trackMonitor: mockTrackMonitor
             });
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'freezed-video-track',
                 payload: {
                     trackId: 'test-track'
@@ -202,7 +238,8 @@ describe('FreezedVideoTrackDetector', () => {
             const inboundRtp = mockTrackMonitor.getInboundRtp();
             expect(inboundRtp?.isFreezed).toBe(false); // No new freezes, so should be false
             expect(eventSpy).toHaveBeenCalledTimes(1); // Only the first call should trigger event
-            expect(mockClientMonitor.getIssues()).toHaveLength(1); // Only one issue from first call
+            // The freeze ended on the second update so the issue is resolved out of the active set.
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
         it('should detect freeze when count increases from previous run', () => {
@@ -260,26 +297,7 @@ describe('FreezedVideoTrackDetector', () => {
 
     describe('update() - Issue creation', () => {
         beforeEach(() => {
-            mockClientMonitor.config.videoFreezesDetector.disabled = false;
-        });
-
-        it('should not create issue when createIssue is false', () => {
-            mockClientMonitor.config.videoFreezesDetector.createIssue = false;
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('freezed-video-track', eventSpy);
-
-            mockTrackMonitor.setInboundRtp({
-                freezeCount: 1,
-                isFreezed: false,
-                trackIdentifier: 'test-track'
-            });
-
-            detector.update();
-
-            // Event should still be emitted
-            expect(eventSpy).toHaveBeenCalled();
-            // But no issue should be created
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            detector.disabled = false;
         });
 
         it('should create issue with correct track identifier', () => {
@@ -292,7 +310,7 @@ describe('FreezedVideoTrackDetector', () => {
             detector.update();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'freezed-video-track',
                 payload: {
                     trackId: 'custom-track-id'
@@ -303,7 +321,7 @@ describe('FreezedVideoTrackDetector', () => {
 
     describe('update() - Event emission timing', () => {
         beforeEach(() => {
-            mockClientMonitor.config.videoFreezesDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should only emit event on freeze start, not on freeze end', () => {

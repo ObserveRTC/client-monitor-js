@@ -3,12 +3,13 @@ import { CongestionDetector } from "../../src/detectors/CongestionDetector";
 // Types for test mocks
 interface CongestionConfig {
     disabled: boolean;
-    createIssue: boolean;
     sensitivity: 'low' | 'medium' | 'high';
 }
 
 interface TestIssue {
+    id: string;
     type: string;
+    key?: string;
     payload: Record<string, unknown>;
 }
 
@@ -25,13 +26,13 @@ class MockClientMonitor {
     public config = {
         congestionDetector: {
             disabled: false,
-            createIssue: true,
             sensitivity: 'medium' as const
         } as CongestionConfig
     };
     
     private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private issues: TestIssue[] = [];
+    public readonly activeIssues = new Map<string, TestIssue>();
+    private nextId = 0;
 
     emit(eventName: string, eventData: Record<string, unknown>) {
         const handlers = this.eventHandlers[eventName] || [];
@@ -45,21 +46,56 @@ class MockClientMonitor {
         this.eventHandlers[eventName].push(handler);
     }
 
-    addIssue(issue: TestIssue) {
-        this.issues.push(issue);
+    addIssue(input: { type: string; payload?: Record<string, unknown> }) {
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            payload: input.payload ?? {},
+        };
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
     }
 
+    raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
+        const existing = this.activeIssues.get(key);
+        if (existing) {
+            existing.payload = input.payload ?? {};
+            existing.type = input.type;
+            this.emit('issue-updated', existing as unknown as Record<string, unknown>);
+            return existing;
+        }
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            key,
+            payload: input.payload ?? {},
+        };
+        this.activeIssues.set(key, issue);
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
+    }
+
+    resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
+        const found = this.activeIssues.get(key);
+        if (!found) return undefined;
+        this.activeIssues.delete(key);
+        const resolved = {
+            ...found,
+            payload: opts?.payload ?? found.payload,
+            resolvedAt: opts?.resolvedAt ?? Date.now(),
+            comment: opts?.comment,
+        };
+        this.emit('issue-resolved', resolved as unknown as Record<string, unknown>);
+        return resolved;
+    }
+
+    // Compatibility helpers used by existing test assertions.
     getIssues() {
-        return this.issues;
+        return [...this.activeIssues.values()];
     }
 
     clearIssues() {
-        this.issues = [];
-    }
-
-    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
-        // Mock implementation for resolving active issues
-        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
+        this.activeIssues.clear();
     }
 }
 
@@ -105,7 +141,7 @@ describe('CongestionDetector', () => {
 
     describe('update() - Basic validation', () => {
         it('should return early if detector is disabled', () => {
-            mockClientMonitor.config.congestionDetector.disabled = true;
+            detector.disabled = true;
             mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
 
             detector.update();
@@ -117,7 +153,7 @@ describe('CongestionDetector', () => {
     describe('update() - High sensitivity', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should detect congestion on any bandwidth limitation', () => {
@@ -165,7 +201,7 @@ describe('CongestionDetector', () => {
     describe('update() - Medium sensitivity', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'medium';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should detect congestion with bandwidth limitation and significant RTT increase', () => {
@@ -209,7 +245,7 @@ describe('CongestionDetector', () => {
     describe('update() - Low sensitivity', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'low';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should detect congestion with bandwidth limitation and high packet loss', () => {
@@ -251,7 +287,7 @@ describe('CongestionDetector', () => {
     describe('update() - Historical tracking', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should track maximum values during non-congested periods', () => {
@@ -306,11 +342,10 @@ describe('CongestionDetector', () => {
     describe('update() - Issue creation', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
-        it('should create issue when createIssue is true', () => {
-            mockClientMonitor.config.congestionDetector.createIssue = true;
+        it('should create an issue when congestion is detected', () => {
             mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
             mockPeerConnection.totalAvailableIncomingBitrate = 1000000;
             mockPeerConnection.totalAvailableOutgoingBitrate = 800000;
@@ -318,7 +353,7 @@ describe('CongestionDetector', () => {
             detector.update();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'congestion',
                 payload: expect.objectContaining({
                     peerConnectionId: 'test-pc-id',
@@ -328,20 +363,51 @@ describe('CongestionDetector', () => {
             });
         });
 
-        it('should not create issue when createIssue is false', () => {
-            mockClientMonitor.config.congestionDetector.createIssue = false;
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
+        // Regression: the 'congestion' event and the raised issue must fire
+        // exactly once per congestion episode. Re-detection while the PC is
+        // still congested is gated by `peerConnection.congested`.
+        it('should emit the detector event and raise the issue only once per congestion episode', () => {
+            const eventSpy = jest.fn();
+            mockClientMonitor.on('congestion', eventSpy);
 
+            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
+            detector.update();
+            expect(eventSpy).toHaveBeenCalledTimes(1);
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+            // Three more ticks while congestion persists — should stay silent.
+            detector.update();
+            detector.update();
+            detector.update();
+
+            expect(eventSpy).toHaveBeenCalledTimes(1);
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+        });
+
+        it('should resolve the issue and emit issue-resolved when congestion clears', () => {
+            const resolvedSpy = jest.fn();
+            mockClientMonitor.on('issue-resolved', resolvedSpy);
+
+            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'none' }]);
             detector.update();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(resolvedSpy).toHaveBeenCalledTimes(1);
+            expect(resolvedSpy.mock.calls[0][0]).toMatchObject({
+                type: 'congestion',
+                comment: 'congestion ended',
+            });
         });
     });
 
     describe('update() - Multiple outbound RTP streams', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should detect congestion if any stream is bandwidth limited', () => {
@@ -372,7 +438,7 @@ describe('CongestionDetector', () => {
     describe('update() - Prevent duplicate events', () => {
         beforeEach(() => {
             mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            mockClientMonitor.config.congestionDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should not emit events for already congested connections', () => {

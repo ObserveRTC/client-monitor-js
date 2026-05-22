@@ -39,9 +39,11 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 		Object.assign(this, options);
 
-		this.detectors.add(
-			new SynthesizedSamplesDetector(this),
-		)
+		if (this._peerConnection.parent.config.syntheticSamplesDetector !== null) {
+			this.detectors.add(
+				new SynthesizedSamplesDetector(this),
+			);
+		}
 	}
 
 	public get visited(): boolean {

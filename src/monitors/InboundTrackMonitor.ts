@@ -43,16 +43,24 @@ export class InboundTrackMonitor {
 		attachments?: Record<string, unknown>,
 	) {
 		this.attachments = attachments;
-		this.detectors = new Detectors(
-			new DryInboundTrackDetector(this),
-		);
+		const monitorConfig = this.getPeerConnection().parent.config;
+		this.detectors = new Detectors();
+		if (monitorConfig.dryInboundTrackDetector !== null) {
+			this.detectors.add(new DryInboundTrackDetector(this));
+		}
 
 		if (this.kind === 'audio') {
-			this.detectors.add(new AudioDesyncDetector(this));
+			if (monitorConfig.audioDesyncDetector !== null) {
+				this.detectors.add(new AudioDesyncDetector(this));
+			}
 			this.calculatedScore.weight = 1;
 		} else if (this.kind === 'video') {
-			this.detectors.add(new FreezedVideoTrackDetector(this));
-			this.detectors.add(new PlayoutDiscrepancyDetector(this));
+			if (monitorConfig.videoFreezesDetector !== null) {
+				this.detectors.add(new FreezedVideoTrackDetector(this));
+			}
+			if (monitorConfig.playoutDiscrepancyDetector !== null) {
+				this.detectors.add(new PlayoutDiscrepancyDetector(this));
+			}
 			this.calculatedScore.weight = 2;
 		}
 

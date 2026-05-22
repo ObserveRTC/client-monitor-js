@@ -40,9 +40,10 @@ export class OutboundTrackMonitor {
 		attachments?: Record<string, unknown>,
 	) {
 		this.attachments = attachments;
-		this.detectors = new Detectors(
-			new DryOutboundTrackDetector(this),
-		);
+		this.detectors = new Detectors();
+		if (this.getPeerConnection().parent.config.dryOutboundTrackDetector !== null) {
+			this.detectors.add(new DryOutboundTrackDetector(this));
+		}
 
 		if (this.kind === 'audio') this.calculatedScore.weight = 1;
 		else if (this.kind === 'video') this.calculatedScore.weight = 2;

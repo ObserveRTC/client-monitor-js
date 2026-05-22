@@ -16,7 +16,6 @@ import { Detector } from "./Detector";
  * 
  * **Configuration Options:**
  * - `disabled`: Boolean to enable/disable the detector
- * - `createIssue`: Whether to create ClientIssue when synthesized samples are detected
  * - `minSynthesizedSamplesDuration`: Minimum duration threshold to trigger detection
  * 
  * **Events Emitted:**
@@ -32,7 +31,6 @@ import { Detector } from "./Detector";
  * const config = {
  *   syntheticSamplesDetector: {
  *     disabled: false,
- *     createIssue: true,
  *     minSynthesizedSamplesDuration: 100 // milliseconds
  *   }
  * };
@@ -46,6 +44,8 @@ import { Detector } from "./Detector";
 export class SynthesizedSamplesDetector implements Detector {
     /** Unique identifier for this detector type */
     public readonly name = 'synthesized-samples-detector';
+    /** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+    public disabled = false;
     
     /**
      * Creates a new SynthesizedSamplesDetector instance
@@ -63,7 +63,7 @@ export class SynthesizedSamplesDetector implements Detector {
 
     /** Gets the detector configuration from the client monitor */
     private get config() {
-        return this.peerConnection.parent.config.syntheticSamplesDetector;
+        return this.peerConnection.parent.config.syntheticSamplesDetector!;
     }
 
     /**
@@ -79,7 +79,7 @@ export class SynthesizedSamplesDetector implements Detector {
      * 4. Provides insight into audio quality degradation
      */
     public update() {
-        if (this.config.disabled) return;
+        if (this.disabled) return;
         if (this.mediaPlayout.deltaSynthesizedSamplesDuration <= this.config.minSynthesizedSamplesDuration) {
             return;
         }

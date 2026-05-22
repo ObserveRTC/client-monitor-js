@@ -1,6 +1,12 @@
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { Detector } from "./Detector";
 
+export type DryInboundTrackIssuePayload = {
+	trackId: string;
+	duration: number;
+	durationInMs?: number;
+}
+
 /**
  * Dry Inbound Track Detector
  * 
@@ -17,7 +23,6 @@ import { Detector } from "./Detector";
  * 
  * **Configuration Options:**
  * - `disabled`: Boolean to enable/disable the detector
- * - `createIssue`: Whether to create ClientIssue when dry track is detected
  * - `thresholdInMs`: Duration threshold in milliseconds before triggering (default: 5000ms)
  * 
  * **Events Emitted:**
@@ -33,7 +38,6 @@ import { Detector } from "./Detector";
  * const config = {
  *   dryInboundTrackDetector: {
  *     disabled: false,
- *     createIssue: true,
  *     thresholdInMs: 5000  // 5 seconds of no data
  *   }
  * };
@@ -48,7 +52,11 @@ export class DryInboundTrackDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'dry-inbound-track';
 	/** Unique identifier for this detector type */
 	public readonly name = 'dry-inbound-track-detector';
+	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+	public disabled = false;
 	
+	private readonly issueKey: string;
+
 	/**
 	 * Creates a new DryInboundTrackDetector instance
 	 * @param trackMonitor - The inbound track monitor to analyze for data flow
@@ -56,10 +64,14 @@ export class DryInboundTrackDetector implements Detector {
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
 	) {
+		this.issueKey = `${DryInboundTrackDetector.ISSUE_TYPE}-track-${trackMonitor.track.id}`;
 	}
 
 	/** Flag to prevent multiple events for the same dry period */
 	private _evented = false;
+
+	/** Timestamp when this dry episode was raised as an issue. */
+	private _startedDryAt?: number;
 
 	/** Gets the peer connection monitor that owns this track */
 	private get peerConnection() {
@@ -68,7 +80,7 @@ export class DryInboundTrackDetector implements Detector {
 
 	/** Gets the detector configuration from the client monitor */
 	private get config() {
-		return this.peerConnection.parent.config.dryInboundTrackDetector;
+		return this.peerConnection.parent.config.dryInboundTrackDetector!;
 	}
 
 	/** Timestamp when the dry period started */
@@ -89,7 +101,7 @@ export class DryInboundTrackDetector implements Detector {
 	 * 6. Emit event and create issue when dry condition is detected
 	 */
 	public update() {
-		if (this.config.disabled) return;
+		if (this.disabled) return;
 		// if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
 		if (this.trackMonitor.remoteOutboundTrackPaused) {
 			this._activatedAt = undefined;
@@ -99,7 +111,7 @@ export class DryInboundTrackDetector implements Detector {
 		if (this.trackMonitor.getInboundRtp()?.deltaBytesReceived !== 0) {
 			this._activatedAt = undefined;
 			if (this._evented) {
-				this._resolveIssue();
+				this._resolve('dry inbound track recovered');
 				this._evented = false;
 			}
 			return;
@@ -114,29 +126,52 @@ export class DryInboundTrackDetector implements Detector {
 
 		if (duration < this.config.thresholdInMs) return;
 
+		// Only emit the detector-level event and raise the issue ONCE per dry
+		// episode. Subsequent ticks while the dry condition persists keep the
+		// existing issue in the active store (dedupe by key in raiseIssue) but
+		// no longer notify listeners — they'll see the lifecycle close via the
+		// `'issue-resolved'` event when the track recovers.
+		if (this._evented) return;
+
 		clientMonitor.emit('dry-inbound-track', {
 			trackMonitor: this.trackMonitor,
 			clientMonitor: clientMonitor,
 		});
 
-		if (this.config.createIssue) {
-			clientMonitor.addIssue({
-				type: DryInboundTrackDetector.ISSUE_TYPE,
-				payload: {
-					trackId: this.trackMonitor.track.id,
-					duration,
-				}
-			});
-		}
+		this._raise({
+			trackId: this.trackMonitor.track.id,
+			duration,
+		});
 		this._evented = true;
 	}
 
-	private _resolveIssue() {
-		const clientMonitor = this.peerConnection.parent;
-		if (!this.config.createIssue) return;
+	private _raise(payload: DryInboundTrackIssuePayload) {
+		this._startedDryAt = this._startedDryAt ?? Date.now();
 
-		clientMonitor.resolveActiveIssues(DryInboundTrackDetector.ISSUE_TYPE, (issue) => {
-			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		this.peerConnection.parent.raiseIssue<DryInboundTrackIssuePayload>(this.issueKey, {
+			type: DryInboundTrackDetector.ISSUE_TYPE,
+			payload,
 		});
+	}
+
+	private _resolve(comment?: string) {
+		const clientMonitor = this.peerConnection.parent;
+		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		let payload: DryInboundTrackIssuePayload | undefined;
+
+		if (issue) {
+			payload = {
+				...(issue.payload as DryInboundTrackIssuePayload),
+				durationInMs: this._startedDryAt ? Date.now() - this._startedDryAt : undefined,
+			};
+		}
+
+		clientMonitor.resolveIssue<DryInboundTrackIssuePayload>(this.issueKey, {
+			comment,
+			payload,
+			resolvedAt: Date.now(),
+		});
+
+		this._startedDryAt = undefined;
 	}
 }

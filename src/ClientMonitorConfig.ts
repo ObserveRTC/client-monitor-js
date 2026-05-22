@@ -65,88 +65,34 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for detecting video freezes during monitoring.
+     * Pass `null` to disable the detector entirely; pass `{}` (or omit) to
+     * enable it with defaults.
      */
-    videoFreezesDetector: {
-        /**
-         * If true, the video freeze detection is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the video freezes detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-    };
+    videoFreezesDetector: Record<string, never> | null;
 
     /**
      * Configuration for detecting inbound track stalling during monitoring.
      */
     dryInboundTrackDetector: {
         /**
-         * If true, the detection of stalled inbound tracks is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the dry inbound track detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-
-        /**
          * The time threshold (in milliseconds) to determine if an inbound track
          * is considered stalled.
          */
         thresholdInMs: number;
-    };
+    } | null;
 
     /**
      * Configuration for detecting outbound track stalling during monitoring.
      */
     dryOutboundTrackDetector: {
         /**
-         * If true, the detection of stalled outbound tracks is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the dry outbound track detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-
-        /**
          * The time threshold (in milliseconds) to determine if an outbound track
          * is considered stalled.
          */
         thresholdInMs: number;
-    };
+    } | null;
 
     playoutDiscrepancyDetector: {
-        /**
-         * If true, the detection of playout discrepancies is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the playout discrepancy detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-
         /**
          * The low watermark for the skew of frames between the received and rendered
          */
@@ -156,16 +102,9 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * The high watermark for the skew of frames between the received and rendered
          */
         highSkewThreshold: number;
-    };
+    } | null;
 
     syntheticSamplesDetector: {
-        /**
-         * If true, the detection of synthesized samples is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
         /**
          * Flag to indicate if the synthesized samples detector should create an event and add it to the monitor
          *
@@ -178,26 +117,12 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * significant and trigger an alert.
          */
         minSynthesizedSamplesDuration: number;
-    }
+    } | null;
 
     /**
      * Configuration for detecting audio desynchronization during monitoring.
      */
     audioDesyncDetector: {
-        /**
-         * If true, the detection of audio desynchronization is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the audio desync detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-
         /**
          * The fractional threshold used to determine if audio desynchronization
          * correction is considered significant. Represents the minimum required ratio
@@ -219,26 +144,12 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          *   the audio desynchronization alert will be turned off.
          */
         fractionalCorrectionAlertOffThreshold: number;
-    };
+    } | null;
 
     /**
      * Configuration for detecting network congestion during monitoring.
      */
     congestionDetector: {
-        /**
-         * If true, the congestion detection is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the congestion detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-
         /**
          * Specifies the sensitivity level for congestion detection.
          * Accepted values are:
@@ -247,26 +158,12 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * - 'high': Highly sensitive to congestion changes.
          */
         sensitivity: 'low' | 'medium' | 'high';
-    };
+    } | null;
 
     /**
      * Configuration for detecting CPU performance issues during monitoring.
      */
     cpuPerformanceDetector: {
-        /**
-         * If true, the CPU performance detection is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
-        /**
-         * Flag to indicate if the CPU performance detector should create an issue and add it to the monitor
-         *
-         * DEFAULT: true
-         */
-        createIssue?: boolean
-
         /**
          * Thresholds for detecting frames-per-second (FPS) volatility during monitoring.
          * - `lowWatermark`: The minimum FPS threshold.
@@ -286,19 +183,12 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
             lowWatermark: number;
             highWatermark: number;
         };
-    };
+    } | null;
 
     /**
      * Configuration for detecting prolonged PeerConnection establishment times.
      */
     longPcConnectionEstablishmentDetector: {
-        /**
-         * If true, the detection of long PeerConnection establishment times is disabled.
-         *
-         * DEFAULT: false
-         */
-        disabled?: boolean;
-
         /**
          * Flag to indicate if the long PC connection establishment detector should create an event and add it to the monitor
          *
@@ -311,7 +201,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * PeerConnection establishment.
          */
         thresholdInMs: number;
-    };
+    } | null;
 
     /**
      * Additional metadata to be included in the client monitor.

@@ -1,5 +1,9 @@
 import { ClientMonitor } from "..";
 
+export type CpuPerformanceIssuePayload = {
+	durationInMs?: number;
+}
+
 /**
  * Detects CPU performance limitations affecting WebRTC quality.
  * 
@@ -15,7 +19,6 @@ import { ClientMonitor } from "..";
  * 
  * **Configuration Options:**
  * - `disabled`: Whether the detector is disabled (default: false)
- * - `createIssue`: Whether to create an issue when CPU limitation is detected
  * - `fpsVolatilityThresholds`: High/low watermarks for FPS volatility detection
  * - `durationOfCollectingStatsThreshold`: High/low watermarks for stats collection duration
  * 
@@ -42,18 +45,29 @@ export class CpuPerformanceDetector {
 	public static readonly ISSUE_TYPE = 'cpulimitation';
 
 	public readonly name = 'cpu-performance-detector';
+	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+	public disabled = false;
+
+	/**
+	 * CPU limitation is a per-monitor singleton, so the key is a constant
+	 * derived from the issue type.
+	 */
+	private readonly issueKey = CpuPerformanceDetector.ISSUE_TYPE;
+
+	/** Timestamp when the current CPU-limited episode started. */
+	private _startedAlertAt?: number;
 
 	public constructor(
 		public readonly clientMonitor: ClientMonitor,
-	) {
-	}
+	) {}
 
 	private get config() {
-		return this.clientMonitor.config.cpuPerformanceDetector;
+		return this.clientMonitor.config.cpuPerformanceDetector!;
 	}
 
 
 	public update() {
+		if (this.disabled) return;
 		const isLimited = this.clientMonitor.cpuPerformanceAlertOn;
 		let gotLimited = false;
 		const { lowWatermark: lowFpsVolatility, highWatermark: highFpsVolatility } = this.config.fpsVolatilityThresholds ?? {};
@@ -98,22 +112,41 @@ export class CpuPerformanceDetector {
 				clientMonitor: this.clientMonitor,
 			});
 
-			if (this.config.createIssue) {
-				this.clientMonitor.addIssue({
-					type: CpuPerformanceDetector.ISSUE_TYPE,
-				});
-			}
+			this._raise();
 
 		} else {
 			if (!isLimited) return;
 			this.clientMonitor.cpuPerformanceAlertOn = false;
-			this._resolveIssue();
+			this._resolve('cpu limitation ended');
 		}
 	}
 
-	private _resolveIssue() {
-		const clientMonitor = this.clientMonitor;
+	private _raise() {
+		this._startedAlertAt = Date.now();
 
-		return clientMonitor.resolveActiveIssues(CpuPerformanceDetector.ISSUE_TYPE, () => true);
+		this.clientMonitor.raiseIssue<CpuPerformanceIssuePayload>(this.issueKey, {
+			type: CpuPerformanceDetector.ISSUE_TYPE,
+			payload: {},
+		});
+	}
+
+	private _resolve(comment?: string) {
+		const issue = this.clientMonitor.activeIssues.get(this.issueKey);
+		let payload: CpuPerformanceIssuePayload | undefined;
+
+		if (issue) {
+			payload = {
+				...(issue.payload as CpuPerformanceIssuePayload),
+				durationInMs: this._startedAlertAt ? Date.now() - this._startedAlertAt : undefined,
+			};
+		}
+
+		this.clientMonitor.resolveIssue<CpuPerformanceIssuePayload>(this.issueKey, {
+			comment,
+			payload,
+			resolvedAt: Date.now(),
+		});
+
+		this._startedAlertAt = undefined;
 	}
 }
