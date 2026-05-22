@@ -3,13 +3,14 @@ import { AudioDesyncDetector } from "../../src/detectors/AudioDesyncDetector";
 // Types for test mocks
 interface AudioDesyncConfig {
     disabled: boolean;
-    createIssue: boolean;
     fractionalCorrectionAlertOnThreshold: number;
     fractionalCorrectionAlertOffThreshold: number;
 }
 
 interface TestIssue {
+    id: string;
     type: string;
+    key?: string;
     payload: Record<string, unknown>;
 }
 
@@ -31,14 +32,14 @@ class MockClientMonitor {
     public config = {
         audioDesyncDetector: {
             disabled: false,
-            createIssue: true,
             fractionalCorrectionAlertOnThreshold: 0.1,
             fractionalCorrectionAlertOffThreshold: 0.05
         } as AudioDesyncConfig
     };
     
     private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private issues: TestIssue[] = [];
+    public readonly activeIssues = new Map<string, TestIssue>();
+    private nextId = 0;
 
     emit(eventName: string, eventData: Record<string, unknown>) {
         const handlers = this.eventHandlers[eventName] || [];
@@ -52,21 +53,56 @@ class MockClientMonitor {
         this.eventHandlers[eventName].push(handler);
     }
 
-    addIssue(issue: TestIssue) {
-        this.issues.push(issue);
+    addIssue(input: { type: string; payload?: Record<string, unknown> }) {
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            payload: input.payload ?? {},
+        };
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
     }
 
+    raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
+        const existing = this.activeIssues.get(key);
+        if (existing) {
+            existing.payload = input.payload ?? {};
+            existing.type = input.type;
+            this.emit('issue-updated', existing as unknown as Record<string, unknown>);
+            return existing;
+        }
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            key,
+            payload: input.payload ?? {},
+        };
+        this.activeIssues.set(key, issue);
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
+    }
+
+    resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
+        const found = this.activeIssues.get(key);
+        if (!found) return undefined;
+        this.activeIssues.delete(key);
+        const resolved = {
+            ...found,
+            payload: opts?.payload ?? found.payload,
+            resolvedAt: opts?.resolvedAt ?? Date.now(),
+            comment: opts?.comment,
+        };
+        this.emit('issue-resolved', resolved as unknown as Record<string, unknown>);
+        return resolved;
+    }
+
+    // Compatibility helpers used by existing test assertions.
     getIssues() {
-        return this.issues;
+        return [...this.activeIssues.values()];
     }
 
     clearIssues() {
-        this.issues = [];
-    }
-
-    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
-        // Mock implementation for resolving active issues
-        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
+        this.activeIssues.clear();
     }
 }
 
@@ -138,7 +174,7 @@ describe('AudioDesyncDetector', () => {
         });
 
         it('should return early if detector is disabled', () => {
-            mockClientMonitor.config.audioDesyncDetector.disabled = true;
+            detector.disabled = true;
             mockTrackMonitor.setInboundRtp({
                 kind: 'audio',
                 insertedSamplesForDeceleration: 100,
@@ -153,7 +189,7 @@ describe('AudioDesyncDetector', () => {
 
     describe('update() - Desync detection logic', () => {
         beforeEach(() => {
-            mockClientMonitor.config.audioDesyncDetector.disabled = false;
+            detector.disabled = false;
         });
 
         it('should not trigger on insufficient corrected samples', () => {
@@ -204,7 +240,7 @@ describe('AudioDesyncDetector', () => {
                 trackMonitor: mockTrackMonitor
             });
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'audio-desync',
                 payload: {
                     peerConnectionId: 'test-pc-id',
@@ -213,6 +249,46 @@ describe('AudioDesyncDetector', () => {
                     fractionalCorrection: 0.15
                 }
             });
+        });
+
+        // Regression: the 'audio-desync-track' event and the raised issue must
+        // fire exactly once per desync episode. Re-detection while desync
+        // persists is gated by the `wasDesync` transition.
+        it('should emit the detector event and raise the issue only once per desync episode', () => {
+            const eventSpy = jest.fn();
+            mockClientMonitor.on('audio-desync-track', eventSpy);
+
+            mockTrackMonitor.setInboundRtp({
+                kind: 'audio',
+                insertedSamplesForDeceleration: 100,
+                removedSamplesForAcceleration: 50,
+                receivingAudioSamples: 850, // 15% > 10%
+                desync: false
+            });
+            detector.update();
+            expect(eventSpy).toHaveBeenCalledTimes(1);
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+            // Subsequent ticks while desync persists must stay silent.
+            mockTrackMonitor.setInboundRtp({
+                kind: 'audio',
+                insertedSamplesForDeceleration: 150,
+                removedSamplesForAcceleration: 75,
+                receivingAudioSamples: 800,
+                desync: true,
+            });
+            detector.update();
+            mockTrackMonitor.setInboundRtp({
+                kind: 'audio',
+                insertedSamplesForDeceleration: 200,
+                removedSamplesForAcceleration: 100,
+                receivingAudioSamples: 700,
+                desync: true,
+            });
+            detector.update();
+
+            expect(eventSpy).toHaveBeenCalledTimes(1);
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
 
         it('should clear desync when fractional correction falls below off threshold', () => {
@@ -279,7 +355,10 @@ describe('AudioDesyncDetector', () => {
             jest.useRealTimers();
         });
 
-        it('should track desync duration', () => {
+        it('should track desync duration via the resolved issue payload', () => {
+            const resolvedSpy = jest.fn();
+            mockClientMonitor.on('issue-resolved', resolvedSpy);
+
             // Trigger desync
             mockTrackMonitor.setInboundRtp({
                 kind: 'audio',
@@ -304,26 +383,15 @@ describe('AudioDesyncDetector', () => {
             });
             detector.update();
 
-            expect(detector.lastDesyncDuration).toBe(5000);
+            // The duration is now reported through the resolved issue's payload,
+            // not via a separate field on the detector.
+            expect(resolvedSpy).toHaveBeenCalledTimes(1);
+            const resolved = resolvedSpy.mock.calls[0][0] as { payload: { durationInMs?: number } };
+            expect(resolved.payload.durationInMs).toBe(5000);
         });
     });
 
     describe('update() - Configuration', () => {
-        it('should not create issue when createIssue is false', () => {
-            mockClientMonitor.config.audioDesyncDetector.createIssue = false;
-
-            mockTrackMonitor.setInboundRtp({
-                kind: 'audio',
-                insertedSamplesForDeceleration: 100,
-                removedSamplesForAcceleration: 50,
-                receivingAudioSamples: 850,
-                desync: false
-            });
-
-            detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
-        });
-
         it('should use custom thresholds', () => {
             mockClientMonitor.config.audioDesyncDetector.fractionalCorrectionAlertOnThreshold = 0.2;  // 20%
             mockClientMonitor.config.audioDesyncDetector.fractionalCorrectionAlertOffThreshold = 0.1;  // 10%

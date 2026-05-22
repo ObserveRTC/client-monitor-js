@@ -1,6 +1,11 @@
 import { Detector } from "./Detector";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 
+export type FreezedVideoTrackIssuePayload = {
+	trackId?: string;
+	durationInMs?: number;
+}
+
 /**
  * Frozen Video Track Detector
  * 
@@ -16,7 +21,6 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
  * 
  * **Configuration Options:**
  * - `disabled`: Boolean to enable/disable the detector
- * - `createIssue`: Whether to create ClientIssue when video freeze is detected
  * 
  * **Events Emitted:**
  * - `freezed-video-track`: Emitted when video frame freeze is detected
@@ -31,7 +35,6 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
  * const config = {
  *   videoFreezesDetector: {
  *     disabled: false,
- *     createIssue: true
  *   }
  * };
  * 
@@ -45,7 +48,14 @@ export class FreezedVideoTrackDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'freezed-video-track';
 	/** Unique identifier for this detector type */
 	public readonly name = 'freezed-video-track-detector';
+	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+	public disabled = false;
 	
+	private readonly issueKey: string;
+
+	/** Timestamp when the current freeze episode started. */
+	private _startedFreezeAt?: number;
+
 	/**
 	 * Creates a new FreezedVideoTrackDetector instance
 	 * @param trackMonitor - The inbound track monitor to analyze for video freezes
@@ -53,11 +63,7 @@ export class FreezedVideoTrackDetector implements Detector {
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
 	) {
-	}
-
-	/** Gets the detector configuration from the client monitor */
-	private get _config() {
-		return this.peerConnection.parent.config.videoFreezesDetector;
+		this.issueKey = `${FreezedVideoTrackDetector.ISSUE_TYPE}-track-${trackMonitor.track.id}`;
 	}
 
 	/** Gets the peer connection monitor that owns this track */
@@ -82,8 +88,9 @@ export class FreezedVideoTrackDetector implements Detector {
 	 * 5. Updates tracking variables for next iteration
 	 */
 	public update() {
+		if (this.disabled) return;
 		const inboundRtp = this.trackMonitor.getInboundRtp();
-		if (!inboundRtp || !inboundRtp.freezeCount || this._config.disabled) {
+		if (!inboundRtp || !inboundRtp.freezeCount) {
 			return;
 		}
 
@@ -99,25 +106,42 @@ export class FreezedVideoTrackDetector implements Detector {
 				trackMonitor: this.trackMonitor,
 			});
 
-			if (this._config.createIssue) {
-				clientMonitor.addIssue({
-					type: FreezedVideoTrackDetector.ISSUE_TYPE,
-					payload: {
-						trackId: inboundRtp.trackIdentifier,
-					}
-				});
-			}
+			this._raise({
+				trackId: inboundRtp.trackIdentifier,
+			});
 
 		} else if (wasFreezed && !inboundRtp.isFreezed) {
-			this._resolveIssue();
+			this._resolve('video freeze ended');
 		}
 	}
 
-	private _resolveIssue() {
-		const clientMonitor = this.peerConnection.parent;
+	private _raise(payload: FreezedVideoTrackIssuePayload) {
+		this._startedFreezeAt = Date.now();
 
-		return clientMonitor.resolveActiveIssues(FreezedVideoTrackDetector.ISSUE_TYPE, (issue) => {
-			return (issue.payload as Record<string, unknown>)?.trackId === this.trackMonitor.track.id;
+		this.peerConnection.parent.raiseIssue<FreezedVideoTrackIssuePayload>(this.issueKey, {
+			type: FreezedVideoTrackDetector.ISSUE_TYPE,
+			payload,
 		});
+	}
+
+	private _resolve(comment?: string) {
+		const clientMonitor = this.peerConnection.parent;
+		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		let payload: FreezedVideoTrackIssuePayload | undefined;
+
+		if (issue) {
+			payload = {
+				...(issue.payload as FreezedVideoTrackIssuePayload),
+				durationInMs: this._startedFreezeAt ? Date.now() - this._startedFreezeAt : undefined,
+			};
+		}
+
+		clientMonitor.resolveIssue<FreezedVideoTrackIssuePayload>(this.issueKey, {
+			comment,
+			payload,
+			resolvedAt: Date.now(),
+		});
+
+		this._startedFreezeAt = undefined;
 	}
 }

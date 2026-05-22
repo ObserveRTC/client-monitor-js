@@ -190,23 +190,24 @@ const monitor = new ClientMonitor({
     addClientLeftEventOnClose: true, // Default: true
     bufferingEventsForSamples: false, // Default: false
 
-    // Detector configurations (all optional with defaults)
+    // Detector configurations (all optional).
+    //
+    //   • Omit the key (or pass `undefined`) → defaults applied.
+    //   • Pass `null`                         → detector is NOT constructed at all.
+    //   • Pass an object                      → detector enabled with your overrides.
+    //
+    // After construction, every built-in detector also exposes a public `disabled`
+    // boolean flag — flip it at runtime to silence the detector without removing it.
     audioDesyncDetector: {
-        disabled: false,
-        createIssue: true,
         fractionalCorrectionAlertOnThreshold: 0.1,
         fractionalCorrectionAlertOffThreshold: 0.05,
     },
 
     congestionDetector: {
-        disabled: false,
-        createIssue: true,
         sensitivity: "medium", // 'low', 'medium', 'high'
     },
 
     cpuPerformanceDetector: {
-        disabled: false,
-        createIssue: true,
         fpsVolatilityThresholds: {
             lowWatermark: 0.1,
             highWatermark: 0.3,
@@ -217,41 +218,23 @@ const monitor = new ClientMonitor({
         },
     },
 
-    dryInboundTrackDetector: {
-        disabled: false,
-        createIssue: true,
-        thresholdInMs: 5000,
-    },
-
-    dryOutboundTrackDetector: {
-        disabled: false,
-        createIssue: true,
-        thresholdInMs: 5000,
-    },
-
-    videoFreezesDetector: {
-        disabled: false,
-        createIssue: true,
-    },
-
+    dryInboundTrackDetector: { thresholdInMs: 5000 },
+    dryOutboundTrackDetector: { thresholdInMs: 5000 },
+    videoFreezesDetector: {},
     playoutDiscrepancyDetector: {
-        disabled: false,
-        createIssue: true,
         lowSkewThreshold: 2,
         highSkewThreshold: 5,
     },
-
     syntheticSamplesDetector: {
-        disabled: false,
-        createIssue: true,
         minSynthesizedSamplesDuration: 1000,
     },
-
     longPcConnectionEstablishmentDetector: {
-        disabled: false,
-        createIssue: true,
         thresholdInMs: 5000,
     },
+
+    // To outright disable a detector at construction time, pass `null`:
+    //   freezedVideoDetector: null,
+    //   playoutDiscrepancyDetector: null,
 
     // Application data (optional)
     appData: {
@@ -302,13 +285,16 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 -   **`setSamplingPeriod(periodInMs: number)`**: Updates the sampling interval
 -   **`setScore(score: number, reasons?: Record<string, number>)`**: Manually sets the client score
 
-#### Event Methods
+#### Event & Issue Methods
 
--   **`addEvent(event: ClientEvent)`**: Adds a custom client event
--   **`addIssue(issue: ClientIssue)`**: Adds a custom client issue
--   **`resolveActiveIssues(type: string, filter: (issue: ClientIssue) => boolean, comment?: string)`**: Resolves active issues matching the filter criteria
--   **`addMetaData(metaData: ClientMetaData)`**: Adds metadata
--   **`addExtensionStats(stats: ExtensionStat)`**: Adds custom extension stats
+-   **`addEvent(event: ClientEvent)`**: Adds an immutable client event.
+-   **`addIssue({ type, payload?, timestamp? })`**: Adds a one-shot issue (fire-and-forget). Emits `'issue'` and buffers into the next sample but never enters the active store and cannot be resolved. Use this for incidents with no "ended" condition (e.g. `USER_MEDIA_ERROR`).
+-   **`raiseIssue(key, { type, payload?, timestamp? })`**: Creates or refreshes a stateful, resolvable issue keyed by `key`. Re-raising with the same key updates the entry in place and emits `'issue-updated'`. See the [Events and Issues](#events-and-issues) section for the full lifecycle.
+-   **`resolveIssue(key, { comment?, payload?, resolvedAt? })`**: Resolves a stateful issue by its key. `payload`, when supplied, overwrites the active payload — that's how built-in detectors enrich the resolution record with `durationInMs`. Emits `'issue-resolved'`.
+-   **`getActiveIssuesByType(type?)`**: Snapshot of currently active stateful issues, optionally filtered by `type`.
+-   **`isIssueActive(key)`**: `true` when a stateful issue with the given `key` is active.
+-   **`addMetaData(metaData: ClientMetaData)`**: Adds metadata.
+-   **`addExtensionStats(stats: ExtensionStat)`**: Adds custom extension stats.
 
 #### Utility Methods
 
@@ -325,7 +311,7 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 -   **`detectors`**: Detector management instance
 -   **`peerConnections`**: Array of monitored peer connections
 -   **`tracks`**: Array of monitored tracks
--   **`activeIssues`**: Record of active issues indexed by type (e.g., `activeIssues['congestion']` returns all active congestion issues)
+-   **`activeIssues`**: `Map<string, RaisedClientIssue>` keyed by issue `key` — currently active stateful issues. Read-only by convention; use `getActiveIssuesByType` / `isIssueActive` instead of touching this directly.
 
 ## Detectors
 
@@ -346,8 +332,6 @@ Detects audio synchronization issues by monitoring sample corrections.
 
 ```javascript
 audioDesyncDetector: {
-    disabled: false,
-    createIssue: true,
     fractionalCorrectionAlertOnThreshold: 0.1,  // 10% correction rate triggers alert
     fractionalCorrectionAlertOffThreshold: 0.05, // 5% correction rate clears alert
 }
@@ -366,8 +350,6 @@ Monitors network congestion by analyzing available bandwidth vs. usage.
 
 ```javascript
 congestionDetector: {
-    disabled: false,
-    createIssue: true,
     sensitivity: 'medium', // 'low', 'medium', 'high'
 }
 ```
@@ -385,8 +367,6 @@ Detects CPU performance issues affecting media processing.
 
 ```javascript
 cpuPerformanceDetector: {
-    disabled: false,
-    createIssue: true,
     fpsVolatilityThresholds: {
         lowWatermark: 0.1,
         highWatermark: 0.3,
@@ -411,8 +391,6 @@ Detects inbound tracks that stop receiving data.
 
 ```javascript
 dryInboundTrackDetector: {
-    disabled: false,
-    createIssue: true,
     thresholdInMs: 5000,
 }
 ```
@@ -430,8 +408,6 @@ Detects outbound tracks that stop sending data.
 
 ```javascript
 dryOutboundTrackDetector: {
-    disabled: false,
-    createIssue: true,
     thresholdInMs: 5000,
 }
 ```
@@ -449,8 +425,6 @@ Detects frozen video tracks.
 
 ```javascript
 videoFreezesDetector: {
-    disabled: false,
-    createIssue: true,
 }
 ```
 
@@ -467,8 +441,6 @@ Detects discrepancies between received and rendered frames.
 
 ```javascript
 playoutDiscrepancyDetector: {
-    disabled: false,
-    createIssue: true,
     lowSkewThreshold: 2,
     highSkewThreshold: 5,
 }
@@ -487,8 +459,6 @@ Detects when audio playout synthesizes samples due to missing data.
 
 ```javascript
 syntheticSamplesDetector: {
-    disabled: false,
-    createIssue: true,
     minSynthesizedSamplesDuration: 1000,
 }
 ```
@@ -506,8 +476,6 @@ Detects slow peer connection establishment.
 
 ```javascript
 longPcConnectionEstablishmentDetector: {
-    disabled: false,
-    createIssue: true,
     thresholdInMs: 5000,
 }
 ```
@@ -516,20 +484,22 @@ longPcConnectionEstablishmentDetector: {
 
 Create custom detectors by implementing the `Detector` interface:
 
-```javascript
-import { Detector } from "@observertc/client-monitor-js";
+```typescript
+import { Detector, ClientMonitor } from "@observertc/client-monitor-js";
 
 class CustomDetector implements Detector {
     public readonly name = 'custom-detector';
+    /** Optional kill-switch honored by both `Detectors.update()` and this method. */
+    public disabled = false;
 
-    constructor(private monitor: any) {}
+    constructor(private monitor: ClientMonitor) {}
 
     public update() {
-        // Custom detection logic
+        if (this.disabled) return;
         if (this.detectCustomCondition()) {
-            this.monitor.parent.emit('custom-issue', {
+            this.monitor.raiseIssue('custom-detector-singleton', {
                 type: 'custom-issue',
-                payload: { reason: 'Custom condition detected' }
+                payload: { reason: 'Custom condition detected' },
             });
         }
     }
@@ -540,13 +510,24 @@ class CustomDetector implements Detector {
     }
 }
 
-// Add to monitor
-const detector = new CustomDetector(someMonitor);
+// Attach
+const detector = new CustomDetector(monitor);
 monitor.detectors.add(detector);
 
-// Remove detector
+// Inspect
+monitor.detectors.has('custom-detector');                 // true
+monitor.detectors.getByName('custom-detector');           // the instance
+monitor.detectors.listOfNames;                            // ['cpu-performance-detector', 'custom-detector', ...]
+
+// Runtime toggle
+monitor.detectors.disable('custom-detector');             // detector stays attached but its update() is skipped
+monitor.detectors.enable('custom-detector');
+
+// Detach
 monitor.detectors.remove(detector);
 ```
+
+See [Controlling which detectors run](#controlling-which-detectors-run) for the full set of registry helpers.
 
 ## Score Calculation
 
@@ -991,237 +972,433 @@ The compression format maintains full compatibility with the ObserveRTC schema d
 
 ## Events and Issues
 
-The monitor tracks two different types of notifications to help you understand what's happening in your WebRTC system:
+`ClientMonitor` emits two different categories of notification: **issues**, which describe a problem state, and **events**, which describe a thing that happened. The two have different lifecycles and different APIs — picking the right one for your use case is the key to keeping your alerting code sane.
 
-### Understanding the Difference
+### Issues vs Events at a glance
 
-**Issues** are ongoing problems that can be tracked and resolved:
+|  | Issue | Event |
+|---|---|---|
+| Represents | An ongoing or one-shot condition (network congestion, dry track, …) | A discrete thing that happened (peer joined, ICE candidate found, …) |
+| Lifecycle | Can be **raised**, **updated**, **resolved** | Immutable record |
+| Resolution | Yes (for the stateful flavor) | No |
+| API | `addIssue` / `raiseIssue` / `resolveIssue` | `addEvent` |
+| Sample buffer | `sample.clientIssues[]` | `sample.clientEvents[]` |
+| Emitted events on `monitor.on(...)` | `'issue'`, `'issue-updated'`, `'issue-resolved'` | `'client-event'` |
 
--   Issues represent a state that can change over time
--   They can be **resolved** when the problem goes away
--   Issues are tracked in `monitor.activeIssues` by type
--   The `resolveActiveIssues()` method can be used to manually resolve issues
--   When an issue is resolved, a `resolved-issue` event is emitted
+The rest of this section drills into the issue lifecycle; events are a thin wrapper around `addEvent` and need no further explanation.
 
-**Events** are notifications about things that happened:
+### Two flavors of issue
 
--   Events are immutable records of what occurred in the system
--   They cannot be resolved (they already happened)
--   Events include state changes, user actions, and detector notifications
--   All events are included in the samples for analytics
+`ClientMonitor` distinguishes a **one-shot issue** (fire-and-forget) from a **raised issue** (stateful, resolvable). Pick the flavor that matches your situation:
 
-### Payload Structure: `issue` and `resolved-issue`
+| Flavor | Method | Has `key` | Enters `activeIssues` | Can be resolved | Typical use |
+|---|---|---|---|---|---|
+| One-shot | `addIssue({ type, payload?, timestamp? })` | no | no | no | A logged event-like incident with no "ended" condition — `USER_MEDIA_ERROR`, a one-off SDK warning, a one-time alert you want included in the next sample. |
+| Stateful | `raiseIssue(key, { type, payload?, timestamp? })` | **yes (required)** | yes | yes (`resolveIssue(key, …)`) | Anything with a start and an end: congestion, CPU pressure, audio desync, video freeze, dry track. The detectors that ship with the library all use this flavor. |
 
-Runtime shape emitted by the monitor:
+You're always free to choose either. The library only insists that *if* you want to resolve later, you must have raised with a `key`.
+
+### In-memory types
+
+Both flavors share `type` and `payload`. The stateful flavor adds the identity (`key`) and timestamps:
 
 ```ts
-type ClientIssue = {
+type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
+
+// What addIssue produces.
+type AddedClientIssue<T = ClientIssuePayload> = {
     type: string;
-    payload?: Record<string, unknown> | boolean | string | number;
+    payload?: T;
     timestamp: number;
 };
 
-type ResolvedClientIssue = ClientIssue & {
+// What raiseIssue produces.
+type RaisedClientIssue<T = ClientIssuePayload> = {
+    type: string;
+    key: string;           // globally unique handle within this monitor
+    payload?: T;
+    raisedAt: number;
+    updatedAt: number;     // bumped on every re-raise of the same key
+};
+
+// Discriminated union over the two flavors.
+type ClientIssue<T = ClientIssuePayload> = AddedClientIssue<T> | RaisedClientIssue<T>;
+
+// What 'issue-resolved' delivers.
+type ResolvedClientIssue<T = ClientIssuePayload> = RaisedClientIssue<T> & {
     resolvedAt: number;
     comment?: string;
 };
 ```
 
-Notes:
+Narrow between the two by checking for `'key' in issue` — that's the discriminant.
 
--   `issue` event emits `ClientIssue`
--   `resolved-issue` event emits the original issue plus `resolvedAt` and optional `comment`
--   In `sample.clientIssues`, payloads are serialized to JSON strings
+> **Wire format**: `ClientSample.clientIssues[]` ships a stripped shape: `{ type, payload?: string (JSON-stringified), timestamp }`. The richer in-memory `id`-less, key-bearing object is a runtime concern; the server schema is unchanged.
 
-### Client Events
+### Lifecycle: the events you can listen to
 
-Automatically generated events include:
-
--   **PEER_CONNECTION_OPENED**: New peer connection
--   **PEER_CONNECTION_CLOSED**: Peer connection closed
--   **MEDIA_TRACK_ADDED**: New media track
--   **MEDIA_TRACK_REMOVED**: Media track ended
--   **ICE_CANDIDATE**: ICE candidate discovered
--   **NEGOTIATION_NEEDED**: SDP negotiation required
--   **EXCESSIVE_SYNTHESIZED_AUDIO**: Excessive audio synthesis detected
--   **LONG_PC_CONNECTION_ESTABLISHMENT**: PeerConnection took too long to establish
-
-### Client Issues
-
-Issues are generated by detectors or integrations when problems are detected:
-
--   **congestion**: Network congestion detected
--   **cpulimitation**: CPU performance issues
--   **audio-desync**: Audio synchronization problems
--   **freezed-video-track**: Video track frozen
--   **dry-inbound-track**: Inbound track not receiving data
--   **dry-outbound-track**: Outbound track not sending data
--   **inbound-video-playout-discrepancy**: Rendered frames lag behind received frames
--   **USER_MEDIA_ERROR**: `getUserMedia` call failed during media-device integration
-
-### Built-In Issue Payloads (Current)
-
-Current issue payload structures by issue type:
-
-| issue.type | issue.payload shape |
-|---|---|
-| `congestion` | `{ peerConnectionId: string; availableIncomingBitrate: number; availableOutgoingBitrate: number; maxAvailableIncomingBitrate: number; maxAvailableOutgoingBitrate: number; maxReceivingBitrate: number; maxSendingBitrate: number }` |
-| `cpulimitation` | `undefined` |
-| `audio-desync` | `{ peerConnectionId: string; trackId: string; dCorrectedSamples: number; fractionalCorrection: number }` |
-| `freezed-video-track` | `{ trackId: string }` |
-| `dry-inbound-track` | `{ trackId: string; duration: number }` |
-| `dry-outbound-track` | `{ trackId: string; duration: number }` |
-| `inbound-video-playout-discrepancy` | `{ trackId: string; frameSkew: number; ewmaFps: number }` |
-| `USER_MEDIA_ERROR` | `{ error: string }` |
-
-### Built-In Resolved Issue Behavior
-
-`resolved-issue` is emitted when an active issue is resolved by detector logic or manual resolution.
-
--   Auto-resolved by built-in detectors: `congestion`, `cpulimitation`, `audio-desync`, `freezed-video-track`, `dry-inbound-track`, `dry-outbound-track`, `inbound-video-playout-discrepancy`
--   Not auto-resolved by built-in logic: `USER_MEDIA_ERROR` (resolve manually if you keep it active)
-
-Example `resolved-issue` payload:
-
-```json
-{
-  "type": "congestion",
-  "payload": {
-    "peerConnectionId": "pc-123",
-    "availableIncomingBitrate": 220000,
-    "availableOutgoingBitrate": 180000,
-    "maxAvailableIncomingBitrate": 2500000,
-    "maxAvailableOutgoingBitrate": 2000000,
-    "maxReceivingBitrate": 1400000,
-    "maxSendingBitrate": 1300000
-  },
-  "timestamp": 1714835200000,
-  "resolvedAt": 1714835216000,
-  "comment": "Network recovered"
-}
+```ts
+monitor.on('issue',          (issue: ClientIssue)         => /* … */);  // raised or added
+monitor.on('issue-updated',  (issue: RaisedClientIssue)   => /* … */);  // re-raise of an active key
+monitor.on('issue-resolved', (issue: ResolvedClientIssue) => /* … */);
 ```
 
-### Mapping for Common Alert Use Cases
+| Step | When it fires | What's delivered |
+|---|---|---|
+| `raiseIssue('x', { type: 't', payload: … })` for an **unknown** `x` | New stateful issue created and stored in `activeIssues` | `'issue'` event with the new `RaisedClientIssue` |
+| `raiseIssue('x', …)` for an **already-active** `x` | Existing entry's payload + `updatedAt` are refreshed in place; no duplicate | `'issue-updated'` event |
+| `addIssue({ type, payload })` | New one-shot issue created; **not** added to `activeIssues` | `'issue'` event |
+| `resolveIssue('x', { comment?, payload?, resolvedAt? })` | Active entry removed from `activeIssues`; optional `payload` overwrites the stored one (used by detectors to add `durationInMs`) | `'issue-resolved'` event |
+| `monitor.close()` | All still-active issues auto-resolve | `'issue-resolved'` for each, with `comment: 'monitor closed before issue could be resolved'` |
 
-| Use Case | issue.type | resolved-issue | payload |
-|---|---|---|---|
-| Unstable network connection | `congestion` | Yes | congestion payload above |
-| Restrictive network | Not a built-in issue type | No paired resolved-issue | Usually represented by immutable events (for example long connection establishment) |
-| Computer overloaded | `cpulimitation` | Yes | `undefined` |
-| Black frame from a participant | `freezed-video-track` | Yes | `{ trackId: string }` |
-| No audio from a participant | `dry-inbound-track` | Yes | `{ trackId: string; duration: number }` |
-| A/V desync | `audio-desync` | Yes | `{ peerConnectionId: string; trackId: string; dCorrectedSamples: number; fractionalCorrection: number }` |
+### Public API on `ClientMonitor`
 
-### Managing Active Issues
+```ts
+// One-shot, never enters activeIssues, cannot be resolved.
+addIssue<T>(input: { type: string; payload?: T; timestamp?: number }): AddedClientIssue<T> | undefined;
 
-Access and manage active issues:
+// Stateful: enters activeIssues under `key`. Re-raising with the same key updates in place.
+raiseIssue<T>(key: string, input: { type: string; payload?: T; timestamp?: number }): RaisedClientIssue<T> | undefined;
 
-```javascript
-// Get all active issues of a specific type
-const congestionIssues = monitor.activeIssues["congestion"];
+// Resolves a stateful issue by key. `input.payload`, when provided, overwrites the stored payload
+// — that's how built-in detectors enrich the resolved record with `durationInMs`.
+resolveIssue<T>(key: string, input: { comment?: string; payload?: T; resolvedAt?: number }): ResolvedClientIssue | undefined;
 
-// Resolve issues by filter function
-// Returns the remaining active issues of that type after resolution
-const remainingIssues = monitor.resolveActiveIssues(
-    "congestion",
-    (issue) => {
-        // Return true for issues you want to resolve
-        return issue.payload?.peerConnectionId === "pc-123";
-    },
-    "Congestion resolved - network improved"
-);
-console.log("Remaining congestion issues:", remainingIssues);
+// Snapshot helpers.
+getActiveIssuesByType(type?: string): RaisedClientIssue[];
+isIssueActive(key: string): boolean;
 
-// Resolve a specific issue by reference
-// Also returns the remaining active issues of that type
-const specificIssue = monitor.activeIssues["congestion"]?.[0];
-if (specificIssue) {
-    const stillActive = monitor.resolveActiveIssues(
-        "congestion",
-        specificIssue, // Pass the issue object directly
-        "Congestion resolved - user manual intervention"
-    );
-    console.log("Still active issues:", stillActive);
-}
+// Public Map<key, RaisedClientIssue> — readable, mutable but should not be touched directly.
+readonly activeIssues: Map<string, RaisedClientIssue>;
+```
 
-// Listen for issue resolution events
-monitor.on("resolved-issue", (issue) => {
-    console.log(`Issue resolved: ${issue.type}`, issue.resolvedAt, issue.comment);
+### The built-in detector issues
+
+The library ships seven detectors. Each one raises its own stateful issue with a typed payload, emits a detector-specific named event on entry, and resolves the issue when the condition clears — enriching the resolved payload with `durationInMs`.
+
+| `type` | Raised when | Resolved when | Detector-specific event | Payload shape |
+|---|---|---|---|---|
+| `audio-desync` | Audio sample-correction fraction crosses the on-threshold | Correction fraction falls below the off-threshold | `'audio-desync-track'` | `AudioDesyncIssuePayload` |
+| `congestion` | Per-PC bandwidth limitation + sensitivity-specific corroborator | Bandwidth limitation clears | `'congestion'` | `CongestionIssuePayload` |
+| `cpulimitation` | CPU-tagged outbound RTP / stats-collection slowness / FPS volatility | Indicators normalize | `'cpulimitation'` | `CpuPerformanceIssuePayload` |
+| `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
+| `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
+| `freezed-video-track` | `freezeCount` increases | No new freezes for one tick | `'freezed-video-track'` | `FreezedVideoTrackIssuePayload` |
+| `inbound-video-playout-discrepancy` | `framesReceived - framesRendered > highSkewThreshold` | Skew drops below `lowSkewThreshold` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
+
+The per-detector payload types are exported from the package root. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
+
+### Type-safe handling: the `ClientMonitorIssue` discriminated union
+
+Listeners on `'issue'` / `'issue-updated'` / `'issue-resolved'` receive the generic `ClientIssue` / `RaisedClientIssue` / `ResolvedClientIssue`. To get full payload typing for the built-in detector issues, cast to the discriminated unions exported from the package:
+
+```ts
+import {
+    ClientMonitor,
+    ClientMonitorIssue,
+    ClientMonitorResolvedIssue,
+    isClientMonitorIssue,
+} from '@observertc/client-monitor-js';
+
+const monitor = new ClientMonitor({ /* … */ });
+
+monitor.on('issue', (issue) => {
+    if (!isClientMonitorIssue(issue)) {
+        // Custom / app-raised issue → handle as RaisedClientIssue<unknown>
+        return;
+    }
+
+    switch (issue.type) {
+        case 'congestion':
+            // issue.payload is CongestionIssuePayload
+            console.log('congestion on PC', issue.payload.peerConnectionId,
+                'avail in', issue.payload.availableIncomingBitrate);
+            break;
+
+        case 'cpulimitation':
+            // issue.payload is CpuPerformanceIssuePayload
+            console.warn('cpu pressure');
+            break;
+
+        case 'audio-desync':
+            // issue.payload is AudioDesyncIssuePayload
+            console.log('audio desync on track', issue.payload.trackId);
+            break;
+
+        case 'freezed-video-track':
+            console.log('freeze on track', issue.payload.trackId);
+            break;
+
+        case 'dry-inbound-track':
+        case 'dry-outbound-track':
+            console.log('dry track', issue.payload.trackId,
+                'duration', issue.payload.duration);
+            break;
+
+        case 'inbound-video-playout-discrepancy':
+            console.log('playout discrepancy on track', issue.payload.trackId,
+                'skew', issue.payload.frameSkew);
+            break;
+    }
+});
+
+monitor.on('issue-resolved', (resolved) => {
+    const own = resolved as ClientMonitorResolvedIssue;
+    switch (own.type) {
+        case 'audio-desync':
+            console.log(`Audio desync on ${own.payload.trackId} lasted ${own.payload.durationInMs}ms`);
+            break;
+        case 'congestion':
+            console.log(`Congestion on ${own.payload.peerConnectionId} lasted ${own.payload.durationInMs}ms`);
+            break;
+        // …
+    }
 });
 ```
 
-### Custom Events and Issues
+Three helpers are available:
 
-Add custom events and resolvable issues:
+-   `ClientMonitorIssue` — discriminated union of every raised issue produced by the bundled detectors.
+-   `ClientMonitorResolvedIssue` — same, for `'issue-resolved'`.
+-   `isClientMonitorIssue(issue)` / `isClientMonitorResolvedIssue(issue)` — type guards that return `true` only for the seven built-in `type` values.
 
-```javascript
-// Custom event (immutable record of something that happened)
-monitor.addEvent({
-    type: "user-action",
-    payload: { action: "mute-audio" },
-    timestamp: Date.now(),
-});
+### Managing active stateful issues
 
-// Custom issue (trackable problem that can be resolved)
-monitor.addIssue({
-    type: "custom-problem",
+```ts
+// All active issues across all detectors:
+const all = monitor.getActiveIssuesByType();
+
+// Active issues of one type:
+const congestionIssues = monitor.getActiveIssuesByType('congestion');
+for (const issue of congestionIssues) {
+    if (issue.payload?.availableIncomingBitrate < 200_000) {
+        ui.showLowBandwidthWarning(issue.key);
+    }
+}
+
+// Is a specific issue active?
+if (monitor.isIssueActive('congestion-pc-pc-123')) { /* … */ }
+
+// Iterate the raw map (advanced — prefer the helpers):
+for (const [key, issue] of monitor.activeIssues) {
+    console.log(key, issue.type, issue.payload);
+}
+```
+
+### Raising your own custom issues
+
+You can raise issues from app code or your own custom detector. Pick a `key` that's unique per logical incident — the detector convention is `${type}-${scope}` (e.g. `congestion-pc-${peerConnectionId}`, `audio-desync-track-${trackId}`).
+
+```ts
+// Start: a meeting-quality watchdog notices a participant's input mic is muted unexpectedly
+monitor.raiseIssue(`unexpected-mute-${participantId}`, {
+    type: 'unexpected-mute',
     payload: {
-        peerId: "peer-42",
-        severity: "high",
-        durationMs: 0,
-        reason: "Custom issue detected"
+        participantId,
+        sinceUtc: new Date().toISOString(),
     },
-    timestamp: Date.now(),
 });
 
-// Later, when the custom problem is fixed:
-monitor.resolveActiveIssues(
-    "custom-problem",
-    (issue) => issue.payload?.peerId === "peer-42" && issue.payload?.severity === "high",
-    "Recovered"
-);
+// Refresh while still ongoing (e.g. with updated metadata):
+monitor.raiseIssue(`unexpected-mute-${participantId}`, {
+    type: 'unexpected-mute',
+    payload: {
+        participantId,
+        sinceUtc: knownStart,
+        framesSpoken: 0,
+    },
+});
+// → emits 'issue-updated', not 'issue'
+
+// End: the participant unmuted, attach how long it lasted
+monitor.resolveIssue(`unexpected-mute-${participantId}`, {
+    comment: 'participant unmuted',
+    payload: {
+        participantId,
+        sinceUtc: knownStart,
+        durationInMs: Date.now() - mutedAtMs,
+    },
+    resolvedAt: Date.now(),
+});
 ```
 
-Recommended payload design for custom issues:
+For a one-shot incident with no "ended" condition (a `getUserMedia` failure, a click-to-call timeout, …), use `addIssue`:
 
--   Include stable identifiers (`peerId`, `peerConnectionId`, `trackId`)
--   Include numeric fields for analysis (`durationMs`, ratios, counters)
--   Keep field names consistent over time
-
-### Event Listeners
-
-Listen for real-time issue and resolution updates:
-
-```javascript
-// Sample created
-monitor.on("sample-created", (sample) => {
-    console.log("New sample:", sample);
+```ts
+monitor.addIssue({
+    type: 'USER_MEDIA_ERROR',
+    payload: { error: `${err}` },
 });
+// Never enters activeIssues, can't be resolved, but is emitted as 'issue'
+// and buffered into the next ClientSample.
+```
 
-// Issue detected
-monitor.on("issue", (issue) => {
-    console.log("Issue:", issue.type, issue.payload);
-});
+### Custom detector example
 
-// Issue resolved
-monitor.on("resolved-issue", (issue) => {
-    console.log("Resolved issue:", issue.type, issue.payload, issue.resolvedAt, issue.comment);
-});
+A custom detector follows the same pattern the built-ins use: own a `key`, expose a `public disabled` flag, raise on entry, resolve on exit, enrich the resolved payload with duration.
 
-// Score updated
-monitor.on("score", ({ clientScore, scoreReasons }) => {
-    console.log("Score:", clientScore, "Reasons:", scoreReasons);
-});
+```ts
+import {
+    Detector,
+    ClientMonitor,
+    InboundTrackMonitor,
+} from '@observertc/client-monitor-js';
 
-// Congestion detected
-monitor.on("congestion", ({ peerConnectionMonitor, availableIncomingBitrate }) => {
-    console.log("Congestion detected on PC:", peerConnectionMonitor.peerConnectionId, availableIncomingBitrate);
-});
+interface MicMutedIssuePayload {
+    participantId: string;
+    expected: boolean;
+    durationInMs?: number;
+}
 
-// Stats collected
-monitor.on("stats-collected", ({ durationOfCollectingStatsInMs, collectedStats }) => {
-    console.log("Stats collection took:", durationOfCollectingStatsInMs, "ms", collectedStats.length);
+class UnexpectedMicMuteDetector implements Detector {
+    public readonly name = 'unexpected-mic-mute-detector';
+    public disabled = false;
+
+    private readonly issueKey: string;
+    private _startedAt?: number;
+
+    constructor(
+        private readonly track: InboundTrackMonitor,
+        private readonly participantId: string,
+        private readonly clientMonitor: ClientMonitor,
+    ) {
+        this.issueKey = `unexpected-mic-mute-track-${track.track.id}`;
+    }
+
+    update() {
+        if (this.disabled) return;
+
+        const wantsAudio = !this.track.track.muted;
+        const isReceivingAudio = (this.track.getInboundRtp()?.deltaBytesReceived ?? 0) > 0;
+        const isMisbehaving = wantsAudio && !isReceivingAudio;
+
+        if (isMisbehaving && !this.clientMonitor.isIssueActive(this.issueKey)) {
+            this._startedAt = Date.now();
+            this.clientMonitor.raiseIssue<MicMutedIssuePayload>(this.issueKey, {
+                type: 'unexpected-mic-mute',
+                payload: { participantId: this.participantId, expected: false },
+            });
+        } else if (!isMisbehaving && this.clientMonitor.isIssueActive(this.issueKey)) {
+            const active = this.clientMonitor.activeIssues.get(this.issueKey);
+            this.clientMonitor.resolveIssue<MicMutedIssuePayload>(this.issueKey, {
+                comment: 'mic unmuted',
+                payload: {
+                    ...(active?.payload as MicMutedIssuePayload),
+                    durationInMs: this._startedAt ? Date.now() - this._startedAt : undefined,
+                },
+            });
+            this._startedAt = undefined;
+        }
+    }
+}
+```
+
+Three things to notice:
+
+1. `disabled` is a public field — applications flip it at runtime to silence the detector.
+2. `Detectors.update()` skips detectors with `disabled === true`, and the in-method `if (this.disabled) return;` makes direct invocations behave the same.
+3. The detector is the source of truth for `_startedAt`; the resolved payload carries the duration so consumers don't have to track it themselves.
+
+### Controlling which detectors run
+
+Each detector entry in `ClientMonitorConfig` is now `Type | null`:
+
+```ts
+new ClientMonitor({
+    // null → don't even construct this detector. No memory, no update() ticks.
+    congestionDetector: null,
+
+    // undefined / omitted → use defaults (this is the existing behavior).
+
+    // Object → enable with overrides.
+    audioDesyncDetector: {
+        fractionalCorrectionAlertOnThreshold: 0.2,
+        fractionalCorrectionAlertOffThreshold: 0.1,
+    },
 });
+```
+
+Already running and want to flip a detector on/off without restarting the monitor? Every built-in detector exposes a `public disabled = false` field, and every layer's `detectors` registry exposes ergonomic helpers for finding and toggling them.
+
+`Detectors` (the registry attached as `monitor.detectors`, `peerConnectionMonitor.detectors`, `inboundTrackMonitor.detectors`, `outboundTrackMonitor.detectors`, `mediaPlayoutMonitor.detectors`) offers:
+
+```ts
+// Inspection
+detectors.size;                         // number of attached detectors
+detectors.listOfNames;                  // string[] of every detector.name
+detectors.has(name);                    // is a detector with that name attached?
+detectors.getByName(name);              // Detector | undefined
+detectors.getByName<CpuPerformanceDetector>('cpu-performance-detector');
+detectors.find(pred);                   // first match
+detectors.filter(pred);                 // all matches
+for (const d of detectors) { /* … */ }  // iterate
+
+// Mutation
+detectors.add(detector);                // append a custom detector
+detectors.remove(detector);             // detach an instance
+detectors.clear();                      // detach all
+
+// Runtime toggle
+detectors.disable(name);                // sets detector.disabled = true (returns true if found)
+detectors.enable(name);                 // sets detector.disabled = false
+detectors.isEnabled(name);              // attached AND not disabled
+detectors.disableAll();                 // silence every attached detector
+detectors.enableAll();                  // re-enable every attached detector
+```
+
+Common patterns:
+
+```ts
+// Kill one specific detector instance-wide.
+monitor.detectors.disable('cpu-performance-detector');
+
+// Silence congestion alerts across every existing PeerConnection.
+for (const pc of monitor.mappedPeerConnections.values()) {
+    pc.detectors.disable('congestion-detector');
+}
+
+// Toggle a track-level detector based on something the app knows.
+inboundTrackMonitor.detectors.disable('freezed-video-track-detector');
+
+// Suspend everything during a known-noisy state, then re-enable.
+monitor.detectors.disableAll();
+// …later
+monitor.detectors.enableAll();
+
+// Tweak the live config of a detector at runtime via getByName.
+const cpu = monitor.detectors.getByName('cpu-performance-detector');
+if (cpu) cpu.disabled = true;
+```
+
+If you want a detector outright gone (not just silenced), call `detectors.remove(instance)` — or skip its construction entirely at monitor creation time by passing `null` for its config field.
+
+### Sample-channel behavior
+
+Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]`. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged. Resolutions are not currently included in the sample buffer (only in the realtime `'issue-resolved'` event). If you reconstruct state server-side from samples only, treat each `clientIssues` entry as "the issue started here" and apply your own correlation logic.
+
+### Event listeners cheat-sheet
+
+```ts
+// Sample produced.
+monitor.on('sample-created', ({ sample }) => { /* … */ });
+
+// Issue lifecycle.
+monitor.on('issue',          (issue)    => { /* new addIssue or new raiseIssue */ });
+monitor.on('issue-updated',  (issue)    => { /* re-raise of an existing key */ });
+monitor.on('issue-resolved', (resolved) => { /* resolveIssue or close() auto-resolve */ });
+
+// Detector-specific events (these fire alongside 'issue', once per episode).
+monitor.on('congestion',                          (e) => { /* … */ });
+monitor.on('cpulimitation',                       (e) => { /* … */ });
+monitor.on('audio-desync-track',                  (e) => { /* … */ });
+monitor.on('freezed-video-track',                 (e) => { /* … */ });
+monitor.on('dry-inbound-track',                   (e) => { /* … */ });
+monitor.on('dry-outbound-track',                  (e) => { /* … */ });
+monitor.on('inbound-video-playout-discrepancy',   (e) => { /* … */ });
+
+// Score & stats lifecycle.
+monitor.on('score',          ({ clientScore, currentReasons }) => { /* … */ });
+monitor.on('stats-collected', ({ durationOfCollectingStatsInMs, collectedStats }) => { /* … */ });
 ```
 
 ## WebRTC Stats Monitors
@@ -1926,7 +2103,6 @@ const monitor = new ClientMonitor({
     // Sensitive congestion detection
     congestionDetector: {
         sensitivity: "high",
-        createIssue: true,
     },
 
     // Strict CPU monitoring
@@ -1990,33 +2166,54 @@ const producer = await sendTransport.produce({
 ### Custom Detector
 
 ```javascript
+// A custom detector following the new lifecycle: stateful issue keyed by the PC,
+// auto-resolve when latency recovers, payload enriched with durationInMs on close.
 class NetworkLatencyDetector {
     name = "network-latency-detector";
+    // Public runtime kill-switch — apps may flip this without removing the detector.
+    disabled = false;
 
     constructor(pcMonitor) {
         this.pcMonitor = pcMonitor;
-        this.highLatencyThreshold = 200; // ms
+        this.highLatencyThreshold = 0.2; // 200ms in seconds, matching avgRttInSec
+        this.lowLatencyThreshold = 0.1; // 100ms hysteresis floor
+        this.issueKey = `high-latency-pc-${pcMonitor.peerConnectionId}`;
+        this._startedAt = undefined;
     }
 
     update() {
-        const rttMs = (this.pcMonitor.avgRttInSec || 0) * 1000;
+        if (this.disabled) return;
 
-        if (rttMs > this.highLatencyThreshold) {
-            this.pcMonitor.parent.emit("high-latency", {
-                peerConnectionId: this.pcMonitor.peerConnectionId,
-                rttMs,
-            });
+        const rtt = this.pcMonitor.avgRttInSec ?? 0;
+        const monitor = this.pcMonitor.parent;
+        const isActive = monitor.isIssueActive(this.issueKey);
 
-            this.pcMonitor.parent.addIssue({
+        if (!isActive && rtt > this.highLatencyThreshold) {
+            this._startedAt = Date.now();
+            monitor.raiseIssue(this.issueKey, {
                 type: "high-latency",
-                payload: { rttMs, threshold: this.highLatencyThreshold },
+                payload: {
+                    peerConnectionId: this.pcMonitor.peerConnectionId,
+                    rttInSec: rtt,
+                    threshold: this.highLatencyThreshold,
+                },
             });
+        } else if (isActive && rtt < this.lowLatencyThreshold) {
+            const active = monitor.activeIssues.get(this.issueKey);
+            monitor.resolveIssue(this.issueKey, {
+                comment: "latency recovered",
+                payload: {
+                    ...active?.payload,
+                    durationInMs: this._startedAt ? Date.now() - this._startedAt : undefined,
+                },
+            });
+            this._startedAt = undefined;
         }
     }
 }
 
-// Add to peer connection monitor
-monitor.on("peer-connection-opened", ({ peerConnectionMonitor }) => {
+// Attach the detector when each PeerConnection is added.
+monitor.on("new-peerconnnection-monitor", ({ peerConnectionMonitor }) => {
     const detector = new NetworkLatencyDetector(peerConnectionMonitor);
     peerConnectionMonitor.detectors.add(detector);
 });
@@ -2047,6 +2244,10 @@ class MonitoringDashboard {
         this.monitor.on("issue", (issue) => {
             this.addIssueToLog(issue);
         });
+
+        this.monitor.on("issue-resolved", (resolved) => {
+            this.addResolvedIssueToLog(resolved);
+        });
     }
 
     updateScoreDisplay(score, reasons) {
@@ -2068,7 +2269,17 @@ class MonitoringDashboard {
     addIssueToLog(issue) {
         const log = document.getElementById("issue-log");
         const entry = document.createElement("div");
-        entry.textContent = `${new Date().toISOString()}: ${issue.type} - ${JSON.stringify(issue.payload)}`;
+        entry.dataset.issueKey = "key" in issue ? issue.key : "";
+        entry.textContent = `${new Date(issue.timestamp ?? issue.raisedAt).toISOString()} OPEN  ${issue.type} ${JSON.stringify(issue.payload ?? {})}`;
+        log.appendChild(entry);
+    }
+
+    addResolvedIssueToLog(resolved) {
+        const log = document.getElementById("issue-log");
+        const entry = document.createElement("div");
+        entry.textContent =
+            `${new Date(resolved.resolvedAt).toISOString()} CLOSE ${resolved.type} ` +
+            `${resolved.comment ?? ""} duration=${resolved.payload?.durationInMs ?? "?"}ms`;
         log.appendChild(entry);
     }
 }

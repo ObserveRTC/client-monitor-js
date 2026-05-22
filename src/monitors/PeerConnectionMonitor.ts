@@ -152,11 +152,14 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	) {
 		super();
 		this.statsAdapters = new StatsAdapters(logger);
-		this.detectors = new Detectors(
-			new LongPcConnectionEstablishmentDetector(this),
-			new CongestionDetector(this),
-			new IceTupleChangeDetector(this),
-		);
+		this.detectors = new Detectors();
+		if (parent.config.longPcConnectionEstablishmentDetector !== null) {
+			this.detectors.add(new LongPcConnectionEstablishmentDetector(this));
+		}
+		if (parent.config.congestionDetector !== null) {
+			this.detectors.add(new CongestionDetector(this));
+		}
+		this.detectors.add(new IceTupleChangeDetector(this));
 	}
 
 	public get score() {

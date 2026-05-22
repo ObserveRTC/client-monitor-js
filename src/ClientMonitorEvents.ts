@@ -18,16 +18,54 @@ import { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 import { ClientSample } from "./schema/ClientSample"
 import { RtcStats } from "./schema/W3cStatsIdentifiers";
 
-export type ClientIssue = {
-	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
-	timestamp: number,
+export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
+
+/**
+ * One-shot issue, produced by `ClientMonitor.addIssue`. Emitted as `'issue'`
+ * and buffered into the next sample, but never enters the active store and
+ * cannot be resolved. Severity should be inferred by the application from
+ * `type`.
+ */
+export type AddedClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = {
+	type: string;
+	payload?: T;
+	timestamp: number;
 }
 
-export type ResolvedClientIssue = ClientIssue & {
-    resolvedAt: number;
+/**
+ * Stateful issue, produced by `ClientMonitor.raiseIssue`. `key` is mandatory
+ * and is the global identity within this monitor — it's also the handle used
+ * to resolve. Re-raising with the same `key` updates the existing entry in
+ * place (payload refreshed, `updatedAt` bumped) and emits `'issue-updated'`.
+ */
+export type RaisedClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = {
+	key: string;
+	type: string;
+	payload?: T;
+	/** Wall-clock time the issue was first raised. */
+	raisedAt: number;
+	/** Wall-clock time of the most recent raise/update call. */
+	updatedAt: number;
+}
+
+/**
+ * Union of the two issue flavors. Use `'key' in issue` to narrow to a
+ * stateful, resolvable issue.
+ */
+export type ClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = {
+	[K in keyof (AddedClientIssue<T> & { resolvable: false })]: (AddedClientIssue<T> & { resolvable: false })[K];
+} | {
+	[K in keyof (RaisedClientIssue<T> & { resolvable: true })]: (RaisedClientIssue<T> & { resolvable: true })[K];
+};
+
+
+export type ResolvedClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = RaisedClientIssue<T> & {
+	resolvedAt: number;
 	comment?: string;
 }
+
+/** Emitted when a raised issue's payload is refreshed without changing identity. */
+export type UpdatedClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = RaisedClientIssue<T>;
 
 export type ClientEvent = {
 	type: string,
@@ -98,7 +136,7 @@ export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
 }
 
-export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent & {	
+export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 }
 
@@ -183,7 +221,8 @@ export type ClientMonitorEvents = {
 	"stats-collected": [StatsCollectedEventPayload],
 	'close': [],
 	'issue': [ClientIssue],
-	'resolved-issue': [ResolvedClientIssue],
+	'issue-updated': [UpdatedClientIssue],
+	'issue-resolved': [ResolvedClientIssue],
 	'client-event': [ClientEvent],
 	'meta': [ClientMetaData],
 	'extension-stats': [ExtensionStat],

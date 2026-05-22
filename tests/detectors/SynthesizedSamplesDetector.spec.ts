@@ -100,7 +100,7 @@ describe('SynthesizedSamplesDetector', () => {
 
     describe('update() - Basic validation', () => {
         it('should return early if detector is disabled', () => {
-            mockClientMonitor.config.syntheticSamplesDetector.disabled = true;
+            detector.disabled = true;
             mockMediaPlayout.setDeltaSynthesizedSamplesDuration(200); // Above threshold
 
             detector.update();
@@ -126,7 +126,7 @@ describe('SynthesizedSamplesDetector', () => {
 
     describe('update() - Detection logic', () => {
         beforeEach(() => {
-            mockClientMonitor.config.syntheticSamplesDetector.disabled = false;
+            detector.disabled = false;
             mockClientMonitor.config.syntheticSamplesDetector.minSynthesizedSamplesDuration = 100;
         });
 
@@ -185,7 +185,7 @@ describe('SynthesizedSamplesDetector', () => {
 
     describe('update() - Event creation', () => {
         beforeEach(() => {
-            mockClientMonitor.config.syntheticSamplesDetector.disabled = false;
+            detector.disabled = false;
             mockClientMonitor.config.syntheticSamplesDetector.minSynthesizedSamplesDuration = 100;
         });
 

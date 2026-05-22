@@ -25,6 +25,11 @@ export type {
 export type {
     ClientEvent,
     ClientIssue,
+    ClientIssuePayload,
+    AddedClientIssue,
+    RaisedClientIssue,
+    ResolvedClientIssue,
+    UpdatedClientIssue,
     ClientMetaData,
     SampleCreatedEventPayload,
     StatsCollectedEventPayload,
@@ -63,6 +68,22 @@ export type {
 export {
     Detectors
 } from './detectors/Detectors';
+export {
+    isClientMonitorIssue,
+    isClientMonitorResolvedIssue,
+} from './ClientMonitorIssues';
+export type {
+    ClientMonitorIssue,
+    ClientMonitorResolvedIssue,
+    ClientMonitorIssueType,
+} from './ClientMonitorIssues';
+export type { AudioDesyncIssuePayload } from './detectors/AudioDesyncDetector';
+export type { CongestionIssuePayload } from './detectors/CongestionDetector';
+export type { CpuPerformanceIssuePayload } from './detectors/CpuPerformanceDetector';
+export type { DryInboundTrackIssuePayload } from './detectors/DryInboundTrackDetector';
+export type { DryOutboundTrackIssuePayload } from './detectors/DryOutboundTrackDetector';
+export type { FreezedVideoTrackIssuePayload } from './detectors/FreezedVideoTrackDetector';
+export type { PlayoutDiscrepancyIssuePayload } from './detectors/PlayoutDiscrepancyDetector';
 export type {
     ScoreCalculator
 } from './scores/ScoreCalculator';

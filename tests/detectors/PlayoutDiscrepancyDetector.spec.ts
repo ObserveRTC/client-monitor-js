@@ -3,13 +3,14 @@ import { PlayoutDiscrepancyDetector } from "../../src/detectors/PlayoutDiscrepan
 // Types for test mocks
 interface PlayoutDiscrepancyConfig {
     disabled: boolean;
-    createIssue: boolean;
     highSkewThreshold: number;
     lowSkewThreshold: number;
 }
 
 interface TestIssue {
+    id: string;
     type: string;
+    key?: string;
     payload: Record<string, unknown>;
 }
 
@@ -28,14 +29,14 @@ class MockClientMonitor {
     public config = {
         playoutDiscrepancyDetector: {
             disabled: false,
-            createIssue: true,
             highSkewThreshold: 10,
             lowSkewThreshold: 3
         } as PlayoutDiscrepancyConfig
     };
     
     private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private issues: TestIssue[] = [];
+    public readonly activeIssues = new Map<string, TestIssue>();
+    private nextId = 0;
 
     emit(eventName: string, eventData: Record<string, unknown>) {
         const handlers = this.eventHandlers[eventName] || [];
@@ -49,21 +50,56 @@ class MockClientMonitor {
         this.eventHandlers[eventName].push(handler);
     }
 
-    addIssue(issue: TestIssue) {
-        this.issues.push(issue);
+    addIssue(input: { type: string; payload?: Record<string, unknown> }) {
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            payload: input.payload ?? {},
+        };
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
     }
 
+    raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
+        const existing = this.activeIssues.get(key);
+        if (existing) {
+            existing.payload = input.payload ?? {};
+            existing.type = input.type;
+            this.emit('issue-updated', existing as unknown as Record<string, unknown>);
+            return existing;
+        }
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            key,
+            payload: input.payload ?? {},
+        };
+        this.activeIssues.set(key, issue);
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
+    }
+
+    resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
+        const found = this.activeIssues.get(key);
+        if (!found) return undefined;
+        this.activeIssues.delete(key);
+        const resolved = {
+            ...found,
+            payload: opts?.payload ?? found.payload,
+            resolvedAt: opts?.resolvedAt ?? Date.now(),
+            comment: opts?.comment,
+        };
+        this.emit('issue-resolved', resolved as unknown as Record<string, unknown>);
+        return resolved;
+    }
+
+    // Compatibility helpers used by existing test assertions.
     getIssues() {
-        return this.issues;
+        return [...this.activeIssues.values()];
     }
 
     clearIssues() {
-        this.issues = [];
-    }
-
-    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
-        // Mock implementation for resolving active issues
-        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
+        this.activeIssues.clear();
     }
 }
 
@@ -122,7 +158,7 @@ describe('PlayoutDiscrepancyDetector', () => {
 
     describe('update() - Basic validation', () => {
         it('should return early if detector is disabled', () => {
-            mockClientMonitor.config.playoutDiscrepancyDetector.disabled = true;
+            detector.disabled = true;
             mockTrackMonitor.setInboundRtp({
                 deltaFramesReceived: 20,
                 deltaFramesRendered: 5,
@@ -174,7 +210,7 @@ describe('PlayoutDiscrepancyDetector', () => {
 
     describe('update() - Detection logic', () => {
         beforeEach(() => {
-            mockClientMonitor.config.playoutDiscrepancyDetector.disabled = false;
+            detector.disabled = false;
             mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 10;
             mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewThreshold = 3;
         });
@@ -209,7 +245,7 @@ describe('PlayoutDiscrepancyDetector', () => {
                 clientMonitor: mockClientMonitor
             });
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'inbound-video-playout-discrepancy',
                 payload: {
                     trackId: 'test-track-id',
@@ -238,7 +274,7 @@ describe('PlayoutDiscrepancyDetector', () => {
 
     describe('update() - Hysteresis behavior', () => {
         beforeEach(() => {
-            mockClientMonitor.config.playoutDiscrepancyDetector.disabled = false;
+            detector.disabled = false;
             mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 10;
             mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewThreshold = 3;
         });
@@ -313,32 +349,45 @@ describe('PlayoutDiscrepancyDetector', () => {
             expect(eventSpy).toHaveBeenCalledTimes(1); // Still only 1 event
             expect(mockClientMonitor.getIssues()).toHaveLength(1); // Still only 1 issue
         });
+
+        // Regression: resolve must remove the issue from the active store,
+        // emit 'issue-resolved', and enrich the payload with durationInMs.
+        it('should emit issue-resolved with durationInMs when skew clears', () => {
+            jest.useFakeTimers();
+            const resolvedSpy = jest.fn();
+            mockClientMonitor.on('issue-resolved', resolvedSpy);
+
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 25,
+                deltaFramesRendered: 10, // Skew = 15
+                ewmaFps: 30
+            });
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+            jest.advanceTimersByTime(3000);
+
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 12,
+                deltaFramesRendered: 10, // Skew = 2, below low threshold
+                ewmaFps: 30
+            });
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(resolvedSpy).toHaveBeenCalledTimes(1);
+            const resolved = resolvedSpy.mock.calls[0][0] as { payload: { durationInMs?: number }; comment?: string };
+            expect(resolved.payload.durationInMs).toBe(3000);
+            expect(resolved.comment).toBe('playout discrepancy ended');
+
+            jest.useRealTimers();
+        });
     });
 
     describe('update() - Issue creation', () => {
         beforeEach(() => {
-            mockClientMonitor.config.playoutDiscrepancyDetector.disabled = false;
+            detector.disabled = false;
             mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 10;
-        });
-
-        it('should not create issue when createIssue is false', () => {
-            mockClientMonitor.config.playoutDiscrepancyDetector.createIssue = false;
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('inbound-video-playout-discrepancy', eventSpy);
-
-            mockTrackMonitor.setInboundRtp({
-                deltaFramesReceived: 25,
-                deltaFramesRendered: 10,
-                ewmaFps: 30
-            });
-
-            detector.update();
-
-            // Event should still be emitted
-            expect(eventSpy).toHaveBeenCalled();
-            expect(detector.active).toBe(true);
-            // But no issue should be created
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
         it('should create issue with correct payload', () => {
@@ -351,7 +400,7 @@ describe('PlayoutDiscrepancyDetector', () => {
             detector.update();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'inbound-video-playout-discrepancy',
                 payload: {
                     trackId: 'test-track-id',

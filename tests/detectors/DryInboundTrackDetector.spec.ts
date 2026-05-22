@@ -3,12 +3,13 @@ import { DryInboundTrackDetector } from "../../src/detectors/DryInboundTrackDete
 // Types for test mocks
 interface DryInboundTrackConfig {
     disabled: boolean;
-    createIssue: boolean;
     thresholdInMs: number;
 }
 
 interface TestIssue {
+    id: string;
     type: string;
+    key?: string;
     payload: Record<string, unknown>;
 }
 
@@ -26,13 +27,13 @@ class MockClientMonitor {
     public config = {
         dryInboundTrackDetector: {
             disabled: false,
-            createIssue: true,
             thresholdInMs: 5000
         } as DryInboundTrackConfig
     };
     
     private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private issues: TestIssue[] = [];
+    public readonly activeIssues = new Map<string, TestIssue>();
+    private nextId = 0;
 
     emit(eventName: string, eventData: Record<string, unknown>) {
         const handlers = this.eventHandlers[eventName] || [];
@@ -46,21 +47,56 @@ class MockClientMonitor {
         this.eventHandlers[eventName].push(handler);
     }
 
-    addIssue(issue: TestIssue) {
-        this.issues.push(issue);
+    addIssue(input: { type: string; payload?: Record<string, unknown> }) {
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            payload: input.payload ?? {},
+        };
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
     }
 
+    raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
+        const existing = this.activeIssues.get(key);
+        if (existing) {
+            existing.payload = input.payload ?? {};
+            existing.type = input.type;
+            this.emit('issue-updated', existing as unknown as Record<string, unknown>);
+            return existing;
+        }
+        const issue: TestIssue = {
+            id: `iss_${this.nextId++}`,
+            type: input.type,
+            key,
+            payload: input.payload ?? {},
+        };
+        this.activeIssues.set(key, issue);
+        this.emit('issue', issue as unknown as Record<string, unknown>);
+        return issue;
+    }
+
+    resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
+        const found = this.activeIssues.get(key);
+        if (!found) return undefined;
+        this.activeIssues.delete(key);
+        const resolved = {
+            ...found,
+            payload: opts?.payload ?? found.payload,
+            resolvedAt: opts?.resolvedAt ?? Date.now(),
+            comment: opts?.comment,
+        };
+        this.emit('issue-resolved', resolved as unknown as Record<string, unknown>);
+        return resolved;
+    }
+
+    // Compatibility helpers used by existing test assertions.
     getIssues() {
-        return this.issues;
+        return [...this.activeIssues.values()];
     }
 
     clearIssues() {
-        this.issues = [];
-    }
-
-    resolveActiveIssues(type: string, filter: (issue: TestIssue) => boolean) {
-        // Mock implementation for resolving active issues
-        this.issues = this.issues.filter(issue => !(issue.type === type && filter(issue)));
+        this.activeIssues.clear();
     }
 }
 
@@ -125,7 +161,7 @@ describe('DryInboundTrackDetector', () => {
 
     describe('update() - Basic validation', () => {
         it('should return early if detector is disabled', () => {
-            mockClientMonitor.config.dryInboundTrackDetector.disabled = true;
+            detector.disabled = true;
             mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
 
             // Advance time beyond threshold
@@ -156,7 +192,7 @@ describe('DryInboundTrackDetector', () => {
 
     describe('update() - Dry track detection', () => {
         beforeEach(() => {
-            mockClientMonitor.config.dryInboundTrackDetector.disabled = false;
+            detector.disabled = false;
             mockTrackMonitor.setRemoteOutboundTrackPaused(false);
         });
 
@@ -193,7 +229,7 @@ describe('DryInboundTrackDetector', () => {
                 clientMonitor: mockClientMonitor
             });
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toEqual({
+            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
                 type: 'dry-inbound-track',
                 payload: {
                     trackId: 'test-track-id',
@@ -224,7 +260,7 @@ describe('DryInboundTrackDetector', () => {
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
-        it('should trigger event and create issue multiple times per dry period', () => {
+        it('should emit the detector event only once per dry episode', () => {
             const eventSpy = jest.fn();
             mockClientMonitor.on('dry-inbound-track', eventSpy);
 
@@ -237,16 +273,14 @@ describe('DryInboundTrackDetector', () => {
             expect(eventSpy).toHaveBeenCalledTimes(1);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
-            // Additional calls should trigger more events and create more issues
+            // While the dry condition continues, the detector stays silent —
+            // no new 'dry-inbound-track' event is fired, and the same active
+            // issue keeps living in the store (deduped by key).
             jest.advanceTimersByTime(5000);
             detector.update();
 
-            expect(eventSpy).toHaveBeenCalledTimes(2);
-            expect(mockClientMonitor.getIssues()).toHaveLength(2);
-            
-            // Verify the duration is updated in the second issue
-            expect(mockClientMonitor.getIssues()[0].payload.duration).toBe(6000);
-            expect(mockClientMonitor.getIssues()[1].payload.duration).toBe(11000);
+            expect(eventSpy).toHaveBeenCalledTimes(1);
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
 
         it('should use custom threshold from configuration', () => {
@@ -301,25 +335,8 @@ describe('DryInboundTrackDetector', () => {
 
     describe('update() - Issue creation', () => {
         beforeEach(() => {
-            mockClientMonitor.config.dryInboundTrackDetector.disabled = false;
+            detector.disabled = false;
             mockTrackMonitor.setRemoteOutboundTrackPaused(false);
-        });
-
-        it('should not create issue when createIssue is false', () => {
-            mockClientMonitor.config.dryInboundTrackDetector.createIssue = false;
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('dry-inbound-track', eventSpy);
-
-            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
-
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
-
-            // Event should still be emitted
-            expect(eventSpy).toHaveBeenCalled();
-            // But no issue should be created
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
         it('should create issue with correct duration', () => {

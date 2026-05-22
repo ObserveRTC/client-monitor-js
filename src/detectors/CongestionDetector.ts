@@ -2,6 +2,17 @@ import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { ClientMonitorEvents } from "../ClientMonitorEvents";
 
+export type CongestionIssuePayload = {
+	peerConnectionId: string;
+	availableIncomingBitrate: number;
+	availableOutgoingBitrate: number;
+	maxAvailableIncomingBitrate: number;
+	maxAvailableOutgoingBitrate: number;
+	maxReceivingBitrate: number;
+	maxSendingBitrate: number;
+	durationInMs?: number;
+}
+
 export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
 
 /**
@@ -24,7 +35,6 @@ export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
  * 
  * **Configuration Options:**
  * - `disabled`: Boolean to enable/disable the detector
- * - `createIssue`: Whether to create ClientIssue when congestion is detected
  * - `sensitivity`: Detection sensitivity level ('low', 'medium', 'high')
  * 
  * **Events Emitted:**
@@ -40,7 +50,6 @@ export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
  * const config = {
  *   congestionDetector: {
  *     disabled: false,
- *     createIssue: true,
  *     sensitivity: 'medium'  // 'low', 'medium', 'high'
  *   }
  * };
@@ -56,6 +65,8 @@ export class CongestionDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'congestion';
 	/** Unique identifier for this detector type */
 	public readonly name = 'congestion-detector';
+	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
+	public disabled = false;
 	
 	/** Maximum available incoming bitrate observed during non-congested periods */
 	private _maxAvailableIncomingBitrate = 0;
@@ -69,6 +80,11 @@ export class CongestionDetector implements Detector {
 	/** Maximum sending bitrate observed during non-congested periods */
 	private _maxSendingBitrate = 0;
 
+	private readonly issueKey: string;
+
+	/** Timestamp when the current congestion episode started. */
+	private _startedCongestionAt?: number;
+
 	/**
 	 * Creates a new CongestionDetector instance
 	 * @param peerConnection - The peer connection monitor to analyze for congestion
@@ -76,11 +92,12 @@ export class CongestionDetector implements Detector {
 	public constructor(
 		public readonly peerConnection: PeerConnectionMonitor
 	) {
+		this.issueKey = `${CongestionDetector.ISSUE_TYPE}-pc-${peerConnection.peerConnectionId}`;
 	}
 
 	/** Gets the detector configuration from the client monitor */
 	private get config() {
-		return this.peerConnection.parent.config.congestionDetector;
+		return this.peerConnection.parent.config.congestionDetector!;
 	}
 
 	/**
@@ -104,8 +121,8 @@ export class CongestionDetector implements Detector {
 	 * - **Low**: Bandwidth limitation + outbound packet loss > 5%
 	 */
 	public update() {
-		if (this.config.disabled) return;
 
+		if (this.disabled) return;
 		let hasBwLimitedOutboundRtp = false;
 
 		for (const outboundRtp of this.peerConnection.outboundRtps) {
@@ -147,7 +164,7 @@ export class CongestionDetector implements Detector {
 		if (!isCongested) {
 			if (this.peerConnection.congested) {
 				this.peerConnection.congested = false;
-				this._resolveIssue();
+				this._resolve('congestion ended');
 			}
 			this._maxAvailableIncomingBitrate = Math.max(this._maxAvailableIncomingBitrate, availableIncomingBitrate);
 			this._maxAvailableOutgoingBitrate = Math.max(this._maxAvailableOutgoingBitrate, availableOutgoingBitrate);
@@ -171,21 +188,16 @@ export class CongestionDetector implements Detector {
 			maxReceivingBitrate: this._maxSendingBitrate,
 			maxSendingBitrate: this._maxSendingBitrate,
 		});
-		
-		if (this.config.createIssue) {
-			this.peerConnection.parent.addIssue({
-				type: CongestionDetector.ISSUE_TYPE,
-				payload: {
-					peerConnectionId: this.peerConnection.peerConnectionId,
-					availableIncomingBitrate,
-					availableOutgoingBitrate,
-					maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
-					maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
-					maxReceivingBitrate: this._maxReceivingBitrate,
-					maxSendingBitrate: this._maxSendingBitrate,
-				}
-			});
-		}
+
+		this._raise({
+			peerConnectionId: this.peerConnection.peerConnectionId,
+			availableIncomingBitrate,
+			availableOutgoingBitrate,
+			maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
+			maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
+			maxReceivingBitrate: this._maxReceivingBitrate,
+			maxSendingBitrate: this._maxSendingBitrate,
+		});
 
 		this._maxAvailableIncomingBitrate = 0;
 		this._maxAvailableOutgoingBitrate = 0;
@@ -193,12 +205,34 @@ export class CongestionDetector implements Detector {
 		this._maxSendingBitrate = 0;
 	}
 
-	private _resolveIssue() {
-		const clientMonitor = this.peerConnection.parent;
+	private _raise(payload: CongestionIssuePayload) {
+		this._startedCongestionAt = Date.now();
 
-		return clientMonitor.resolveActiveIssues(CongestionDetector.ISSUE_TYPE, (issue) => {
-			return (issue.payload as Record<string, unknown>)?.peerConnectionId === this.peerConnection.peerConnectionId;
+		this.peerConnection.parent.raiseIssue<CongestionIssuePayload>(this.issueKey, {
+			type: CongestionDetector.ISSUE_TYPE,
+			payload,
 		});
+	}
+
+	private _resolve(comment?: string) {
+		const clientMonitor = this.peerConnection.parent;
+		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		let payload: CongestionIssuePayload | undefined;
+
+		if (issue) {
+			payload = {
+				...(issue.payload as CongestionIssuePayload),
+				durationInMs: this._startedCongestionAt ? Date.now() - this._startedCongestionAt : undefined,
+			};
+		}
+
+		clientMonitor.resolveIssue<CongestionIssuePayload>(this.issueKey, {
+			comment,
+			payload,
+			resolvedAt: Date.now(),
+		});
+
+		this._startedCongestionAt = undefined;
 	}
 
 }
