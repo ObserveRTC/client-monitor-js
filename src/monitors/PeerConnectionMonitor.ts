@@ -401,6 +401,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			mediaSources: this.mediaSources.map(mediaSource => mediaSource.createSample()),
 			mediaPlayouts: this.mediaPlayouts.map(mediaPlayout => mediaPlayout.createSample()),
 			peerConnectionTransports: this.peerConnectionTransports.map(peerConnectionTransport => peerConnectionTransport.createSample()),
+			dataChannels: this.dataChannels.map(dataChannel => dataChannel.createSample()),
 			iceTransports: this.iceTransports.map(iceTransport => iceTransport.createSample()),
 			iceCandidates: this.iceCandidates.map(iceCandidate => iceCandidate.createSample()),
 			iceCandidatePairs: this.iceCandidatePairs.map(iceCandidatePair => iceCandidatePair.createSample()),
