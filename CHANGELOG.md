@@ -1,3 +1,9 @@
+## 4.3.1
+
+### Bug Fixes
+
+-   Added `dataChannels` to peer connection sample serialization so tracked data channel stats are included in `ClientSample.peerConnections[].dataChannels`.
+
 ## 4.3.0
 
 ### Major Features
