@@ -165,13 +165,28 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      */
     cpuPerformanceDetector: {
         /**
-         * Thresholds for detecting frames-per-second (FPS) volatility during monitoring.
-         * - `lowWatermark`: The minimum FPS threshold.
-         * - `highWatermark`: The maximum FPS threshold.
+         * Thresholds for the ratio of decoded to received frames on inbound
+         * video tracks. When the decoder cannot keep up with the incoming
+         * stream (a classic sign of CPU limitation) frames are received but
+         * never decoded, so the decoded/received ratio drops.
+         *
+         * This replaces FPS-volatility based detection, which false-triggered
+         * on content such as screen share whose frame rate legitimately swings
+         * (e.g. 15 -> 1 fps when the shared content goes static). When fps
+         * drops legitimately, received and decoded frames drop together so the
+         * ratio stays close to 1.0 and no alert fires.
+         *
+         * - `alertOn`: ratio at or below which the alert turns ON (e.g. 0.7).
+         * - `alertOff`: ratio at or above which the alert turns OFF (e.g. 0.85);
+         *   should be higher than `alertOn` to provide hysteresis.
+         * - `minReceivedFrames`: the minimum number of frames that must have
+         *   been received in an interval before the ratio is evaluated, guarding
+         *   against noise at low frame rates (e.g. 1 received, 0 decoded).
          */
-        fpsVolatilityThresholds: {
-            lowWatermark: number;
-            highWatermark: number;
+        incomingDecodedFramesRatioThresholds: {
+            alertOn: number;
+            alertOff: number;
+            minReceivedFrames: number;
         };
 
         /**

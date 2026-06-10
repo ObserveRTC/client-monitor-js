@@ -135,9 +135,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 sensitivity: 'medium',
             }),
             cpuPerformanceDetector: detectorDefault(monitorConfig.cpuPerformanceDetector, {
-                fpsVolatilityThresholds: {
-                    lowWatermark: 0.1,
-                    highWatermark: 0.3,
+                incomingDecodedFramesRatioThresholds: {
+                    alertOn: 0.7,
+                    alertOff: 0.85,
+                    minReceivedFrames: 10,
                 },
                 durationOfCollectingStatsThreshold: {
                     lowWatermark: 5000,

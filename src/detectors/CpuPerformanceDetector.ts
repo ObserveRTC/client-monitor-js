@@ -8,18 +8,26 @@ export type CpuPerformanceIssuePayload = {
  * Detects CPU performance limitations affecting WebRTC quality.
  * 
  * This detector monitors various indicators of CPU performance issues that can
- * degrade WebRTC call quality, including quality limitation reasons, FPS volatility,
- * and stats collection duration. It uses hysteresis behavior with different
- * thresholds for alerting on and off to prevent flapping.
- * 
+ * degrade WebRTC call quality, including quality limitation reasons, the inbound
+ * decoded/received frames ratio, and stats collection duration. It uses
+ * hysteresis behavior with different thresholds for alerting on and off to
+ * prevent flapping.
+ *
  * **Detection Criteria:**
  * - Outbound RTP quality limitation reason is 'cpu'
- * - FPS volatility exceeds configured thresholds (with hysteresis)
+ * - Inbound decoded/received frames ratio falls below the configured thresholds
+ *   (with hysteresis) — i.e. the decoder cannot keep up with received frames
  * - Stats collection duration exceeds thresholds (indicating processing delays)
- * 
+ *
+ * **Why not FPS volatility:** frame-rate volatility false-triggered on content
+ * such as screen share, whose fps legitimately swings (e.g. 15 -> 1 fps when the
+ * shared content goes static). The decoded/received ratio is robust to this
+ * because received and decoded frames drop together when fps drops legitimately.
+ *
  * **Configuration Options:**
  * - `disabled`: Whether the detector is disabled (default: false)
- * - `fpsVolatilityThresholds`: High/low watermarks for FPS volatility detection
+ * - `incomingDecodedFramesRatioThresholds`: alertOn/alertOff ratios and a
+ *   minReceivedFrames guard for inbound decode-keep-up detection
  * - `durationOfCollectingStatsThreshold`: High/low watermarks for stats collection duration
  * 
  * **Events Emitted:**
@@ -70,9 +78,9 @@ export class CpuPerformanceDetector {
 		if (this.disabled) return;
 		const isLimited = this.clientMonitor.cpuPerformanceAlertOn;
 		let gotLimited = false;
-		const { lowWatermark: lowFpsVolatility, highWatermark: highFpsVolatility } = this.config.fpsVolatilityThresholds ?? {};
-		
-		
+		const { alertOn, alertOff, minReceivedFrames } = this.config.incomingDecodedFramesRatioThresholds ?? {};
+
+
 		if (this.config.durationOfCollectingStatsThreshold) {
 			const { lowWatermark, highWatermark } = this.config.durationOfCollectingStatsThreshold;
 			
@@ -89,17 +97,33 @@ export class CpuPerformanceDetector {
 			gotLimited ||= outboundRtp.qualityLimitationReason === 'cpu';
 		}
 
-		if (lowFpsVolatility && highFpsVolatility) {
+		if (alertOn !== undefined && alertOff !== undefined) {
+			const minFrames = minReceivedFrames ?? 0;
 			for (const inboundRtp of this.clientMonitor.inboundRtps) {
 				if (gotLimited) continue;
-				if (!inboundRtp.fpsVolatility) continue;
-				if (!inboundRtp.avgFramesPerSec || inboundRtp.avgFramesPerSec < 10) continue;
+				// Decode CPU limitation only applies to video tracks.
+				if (inboundRtp.kind !== 'video') continue;
+
+				const receivedFrames = inboundRtp.deltaFramesReceived ?? 0;
+				const decodedFrames = inboundRtp.deltaFramesDecoded ?? 0;
+
+				// Not enough frames this interval to make a reliable judgement.
+				// This is what makes the detector robust to legitimate fps swings
+				// (e.g. screen share dropping from 15 to 1 fps): a low frame count
+				// is simply skipped rather than treated as a problem.
+				if (receivedFrames < minFrames) continue;
+
+				// Ratio of frames the decoder kept up with. Clamp to 1.0 because
+				// decoded can briefly exceed received due to counter timing
+				// (frames received in a previous interval decoded in this one).
+				const decodedRatio = Math.min(decodedFrames / receivedFrames, 1);
+
 				if (isLimited) {
-					gotLimited = lowFpsVolatility < inboundRtp.fpsVolatility;
-				} else {
-					if (highFpsVolatility < inboundRtp.fpsVolatility) {
-						gotLimited = true;
-					}
+					// Already alerting: stay alerting until we recover above the
+					// alert-off ratio (hysteresis).
+					gotLimited = decodedRatio < alertOff;
+				} else if (decodedRatio <= alertOn) {
+					gotLimited = true;
 				}
 			}
 		}

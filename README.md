@@ -208,9 +208,10 @@ const monitor = new ClientMonitor({
     },
 
     cpuPerformanceDetector: {
-        fpsVolatilityThresholds: {
-            lowWatermark: 0.1,
-            highWatermark: 0.3,
+        incomingDecodedFramesRatioThresholds: {
+            alertOn: 0.7,
+            alertOff: 0.85,
+            minReceivedFrames: 10,
         },
         durationOfCollectingStatsThreshold: {
             lowWatermark: 5000,
@@ -360,16 +361,20 @@ Detects CPU performance issues affecting media processing.
 
 **Triggers on:**
 
--   FPS volatility exceeds thresholds
+-   Outbound RTP quality limitation reason is `'cpu'`
+-   Inbound decoded/received frames ratio drops below threshold (the decoder cannot keep up with received frames — a sign of decode-side CPU limitation)
 -   Stats collection takes too long (indicating CPU stress)
+
+> **Why not FPS volatility?** Earlier versions inferred decode CPU pressure from frame-rate volatility. That false-triggered on content such as screen share, whose fps legitimately swings (e.g. 15 → 1 fps when the shared content goes static). The decoded/received ratio is robust to this: when fps drops legitimately, received and decoded frames drop together so the ratio stays near 1.0. An alert only fires when frames are received but not decoded.
 
 **Configuration:**
 
 ```javascript
 cpuPerformanceDetector: {
-    fpsVolatilityThresholds: {
-        lowWatermark: 0.1,
-        highWatermark: 0.3,
+    incomingDecodedFramesRatioThresholds: {
+        alertOn: 0.7,        // alert ON when <70% of received frames are decoded
+        alertOff: 0.85,      // alert OFF once >=85% are decoded again (hysteresis)
+        minReceivedFrames: 10, // skip intervals with fewer received frames (low-fps noise guard)
     },
     durationOfCollectingStatsThreshold: {
         lowWatermark: 5000,
@@ -1080,7 +1085,7 @@ The library ships seven detectors. Each one raises its own stateful issue with a
 |---|---|---|---|---|
 | `audio-desync` | Audio sample-correction fraction crosses the on-threshold | Correction fraction falls below the off-threshold | `'audio-desync-track'` | `AudioDesyncIssuePayload` |
 | `congestion` | Per-PC bandwidth limitation + sensitivity-specific corroborator | Bandwidth limitation clears | `'congestion'` | `CongestionIssuePayload` |
-| `cpulimitation` | CPU-tagged outbound RTP / stats-collection slowness / FPS volatility | Indicators normalize | `'cpulimitation'` | `CpuPerformanceIssuePayload` |
+| `cpulimitation` | CPU-tagged outbound RTP / stats-collection slowness / low inbound decoded-to-received frames ratio | Indicators normalize | `'cpulimitation'` | `CpuPerformanceIssuePayload` |
 | `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
 | `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
 | `freezed-video-track` | `freezeCount` increases | No new freezes for one tick | `'freezed-video-track'` | `FreezedVideoTrackIssuePayload` |
@@ -2107,9 +2112,10 @@ const monitor = new ClientMonitor({
 
     // Strict CPU monitoring
     cpuPerformanceDetector: {
-        fpsVolatilityThresholds: {
-            lowWatermark: 0.05,
-            highWatermark: 0.2,
+        incomingDecodedFramesRatioThresholds: {
+            alertOn: 0.85,
+            alertOff: 0.95,
+            minReceivedFrames: 5,
         },
         durationOfCollectingStatsThreshold: {
             lowWatermark: 3000,
