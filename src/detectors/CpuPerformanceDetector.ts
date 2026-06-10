@@ -46,7 +46,8 @@ export type CpuPerformanceIssuePayload = {
  * **Behavior:**
  * - Uses hysteresis to prevent alert flapping
  * - Monitors multiple CPU performance indicators simultaneously
- * - Only considers inbound tracks with sufficient FPS (>= 10) for volatility analysis
+ * - Only considers inbound video tracks with enough received frames in the
+ *   interval (>= `minReceivedFrames`) for the decoded/received ratio analysis
  * - Automatically clears alert when conditions improve
  */
 export class CpuPerformanceDetector {

@@ -14,6 +14,9 @@ jobs:
               with:
                   node-version: 18
                   cache: "yarn"
+                  # Writes an .npmrc that authenticates against the public npm
+                  # registry using the NODE_AUTH_TOKEN env var at publish time.
+                  registry-url: "https://registry.npmjs.org"
             - name: Install
               run: yarn install --frozen-lockfile
 
@@ -22,6 +25,19 @@ jobs:
 
             - name: Test
               run: yarn test --detectOpenHandles --forceExit
+
+            - name: Verify npm auth
+              # Fail fast with a clear message instead of npm's misleading
+              # "404 Not Found" that it returns for scoped packages when the
+              # token is missing or lacks publish access.
+              run: |
+                  if [ -z "$NODE_AUTH_TOKEN" ]; then
+                      echo "::error::NPM_TOKEN secret is empty or unset — cannot authenticate to npm."
+                      exit 1
+                  fi
+                  npm whoami
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
             - name: Setup Custom Contexts
               shell: bash
@@ -35,22 +51,15 @@ jobs:
               if: steps.job_context.outputs.branch != 'master'
               run: |
                   npm version prerelease --preid=${{ steps.job_context.outputs.short_sha }} --git-tag-version false
-              working-directory: ${{env.working-directory}}
 
             - name: Publish package to latest
               if: steps.job_context.outputs.branch == 'master'
-              working-directory: ${{env.working-directory}}
-              run: |
-                  npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
-                  npm publish --ignore-scripts --access public
+              run: npm publish --ignore-scripts --access public
               env:
-                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
             - name: Publish package to branch-tag
               if: steps.job_context.outputs.branch != 'master'
-              working-directory: ${{env.working-directory}}
-              run: |
-                  npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
-                  npm publish --ignore-scripts --access public  --tag $(echo "develop-${{ steps.job_context.outputs.version }}-rc" | sed 's/[.]//g')
+              run: npm publish --ignore-scripts --access public --tag $(echo "develop-${{ steps.job_context.outputs.version }}-rc" | sed 's/[.]//g')
               env:
-                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
