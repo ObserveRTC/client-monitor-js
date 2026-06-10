@@ -27,6 +27,18 @@ jobs:
             - name: Upgrade npm
               run: npm install -g npm@latest
 
+            - name: Diagnostics
+              # npm OIDC trusted publishing needs npm >= 11.5.1 and an OIDC
+              # token request URL (present only when id-token: write is granted).
+              run: |
+                  echo "node: $(node --version)"
+                  echo "npm:  $(npm --version)"
+                  if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+                      echo "OIDC: available"
+                  else
+                      echo "::warning::OIDC token URL not present — id-token permission missing or OIDC unavailable."
+                  fi
+
             - name: Install
               run: yarn install --frozen-lockfile
 
