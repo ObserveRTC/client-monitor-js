@@ -185,7 +185,7 @@ export class CongestionDetector implements Detector {
 			availableOutgoingBitrate,
 			maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
 			maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
-			maxReceivingBitrate: this._maxSendingBitrate,
+			maxReceivingBitrate: this._maxReceivingBitrate,
 			maxSendingBitrate: this._maxSendingBitrate,
 		});
 

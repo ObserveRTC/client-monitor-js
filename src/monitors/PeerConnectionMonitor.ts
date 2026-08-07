@@ -211,13 +211,17 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		this.emit('stats', stats);
 
-		this.accept(stats);
+		this._acceptAdaptedStats(stats);
 
 		return stats;
 	}
 
 
 	public accept(stats: W3C.RtcStats[]) {
+		this._acceptAdaptedStats(this.statsAdapters.adapt(stats));
+	}
+
+	private _acceptAdaptedStats(stats: W3C.RtcStats[]) {
 		let sumOfRttInS =  0;
 		let rttMeasurementsCounter = 0;
 		this.deltaVideoBytesSent = 0;
@@ -228,6 +232,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.deltaDataChannelBytesSent = 0;
 		this.deltaOutboundPacketsLost = 0;
 		this.deltaOutboundPacketsReceived = 0;
+		this.deltaOutboundPacketsSent = 0;
 		this.deltaInboundPacketsLost = 0;
 		this.deltaInboundPacketsReceived = 0;
 
@@ -239,8 +244,6 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.inboundFractionalLost = 0;
 		this.totalAvailableIncomingBitrate = 0;
 		this.totalAvailableOutgoingBitrate = 0;
-
-		stats = this.statsAdapters.adapt(stats);
 
 		for (let i = 0, input = stats; i < 2 && 0 < input.length; ++i) {
 
@@ -366,8 +369,17 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
 
 		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
-		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.relayProtocol) &&
-			selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.url?.startsWith('turn'));
+		// A selected pair goes through TURN when its *local* candidate is a relay candidate
+		// (relay candidates are only obtained from TURN servers). `relayProtocol` is kept as a
+		// compatibility fallback for stats that omit `candidateType`; both signals must be read
+		// from the same pair. Note: `url?.startsWith('turn')` alone is not a valid TURN signal,
+		// because srflx candidates discovered through a TURN server's STUN function also carry
+		// a `turn:` url.
+		this.usingTURN = selectedIceCandidatePairs.some(pair => {
+			const localCandidate = pair.getLocalCandidate();
+
+			return localCandidate?.candidateType === 'relay' || localCandidate?.relayProtocol !== undefined;
+		});
 		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
 
 		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;

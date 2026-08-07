@@ -281,7 +281,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     public async collect(): Promise<[string, RTCStats[]][]> {
-        if (this.closed) this.logger.warn(`[${MODULE_NAME}]:`, 'ClientMonitor is closed, cannot collet stats');
+        if (this.closed) {
+            this.logger.warn(`[${MODULE_NAME}]:`, 'ClientMonitor is closed, cannot collect stats');
+
+            return [];
+        }
 
         this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
@@ -312,7 +316,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.receivingVideoBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.receivingVideoBitrate ?? 0), 0);
         this.totalAvailableIncomingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableIncomingBitrate ?? 0), 0);
         this.totalAvailableOutgoingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableOutgoingBitrate ?? 0), 0);
-        this.avgRttInSec = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length;
+        // guard against division by zero (no peer connections yet) producing NaN
+        this.avgRttInSec = 0 < this.peerConnections.length
+            ? this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length
+            : -1;
         this.durationOfCollectingStatsInMs = Date.now() - this.lastCollectingStatsAt;
 
         this.tracks.forEach(track => track.update());

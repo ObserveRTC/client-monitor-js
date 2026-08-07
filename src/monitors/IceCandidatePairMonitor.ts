@@ -33,13 +33,13 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	public deltaPacketsReceived?: number | undefined;
 	public deltaBytesSent?: number | undefined;
 	public deltaBytesReceived?: number | undefined;
-	
+
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
 	 */
 	attachments?: Record<string, unknown> | undefined;
 	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
+	 * Additional data attached to this stats, will not be shipped to the server,
 	 * but can be used by the application
 	 */
 	public appData?: Record<string, unknown> | undefined;
@@ -56,7 +56,7 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
@@ -66,7 +66,7 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
 
@@ -75,16 +75,16 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		this.deltaPacketsReceived = 0;
 		this.deltaPacketsSent = 0;
 
-		if (this.packetsSent !== undefined && stats.packetsSent !== undefined) {
+		if (this.packetsSent !== undefined && stats.packetsSent !== undefined && this.packetsSent <= stats.packetsSent) {
 			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
 		}
-		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
+		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined && this.packetsReceived <= stats.packetsReceived) {
 			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
 		}
-		if (this.bytesSent !== undefined && stats.bytesSent !== undefined) {
+		if (this.bytesSent !== undefined && stats.bytesSent !== undefined && this.bytesSent <= stats.bytesSent) {
 			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 		}
-		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
+		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined && this.bytesReceived <= stats.bytesReceived) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
 
