@@ -1,4 +1,5 @@
 import { MediaPlayoutMonitor } from "../monitors/MediaPlayoutMonitor";
+import { ClientEventTypes } from "../schema/ClientEventTypes";
 import { Detector } from "./Detector";
 
 /**
@@ -92,7 +93,7 @@ export class SynthesizedSamplesDetector implements Detector {
 
         if (this.config.createEvent) {
             clientMonitor.addEvent({
-                type: 'EXCESSIVE_SYNTHESIZED_AUDIO',
+                type: ClientEventTypes.EXCESSIVE_SYNTHESIZED_AUDIO,
                 payload: {
                     // trackId: this.mediaPlayout.
                     deltaSynthesizedSamplesDuration: this.mediaPlayout.deltaSynthesizedSamplesDuration,

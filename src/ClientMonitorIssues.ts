@@ -5,6 +5,12 @@ import { CpuPerformanceIssuePayload } from "./detectors/CpuPerformanceDetector";
 import { DryInboundTrackIssuePayload } from "./detectors/DryInboundTrackDetector";
 import { DryOutboundTrackIssuePayload } from "./detectors/DryOutboundTrackDetector";
 import { FreezedVideoTrackIssuePayload } from "./detectors/FreezedVideoTrackDetector";
+import {
+    IceConnectionFailedIssuePayload,
+    IceDisconnectedIssuePayload,
+    IceTransportStalledIssuePayload,
+    UnstableIcePathIssuePayload,
+} from "./detectors/IceConnectivityDetector";
 import { PlayoutDiscrepancyIssuePayload } from "./detectors/PlayoutDiscrepancyDetector";
 
 /**
@@ -39,7 +45,11 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<DryInboundTrackIssuePayload>    & { type: 'dry-inbound-track' }
     | RaisedClientIssue<DryOutboundTrackIssuePayload>   & { type: 'dry-outbound-track' }
     | RaisedClientIssue<FreezedVideoTrackIssuePayload>  & { type: 'freezed-video-track' }
-    | RaisedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' };
+    | RaisedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' }
+    | RaisedClientIssue<UnstableIcePathIssuePayload>       & { type: 'unstable-ice-path' }
+    | RaisedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
+    | RaisedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
+    | RaisedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -55,7 +65,11 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<DryInboundTrackIssuePayload>    & { type: 'dry-inbound-track' }
     | ResolvedClientIssue<DryOutboundTrackIssuePayload>   & { type: 'dry-outbound-track' }
     | ResolvedClientIssue<FreezedVideoTrackIssuePayload>  & { type: 'freezed-video-track' }
-    | ResolvedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' };
+    | ResolvedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' }
+    | ResolvedClientIssue<UnstableIcePathIssuePayload>       & { type: 'unstable-ice-path' }
+    | ResolvedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
+    | ResolvedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
+    | ResolvedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -76,6 +90,10 @@ export function isClientMonitorIssue(
         case 'dry-outbound-track':
         case 'freezed-video-track':
         case 'inbound-video-playout-discrepancy':
+        case 'unstable-ice-path':
+        case 'ice-disconnected':
+        case 'ice-connection-failed':
+        case 'ice-transport-stalled':
             return true;
         default:
             return false;

@@ -22,8 +22,10 @@ import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
+import { IceConnectivityDetector } from "../detectors/IceConnectivityDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
+import { SelectedIcePath } from "./SelectedIcePath";
 import {
 	CertificateStats,
 	CodecStats,
@@ -66,6 +68,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public readonly mappedIceCandidateMonitors = new Map<string, IceCandidateMonitor>();
 	public readonly mappedIceCandidatePairMonitors = new Map<string, IceCandidatePairMonitor>();
 	public readonly mappedCertificateMonitors = new Map<string, CertificateMonitor>();
+	/** Live selected ICE paths, keyed by ICE transport (see `SelectedIcePath`). */
+	public readonly mappedSelectedIcePaths = new Map<string, SelectedIcePath>();
 
 	// tracks that are detected at peer connection level, but not yet picked up by stats
 	private readonly _pendingMediaStreamTracks = new Map<string, {
@@ -160,6 +164,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			this.detectors.add(new CongestionDetector(this));
 		}
 		this.detectors.add(new IceTupleChangeDetector(this));
+		if (parent.config.iceConnectivityDetector !== null) {
+			this.detectors.add(new IceConnectivityDetector(this));
+		}
 	}
 
 	public get score() {
@@ -368,18 +375,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
 
-		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
-		// A selected pair goes through TURN when its *local* candidate is a relay candidate
-		// (relay candidates are only obtained from TURN servers). `relayProtocol` is kept as a
-		// compatibility fallback for stats that omit `candidateType`; both signals must be read
-		// from the same pair. Note: `url?.startsWith('turn')` alone is not a valid TURN signal,
-		// because srflx candidates discovered through a TURN server's STUN function also carry
-		// a `turn:` url.
-		this.usingTURN = selectedIceCandidatePairs.some(pair => {
-			const localCandidate = pair.getLocalCandidate();
+		this._updateSelectedIcePaths(selectedIceCandidatePairs);
 
-			return localCandidate?.candidateType === 'relay' || localCandidate?.relayProtocol !== undefined;
-		});
+		// Each flag is decided per candidate pair, so a TURN verdict can never be
+		// assembled from signals belonging to two different candidates.
+		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.usingTcp);
+		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.usingTurn);
 		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
 
 		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
@@ -503,6 +504,26 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		return [ ...this.mappedCertificateMonitors.values() ];
 	}
 
+	public get selectedIcePaths() {
+		return [ ...this.mappedSelectedIcePaths.values() ];
+	}
+
+	/**
+	 * The selected ICE path of this peer connection, or `undefined` before ICE
+	 * selects one.
+	 *
+	 * With BUNDLE negotiated — the normal case, and always the case for
+	 * mediasoup transports — a peer connection has exactly one ICE transport and
+	 * therefore exactly one path, so this is the accessor to reach for. Read
+	 * `selectedIcePaths` when you must handle a connection whose m-lines were
+	 * not bundled and can sit on different paths.
+	 */
+	public get selectedIcePath(): SelectedIcePath | undefined {
+		for (const selectedIcePath of this.mappedSelectedIcePaths.values()) return selectedIcePath;
+
+		return undefined;
+	}
+
 	public get selectedIceCandidatePairs() {
 		return this.iceTransports.map(iceTransport => iceTransport.getSelectedCandidatePair())
 		.filter(pair => pair !== undefined) as IceCandidatePairMonitor[];
@@ -524,6 +545,47 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	public get connectionState() {
 		return this._connectionState;
+	}
+
+	/**
+	 * Keeps one live `SelectedIcePath` per ICE transport that has a selected
+	 * candidate pair: creates paths as transports select one, feeds the current
+	 * pair to existing ones, and closes paths whose transport is gone.
+	 */
+	private _updateSelectedIcePaths(selectedIceCandidatePairs: IceCandidatePairMonitor[]) {
+		const seenKeys = new Set<string>();
+
+		for (const pair of selectedIceCandidatePairs) {
+			const key = pair.pathKey;
+
+			seenKeys.add(key);
+
+			const existingPath = this.mappedSelectedIcePaths.get(key);
+
+			if (existingPath) {
+				existingPath.update(pair);
+				continue;
+			}
+
+			const selectedIcePath = new SelectedIcePath(key, pair, this);
+
+			this.mappedSelectedIcePaths.set(key, selectedIcePath);
+
+			this.parent.emit('new-selected-ice-path', {
+				clientMonitor: this.parent,
+				peerConnectionMonitor: this,
+				selectedIcePath,
+			});
+
+			selectedIcePath.notifyInitialSelection();
+		}
+
+		for (const [ key, selectedIcePath ] of [ ...this.mappedSelectedIcePaths.entries() ]) {
+			if (seenKeys.has(key)) continue;
+
+			this.mappedSelectedIcePaths.delete(key);
+			selectedIcePath.close();
+		}
 	}
 
 	private _checkVisited() {
@@ -599,6 +661,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public close() {
 		if (this.closed) return;
 		this.closed = true;
+
+		this.mappedSelectedIcePaths.forEach(selectedIcePath => selectedIcePath.close());
+		this.mappedSelectedIcePaths.clear();
 
 		// this will clear up everything since the second time
 		// the visited will be false, hence will delete the monitors

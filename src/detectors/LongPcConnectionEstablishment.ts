@@ -1,3 +1,4 @@
+import { ClientEventTypes } from "../schema/ClientEventTypes";
 import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 
@@ -54,9 +55,12 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 	public update(): void {
 		if (this.disabled) return;
 		if (this.peerConnection.connectionState !== 'connecting') {
-			if (this._evented && this.peerConnection.connectionState === 'connected') {
-				return (this._evented = false, void 0)
-			}
+			// Rearm on *any* exit from `connecting`, not just a successful one.
+			// A connection that failed and is retrying is more interesting than
+			// the first attempt, so resetting only on `connected` would silence
+			// every establishment after the first failure.
+			this._evented = false;
+
 			return;
 		}
 		if (this._evented) return;
@@ -76,7 +80,7 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 
 		if (this.config.createEvent) {
 			clientMonitor.addEvent({
-				type: 'LONG_PC_CONNECTION_ESTABLISHMENT',
+				type: ClientEventTypes.LONG_PC_CONNECTION_ESTABLISHMENT,
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,
 					duration,

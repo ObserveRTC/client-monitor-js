@@ -41,6 +41,10 @@ export type {
     DryInboundTrackEventPayload,
     DryOutboundTrackEventPayload,
     IceTupleChangedEventPayload,
+    IcePathChangedEventPayload,
+    NewSelectedIcePathEventPayload,
+    IceRestartEventPayload,
+    IceRestartRecommendedEventPayload,
     TooLongPcConnectionEstablishmentEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
@@ -84,6 +88,25 @@ export type { DryInboundTrackIssuePayload } from './detectors/DryInboundTrackDet
 export type { DryOutboundTrackIssuePayload } from './detectors/DryOutboundTrackDetector';
 export type { FreezedVideoTrackIssuePayload } from './detectors/FreezedVideoTrackDetector';
 export type { PlayoutDiscrepancyIssuePayload } from './detectors/PlayoutDiscrepancyDetector';
+export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
+export type {
+    IceRestartOutcome,
+    IceRestartClientEventPayload,
+    IceRestartRecommendationReason,
+    IceDisconnectedIssuePayload,
+    IceConnectionFailedIssuePayload,
+    IceTransportStalledIssuePayload,
+    UnstableIcePathIssuePayload,
+} from './detectors/IceConnectivityDetector';
+export { SelectedIcePath } from './monitors/SelectedIcePath';
+export type {
+    IcePathTransition,
+    IcePathEvidence,
+    IcePathDurations,
+    SelectedIcePathEvents,
+} from './monitors/SelectedIcePath';
+export type { IcePathKind } from './monitors/IceCandidatePairMonitor';
+export type { IceRelayProtocol, IceAddressFamily } from './monitors/IceCandidateMonitor';
 export type {
     ScoreCalculator
 } from './scores/ScoreCalculator';

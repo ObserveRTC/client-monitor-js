@@ -232,6 +232,15 @@ const monitor = new ClientMonitor({
     longPcConnectionEstablishmentDetector: {
         thresholdInMs: 5000,
     },
+    iceConnectivityDetector: {
+        disconnectedThresholdInMs: 5000,   // how long `disconnected` must last before an issue
+        transportStallThresholdInMs: 5000, // sending but receiving nothing for this long
+        pathSwitchWindowInMs: 30000,       // window for counting selected-path switches
+        pathSwitchThreshold: 3,            // switches in that window => unstable path
+        iceRestartRecommendationThresholdInMs: 10000, // before recommending a restart
+        iceRestartRecommendationCooldownInMs: 15000,  // min gap between recommendations
+        createEvent: true,
+    },
 
     // To outright disable a detector at construction time, pass `null`:
     //   freezedVideoDetector: null,
@@ -483,6 +492,74 @@ Detects slow peer connection establishment.
 longPcConnectionEstablishmentDetector: {
     thresholdInMs: 5000,
 }
+```
+
+#### IceConnectivityDetector
+
+Runtime ICE and transport health, per ICE transport. Peer-connection setup latency
+is **not** in scope — `LongPcConnectionEstablishmentDetector` covers that.
+
+**Raises:**
+
+-   `ice-disconnected` — the transport stayed `disconnected` past
+    `disconnectedThresholdInMs`. Transient blips, which ICE usually heals on its
+    own, never raise an issue.
+-   `ice-connection-failed` — ICE reached `failed`, which is terminal for that
+    generation.
+-   `ice-transport-stalled` — deliberately narrow: raised only while this endpoint
+    is still **sending** on a succeeded pair of a connected transport but receives
+    nothing, and only after inbound traffic had previously been observed. "No
+    traffic in either direction" is *not* reported, because at peer-connection
+    level it cannot be told apart from a legitimately idle or paused connection.
+-   `unstable-ice-path` — the selected path switched `pathSwitchThreshold` times
+    within `pathSwitchWindowInMs`.
+
+**Emits:**
+
+-   `'ice-restart-recommended'` — see below.
+-   `'ice-restart'` — a new ICE generation was inferred from a changed ICE
+    username fragment, with `outcome` of `'detected'`, `'recovered'` or
+    `'failed'`. A `connected → checking` transition alone is never treated as a
+    restart.
+
+##### Recommending an ICE restart
+
+The library detects **when** a restart is warranted; performing it stays with the
+application. Only the application knows whether renegotiation is safe right now,
+whether signalling is up, and whether it would rather tear the call down — so the
+detector names the moment and gets out of the way.
+
+A recommendation fires when ICE reaches `failed` (immediately — it never
+self-heals), or when `disconnected`, an inbound stall, or an unfinished
+establishment outlasts `iceRestartRecommendationThresholdInMs`. The `reason`
+tells you which:
+
+| `reason` | Meaning |
+|---|---|
+| `ice-failed` | ICE gave up on this generation. |
+| `ice-disconnected` | `disconnected` outlasted the window in which ICE usually self-heals. |
+| `transport-stalled` | ICE still reports connected, but the selected path stopped delivering. |
+| `never-established` | The peer connection never finished connecting. Tracked from `connectionState`, which covers the DTLS handshake too — a connection can sit in `connecting` while every ICE transport reports `connected`. |
+
+`LongPcConnectionEstablishmentDetector` reports that setup is *slow* at its own
+(shorter) threshold; the `never-established` recommendation says it is not going
+to happen on its own. The two thresholds form an escalation, not a duplicate
+report. While a restart the application already started is in flight, the
+detector stays quiet. Repeat recommendations are spaced
+by `iceRestartRecommendationCooldownInMs`, and each carries a
+`recommendationCount` and the current `iceGeneration` so you can back off after
+repeated failed attempts.
+
+```typescript
+monitor.on('ice-restart-recommended', ({ peerConnectionMonitor, reason, recommendationCount }) => {
+    if (3 <= recommendationCount) return rejoinTheCall();   // restarts are not helping
+
+    // your application decides — the library never restarts ICE itself
+    myRtcPeerConnection.restartIce();
+    // or, with mediasoup: ask the server for new ICE parameters and
+    // transport.restartIce({ iceParameters })
+    console.warn(`ICE restart recommended (${reason})`, peerConnectionMonitor.peerConnectionId);
+});
 ```
 
 ### Custom Detectors
@@ -1079,7 +1156,7 @@ readonly activeIssues: Map<string, RaisedClientIssue>;
 
 ### The built-in detector issues
 
-The library ships seven detectors. Each one raises its own stateful issue with a typed payload, emits a detector-specific named event on entry, and resolves the issue when the condition clears — enriching the resolved payload with `durationInMs`.
+The library ships eight detectors. Each one raises its own stateful issue with a typed payload, emits a detector-specific named event on entry, and resolves the issue when the condition clears — enriching the resolved payload with `durationInMs`.
 
 | `type` | Raised when | Resolved when | Detector-specific event | Payload shape |
 |---|---|---|---|---|
@@ -1090,6 +1167,10 @@ The library ships seven detectors. Each one raises its own stateful issue with a
 | `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
 | `freezed-video-track` | `freezeCount` increases | No new freezes for one tick | `'freezed-video-track'` | `FreezedVideoTrackIssuePayload` |
 | `inbound-video-playout-discrepancy` | `framesReceived - framesRendered > highSkewThreshold` | Skew drops below `lowSkewThreshold` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
+| `ice-disconnected` | An ICE transport stayed `disconnected` past `disconnectedThresholdInMs` | ICE reconnects, or the transport goes away | — | `IceDisconnectedIssuePayload` |
+| `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
+| `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, but receiving nothing for `transportStallThresholdInMs` | Inbound traffic resumes | — | `IceTransportStalledIssuePayload` |
+| `unstable-ice-path` | `pathSwitchThreshold` selected-path switches within `pathSwitchWindowInMs` | The window drains | — | `UnstableIcePathIssuePayload` |
 
 The per-detector payload types are exported from the package root. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
 
@@ -1401,6 +1482,13 @@ monitor.on('dry-inbound-track',                   (e) => { /* … */ });
 monitor.on('dry-outbound-track',                  (e) => { /* … */ });
 monitor.on('inbound-video-playout-discrepancy',   (e) => { /* … */ });
 
+// ICE connectivity.
+monitor.on('ice-path-changed',      (e) => { /* selected path changed: direct <-> TURN, protocol, server */ });
+monitor.on('ice-restart',           (e) => { /* a new ICE generation was inferred */ });
+monitor.on('ice-restart-recommended', (e) => { /* YOUR app decides whether to restartIce() */ });
+monitor.on('ice-tuple-changed',     (e) => { /* low-level: the selected tuple set changed */ });
+monitor.on('new-selected-ice-path', (e) => { /* an ICE transport selected its first path */ });
+
 // Score & stats lifecycle.
 monitor.on('score',          ({ clientScore, currentReasons }) => { /* … */ });
 monitor.on('stats-collected', ({ durationOfCollectingStatsInMs, collectedStats }) => { /* … */ });
@@ -1511,6 +1599,31 @@ ICE candidate pair with derived metrics:
 -   `availableIncomingBitrate`: Calculated available bandwidth
 -   `availableOutgoingBitrate`: Calculated available bandwidth
 
+**Path helpers** — every one is read from the pair's **own local candidate**, so a
+TURN verdict can never be assembled from signals belonging to two different
+candidates:
+
+-   `usingTurn`: the local candidate is a relay candidate. A `turn:` url alone is
+    *not* a TURN signal — a srflx candidate discovered through a TURN server's
+    STUN function carries one too.
+-   `usingTcp`: the local candidate's ICE transport protocol is TCP. Note a relay
+    reached over TURN/TCP or TURN/TLS commonly still reports `protocol: 'udp'` —
+    read `relayProtocol` for the TURN leg.
+-   `relayProtocol`: `'udp'`, `'tcp'` or `'tls'`, when exposed.
+-   `pathKind`: `'direct'`, `'turn-udp'`, `'turn-tcp'`, `'turn-tls'`, or
+    `'turn-unknown'` (a relay whose `relayProtocol` the browser hides).
+-   `turnUrl` / `turnServer`: the ICE server, and its identity without the query
+    part so the same server over UDP and TCP resolves to one value.
+-   `tuple`: `localAddress:localPort:remoteAddress:remotePort:protocol`.
+-   `pathKey`: identity of the path this pair belongs to — the transport id,
+    falling back to the local candidate's, then to one constant per peer
+    connection. Never the pair id, so a path survives a pair switch.
+
+#### IceCandidateMonitor
+
+Adds `isRelay`, `turnTransport` (normalized `relayProtocol`), `turnServer` and
+`addressFamily` (`'ipv4'` / `'ipv6'`, `undefined` behind an mDNS name).
+
 #### IceTransportMonitor
 
 ICE transport layer monitoring:
@@ -1519,6 +1632,45 @@ ICE transport layer monitoring:
 
 -   `selectedCandidatePair`: Currently selected candidate pair
 -   All standard ICE transport fields
+
+#### SelectedIcePath
+
+The live selected path of one ICE transport, reachable as
+`peerConnectionMonitor.selectedIcePath` (the single path — with BUNDLE
+negotiated, which is the normal case and always the case for mediasoup
+transports, a peer connection has exactly one) or `selectedIcePaths` (all of
+them, for a connection whose m-lines were not bundled and can sit on different
+paths).
+
+It holds **no copies** of candidate data: `kind`, `usingTurn`, `relayProtocol`,
+`turnServer`, `tuple`, addresses, ports and address families are getters reading
+through the linked pair and its candidates, alongside `pair`, `localCandidate`,
+`remoteCandidate` and `iceTransport`. It follows the pair it is updated with, so
+it can never disagree with the stats.
+
+What it owns is what those monitors cannot express:
+
+-   **Transitions.** It compares the selected pair between ticks and emits
+    `'ice-path-changed'` with `transition` of `'initial-selection'`,
+    `'direct-to-relay'`, `'relay-to-direct'`, `'relay-protocol-changed'`,
+    `'turn-server-changed'` or `'path-changed'`, plus `from` / `to` evidence.
+-   **TURN usage facts.** `durations` per path kind, `relayDurationInMs`,
+    `timeToFirstRelayInMs`, the switch counters, and relay-vs-total bytes and
+    packets with `relayBytesRatio`. These are measurements, not verdicts — the
+    client does not judge whether TURN usage was appropriate.
+
+```typescript
+monitor.on('ice-path-changed', ({ selectedIcePath, transition, from, to }) => {
+    console.log(`${transition}: ${from?.kind ?? 'none'} -> ${to.kind}`);
+    console.log('relay share of traffic so far:', selectedIcePath.relayBytesRatio);
+});
+```
+
+These accumulators are deliberately **not** part of the client sample. The sample
+already carries `iceTransports`, `iceCandidatePairs` and `iceCandidates`, so a
+server can resolve the selected pair and derive the same facts itself, and the
+sub-sample transitions it would otherwise miss arrive as
+`PEER_CONNECTION_ICE_PATH_CHANGED` client events.
 
 ### appData and attachments
 

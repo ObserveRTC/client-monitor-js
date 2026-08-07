@@ -23,6 +23,13 @@ export enum ClientEventTypes {
 	// ICE_CONNECTION_STATE_CHANGE = 'ICE_CONNECTION_STATE_CHANGE',
 	ICE_CANDIDATE = 'ICE_CANDIDATE',
 	ICE_CANDIDATE_ERROR = 'ICE_CANDIDATE_ERROR',
+
+	// events raised by the built-in detectors and monitors
+	PEER_CONNECTION_ICE_PATH_CHANGED = 'PEER_CONNECTION_ICE_PATH_CHANGED',
+	ICE_RESTART = 'ICE_RESTART',
+	ICE_RESTART_RECOMMENDED = 'ICE_RESTART_RECOMMENDED',
+	LONG_PC_CONNECTION_ESTABLISHMENT = 'LONG_PC_CONNECTION_ESTABLISHMENT',
+	EXCESSIVE_SYNTHESIZED_AUDIO = 'EXCESSIVE_SYNTHESIZED_AUDIO',
 	
 	// mediasoup events
 	PRODUCER_ADDED = 'PRODUCER_ADDED',
@@ -259,4 +266,49 @@ export interface DataConsumerClosedEventPayload extends Record<string, unknown> 
 	peerConnectionId: string;
 	dataProducerId: string;
 	dataConsumerId: string;
+}
+
+export interface PeerConnectionIcePathChangedEventPayload extends Record<string, unknown> {
+	peerConnectionId: string;
+	/** Why the path changed: 'initial-selection', 'direct-to-relay', ... */
+	transition: string;
+	/** The previous path. Absent for the first path observed on a transport. */
+	from?: Record<string, unknown>;
+	/** The path that is selected now. */
+	to: Record<string, unknown>;
+}
+
+export interface IceRestartEventPayload extends Record<string, unknown> {
+	peerConnectionId: string;
+	transportId: string;
+	iceGeneration: number;
+	/** 'detected', 'recovered' or 'failed'. */
+	outcome: string;
+	iceState?: string;
+	/** How the new ICE generation was inferred. */
+	evidence: string;
+	timestamp: number;
+}
+
+export interface LongPcConnectionEstablishmentEventPayload extends Record<string, unknown> {
+	peerConnectionId: string;
+	duration: number;
+}
+
+export interface ExcessiveSynthesizedAudioEventPayload extends Record<string, unknown> {
+	deltaSynthesizedSamplesDuration?: number;
+}
+
+export interface IceRestartRecommendedEventPayload extends Record<string, unknown> {
+	peerConnectionId: string;
+	/** Absent for a `never-established` recommendation, which is not per transport. */
+	transportId?: string;
+	/** 'ice-failed', 'ice-disconnected' or 'transport-stalled'. */
+	reason: string;
+	conditionDurationInMs: number;
+	iceGeneration: number;
+	recommendationCount: number;
+	iceState?: string;
+	dtlsState?: string;
+	selectedCandidatePairId?: string;
 }

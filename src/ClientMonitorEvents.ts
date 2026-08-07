@@ -17,6 +17,8 @@ import { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
 import { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 import { ClientSample } from "./schema/ClientSample"
 import { RtcStats } from "./schema/W3cStatsIdentifiers";
+import { IcePathEvidence, IcePathTransition, SelectedIcePath } from "./monitors/SelectedIcePath";
+import { IceRestartOutcome, IceRestartRecommendedEventPayload as IceRestartRecommendationPayload } from "./detectors/IceConnectivityDetector";
 
 export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
 
@@ -136,6 +138,31 @@ export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
 }
 
+export type IcePathChangedEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	selectedIcePath: SelectedIcePath,
+	transition: IcePathTransition,
+	/** Absent for the first path observed on a transport. */
+	from?: IcePathEvidence,
+	to: IcePathEvidence,
+}
+
+export type NewSelectedIcePathEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	selectedIcePath: SelectedIcePath,
+}
+
+export type IceRestartRecommendedEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& IceRestartRecommendationPayload;
+
+export type IceRestartEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	transportId: string,
+	iceGeneration: number,
+	outcome: IceRestartOutcome,
+}
+
 export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 }
@@ -236,9 +263,11 @@ export type ClientMonitorEvents = {
 	'dry-inbound-track': [DryInboundTrackEventPayload],
 	'dry-outbound-track': [DryOutboundTrackEventPayload],
 	'ice-tuple-changed': [IceTupleChangedEventPayload],
+	'ice-path-changed': [IcePathChangedEventPayload],
 	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload],
 	'inbound-video-playout-discrepancy': [InboundVideoPlayoutDiscrepancyEventPayload],
-	// 'ice-restart': [peerConnectionMonitor: PeerConnectionMonitor],
+	'ice-restart': [IceRestartEventPayload],
+	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
 	'score': [ScoreEventPayload],
 
 	// for appData
@@ -258,4 +287,5 @@ export type ClientMonitorEvents = {
 	'new-remote-inbound-rtp-monitor': [NewRemoteInboundRtpMonitorEventPayload],
 	'new-remote-outbound-rtp-monitor': [NewRemoteOutboundRtpMonitorEventPayload],
 	'new-certificate-monitor': [NewCertificateMonitorEventPayload],
+	'new-selected-ice-path': [NewSelectedIcePathEventPayload],
 }

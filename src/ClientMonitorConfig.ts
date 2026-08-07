@@ -219,6 +219,67 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     } | null;
 
     /**
+     * Configuration for runtime ICE connectivity health (persistent
+     * disconnection, ICE failure, inbound transport stall, inferred ICE
+     * restarts). Peer-connection setup latency is covered by
+     * `longPcConnectionEstablishmentDetector` instead.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    iceConnectivityDetector: {
+        /**
+         * How long (in milliseconds) an ICE transport must stay `disconnected`
+         * before an issue is raised. Transient disconnections below this
+         * threshold are ignored, since they are common and self-healing.
+         */
+        disconnectedThresholdInMs: number;
+
+        /**
+         * How long (in milliseconds) a connected transport may keep sending
+         * without receiving anything before an inbound stall is reported.
+         */
+        transportStallThresholdInMs: number;
+
+        /**
+         * Flag to indicate if the detector should create `ICE_RESTART` client
+         * events (buffered into the sample) in addition to emitting the
+         * `ice-restart` monitor event.
+         *
+         * DEFAULT: true
+         */
+        createEvent?: boolean;
+
+        /**
+         * The sliding window (in milliseconds) over which selected-path
+         * switches are counted for the `unstable-ice-path` issue.
+         */
+        pathSwitchWindowInMs: number;
+
+        /**
+         * How many selected-path switches inside `pathSwitchWindowInMs` are
+         * needed before the path is considered unstable.
+         */
+        pathSwitchThreshold: number;
+
+        /**
+         * How long (in milliseconds) a `disconnected` or stalled transport must
+         * persist before an ICE restart is recommended. ICE `failed` recommends
+         * immediately, since it never self-heals.
+         *
+         * Performing the restart is the application's responsibility — the
+         * library only reports that one is warranted.
+         */
+        iceRestartRecommendationThresholdInMs: number;
+
+        /**
+         * Minimum time (in milliseconds) between repeated restart
+         * recommendations for the same ICE transport, so a persisting condition
+         * does not produce one recommendation per stats tick.
+         */
+        iceRestartRecommendationCooldownInMs: number;
+    } | null;
+
+    /**
      * Additional metadata to be included in the client monitor.
      *
      * OPTIONAL

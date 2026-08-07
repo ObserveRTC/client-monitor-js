@@ -26,6 +26,11 @@ import {
 	ConsumerPausedEventPayload,
 	ConsumerResumedEventPayload,
 	ClientJoinedEventPayload,
+	PeerConnectionIcePathChangedEventPayload,
+	IceRestartEventPayload,
+	IceRestartRecommendedEventPayload,
+	LongPcConnectionEstablishmentEventPayload,
+	ExcessiveSynthesizedAudioEventPayload,
 	ClientLeftEventPayload,
 	IceGatheringStateChangedEventPayload,
 	SignalingStateChangedEventPayload,
@@ -34,6 +39,11 @@ import {
 
 
 export type ClientEventPayloadMap = {
+	[ClientEventTypes.PEER_CONNECTION_ICE_PATH_CHANGED]: PeerConnectionIcePathChangedEventPayload;
+	[ClientEventTypes.ICE_RESTART]: IceRestartEventPayload;
+	[ClientEventTypes.ICE_RESTART_RECOMMENDED]: IceRestartRecommendedEventPayload;
+	[ClientEventTypes.LONG_PC_CONNECTION_ESTABLISHMENT]: LongPcConnectionEstablishmentEventPayload;
+	[ClientEventTypes.EXCESSIVE_SYNTHESIZED_AUDIO]: ExcessiveSynthesizedAudioEventPayload;
 	[ClientEventTypes.CLIENT_JOINED]: ClientJoinedEventPayload;
 	[ClientEventTypes.CLIENT_LEFT]: ClientLeftEventPayload;
 	[ClientEventTypes.PEER_CONNECTION_OPENED]: PeerConnectionOpenedEventPayload;

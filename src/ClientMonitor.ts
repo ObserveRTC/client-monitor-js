@@ -153,6 +153,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 thresholdInMs: 5000,
                 createEvent: true,
             }),
+            iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
+                disconnectedThresholdInMs: 5000,
+                transportStallThresholdInMs: 5000,
+                createEvent: true,
+                pathSwitchWindowInMs: 30000,
+                pathSwitchThreshold: 3,
+                iceRestartRecommendationThresholdInMs: 10000,
+                iceRestartRecommendationCooldownInMs: 15000,
+            }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             appData: monitorConfig.appData ?? {} as AppData,
         }
