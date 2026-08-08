@@ -198,6 +198,251 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
             lowWatermark: number;
             highWatermark: number;
         };
+
+        /**
+         * Share of an interval (`0..1`) an outbound video stream must spend
+         * explicitly CPU-limited, per `qualityLimitationDurations.cpu`, before
+         * that counts as CPU limitation. Corroborates the instantaneous
+         * `qualityLimitationReason`, which flickers.
+         *
+         * Set to `undefined` to skip this check.
+         */
+        encoderCpuLimitationShareThreshold?: number;
+
+        /**
+         * Fraction of the per-frame time budget that encoding one frame may
+         * consume before the encoder counts as CPU-pressured. The budget is
+         * derived from the stream's own frame rate (33ms at 30fps), so this is
+         * portable across frame rates in a way a fixed millisecond value is not.
+         *
+         * Set to `undefined` to skip this check.
+         */
+        encodeTimeBudgetRatio?: number;
+    } | null;
+
+    /**
+     * Configuration for detecting audible audio concealment on inbound audio
+     * tracks — how the audio actually sounded, as opposed to how much of it was
+     * lost in transit.
+     */
+    audioConcealmentDetector: {
+        /** Windowed audible concealment share at which the issue is raised. */
+        onThreshold: number;
+
+        /** Windowed share below which the issue resolves (hysteresis). */
+        offThreshold: number;
+
+        /**
+         * Sliding window over which concealment is accumulated. Concealment is
+         * bursty, so a per-tick threshold would flap.
+         */
+        windowInMs: number;
+
+        /**
+         * Minimum number of samples that must have arrived within the window
+         * before the rate is trusted.
+         */
+        minSamplesInWindow: number;
+    } | null;
+
+    /**
+     * Configuration for detecting jitter buffer stress on inbound audio tracks:
+     * the buffer growing *and* stretching audio at the same time.
+     */
+    jitterBufferStressDetector: {
+        /** Target delay above which the jitter buffer counts as stretched thin. */
+        targetDelayThresholdInMs: number;
+
+        /** Share of samples inserted or removed above which NetEQ counts as working hard. */
+        timeStretchThreshold: number;
+
+        /** Consecutive collections both conditions must hold before raising. */
+        minConsecutiveTicks: number;
+    } | null;
+
+    /**
+     * Configuration for detecting a receive-side decoder that cannot keep up
+     * with frames that demonstrably arrived.
+     */
+    decoderPerformanceDetector: {
+        /**
+         * Fraction of the per-frame time budget decoding may consume before the
+         * decoder counts as overloaded. The budget comes from the stream's own
+         * frame rate.
+         */
+        decodeTimeBudgetRatio: number;
+
+        /** Δ`framesDropped` / Δ`framesReceived` above which frames are being dropped after arrival. */
+        dropRatioThreshold: number;
+
+        /** Frames that must have been received in the interval before judging. */
+        minFramesReceived: number;
+
+        /**
+         * Loss fraction above which the network is the better explanation and
+         * the detector stays silent — the whole point of this detector is to
+         * only blame the client when the frames actually arrived.
+         */
+        quietLossThreshold: number;
+
+        /** Consecutive collections the condition must hold before raising. */
+        minConsecutiveTicks: number;
+    } | null;
+
+    /**
+     * Configuration for the video repair loop: keyframe storms, and repair
+     * requests that go unanswered.
+     */
+    videoRecoveryDetector: {
+        /** Sliding window over which PLI/FIR/keyframe rates are averaged. */
+        windowInMs: number;
+
+        /** PLIs per second above which a keyframe storm is raised. */
+        pliRateAlertOn: number;
+
+        /** PLIs per second below which the storm resolves (hysteresis). */
+        pliRateAlertOff: number;
+
+        /**
+         * How long the picture must stay frozen with keyframes not advancing
+         * before `video-recovery-failed` is raised.
+         */
+        recoveryFailedThresholdInMs: number;
+
+        /**
+         * PLIs that must have been sent during the stall — the issue's claim is
+         * "we asked and nothing came back", so it requires evidence of asking.
+         */
+        recoveryFailedMinPliCount: number;
+    } | null;
+
+    /**
+     * Configuration for separating a slow capture source from a slow encoder on
+     * outbound video tracks.
+     */
+    sourceEncoderBottleneckDetector: {
+        /**
+         * Fraction of the track's configured frame rate the capture source must
+         * fall below to count as starving, when `getSettings().frameRate` is
+         * available.
+         */
+        captureFpsRatioThreshold: number;
+
+        /**
+         * Absolute floor (frames per second) used when the browser does not
+         * report a configured frame rate, and as the "source is healthy" bar
+         * for the encoder check.
+         */
+        minSourceFps: number;
+
+        /** Fraction of the source frame rate the encoder must fall below to count as behind. */
+        encodeFpsRatioThreshold: number;
+
+        /** Fraction of the per-frame budget encoding may consume before counting as too slow. */
+        encodeTimeBudgetRatio: number;
+
+        /** Share of the interval spent CPU-limited above which the encoder counts as bottlenecked. */
+        cpuLimitationShareThreshold: number;
+
+        /** Consecutive collections a condition must hold before raising. */
+        minConsecutiveTicks: number;
+    } | null;
+
+    /**
+     * Configuration for reporting changes in the set of simulcast layers
+     * actually being sent. Observation only — no issue is raised.
+     */
+    simulcastLayerDetector: {
+        /**
+         * Whether to buffer a `SIMULCAST_LAYER_CHANGED` client event into the
+         * sample in addition to emitting the monitor event.
+         *
+         * DEFAULT: true
+         */
+        createEvent?: boolean;
+    } | null;
+
+    /**
+     * Configuration for capture-side failures on outbound tracks: the device
+     * disappearing, being taken by the OS, or producing nothing but silence.
+     */
+    captureFailureDetector: {
+        /**
+         * How long an unmuted, enabled, live microphone must produce silence
+         * before it is reported. Deliberately long: a silent microphone and a
+         * person not speaking are the same measurement, and only duration
+         * separates them.
+         */
+        silenceThresholdInMs: number;
+
+        /** RMS level at or below which the source counts as silent. */
+        silenceRmsThreshold: number;
+
+        /**
+         * Whether to buffer `CAPTURE_TRACK_ENDED` / `CAPTURE_TRACK_MUTED` client
+         * events into the sample.
+         *
+         * DEFAULT: true
+         */
+        createEvent?: boolean;
+    } | null;
+
+    /**
+     * Configuration for reporting codec changes. Observation only — a codec
+     * change is not a fault, but it is the missing column in most aggregate
+     * quality questions.
+     */
+    codecChangeDetector: {
+        /**
+         * Whether to buffer a `CODEC_CHANGED` client event into the sample.
+         *
+         * DEFAULT: true
+         */
+        createEvent?: boolean;
+    } | null;
+
+    /**
+     * Configuration for reporting video resolution changes. Observation only:
+     * the adaptation ladder moving is the system working. On outbound tracks the
+     * event carries `qualityLimitationReason`, which is what separates
+     * adaptation from an application-driven constraint change.
+     */
+    videoResolutionChangeDetector: {
+        /**
+         * Whether to buffer a `VIDEO_RESOLUTION_CHANGED` client event into the
+         * sample.
+         *
+         * DEFAULT: true
+         */
+        createEvent?: boolean;
+    } | null;
+
+    /**
+     * Configuration for reporting gaps in stats collection (backgrounded tab,
+     * sleeping device, blocked main thread). Every rate this library reports
+     * assumes collection happened on schedule; this says when it did not.
+     */
+    statsGapDetector: {
+        /**
+         * Multiple of `collectingPeriodInMs` the actual interval must exceed to
+         * count as a gap.
+         */
+        gapRatioThreshold: number;
+
+        /**
+         * Absolute floor (milliseconds) below which an overrun is treated as
+         * ordinary scheduling jitter, so a short collecting period does not
+         * report a gap on every tick.
+         */
+        minGapInMs: number;
+
+        /**
+         * Whether to buffer a `STATS_COLLECTION_GAP` client event into the
+         * sample.
+         *
+         * DEFAULT: true
+         */
+        createEvent?: boolean;
     } | null;
 
     /**

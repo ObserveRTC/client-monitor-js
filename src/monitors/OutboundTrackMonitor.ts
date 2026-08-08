@@ -1,5 +1,10 @@
 import { Detectors } from "../detectors/Detectors";
 import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector";
+import { CaptureFailureDetector } from "../detectors/CaptureFailureDetector";
+import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
+import { SourceEncoderBottleneckDetector } from "../detectors/SourceEncoderBottleneckDetector";
+import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
+import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { OutboundTrackSample } from "../schema/ClientSample";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
@@ -41,17 +46,42 @@ export class OutboundTrackMonitor {
 	) {
 		this.attachments = attachments;
 		this.detectors = new Detectors();
-		if (this.getPeerConnection().parent.config.dryOutboundTrackDetector !== null) {
+
+		const monitorConfig = this.getPeerConnection().parent.config;
+
+		if (monitorConfig.dryOutboundTrackDetector !== null) {
 			this.detectors.add(new DryOutboundTrackDetector(this));
+		}
+		if (monitorConfig.captureFailureDetector !== null) {
+			this.detectors.add(new CaptureFailureDetector(this));
+		}
+		if (monitorConfig.codecChangeDetector !== null) {
+			this.detectors.add(new CodecChangeDetector(this));
 		}
 
 		if (this.kind === 'audio') this.calculatedScore.weight = 1;
-		else if (this.kind === 'video') this.calculatedScore.weight = 2;
+		else if (this.kind === 'video') {
+			if (monitorConfig.sourceEncoderBottleneckDetector !== null) {
+				this.detectors.add(new SourceEncoderBottleneckDetector(this));
+			}
+			if (monitorConfig.simulcastLayerDetector !== null) {
+				this.detectors.add(new SimulcastLayerDetector(this));
+			}
+			if (monitorConfig.videoResolutionChangeDetector !== null) {
+				this.detectors.add(new VideoResolutionChangeDetector(this));
+			}
+			this.calculatedScore.weight = 2;
+		}
 	}
 
 
 	public getPeerConnection() {
 		return this._mediaSource.getPeerConnection();
+	}
+
+	/** The capture source feeding this track. */
+	public getMediaSource() {
+		return this._mediaSource;
 	}
 
 	public get kind() {
@@ -86,21 +116,25 @@ export class OutboundTrackMonitor {
 		return Array.from(this.mappedOutboundRtps.values());
 	}
 
+	/** Allocation-free on purpose — several detectors call this every stats tick. */
 	public getHighestLayer() {
-		const outboundRtps = Array.from(this.mappedOutboundRtps.values());
-
-		if (outboundRtps.length === 0) return undefined;
-		if (outboundRtps.length === 1) return outboundRtps[0];
-
+		let first: OutboundRtpMonitor | undefined;
+		let count = 0;
 		let highestLayer: OutboundRtpMonitor | undefined;
 		let highestBitrate = 0;
 
 		for (const outboundRtp of this.mappedOutboundRtps.values()) {
+			count += 1;
+			first ??= outboundRtp;
+
 			if (outboundRtp.bitrate && outboundRtp.bitrate > highestBitrate) {
 				highestLayer = outboundRtp;
 				highestBitrate = outboundRtp.bitrate;
 			}
 		}
+
+		if (count === 0) return undefined;
+		if (count === 1) return first;
 
 		return highestLayer;
 	}

@@ -217,6 +217,8 @@ const monitor = new ClientMonitor({
             lowWatermark: 5000,
             highWatermark: 10000,
         },
+        encoderCpuLimitationShareThreshold: 0.3, // share of the interval spent CPU-limited
+        encodeTimeBudgetRatio: 0.8,              // share of the per-frame budget encoding may use
     },
 
     dryInboundTrackDetector: { thresholdInMs: 5000 },
@@ -239,6 +241,55 @@ const monitor = new ClientMonitor({
         pathSwitchThreshold: 3,            // switches in that window => unstable path
         iceRestartRecommendationThresholdInMs: 10000, // before recommending a restart
         iceRestartRecommendationCooldownInMs: 15000,  // min gap between recommendations
+        createEvent: true,
+    },
+
+    audioConcealmentDetector: {
+        onThreshold: 0.03,        // audible concealment share that raises the issue
+        offThreshold: 0.01,       // share below which it resolves
+        windowInMs: 5000,         // concealment is bursty; judge over a window
+        minSamplesInWindow: 24000,
+    },
+    jitterBufferStressDetector: {
+        targetDelayThresholdInMs: 200,
+        timeStretchThreshold: 0.02,
+        minConsecutiveTicks: 2,
+    },
+    decoderPerformanceDetector: {
+        decodeTimeBudgetRatio: 0.8,  // share of the per-frame budget decoding may use
+        dropRatioThreshold: 0.1,
+        minFramesReceived: 10,
+        quietLossThreshold: 0.02,    // above this, blame the network instead
+        minConsecutiveTicks: 2,
+    },
+    videoRecoveryDetector: {
+        windowInMs: 10000,
+        pliRateAlertOn: 1,           // PLIs per second
+        pliRateAlertOff: 0.3,
+        recoveryFailedThresholdInMs: 3000,
+        recoveryFailedMinPliCount: 2,
+    },
+    sourceEncoderBottleneckDetector: {
+        captureFpsRatioThreshold: 0.5,
+        minSourceFps: 5,
+        encodeFpsRatioThreshold: 0.7,
+        encodeTimeBudgetRatio: 0.8,
+        cpuLimitationShareThreshold: 0.3,
+        minConsecutiveTicks: 2,
+    },
+    captureFailureDetector: {
+        silenceThresholdInMs: 30000, // long on purpose: silence != a broken mic
+        silenceRmsThreshold: 0.001,
+        createEvent: true,
+    },
+
+    // Observations — these emit events and never raise issues.
+    codecChangeDetector: { createEvent: true },
+    videoResolutionChangeDetector: { createEvent: true },
+    simulcastLayerDetector: { createEvent: true },
+    statsGapDetector: {
+        gapRatioThreshold: 2, // multiple of collectingPeriodInMs that counts as a gap
+        minGapInMs: 3000,
         createEvent: true,
     },
 
@@ -561,6 +612,173 @@ monitor.on('ice-restart-recommended', ({ peerConnectionMonitor, reason, recommen
     console.warn(`ICE restart recommended (${reason})`, peerConnectionMonitor.peerConnectionId);
 });
 ```
+
+#### AudioConcealmentDetector
+
+Reports how the audio actually *sounded*, which packet loss does not. Opus and
+NetEQ conceal a great deal of loss inaudibly, and conversely audio degrades
+without dramatic loss when the jitter buffer misbehaves — so concealment is both
+the more sensitive and the more specific signal.
+
+The rate is **audible** concealment only: `concealedSamples` also rises during
+ordinary silence, so `silentConcealedSamples` is subtracted before the detector
+sees the number. Without that subtraction this would flag every quiet moment in
+every call.
+
+**Raises:** `audio-concealment`, with `concealmentRate`, `concealmentEventRate`
+and a `burstiness` of `'bursty'` (many short clicks) or `'continuous'` (fewer,
+longer dropouts) — they sound different and have different causes.
+
+It stays silent while the remote track is paused, and while too few samples
+arrived in the window to judge.
+
+```javascript
+audioConcealmentDetector: {
+    onThreshold: 0.03,
+    offThreshold: 0.01,
+    windowInMs: 5000,
+    minSamplesInWindow: 24000,
+}
+```
+
+#### JitterBufferStressDetector
+
+The complement to `AudioConcealmentDetector`: it separates "network jitter
+absorbed cleanly" from "the jitter buffer ballooned, adding latency and
+stretching audio to cope".
+
+Both conditions are required, deliberately. A high target delay on its own means
+NetEQ is *succeeding* — buying latency to hide jitter, with the user hearing
+nothing wrong. Time stretching on its own is ordinary clock-drift correction. It
+is the two together that mean the buffer is fighting the network and losing.
+
+**Raises:** `audio-jitter-buffer-stress`.
+
+```javascript
+jitterBufferStressDetector: {
+    targetDelayThresholdInMs: 200,
+    timeStretchThreshold: 0.02,
+    minConsecutiveTicks: 2,
+}
+```
+
+#### DecoderPerformanceDetector
+
+The receive-side sibling of CPU limitation, and the piece that makes
+network-versus-client attribution possible. Frames dropped because they never
+arrived and frames dropped because the client could not decode them look
+identical in a frame-rate chart, and the fixes are opposite — so this detector
+fires only when the frames demonstrably *did* arrive: enough frames received,
+loss below `quietLossThreshold`, and either decode time past the per-frame
+budget or frames dropped after arrival.
+
+The budget is derived from the stream's own frame rate (33 ms at 30 fps, 66 ms
+at 15 fps), so a static screen share dropping to 1 fps does not trip it.
+
+**Raises:** `video-decoder-overloaded`, carrying `decoderImplementation` and
+`powerEfficientDecoder` — a software decoder on a codec the device can do in
+hardware is the most actionable finding here.
+
+```javascript
+decoderPerformanceDetector: {
+    decodeTimeBudgetRatio: 0.8,
+    dropRatioThreshold: 0.1,
+    minFramesReceived: 10,
+    quietLossThreshold: 0.02,
+    minConsecutiveTicks: 2,
+}
+```
+
+#### Video recovery (part of `FreezedVideoTrackDetector`)
+
+`FreezedVideoTrackDetector` owns the whole freeze / repair domain: it derives
+the track's freeze state (a freeze persists until frames render again, not just
+until the next tick) and watches the repair loop — PLI/FIR out, keyframes back
+in. The `videoRecoveryDetector` config gates the two repair-loop issues:
+
+-   `keyframe-storm` — a sustained PLI rate. Worth its own issue because it is
+    self-reinforcing: keyframes are several times the size of delta frames, so a
+    burst of them worsens exactly the congestion that provoked the PLIs.
+-   `video-recovery-failed` — PLIs going out repeatedly, the picture still
+    frozen, and `keyFramesDecoded` *not* advancing. This is the valuable one for
+    debugging an SFU: it says the repair request left the client and nothing came
+    back, which points at forwarding rather than at the first-hop network.
+
+```javascript
+videoRecoveryDetector: {
+    windowInMs: 10000,
+    pliRateAlertOn: 1,
+    pliRateAlertOff: 0.3,
+    recoveryFailedThresholdInMs: 3000,
+    recoveryFailedMinPliCount: 2,
+}
+```
+
+#### SourceEncoderBottleneckDetector
+
+Splits one symptom — "we are sending fewer frames than we should" — into its two
+causes, which from RTP alone are indistinguishable:
+
+-   `capture-bottleneck` — the *source* never produced the frames. A camera
+    throttling in low light, an OS capture stall, a device the browser is quietly
+    downgrading. Nothing the encoder or the network can do about it.
+-   `encoder-bottleneck` — the source produced frames and the encoder could not
+    keep up. Carries `encodeTimePerFrameInMs`, `cpuLimitationShare`,
+    `encoderImplementation` and `powerEfficientEncoder`.
+
+The discriminator is `MediaSourceMonitor.sourceFps` against what the highest
+active layer actually encoded.
+
+```javascript
+sourceEncoderBottleneckDetector: {
+    captureFpsRatioThreshold: 0.5,
+    minSourceFps: 5,
+    encodeFpsRatioThreshold: 0.7,
+    encodeTimeBudgetRatio: 0.8,
+    cpuLimitationShareThreshold: 0.3,
+    minConsecutiveTicks: 2,
+}
+```
+
+#### CaptureFailureDetector
+
+Watches the source end of an outbound track, where several very common
+user-visible failures originate and none of them show up in RTP.
+
+**Raises:** `capture-track-ended` (the device is gone), `silent-audio-source`
+(the microphone is live and producing nothing).
+
+**Emits:** `'capture-track-ended'`, `'capture-track-muted'` (the OS or another
+application took the device), plus the matching client events.
+
+The silence threshold is 30 seconds by default, and long on purpose: a
+microphone capturing digital silence and a person not talking are the same
+measurement, and only duration separates them. The check requires the track to
+be live, enabled and unmuted — a muted microphone is silent deliberately and is
+reported as a mute, not a failure. The level comes from
+`MediaSourceMonitor.rmsAudioLevel`, which integrates `totalAudioEnergy` over the
+interval, rather than the instantaneous `audioLevel` that reads zero between
+words.
+
+```javascript
+captureFailureDetector: {
+    silenceThresholdInMs: 30000,
+    silenceRmsThreshold: 0.001,
+    createEvent: true,
+}
+```
+
+#### Observation detectors
+
+These four emit events and **never raise issues** — they describe things that are
+not faults but are the missing context in most investigations.
+
+| Detector | Monitor event | Client event | What it answers |
+|---|---|---|---|
+| `CodecChangeDetector` | `codec-changed` | `CODEC_CHANGED` | "Why do all the bad calls use H264?" Compares `sdpFmtpLine` too, so a profile switch within one mime type is caught. |
+| `VideoResolutionChangeDetector` | `video-resolution-changed` | `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder. On outbound tracks it carries `qualityLimitationReason`, which is what separates encoder adaptation from the application changing its constraints. Classified as `upgrade`, `downgrade` or `reshape` (an orientation flip). |
+| `SimulcastLayerDetector` | `simulcast-layer-changed` | `SIMULCAST_LAYER_CHANGED` | Which layers are actually being sent. A layer counts as active only if it sent bytes — `active: true` with no bytes is the common shape of a layer the encoder quietly gave up on. |
+| `StatsGapDetector` | `stats-collection-gap` | `STATS_COLLECTION_GAP` | Protects the monitor from itself: a backgrounded tab or sleeping device makes the next tick attribute a large accumulation to a short window. The gap is reported rather than corrected, because the counters cannot say when within it the traffic happened. |
 
 ### Custom Detectors
 
@@ -1156,7 +1374,7 @@ readonly activeIssues: Map<string, RaisedClientIssue>;
 
 ### The built-in detector issues
 
-The library ships eight detectors. Each one raises its own stateful issue with a typed payload, emits a detector-specific named event on entry, and resolves the issue when the condition clears — enriching the resolved payload with `durationInMs`.
+Most built-in detectors raise their own stateful issue with a typed payload, emit a detector-specific named event on entry, and resolve the issue when the condition clears — enriching the resolved payload with `durationInMs`. The four *observation* detectors (`CodecChangeDetector`, `VideoResolutionChangeDetector`, `SimulcastLayerDetector`, `StatsGapDetector`) are the exception: they emit events only, because what they report is not a fault.
 
 | `type` | Raised when | Resolved when | Detector-specific event | Payload shape |
 |---|---|---|---|---|
@@ -1171,6 +1389,15 @@ The library ships eight detectors. Each one raises its own stateful issue with a
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
 | `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, but receiving nothing for `transportStallThresholdInMs` | Inbound traffic resumes | — | `IceTransportStalledIssuePayload` |
 | `unstable-ice-path` | `pathSwitchThreshold` selected-path switches within `pathSwitchWindowInMs` | The window drains | — | `UnstableIcePathIssuePayload` |
+| `audio-concealment` | Audible concealment share (silence excluded) crosses `onThreshold` over the window | Share falls below `offThreshold` | `'audio-concealment'` | `AudioConcealmentIssuePayload` |
+| `audio-jitter-buffer-stress` | Target delay grown **and** NetEQ time-stretching, for `minConsecutiveTicks` | Either condition clears | `'audio-jitter-buffer-stress'` | `JitterBufferStressIssuePayload` |
+| `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
+| `keyframe-storm` | Sustained PLI rate above `pliRateAlertOn` | Rate falls below `pliRateAlertOff` | `'keyframe-storm'` | `KeyframeStormIssuePayload` |
+| `video-recovery-failed` | PLIs sent, picture frozen, `keyFramesDecoded` not advancing for `recoveryFailedThresholdInMs` | A keyframe arrives or the freeze ends | `'video-recovery-failed'` | `VideoRecoveryFailedIssuePayload` |
+| `capture-bottleneck` | The capture source produced far fewer frames than configured | The source recovers | `'capture-bottleneck'` | `CaptureBottleneckIssuePayload` |
+| `encoder-bottleneck` | A healthy source outran the encoder, or the encoder was CPU-limited | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
+| `capture-track-ended` | The outbound track's device reached `ended` | — (terminal) | `'capture-track-ended'` | `CaptureTrackEndedIssuePayload` |
+| `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
 
 The per-detector payload types are exported from the package root. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
 
@@ -1481,6 +1708,22 @@ monitor.on('freezed-video-track',                 (e) => { /* … */ });
 monitor.on('dry-inbound-track',                   (e) => { /* … */ });
 monitor.on('dry-outbound-track',                  (e) => { /* … */ });
 monitor.on('inbound-video-playout-discrepancy',   (e) => { /* … */ });
+monitor.on('audio-concealment',                   (e) => { /* audible concealment, not raw loss */ });
+monitor.on('audio-jitter-buffer-stress',          (e) => { /* buffer grown AND stretching */ });
+monitor.on('video-decoder-overloaded',            (e) => { /* frames arrived, client could not decode */ });
+monitor.on('keyframe-storm',                      (e) => { /* PLIs feeding the congestion that caused them */ });
+monitor.on('video-recovery-failed',               (e) => { /* we asked for a keyframe; nothing came back */ });
+monitor.on('capture-bottleneck',                  (e) => { /* the camera never produced the frames */ });
+monitor.on('encoder-bottleneck',                  (e) => { /* the source did; the encoder could not keep up */ });
+monitor.on('capture-track-ended',                 (e) => { /* the device is gone */ });
+monitor.on('capture-track-muted',                 (e) => { /* the OS or another app took it */ });
+monitor.on('silent-audio-source',                 (e) => { /* live mic producing digital silence */ });
+
+// Observations — these never raise an issue.
+monitor.on('codec-changed',            (e) => { /* mime type or profile switched */ });
+monitor.on('video-resolution-changed', (e) => { /* the adaptation ladder moved */ });
+monitor.on('simulcast-layer-changed',  (e) => { /* which layers are actually being sent */ });
+monitor.on('stats-collection-gap',     (e) => { /* backgrounded tab: discount this interval */ });
 
 // ICE connectivity.
 monitor.on('ice-path-changed',      (e) => { /* selected path changed: direct <-> TURN, protocol, server */ });
@@ -2023,7 +2266,29 @@ console.log(inboundRtp.deltaFramesReceived);        // Video frames received in 
 console.log(inboundRtp.deltaFramesRendered);        // Video frames rendered in period
 console.log(inboundRtp.deltaCorruptionProbability); // Frame corruption change
 console.log(inboundRtp.deltaTime);                  // Elapsed time for calculations (ms)
+
+// Audio concealment and jitter buffer (the "how did it sound" set)
+console.log(inboundRtp.concealmentRate);            // Audible concealment share — silence excluded
+console.log(inboundRtp.concealmentEventRate);       // Concealment events per second
+console.log(inboundRtp.timeStretchRate);            // Share of samples NetEQ stretched or compressed
+console.log(inboundRtp.avgJitterBufferDelayInMs);   // Latency the buffer actually added, per sample
+console.log(inboundRtp.jitterBufferTargetDelayInMs);// What NetEQ is aiming for — a rising target predicts trouble
+console.log(inboundRtp.discardRate);                // Packets that arrived too late to use
+
+// Video decode cost and recovery pressure
+console.log(inboundRtp.decodeTimePerFrameInMs);     // Decode cost per frame
+console.log(inboundRtp.dropRatio);                  // Frames dropped after arriving
+console.log(inboundRtp.renderRatio);                // Frames rendered vs decoded
+console.log(inboundRtp.keyFrameRate);               // Keyframes decoded per second
+console.log(inboundRtp.pliRate);                    // PLIs sent per second
+console.log(inboundRtp.firRate);
+console.log(inboundRtp.nackRate);
+console.log(inboundRtp.retransmissionRatio);        // Share of received bytes that were retransmissions
 ```
+
+> Every delta above is **counter-reset safe**: a counter that goes backwards
+> (SSRC reuse, an ICE restart, a stats-object replacement) yields `0` rather than
+> a negative value, so no rate derived from it can go negative.
 
 #### Outbound RTP Metrics
 
@@ -2041,6 +2306,20 @@ console.log(outboundRtp.bitPerPixel);           // Video: bits per pixel efficie
 // Delta metrics
 console.log(outboundRtp.deltaPacketsSent);      // Packets sent in period
 console.log(outboundRtp.deltaBytesSent);        // Bytes sent in period
+
+// Encoder cost and pressure
+console.log(outboundRtp.encodeTimePerFrameInMs);// Encode cost per frame — the most direct send-side CPU signal
+console.log(outboundRtp.avgQpPerFrame);         // Average quantization parameter per encoded frame
+console.log(outboundRtp.retransmissionRatio);   // Share of sent bytes that were retransmissions
+console.log(outboundRtp.retransmittedPacketRatio);
+console.log(outboundRtp.avgPacketSendDelayInMs);// Per-packet pacer delay
+console.log(outboundRtp.keyFrameRate);          // Keyframes encoded per second
+console.log(outboundRtp.nackRate, outboundRtp.pliRate, outboundRtp.firRate);
+
+// What the encoder spent THIS interval doing, in 0..1 — unlike the raw
+// `qualityLimitationDurations` accumulators, this can be compared to a threshold.
+console.log(outboundRtp.qualityLimitationDurationShares);
+// => { none: 0.25, cpu: 0.75, bandwidth: 0, other: 0 }
 ```
 
 #### Remote RTP Metrics
@@ -2052,7 +2331,16 @@ const remoteInboundRtp = /* get from pcMonitor.mappedRemoteInboundRtpMonitors */
 
 console.log(remoteInboundRtp.packetRate);       // Remote receiving packet rate
 console.log(remoteInboundRtp.deltaPacketsLost); // Remote packets lost in period
+
+// The RTT the far end measured for the stream we send, averaged over the
+// interval from totalRoundTripTime / roundTripTimeMeasurements. `roundTripTime`
+// alone is the last single measurement and is noisy.
+console.log(remoteInboundRtp.avgRoundTripTimeInSec);
 ```
+
+> `packetsLost` legitimately *decreases* when a late packet arrives, so the
+> counter-reset guard is not merely defensive here — `deltaPacketsLost` is
+> clamped at `0` rather than going negative.
 
 **Remote Outbound RTP** (remote peer's sending stats):
 
@@ -2102,8 +2390,14 @@ console.log(dataChannel.deltaBytesReceived);    // Bytes received in period
 
 ```javascript
 const mediaSource = /* get from pcMonitor.mappedMediaSourceMonitors */;
-// Media source stats are mostly raw WebRTC stats
-// Derived metrics are primarily calculated at RTP level
+
+console.log(mediaSource.deltaFrames);   // Frames the capture source produced in the period
+console.log(mediaSource.sourceFps);     // ...as a rate. Compare against what the encoder managed
+                                        // to tell a slow camera from a slow encoder.
+console.log(mediaSource.rmsAudioLevel); // RMS over the interval, from totalAudioEnergy —
+                                        // unlike `audioLevel` it does not read zero between words.
+
+console.log(mediaSource.getOutboundRtps()); // Every encoding fed by this source (simulcast: several)
 ```
 
 **Media Playout derived metrics** (audio playout):
@@ -2113,6 +2407,10 @@ const mediaPlayout = /* get from pcMonitor.mappedMediaPlayoutMonitors */;
 
 console.log(mediaPlayout.deltaSynthesizedSamplesDuration); // Synthesized audio duration in period
 console.log(mediaPlayout.deltaSamplesDuration);            // Total samples duration in period
+console.log(mediaPlayout.synthesizedSamplesRatio);         // Synthesized share of the interval, 0..1
+console.log(mediaPlayout.playoutDelayPerSampleInMs);       // How long audio waited before being played.
+                                                           // `totalPlayoutDelay` alone grows forever and
+                                                           // cannot be compared to a threshold; this can.
 ```
 
 ### Accessing Derived Metrics

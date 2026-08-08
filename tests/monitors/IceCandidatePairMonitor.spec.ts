@@ -233,6 +233,39 @@ describe('IceCandidatePairMonitor path helpers', () => {
         });
     });
 
+    describe('stun round trip', () => {
+        it('averages over the checks that completed in the interval', () => {
+            const pair = makePair({ pair: { totalRoundTripTime: 1.0, responsesReceived: 10 } });
+
+            pair.accept({
+                id: 'pair-1',
+                timestamp: 3000,
+                transportId: 'transport-1',
+                totalRoundTripTime: 1.6,
+                responsesReceived: 14,
+            } as IceCandidatePairStats);
+
+            expect(pair.avgRoundTripTimeInSec).toBeCloseTo(0.15);
+        });
+
+        it('reports no average when no check completed', () => {
+            const pair = makePair({ pair: { totalRoundTripTime: 1.0, responsesReceived: 10, currentRoundTripTime: 0.08 } });
+
+            pair.accept({
+                id: 'pair-1',
+                timestamp: 3000,
+                transportId: 'transport-1',
+                totalRoundTripTime: 1.0,
+                responsesReceived: 10,
+                currentRoundTripTime: 0.08,
+            } as IceCandidatePairStats);
+
+            // the consumer falls back to the (possibly stale) currentRoundTripTime
+            expect(pair.avgRoundTripTimeInSec).toBeUndefined();
+            expect(pair.currentRoundTripTime).toBeCloseTo(0.08);
+        });
+    });
+
     describe('stats integrity', () => {
         it('keeps the derived getters working after accept()', () => {
             const pair = makePair({

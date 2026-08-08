@@ -23,6 +23,7 @@ import { Sources } from './sources/Sources';
 import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
+import { StatsGapDetector } from './detectors/StatsGapDetector';
 import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
 import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
@@ -144,6 +145,60 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                     lowWatermark: 5000,
                     highWatermark: 10000,
                 },
+                encoderCpuLimitationShareThreshold: 0.3,
+                encodeTimeBudgetRatio: 0.8,
+            }),
+            audioConcealmentDetector: detectorDefault(monitorConfig.audioConcealmentDetector, {
+                onThreshold: 0.03,
+                offThreshold: 0.01,
+                windowInMs: 5000,
+                minSamplesInWindow: 24000, // half a second of 48kHz audio
+            }),
+            jitterBufferStressDetector: detectorDefault(monitorConfig.jitterBufferStressDetector, {
+                targetDelayThresholdInMs: 200,
+                timeStretchThreshold: 0.02,
+                minConsecutiveTicks: 2,
+            }),
+            decoderPerformanceDetector: detectorDefault(monitorConfig.decoderPerformanceDetector, {
+                decodeTimeBudgetRatio: 0.8,
+                dropRatioThreshold: 0.1,
+                minFramesReceived: 10,
+                quietLossThreshold: 0.02,
+                minConsecutiveTicks: 2,
+            }),
+            videoRecoveryDetector: detectorDefault(monitorConfig.videoRecoveryDetector, {
+                windowInMs: 10000,
+                pliRateAlertOn: 1,
+                pliRateAlertOff: 0.3,
+                recoveryFailedThresholdInMs: 3000,
+                recoveryFailedMinPliCount: 2,
+            }),
+            sourceEncoderBottleneckDetector: detectorDefault(monitorConfig.sourceEncoderBottleneckDetector, {
+                captureFpsRatioThreshold: 0.5,
+                minSourceFps: 5,
+                encodeFpsRatioThreshold: 0.7,
+                encodeTimeBudgetRatio: 0.8,
+                cpuLimitationShareThreshold: 0.3,
+                minConsecutiveTicks: 2,
+            }),
+            simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
+                createEvent: true,
+            }),
+            captureFailureDetector: detectorDefault(monitorConfig.captureFailureDetector, {
+                silenceThresholdInMs: 30000,
+                silenceRmsThreshold: 0.001,
+                createEvent: true,
+            }),
+            codecChangeDetector: detectorDefault(monitorConfig.codecChangeDetector, {
+                createEvent: true,
+            }),
+            videoResolutionChangeDetector: detectorDefault(monitorConfig.videoResolutionChangeDetector, {
+                createEvent: true,
+            }),
+            statsGapDetector: detectorDefault(monitorConfig.statsGapDetector, {
+                gapRatioThreshold: 2,
+                minGapInMs: 3000,
+                createEvent: true,
             }),
             playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
                 lowSkewThreshold: 2,
@@ -188,6 +243,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.detectors = new Detectors();
         if (this.config.cpuPerformanceDetector !== null) {
             this.detectors.add(new CpuPerformanceDetector(this));
+        }
+        if (this.config.statsGapDetector !== null) {
+            this.detectors.add(new StatsGapDetector(this));
         }
     }
 

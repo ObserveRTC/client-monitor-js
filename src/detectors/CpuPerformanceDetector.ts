@@ -94,14 +94,18 @@ export class CpuPerformanceDetector {
 			}
 		}
 
+		// one pass: the outboundRtps getter allocates a fresh array per access
 		for (const outboundRtp of this.clientMonitor.outboundRtps) {
-			gotLimited ||= outboundRtp.qualityLimitationReason === 'cpu';
+			if (gotLimited) break;
+
+			gotLimited = outboundRtp.qualityLimitationReason === 'cpu' ||
+				this._checkEncoderPressure(outboundRtp);
 		}
 
-		if (alertOn !== undefined && alertOff !== undefined) {
+		if (!gotLimited && alertOn !== undefined && alertOff !== undefined) {
 			const minFrames = minReceivedFrames ?? 0;
 			for (const inboundRtp of this.clientMonitor.inboundRtps) {
-				if (gotLimited) continue;
+				if (gotLimited) break;
 				// Decode CPU limitation only applies to video tracks.
 				if (inboundRtp.kind !== 'video') continue;
 
@@ -144,6 +148,35 @@ export class CpuPerformanceDetector {
 			this.clientMonitor.cpuPerformanceAlertOn = false;
 			this._resolve('cpu limitation ended');
 		}
+	}
+
+	/**
+	 * Encoder-side CPU pressure: a meaningful share of the interval spent
+	 * explicitly CPU-limited, or encode time per frame past a budget derived
+	 * from the stream's own frame rate. Unlike the instantaneous
+	 * `qualityLimitationReason` label these are sustained by construction.
+	 */
+	private _checkEncoderPressure(outboundRtp: { kind: string, framesPerSecond?: number, encodeTimePerFrameInMs?: number, qualityLimitationDurationShares?: { cpu: number } }): boolean {
+		if (outboundRtp.kind !== 'video') return false;
+
+		const cpuShareThreshold = this.config.encoderCpuLimitationShareThreshold;
+		const encodeBudgetRatio = this.config.encodeTimeBudgetRatio;
+
+		if (cpuShareThreshold !== undefined) {
+			const cpuShare = outboundRtp.qualityLimitationDurationShares?.cpu;
+
+			if (cpuShare !== undefined && cpuShareThreshold < cpuShare) return true;
+		}
+
+		if (encodeBudgetRatio !== undefined) {
+			const fps = outboundRtp.framesPerSecond;
+			const encodeTimePerFrameInMs = outboundRtp.encodeTimePerFrameInMs;
+
+			if (!fps || fps < 1 || encodeTimePerFrameInMs === undefined) return false;
+			if ((1000 / fps) * encodeBudgetRatio < encodeTimePerFrameInMs) return true;
+		}
+
+		return false;
 	}
 
 	private _raise() {

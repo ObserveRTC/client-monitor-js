@@ -12,6 +12,21 @@ import {
     UnstableIcePathIssuePayload,
 } from "./detectors/IceConnectivityDetector";
 import { PlayoutDiscrepancyIssuePayload } from "./detectors/PlayoutDiscrepancyDetector";
+import { AudioConcealmentIssuePayload } from "./detectors/AudioConcealmentDetector";
+import { JitterBufferStressIssuePayload } from "./detectors/JitterBufferStressDetector";
+import { DecoderPerformanceIssuePayload } from "./detectors/DecoderPerformanceDetector";
+import {
+    KeyframeStormIssuePayload,
+    VideoRecoveryFailedIssuePayload,
+} from "./detectors/FreezedVideoTrackDetector";
+import {
+    CaptureBottleneckIssuePayload,
+    EncoderBottleneckIssuePayload,
+} from "./detectors/SourceEncoderBottleneckDetector";
+import {
+    CaptureTrackEndedIssuePayload,
+    SilentAudioSourceIssuePayload,
+} from "./detectors/CaptureFailureDetector";
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -49,7 +64,16 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<UnstableIcePathIssuePayload>       & { type: 'unstable-ice-path' }
     | RaisedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
     | RaisedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
-    | RaisedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' };
+    | RaisedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' }
+    | RaisedClientIssue<AudioConcealmentIssuePayload>       & { type: 'audio-concealment' }
+    | RaisedClientIssue<JitterBufferStressIssuePayload>    & { type: 'audio-jitter-buffer-stress' }
+    | RaisedClientIssue<DecoderPerformanceIssuePayload>    & { type: 'video-decoder-overloaded' }
+    | RaisedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
+    | RaisedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
+    | RaisedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
+    | RaisedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
+    | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -69,7 +93,16 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<UnstableIcePathIssuePayload>       & { type: 'unstable-ice-path' }
     | ResolvedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
     | ResolvedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
-    | ResolvedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' };
+    | ResolvedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' }
+    | ResolvedClientIssue<AudioConcealmentIssuePayload>       & { type: 'audio-concealment' }
+    | ResolvedClientIssue<JitterBufferStressIssuePayload>    & { type: 'audio-jitter-buffer-stress' }
+    | ResolvedClientIssue<DecoderPerformanceIssuePayload>    & { type: 'video-decoder-overloaded' }
+    | ResolvedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
+    | ResolvedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
+    | ResolvedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
+    | ResolvedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
+    | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -94,6 +127,15 @@ export function isClientMonitorIssue(
         case 'ice-disconnected':
         case 'ice-connection-failed':
         case 'ice-transport-stalled':
+        case 'audio-concealment':
+        case 'audio-jitter-buffer-stress':
+        case 'video-decoder-overloaded':
+        case 'keyframe-storm':
+        case 'video-recovery-failed':
+        case 'capture-bottleneck':
+        case 'encoder-bottleneck':
+        case 'capture-track-ended':
+        case 'silent-audio-source':
             return true;
         default:
             return false;

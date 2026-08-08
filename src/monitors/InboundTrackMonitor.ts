@@ -6,6 +6,11 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { InboundTrackSample } from "../schema/ClientSample";
 import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetector";
+import { AudioConcealmentDetector } from "../detectors/AudioConcealmentDetector";
+import { JitterBufferStressDetector } from "../detectors/JitterBufferStressDetector";
+import { DecoderPerformanceDetector } from "../detectors/DecoderPerformanceDetector";
+import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
+import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
 
 export class InboundTrackMonitor {
 	public readonly direction = 'inbound';
@@ -49,17 +54,35 @@ export class InboundTrackMonitor {
 			this.detectors.add(new DryInboundTrackDetector(this));
 		}
 
+		if (monitorConfig.codecChangeDetector !== null) {
+			this.detectors.add(new CodecChangeDetector(this));
+		}
+
 		if (this.kind === 'audio') {
 			if (monitorConfig.audioDesyncDetector !== null) {
 				this.detectors.add(new AudioDesyncDetector(this));
 			}
+			if (monitorConfig.audioConcealmentDetector !== null) {
+				this.detectors.add(new AudioConcealmentDetector(this));
+			}
+			if (monitorConfig.jitterBufferStressDetector !== null) {
+				this.detectors.add(new JitterBufferStressDetector(this));
+			}
 			this.calculatedScore.weight = 1;
 		} else if (this.kind === 'video') {
-			if (monitorConfig.videoFreezesDetector !== null) {
+			// one detector owns freeze state and the repair loop; each config
+			// key gates its half inside
+			if (monitorConfig.videoFreezesDetector !== null || monitorConfig.videoRecoveryDetector !== null) {
 				this.detectors.add(new FreezedVideoTrackDetector(this));
 			}
 			if (monitorConfig.playoutDiscrepancyDetector !== null) {
 				this.detectors.add(new PlayoutDiscrepancyDetector(this));
+			}
+			if (monitorConfig.decoderPerformanceDetector !== null) {
+				this.detectors.add(new DecoderPerformanceDetector(this));
+			}
+			if (monitorConfig.videoResolutionChangeDetector !== null) {
+				this.detectors.add(new VideoResolutionChangeDetector(this));
 			}
 			this.calculatedScore.weight = 2;
 		}

@@ -34,7 +34,13 @@ import {
 	ClientLeftEventPayload,
 	IceGatheringStateChangedEventPayload,
 	SignalingStateChangedEventPayload,
-	IceCandidateErrorEventPayload
+	IceCandidateErrorEventPayload,
+	CodecChangedEventPayload,
+	VideoResolutionChangedEventPayload,
+	SimulcastLayerChangedEventPayload,
+	CaptureTrackEndedEventPayload,
+	CaptureTrackMutedEventPayload,
+	StatsCollectionGapEventPayload
 } from "../schema/ClientEventTypes";
 
 
@@ -44,6 +50,12 @@ export type ClientEventPayloadMap = {
 	[ClientEventTypes.ICE_RESTART_RECOMMENDED]: IceRestartRecommendedEventPayload;
 	[ClientEventTypes.LONG_PC_CONNECTION_ESTABLISHMENT]: LongPcConnectionEstablishmentEventPayload;
 	[ClientEventTypes.EXCESSIVE_SYNTHESIZED_AUDIO]: ExcessiveSynthesizedAudioEventPayload;
+	[ClientEventTypes.CODEC_CHANGED]: CodecChangedEventPayload;
+	[ClientEventTypes.VIDEO_RESOLUTION_CHANGED]: VideoResolutionChangedEventPayload;
+	[ClientEventTypes.SIMULCAST_LAYER_CHANGED]: SimulcastLayerChangedEventPayload;
+	[ClientEventTypes.CAPTURE_TRACK_ENDED]: CaptureTrackEndedEventPayload;
+	[ClientEventTypes.CAPTURE_TRACK_MUTED]: CaptureTrackMutedEventPayload;
+	[ClientEventTypes.STATS_COLLECTION_GAP]: StatsCollectionGapEventPayload;
 	[ClientEventTypes.CLIENT_JOINED]: ClientJoinedEventPayload;
 	[ClientEventTypes.CLIENT_LEFT]: ClientLeftEventPayload;
 	[ClientEventTypes.PEER_CONNECTION_OPENED]: PeerConnectionOpenedEventPayload;
@@ -105,6 +117,13 @@ export class ClientEventPayloadProvider {
 	public createSignalingStateChangedEventPayload: ClientEventPayloadProviderFunction<SignalingStateChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createIceCandidateErrorEventPayload: ClientEventPayloadProviderFunction<IceCandidateErrorEventPayload> = createDefaultClientEventPayloadProviderFunction();
 
+	public createCodecChangedEventPayload: ClientEventPayloadProviderFunction<CodecChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createVideoResolutionChangedEventPayload: ClientEventPayloadProviderFunction<VideoResolutionChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createSimulcastLayerChangedEventPayload: ClientEventPayloadProviderFunction<SimulcastLayerChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createCaptureTrackEndedEventPayload: ClientEventPayloadProviderFunction<CaptureTrackEndedEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createCaptureTrackMutedEventPayload: ClientEventPayloadProviderFunction<CaptureTrackMutedEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createStatsCollectionGapEventPayload: ClientEventPayloadProviderFunction<StatsCollectionGapEventPayload> = createDefaultClientEventPayloadProviderFunction();
+
 	public createProducerAddedEventPayload: ClientEventPayloadProviderFunction<ProducerAddedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createProducerRemovedEventPayload: ClientEventPayloadProviderFunction<ProducerRemovedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createProducerPausedEventPayload: ClientEventPayloadProviderFunction<ProducerPausedEventPayload> = createDefaultClientEventPayloadProviderFunction();
@@ -158,6 +177,18 @@ export class ClientEventPayloadProvider {
 				return this.createIceCandidateEventPayload(input as IceCandidateEventPayload);
 			case ClientEventTypes.ICE_CANDIDATE_ERROR:
 				return this.createIceCandidateErrorEventPayload(input as IceCandidateErrorEventPayload);
+			case ClientEventTypes.CODEC_CHANGED:
+				return this.createCodecChangedEventPayload(input as CodecChangedEventPayload);
+			case ClientEventTypes.VIDEO_RESOLUTION_CHANGED:
+				return this.createVideoResolutionChangedEventPayload(input as VideoResolutionChangedEventPayload);
+			case ClientEventTypes.SIMULCAST_LAYER_CHANGED:
+				return this.createSimulcastLayerChangedEventPayload(input as SimulcastLayerChangedEventPayload);
+			case ClientEventTypes.CAPTURE_TRACK_ENDED:
+				return this.createCaptureTrackEndedEventPayload(input as CaptureTrackEndedEventPayload);
+			case ClientEventTypes.CAPTURE_TRACK_MUTED:
+				return this.createCaptureTrackMutedEventPayload(input as CaptureTrackMutedEventPayload);
+			case ClientEventTypes.STATS_COLLECTION_GAP:
+				return this.createStatsCollectionGapEventPayload(input as StatsCollectionGapEventPayload);
 			case ClientEventTypes.PRODUCER_ADDED:
 				return this.createProducerAddedEventPayload(input as ProducerAddedEventPayload);
 			case ClientEventTypes.PRODUCER_REMOVED:

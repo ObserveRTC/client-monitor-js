@@ -1,6 +1,7 @@
 import { IceCandidatePairStats } from "../schema/ClientSample";
 import { IceRelayProtocol } from "./IceCandidateMonitor";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
+import { positiveDelta } from "../utils/common";
 
 /**
  * Coarse classification of the path this candidate pair represents.
@@ -50,6 +51,17 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	public deltaPacketsReceived?: number | undefined;
 	public deltaBytesSent?: number | undefined;
 	public deltaBytesReceived?: number | undefined;
+	public deltaTotalRoundTripTime?: number | undefined;
+	public deltaResponsesReceived?: number | undefined;
+
+	/**
+	 * STUN round trip averaged over the checks that completed in this interval,
+	 * from `totalRoundTripTime` / `responsesReceived`. `currentRoundTripTime`
+	 * is only the *latest* check and consent checks run every ~5s, so it is
+	 * often stale at typical collecting periods. `undefined` when no check
+	 * completed in the interval.
+	 */
+	public avgRoundTripTimeInSec?: number | undefined;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -104,6 +116,14 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined && this.bytesReceived <= stats.bytesReceived) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 		}
+
+		this.deltaTotalRoundTripTime = positiveDelta(stats.totalRoundTripTime, this.totalRoundTripTime);
+		this.deltaResponsesReceived = positiveDelta(stats.responsesReceived, this.responsesReceived);
+		this.avgRoundTripTimeInSec = this.deltaTotalRoundTripTime !== undefined &&
+			this.deltaResponsesReceived !== undefined &&
+			this.deltaResponsesReceived > 0
+			? this.deltaTotalRoundTripTime / this.deltaResponsesReceived
+			: undefined;
 
 		Object.assign(this, stats);
 	}
