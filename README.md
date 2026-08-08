@@ -245,9 +245,9 @@ const monitor = new ClientMonitor({
     },
 
     audioConcealmentDetector: {
-        onThreshold: 0.03,        // audible concealment share that raises the issue
-        offThreshold: 0.01,       // share below which it resolves
-        windowInMs: 5000,         // concealment is bursty; judge over a window
+        onThreshold: 0.03,        // Webex treats >3% concealment as significant, >5% as severe
+        offThreshold: 0.01,
+        windowInMs: 15000,        // spans several collections even at a 5s collecting period
         minSamplesInWindow: 24000,
     },
     jitterBufferStressDetector: {
@@ -263,16 +263,16 @@ const monitor = new ClientMonitor({
         minConsecutiveTicks: 2,
     },
     videoRecoveryDetector: {
-        windowInMs: 10000,
-        pliRateAlertOn: 1,           // PLIs per second
-        pliRateAlertOff: 0.3,
-        recoveryFailedThresholdInMs: 3000,
+        windowInMs: 30000,
+        pliRateAlertOn: 0.5,         // real-world storms run ~0.5-0.7 PLI/s sustained
+        pliRateAlertOff: 0.15,
+        recoveryFailedThresholdInMs: 5000,
         recoveryFailedMinPliCount: 2,
     },
     stuckDecoderDetector: {
         thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier x RTT)
         rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
-        minStuckTicks: 3,      // never judge on fewer observations than this
+        minStuckTicks: 2,      // never judge on fewer observations than this
         minBitrate: 10000,     // bps below which this is a dry track, not a wedge
         minPliCount: 2,
     },
@@ -296,7 +296,7 @@ const monitor = new ClientMonitor({
     simulcastLayerDetector: { createEvent: true },
     statsGapDetector: {
         gapRatioThreshold: 2, // multiple of collectingPeriodInMs that counts as a gap
-        minGapInMs: 3000,
+        minGapInMs: 5000,     // a single missed short tick is jitter, not a gap
         createEvent: true,
     },
 
@@ -713,10 +713,10 @@ in. The `videoRecoveryDetector` config gates the two repair-loop issues:
 
 ```javascript
 videoRecoveryDetector: {
-    windowInMs: 10000,
-    pliRateAlertOn: 1,
-    pliRateAlertOff: 0.3,
-    recoveryFailedThresholdInMs: 3000,
+    windowInMs: 30000,
+    pliRateAlertOn: 0.5,
+    pliRateAlertOff: 0.15,
+    recoveryFailedThresholdInMs: 5000,
     recoveryFailedMinPliCount: 2,
 }
 ```
@@ -760,7 +760,7 @@ monitor.on('stuck-decoder', ({ trackMonitor, variant, deadBytesReceived }) => {
 stuckDecoderDetector: {
     thresholdInMs: 4000,
     rttMultiplier: 15,
-    minStuckTicks: 3,
+    minStuckTicks: 2,
     minBitrate: 10000,
     minPliCount: 2,
 }

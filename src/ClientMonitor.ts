@@ -126,8 +126,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 thresholdInMs: 5000,
             }),
             audioDesyncDetector: detectorDefault(monitorConfig.audioDesyncDetector, {
-                fractionalCorrectionAlertOffThreshold: 0.25,
-                fractionalCorrectionAlertOnThreshold: 0.5,
+                // aligned with the documented defaults; the previous 0.5/0.25
+                // required half of all samples to be corrected before alerting
+                fractionalCorrectionAlertOffThreshold: 0.05,
+                fractionalCorrectionAlertOnThreshold: 0.1,
             }),
             syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
                 minSynthesizedSamplesDuration: 0,
@@ -149,9 +151,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 encodeTimeBudgetRatio: 0.8,
             }),
             audioConcealmentDetector: detectorDefault(monitorConfig.audioConcealmentDetector, {
+                // Webex-aligned: >3% concealment is a significant change, a
+                // "severely concealed second" is >5%
                 onThreshold: 0.03,
                 offThreshold: 0.01,
-                windowInMs: 5000,
+                // must span several collections at the commonly recommended
+                // ~5s collecting period — a 5s window would hold one sample
+                windowInMs: 15000,
                 minSamplesInWindow: 24000, // half a second of 48kHz audio
             }),
             jitterBufferStressDetector: detectorDefault(monitorConfig.jitterBufferStressDetector, {
@@ -167,10 +173,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 minConsecutiveTicks: 2,
             }),
             videoRecoveryDetector: detectorDefault(monitorConfig.videoRecoveryDetector, {
-                windowInMs: 10000,
-                pliRateAlertOn: 1,
-                pliRateAlertOff: 0.3,
-                recoveryFailedThresholdInMs: 3000,
+                windowInMs: 30000,
+                // real-world storms run ~0.5-0.7 PLI/s sustained; healthy
+                // streams stay well under 0.1/s outside of joins
+                pliRateAlertOn: 0.5,
+                pliRateAlertOff: 0.15,
+                recoveryFailedThresholdInMs: 5000,
                 recoveryFailedMinPliCount: 2,
             }),
             sourceEncoderBottleneckDetector: detectorDefault(monitorConfig.sourceEncoderBottleneckDetector, {
@@ -198,13 +206,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
                 thresholdInMs: 4000,
                 rttMultiplier: 15,
-                minStuckTicks: 3,
+                minStuckTicks: 2,
                 minBitrate: 10000,
                 minPliCount: 2,
             }),
             statsGapDetector: detectorDefault(monitorConfig.statsGapDetector, {
                 gapRatioThreshold: 2,
-                minGapInMs: 3000,
+                minGapInMs: 5000,
                 createEvent: true,
             }),
             playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
