@@ -269,6 +269,13 @@ const monitor = new ClientMonitor({
         recoveryFailedThresholdInMs: 3000,
         recoveryFailedMinPliCount: 2,
     },
+    stuckDecoderDetector: {
+        thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier x RTT)
+        rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
+        minStuckTicks: 3,      // never judge on fewer observations than this
+        minBitrate: 10000,     // bps below which this is a dry track, not a wedge
+        minPliCount: 2,
+    },
     sourceEncoderBottleneckDetector: {
         captureFpsRatioThreshold: 0.5,
         minSourceFps: 5,
@@ -711,6 +718,51 @@ videoRecoveryDetector: {
     pliRateAlertOff: 0.3,
     recoveryFailedThresholdInMs: 3000,
     recoveryFailedMinPliCount: 2,
+}
+```
+
+#### StuckDecoderDetector
+
+Detects the per-consumer decode wedge: RTP bytes keep arriving but no frame
+ever decodes again — a corrupt or incomplete frame broke the decode chain, PLIs
+go out continuously, keyframes may even be generated upstream, and this
+consumer never assembles a usable frame until it is recreated.
+
+The fingerprint is `bytesReceived` rising + `framesReceived` flat + `pliCount`
+rising + `keyFramesDecoded` flat. The "bytes still flowing" condition is what
+separates it from everything nearby: a dry track has no bytes, and
+`video-recovery-failed` reports an unanswered repair request without saying
+whether the pipe is dead or the decoder is. It reads only RTP deltas, so it
+works regardless of browser freeze statistics.
+
+A wedge never self-heals, so the wait only needs to outlast a *legitimate*
+PLI → keyframe recovery — and that cost scales with the connection, not with a
+fixed number of seconds. The effective wait is
+`max(thresholdInMs, rttMultiplier × RTT)`, at least `minStuckTicks`
+collections, with `minBitrate` (a rate, so it means the same thing at every
+collecting period) confirming the stream is actually being delivered.
+
+**Raises:** `stuck-decoder`, with a `variant` (`'assembly'`: no frame ever
+reassembled; `'decode'`: frames assemble but never decode), the accumulated
+dead bytes, and the PLI count since the wedge began.
+
+**Mitigation hook:** recreating the consumer is the known workaround — listen
+for the `stuck-decoder` monitor event:
+
+```typescript
+monitor.on('stuck-decoder', ({ trackMonitor, variant, deadBytesReceived }) => {
+    // the stream is being delivered but nothing decodes — recreate the consumer
+    recreateConsumerFor(trackMonitor.track.id);
+});
+```
+
+```javascript
+stuckDecoderDetector: {
+    thresholdInMs: 4000,
+    rttMultiplier: 15,
+    minStuckTicks: 3,
+    minBitrate: 10000,
+    minPliCount: 2,
 }
 ```
 
@@ -1398,6 +1450,7 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `encoder-bottleneck` | A healthy source outran the encoder, or the encoder was CPU-limited | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
 | `capture-track-ended` | The outbound track's device reached `ended` | — (terminal) | `'capture-track-ended'` | `CaptureTrackEndedIssuePayload` |
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
+| `stuck-decoder` | RTP bytes flowing, nothing decoding, PLIs firing, for `thresholdInMs` | Frames decode again | `'stuck-decoder'` | `StuckDecoderIssuePayload` |
 
 The per-detector payload types are exported from the package root. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
 
@@ -1713,6 +1766,7 @@ monitor.on('audio-jitter-buffer-stress',          (e) => { /* buffer grown AND s
 monitor.on('video-decoder-overloaded',            (e) => { /* frames arrived, client could not decode */ });
 monitor.on('keyframe-storm',                      (e) => { /* PLIs feeding the congestion that caused them */ });
 monitor.on('video-recovery-failed',               (e) => { /* we asked for a keyframe; nothing came back */ });
+monitor.on('stuck-decoder',                       (e) => { /* RTP flowing, nothing decodes — recreate the consumer */ });
 monitor.on('capture-bottleneck',                  (e) => { /* the camera never produced the frames */ });
 monitor.on('encoder-bottleneck',                  (e) => { /* the source did; the encoder could not keep up */ });
 monitor.on('capture-track-ended',                 (e) => { /* the device is gone */ });

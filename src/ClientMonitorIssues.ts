@@ -27,6 +27,7 @@ import {
     CaptureTrackEndedIssuePayload,
     SilentAudioSourceIssuePayload,
 } from "./detectors/CaptureFailureDetector";
+import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -73,7 +74,8 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
     | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | RaisedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
-    | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' };
+    | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
+    | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -102,7 +104,8 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
     | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | ResolvedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
-    | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' };
+    | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
+    | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -136,6 +139,7 @@ export function isClientMonitorIssue(
         case 'encoder-bottleneck':
         case 'capture-track-ended':
         case 'silent-audio-source':
+        case 'stuck-decoder':
             return true;
         default:
             return false;

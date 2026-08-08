@@ -195,6 +195,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             videoResolutionChangeDetector: detectorDefault(monitorConfig.videoResolutionChangeDetector, {
                 createEvent: true,
             }),
+            stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
+                thresholdInMs: 4000,
+                rttMultiplier: 15,
+                minStuckTicks: 3,
+                minBitrate: 10000,
+                minPliCount: 2,
+            }),
             statsGapDetector: detectorDefault(monitorConfig.statsGapDetector, {
                 gapRatioThreshold: 2,
                 minGapInMs: 3000,

@@ -60,6 +60,7 @@ export type {
     CodecChangedEventPayload,
     VideoResolutionChangedEventPayload,
     StatsCollectionGapEventPayload,
+    StuckDecoderEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
 
@@ -128,6 +129,8 @@ export { CodecChangeDetector } from './detectors/CodecChangeDetector';
 export { VideoResolutionChangeDetector } from './detectors/VideoResolutionChangeDetector';
 export type { VideoResolutionChangeDirection } from './detectors/VideoResolutionChangeDetector';
 export { StatsGapDetector } from './detectors/StatsGapDetector';
+export { StuckDecoderDetector } from './detectors/StuckDecoderDetector';
+export type { StuckDecoderIssuePayload, StuckDecoderVariant } from './detectors/StuckDecoderDetector';
 export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
 export type {
     IceRestartOutcome,

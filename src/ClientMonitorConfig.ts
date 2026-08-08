@@ -418,6 +418,48 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     } | null;
 
     /**
+     * Configuration for detecting a stuck decoder: RTP bytes keep
+     * arriving but no frame decodes for a sustained stretch, while the browser
+     * keeps sending PLIs. The specific condition under which recreating the
+     * consumer is the right mitigation — listen for the `stuck-decoder` event.
+     */
+    stuckDecoderDetector: {
+        /**
+         * Floor (in milliseconds) on how long nothing may decode, with RTP
+         * flowing, before raising. The effective wait is
+         * `max(thresholdInMs, rttMultiplier × RTT)` — a wedge never self-heals,
+         * so the wait only needs to outlast a legitimate PLI → keyframe
+         * recovery round trip, and that cost scales with RTT rather than
+         * being a fixed number of seconds.
+         */
+        thresholdInMs: number;
+
+        /**
+         * Multiple of the connection's current RTT the condition must outlast.
+         * Extends the wait on high-latency paths where recovery legitimately
+         * takes longer; on a low-RTT path `thresholdInMs` dominates.
+         */
+        rttMultiplier: number;
+
+        /**
+         * Consecutive stuck collections required, so the verdict never rests
+         * on fewer observations than this regardless of the collecting period.
+         */
+        minStuckTicks: number;
+
+        /**
+         * Receive bitrate (bps) above which the stream counts as "still being
+         * delivered" — separates the wedge from a dry/starved track. A rate,
+         * not a per-tick byte count, so it means the same thing at every
+         * collecting period.
+         */
+        minBitrate: number;
+
+        /** PLIs that must have been sent during the stuck stretch. */
+        minPliCount: number;
+    } | null;
+
+    /**
      * Configuration for reporting gaps in stats collection (backgrounded tab,
      * sleeping device, blocked main thread). Every rate this library reports
      * assumes collection happened on schedule; this says when it did not.

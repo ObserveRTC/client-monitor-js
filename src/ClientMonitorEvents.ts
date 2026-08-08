@@ -21,6 +21,7 @@ import { IcePathEvidence, IcePathTransition, SelectedIcePath } from "./monitors/
 import { IceRestartOutcome, IceRestartRecommendedEventPayload as IceRestartRecommendationPayload } from "./detectors/IceConnectivityDetector";
 import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
+import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
 
 export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
 
@@ -248,6 +249,14 @@ export type VideoResolutionChangedEventPayload = ClientMonitorBaseEvent & {
 	qualityLimitationReason?: string,
 }
 
+export type StuckDecoderEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	variant: StuckDecoderVariant,
+	stuckForInMs: number,
+	deadBytesReceived: number,
+	pliCountSinceStuck: number,
+}
+
 export type StatsCollectionGapEventPayload = ClientMonitorBaseEvent & {
 	expectedPeriodInMs: number,
 	actualPeriodInMs: number,
@@ -360,6 +369,7 @@ export type ClientMonitorEvents = {
 	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],
 	'keyframe-storm': [KeyframeStormEventPayload],
 	'video-recovery-failed': [VideoRecoveryFailedEventPayload],
+	'stuck-decoder': [StuckDecoderEventPayload],
 	'capture-bottleneck': [CaptureBottleneckEventPayload],
 	'encoder-bottleneck': [EncoderBottleneckEventPayload],
 	'capture-track-ended': [CaptureTrackEndedEventPayload],
