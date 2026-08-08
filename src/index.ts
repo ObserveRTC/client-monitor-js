@@ -41,7 +41,26 @@ export type {
     DryInboundTrackEventPayload,
     DryOutboundTrackEventPayload,
     IceTupleChangedEventPayload,
+    IcePathChangedEventPayload,
+    NewSelectedIcePathEventPayload,
+    IceRestartEventPayload,
+    IceRestartRecommendedEventPayload,
     TooLongPcConnectionEstablishmentEventPayload,
+    AudioConcealmentEventPayload,
+    AudioJitterBufferStressEventPayload,
+    VideoDecoderOverloadedEventPayload,
+    KeyframeStormEventPayload,
+    VideoRecoveryFailedEventPayload,
+    CaptureBottleneckEventPayload,
+    EncoderBottleneckEventPayload,
+    CaptureTrackEndedEventPayload,
+    CaptureTrackMutedEventPayload,
+    SilentAudioSourceEventPayload,
+    SimulcastLayerChangedEventPayload,
+    CodecChangedEventPayload,
+    VideoResolutionChangedEventPayload,
+    StatsCollectionGapEventPayload,
+    StuckDecoderEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
 
@@ -84,6 +103,53 @@ export type { DryInboundTrackIssuePayload } from './detectors/DryInboundTrackDet
 export type { DryOutboundTrackIssuePayload } from './detectors/DryOutboundTrackDetector';
 export type { FreezedVideoTrackIssuePayload } from './detectors/FreezedVideoTrackDetector';
 export type { PlayoutDiscrepancyIssuePayload } from './detectors/PlayoutDiscrepancyDetector';
+export { AudioConcealmentDetector } from './detectors/AudioConcealmentDetector';
+export type { AudioConcealmentIssuePayload } from './detectors/AudioConcealmentDetector';
+export { JitterBufferStressDetector } from './detectors/JitterBufferStressDetector';
+export type { JitterBufferStressIssuePayload } from './detectors/JitterBufferStressDetector';
+export { DecoderPerformanceDetector } from './detectors/DecoderPerformanceDetector';
+export type { DecoderPerformanceIssuePayload } from './detectors/DecoderPerformanceDetector';
+export type {
+    KeyframeStormIssuePayload,
+    VideoRecoveryFailedIssuePayload,
+} from './detectors/FreezedVideoTrackDetector';
+export { SourceEncoderBottleneckDetector } from './detectors/SourceEncoderBottleneckDetector';
+export type {
+    CaptureBottleneckIssuePayload,
+    EncoderBottleneckIssuePayload,
+} from './detectors/SourceEncoderBottleneckDetector';
+export { SimulcastLayerDetector } from './detectors/SimulcastLayerDetector';
+export type { SimulcastLayerState } from './detectors/SimulcastLayerDetector';
+export { CaptureFailureDetector } from './detectors/CaptureFailureDetector';
+export type {
+    SilentAudioSourceIssuePayload,
+    CaptureTrackEndedIssuePayload,
+} from './detectors/CaptureFailureDetector';
+export { CodecChangeDetector } from './detectors/CodecChangeDetector';
+export { VideoResolutionChangeDetector } from './detectors/VideoResolutionChangeDetector';
+export type { VideoResolutionChangeDirection } from './detectors/VideoResolutionChangeDetector';
+export { StatsGapDetector } from './detectors/StatsGapDetector';
+export { StuckDecoderDetector } from './detectors/StuckDecoderDetector';
+export type { StuckDecoderIssuePayload, StuckDecoderVariant } from './detectors/StuckDecoderDetector';
+export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
+export type {
+    IceRestartOutcome,
+    IceRestartClientEventPayload,
+    IceRestartRecommendationReason,
+    IceDisconnectedIssuePayload,
+    IceConnectionFailedIssuePayload,
+    IceTransportStalledIssuePayload,
+    UnstableIcePathIssuePayload,
+} from './detectors/IceConnectivityDetector';
+export { SelectedIcePath } from './monitors/SelectedIcePath';
+export type {
+    IcePathTransition,
+    IcePathEvidence,
+    IcePathDurations,
+    SelectedIcePathEvents,
+} from './monitors/SelectedIcePath';
+export type { IcePathKind } from './monitors/IceCandidatePairMonitor';
+export type { IceRelayProtocol, IceAddressFamily } from './monitors/IceCandidateMonitor';
 export type {
     ScoreCalculator
 } from './scores/ScoreCalculator';

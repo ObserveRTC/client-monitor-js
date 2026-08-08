@@ -1,6 +1,7 @@
 import { MediaSourceStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
+import { positiveDelta } from "../utils/common";
 
 export class MediaSourceMonitor implements MediaSourceStats {
 	private _visited = true;
@@ -18,7 +19,22 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	height?: number | undefined;
 	frames?: number | undefined;
 	framesPerSecond?: number | undefined;
-	
+
+	// derived fields
+	public deltaFrames?: number | undefined;
+	public deltaTotalAudioEnergy?: number | undefined;
+	public deltaSamplesDuration?: number | undefined;
+
+	/** Frames per second the capture source actually produced in this interval. */
+	public sourceFps?: number | undefined;
+
+	/**
+	 * RMS audio level over this interval, from `totalAudioEnergy`. Unlike the
+	 * instantaneous `audioLevel` it does not read zero between speech bursts,
+	 * so it is the value to compare against a silence threshold.
+	 */
+	public rmsAudioLevel?: number | undefined;
+
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
 	 */
@@ -57,13 +73,31 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		return this._peerConnection.mappedOutboundTracks.get(this.trackIdentifier ?? '');
 	}
 
+	/** Every outbound stream encoded from this source (several with simulcast). */
+	public getOutboundRtps() {
+		return this._peerConnection.outboundRtps.filter((outboundRtp) => outboundRtp.mediaSourceId === this.id);
+	}
+
 	public accept(stats: Omit<MediaSourceStats, 'appData'>): void {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		const elapsedInSec = elapsedInMs / 1000;
+
+		this.deltaFrames = positiveDelta(stats.frames, this.frames);
+		this.deltaTotalAudioEnergy = positiveDelta(stats.totalAudioEnergy, this.totalAudioEnergy);
+		this.deltaSamplesDuration = positiveDelta(stats.totalSamplesDuration, this.totalSamplesDuration);
+
+		this.sourceFps = this.deltaFrames !== undefined ? this.deltaFrames / elapsedInSec : undefined;
+
+		this.rmsAudioLevel = this.deltaTotalAudioEnergy !== undefined &&
+			this.deltaSamplesDuration !== undefined &&
+			this.deltaSamplesDuration > 0
+			? Math.sqrt(this.deltaTotalAudioEnergy / this.deltaSamplesDuration)
+			: undefined;
 
 		Object.assign(this, stats);
 	}

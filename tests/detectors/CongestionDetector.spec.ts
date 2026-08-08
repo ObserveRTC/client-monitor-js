@@ -312,7 +312,7 @@ describe('CongestionDetector', () => {
             expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({
                 maxAvailableIncomingBitrate: 1000000,
                 maxAvailableOutgoingBitrate: 800000,
-                maxReceivingBitrate: 400000, // Note: the implementation has a bug - it uses sendingBitrate
+                maxReceivingBitrate: 500000,
                 maxSendingBitrate: 400000
             }));
         });

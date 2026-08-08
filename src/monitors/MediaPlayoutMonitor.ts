@@ -3,6 +3,7 @@ import { SynthesizedSamplesDetector } from "../detectors/SynthesizedSamplesDetec
 import { MediaPlayoutStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
+import { positiveDelta } from "../utils/common";
 
 export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	private _visited = true;
@@ -19,6 +20,22 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 	public deltaSynthesizedSamplesDuration = 0;
 	public deltaSamplesDuration = 0;
+	public deltaSynthesizedSamplesEvents?: number | undefined;
+	public deltaTotalPlayoutDelay?: number | undefined;
+	public deltaSamplesCount?: number | undefined;
+
+	/**
+	 * Average playout delay per sample in this interval, in milliseconds —
+	 * `totalPlayoutDelay` alone grows forever and cannot be compared to a
+	 * threshold.
+	 */
+	public playoutDelayPerSampleInMs?: number | undefined;
+
+	/**
+	 * Share of the playout duration in this interval that was synthesized
+	 * (concealment / stretching) rather than real received audio, in `0..1`.
+	 */
+	public synthesizedSamplesRatio?: number | undefined;
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
 	 */
@@ -65,12 +82,22 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
-		if (this.synthesizedSamplesDuration !== undefined && stats.synthesizedSamplesDuration !== undefined) {
-			this.deltaSynthesizedSamplesDuration = stats.synthesizedSamplesDuration - this.synthesizedSamplesDuration;
+		this.deltaSynthesizedSamplesDuration = positiveDelta(stats.synthesizedSamplesDuration, this.synthesizedSamplesDuration) ?? 0;
+		this.deltaSamplesDuration = positiveDelta(stats.totalSamplesDuration, this.totalSamplesDuration) ?? 0;
+		this.deltaSynthesizedSamplesEvents = positiveDelta(stats.synthesizedSamplesEvents, this.synthesizedSamplesEvents);
+		this.deltaTotalPlayoutDelay = positiveDelta(stats.totalPlayoutDelay, this.totalPlayoutDelay);
+		this.deltaSamplesCount = positiveDelta(stats.totalSamplesCount, this.totalSamplesCount);
+
+		if (this.deltaTotalPlayoutDelay !== undefined && this.deltaSamplesCount !== undefined && this.deltaSamplesCount > 0) {
+			// totalPlayoutDelay is a sum of per-sample delays in seconds.
+			this.playoutDelayPerSampleInMs = (this.deltaTotalPlayoutDelay * 1000) / this.deltaSamplesCount;
+		} else {
+			this.playoutDelayPerSampleInMs = undefined;
 		}
-		if (this.totalSamplesDuration !== undefined && stats.totalSamplesDuration !== undefined) {
-			this.deltaSamplesDuration = stats.totalSamplesDuration - this.totalSamplesDuration;
-		}
+
+		this.synthesizedSamplesRatio = this.deltaSamplesDuration > 0
+			? Math.min(1, this.deltaSynthesizedSamplesDuration / this.deltaSamplesDuration)
+			: 0;
 
 		Object.assign(this, stats);
 

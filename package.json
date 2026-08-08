@@ -1,6 +1,6 @@
 {
   "name": "@observertc/client-monitor-js",
-  "version": "4.3.1",
+  "version": "4.5.0",
   "description": "ObserveRTC Client Integration Javascript Library",
   "type": "module",
   "main": "./dist/index.js",
@@ -68,7 +68,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/observertc/client-monitor-js"
+    "url": "https://github.com/ObserveRTC/client-monitor-js"
   },
   "sideEffects": false,
   "browserslist": [

@@ -52,3 +52,16 @@ type Merge<T> = {
 
 export const NULL_UUID = "00000000-0000-0000-0000-000000000000";
 
+/**
+ * Difference between two readings of a monotonic counter, treating a backwards
+ * step as "no progress": a counter that goes down means the underlying stats
+ * object was reset (SSRC reuse, ICE restart, replaced track), and a negative
+ * delta would poison every rate derived from it.
+ */
+export function positiveDelta(current?: number, previous?: number): number | undefined {
+	if (current === undefined || previous === undefined) return undefined;
+	if (current < previous) return 0;
+
+	return current - previous;
+}
+

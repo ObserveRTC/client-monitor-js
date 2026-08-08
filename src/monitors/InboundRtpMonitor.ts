@@ -2,6 +2,7 @@ import { InboundRtpStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
+import { positiveDelta } from "../utils/common";
 
 export class InboundRtpMonitor implements InboundRtpStats {
 	// field indicate that this object was visited by accepting stats
@@ -104,6 +105,44 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaFramesRendered?: number;
 	deltaTime?: number;
 
+	// ---- derived: audio concealment & jitter buffer ----
+	public deltaTotalSamplesReceived?: number;
+	public deltaConcealedSamples?: number;
+	public deltaSilentConcealedSamples?: number;
+	public deltaConcealmentEvents?: number;
+	public deltaInsertedSamplesForDeceleration?: number;
+	public deltaRemovedSamplesForAcceleration?: number;
+	public deltaPacketsDiscarded?: number;
+	public deltaJitterBufferEmittedCount?: number;
+	public deltaJitterBufferTargetDelay?: number;
+	/** Audible concealment only — silent concealment is excluded. */
+	public concealmentRate?: number;
+	public concealmentEventRate?: number;
+	/** Share of samples NetEQ stretched or compressed to keep up. */
+	public timeStretchRate?: number;
+	public avgJitterBufferDelayInMs?: number;
+	public jitterBufferTargetDelayInMs?: number;
+	public discardRate?: number;
+
+	// ---- derived: video decode cost & recovery pressure ----
+	public deltaFramesDropped?: number;
+	public deltaKeyFramesDecoded?: number;
+	public deltaTotalDecodeTime?: number;
+	public deltaPliCount?: number;
+	public deltaFirCount?: number;
+	public deltaNackCount?: number;
+	public deltaRetransmittedBytesReceived?: number;
+	public deltaRetransmittedPacketsReceived?: number;
+	/** Share of the bytes received in this interval that were retransmissions. */
+	public retransmissionRatio?: number;
+	public decodeTimePerFrameInMs?: number;
+	public dropRatio?: number;
+	public renderRatio?: number;
+	public keyFrameRate?: number;
+	public pliRate?: number;
+	public firRate?: number;
+	public nackRate?: number;
+
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
 	 */
@@ -151,45 +190,104 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		const elapsedInSec = elapsedInMs / 1000;
 
 		// before we assign let's update delta fields
-		if (this.totalSamplesReceived !== undefined && stats.totalSamplesReceived !== undefined) {
-			this.receivingAudioSamples = stats.totalSamplesReceived - this.totalSamplesReceived;
+		this.deltaTotalSamplesReceived = positiveDelta(stats.totalSamplesReceived, this.totalSamplesReceived);
+		if (this.deltaTotalSamplesReceived !== undefined) {
+			this.receivingAudioSamples = this.deltaTotalSamplesReceived;
 		}
 		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
-			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
+			this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived) ?? 0;
 			this.bitrate = Math.max(0, this.deltaBytesReceived * 8 / (elapsedInSec));
 		}
 		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
-			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
+			this.deltaPacketsLost = positiveDelta(stats.packetsLost, this.packetsLost) ?? 0;
 		}
 		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
-			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
+			this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived) ?? 0;
 			this.packetRate = this.deltaPacketsReceived / elapsedInSec;
+		}
+
+		// ---- audio: concealment and jitter-buffer pressure ----
+		this.deltaConcealedSamples = positiveDelta(stats.concealedSamples, this.concealedSamples);
+		this.deltaSilentConcealedSamples = positiveDelta(stats.silentConcealedSamples, this.silentConcealedSamples);
+		this.deltaConcealmentEvents = positiveDelta(stats.concealmentEvents, this.concealmentEvents);
+		this.deltaInsertedSamplesForDeceleration = positiveDelta(stats.insertedSamplesForDeceleration, this.insertedSamplesForDeceleration);
+		this.deltaRemovedSamplesForAcceleration = positiveDelta(stats.removedSamplesForAcceleration, this.removedSamplesForAcceleration);
+		this.deltaPacketsDiscarded = positiveDelta(stats.packetsDiscarded, this.packetsDiscarded);
+		this.deltaJitterBufferEmittedCount = positiveDelta(stats.jitterBufferEmittedCount, this.jitterBufferEmittedCount);
+
+		if (this.deltaConcealedSamples !== undefined && 0 < (this.deltaTotalSamplesReceived ?? 0)) {
+			// silent concealment is subtracted: `concealedSamples` also rises during ordinary silence
+			const audible = Math.max(0, this.deltaConcealedSamples - (this.deltaSilentConcealedSamples ?? 0));
+
+			this.concealmentRate = audible / (this.deltaTotalSamplesReceived as number);
+		} else {
+			this.concealmentRate = undefined;
+		}
+		this.concealmentEventRate = this.deltaConcealmentEvents !== undefined
+			? this.deltaConcealmentEvents / elapsedInSec : undefined;
+
+		if (0 < (this.deltaTotalSamplesReceived ?? 0)) {
+			const stretched = (this.deltaInsertedSamplesForDeceleration ?? 0) + (this.deltaRemovedSamplesForAcceleration ?? 0);
+
+			this.timeStretchRate = stretched / (this.deltaTotalSamplesReceived as number);
+		} else {
+			this.timeStretchRate = undefined;
+		}
+
+		if (this.deltaPacketsDiscarded !== undefined) {
+			const consumed = this.deltaPacketsDiscarded + (this.deltaPacketsReceived ?? 0);
+
+			this.discardRate = 0 < consumed ? this.deltaPacketsDiscarded / consumed : 0;
 		}
 		if (this.totalCorruptionProbability !== undefined &&
 			stats.totalCorruptionProbability !== undefined &&
 			this.corruptionMeasurements !== undefined &&
 			stats.corruptionMeasurements !== undefined
 		) {
-			const deltaCoruption = stats.totalCorruptionProbability - this.totalCorruptionProbability;
+			const deltaCorruption = stats.totalCorruptionProbability - this.totalCorruptionProbability;
 			const deltaMeasurements = Math.max(1, stats.corruptionMeasurements - this.corruptionMeasurements);
 			this.deltaCorruptionProbability = Math.max(
 				0,
-				deltaCoruption / deltaMeasurements
+				deltaCorruption / deltaMeasurements
 			);
 		}
 
-		if (this.jitterBufferDelay !== undefined && stats.jitterBufferDelay !== undefined) {
-			this.deltaJitterBufferDelay = stats.jitterBufferDelay - this.jitterBufferDelay;
-		}
-		if (this.framesDecoded !== undefined && stats.framesDecoded !== undefined) {
-			this.deltaFramesDecoded = stats.framesDecoded - this.framesDecoded;
-		}
-		if (this.framesReceived !== undefined && stats.framesReceived !== undefined) {
-			this.deltaFramesReceived = stats.framesReceived - this.framesReceived;
-		}
-		if (this.framesRendered !== undefined && stats.framesRendered !== undefined) {
-			this.deltaFramesRendered = stats.framesRendered - this.framesRendered;
-		}
+		this.deltaJitterBufferDelay = positiveDelta(stats.jitterBufferDelay, this.jitterBufferDelay);
+		this.deltaFramesDecoded = positiveDelta(stats.framesDecoded, this.framesDecoded);
+		this.deltaFramesReceived = positiveDelta(stats.framesReceived, this.framesReceived);
+		this.deltaFramesRendered = positiveDelta(stats.framesRendered, this.framesRendered);
+		this.deltaFramesDropped = positiveDelta(stats.framesDropped, this.framesDropped);
+		this.deltaKeyFramesDecoded = positiveDelta(stats.keyFramesDecoded, this.keyFramesDecoded);
+		this.deltaTotalDecodeTime = positiveDelta(stats.totalDecodeTime, this.totalDecodeTime);
+		this.deltaPliCount = positiveDelta(stats.pliCount, this.pliCount);
+		this.deltaFirCount = positiveDelta(stats.firCount, this.firCount);
+		this.deltaNackCount = positiveDelta(stats.nackCount, this.nackCount);
+		this.deltaRetransmittedBytesReceived = positiveDelta(stats.retransmittedBytesReceived, this.retransmittedBytesReceived);
+		this.deltaRetransmittedPacketsReceived = positiveDelta(stats.retransmittedPacketsReceived, this.retransmittedPacketsReceived);
+
+		this.retransmissionRatio = this.deltaRetransmittedBytesReceived !== undefined && 0 < (this.deltaBytesReceived ?? 0)
+			? Math.min(1, this.deltaRetransmittedBytesReceived / (this.deltaBytesReceived as number))
+			: undefined;
+
+		this.avgJitterBufferDelayInMs = 0 < (this.deltaJitterBufferEmittedCount ?? 0) && this.deltaJitterBufferDelay !== undefined
+			? (this.deltaJitterBufferDelay / (this.deltaJitterBufferEmittedCount as number)) * 1000
+			: undefined;
+		this.deltaJitterBufferTargetDelay = positiveDelta(stats.jitterBufferTargetDelay, this.jitterBufferTargetDelay);
+		this.jitterBufferTargetDelayInMs = 0 < (this.deltaJitterBufferEmittedCount ?? 0) && this.deltaJitterBufferTargetDelay !== undefined
+			? (this.deltaJitterBufferTargetDelay / (this.deltaJitterBufferEmittedCount as number)) * 1000
+			: undefined;
+
+		// ---- video: decode cost and recovery pressure ----
+		this.decodeTimePerFrameInMs = 0 < (this.deltaFramesDecoded ?? 0) && this.deltaTotalDecodeTime !== undefined
+			? (this.deltaTotalDecodeTime / (this.deltaFramesDecoded as number)) * 1000 : undefined;
+		this.dropRatio = 0 < (this.deltaFramesReceived ?? 0) && this.deltaFramesDropped !== undefined
+			? this.deltaFramesDropped / (this.deltaFramesReceived as number) : undefined;
+		this.renderRatio = 0 < (this.deltaFramesDecoded ?? 0) && this.deltaFramesRendered !== undefined
+			? this.deltaFramesRendered / (this.deltaFramesDecoded as number) : undefined;
+		this.keyFrameRate = this.deltaKeyFramesDecoded !== undefined ? this.deltaKeyFramesDecoded / elapsedInSec : undefined;
+		this.pliRate = this.deltaPliCount !== undefined ? this.deltaPliCount / elapsedInSec : undefined;
+		this.firRate = this.deltaFirCount !== undefined ? this.deltaFirCount / elapsedInSec : undefined;
+		this.nackRate = this.deltaNackCount !== undefined ? this.deltaNackCount / elapsedInSec : undefined;
 		this.deltaTime = elapsedInMs;
 
 		Object.assign(this, stats);

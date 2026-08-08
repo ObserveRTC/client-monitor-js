@@ -8,12 +8,37 @@ on:
 jobs:
     publish:
         runs-on: ubuntu-latest
+        # Required for npm OIDC trusted publishing: lets the job mint a
+        # short-lived OIDC token that npm verifies against the trusted
+        # publisher configured for this package. No NPM_TOKEN secret needed.
+        permissions:
+            id-token: write
+            contents: read
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
-                  node-version: 18
+                  # npm OIDC trusted publishing requires Node 20.17+/22.9+.
+                  node-version: 22
                   cache: "yarn"
+                  registry-url: "https://registry.npmjs.org"
+            # Trusted publishing requires npm >= 11.5.1; Node 22 ships an older
+            # npm, so upgrade the global npm used for `npm publish`.
+            - name: Upgrade npm
+              run: npm install -g npm@latest
+
+            - name: Diagnostics
+              # npm OIDC trusted publishing needs npm >= 11.5.1 and an OIDC
+              # token request URL (present only when id-token: write is granted).
+              run: |
+                  echo "node: $(node --version)"
+                  echo "npm:  $(npm --version)"
+                  if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+                      echo "OIDC: available"
+                  else
+                      echo "::warning::OIDC token URL not present — id-token permission missing or OIDC unavailable."
+                  fi
+
             - name: Install
               run: yarn install --frozen-lockfile
 
@@ -35,22 +60,13 @@ jobs:
               if: steps.job_context.outputs.branch != 'master'
               run: |
                   npm version prerelease --preid=${{ steps.job_context.outputs.short_sha }} --git-tag-version false
-              working-directory: ${{env.working-directory}}
 
+            # With trusted publishing, npm authenticates via OIDC automatically
+            # and generates provenance — no token env var required.
             - name: Publish package to latest
               if: steps.job_context.outputs.branch == 'master'
-              working-directory: ${{env.working-directory}}
-              run: |
-                  npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
-                  npm publish --ignore-scripts --access public
-              env:
-                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+              run: npm publish --ignore-scripts --access public
 
             - name: Publish package to branch-tag
               if: steps.job_context.outputs.branch != 'master'
-              working-directory: ${{env.working-directory}}
-              run: |
-                  npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
-                  npm publish --ignore-scripts --access public  --tag $(echo "develop-${{ steps.job_context.outputs.version }}-rc" | sed 's/[.]//g')
-              env:
-                  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+              run: npm publish --ignore-scripts --access public --tag $(echo "develop-${{ steps.job_context.outputs.version }}-rc" | sed 's/[.]//g')

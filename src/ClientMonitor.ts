@@ -23,6 +23,7 @@ import { Sources } from './sources/Sources';
 import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
+import { StatsGapDetector } from './detectors/StatsGapDetector';
 import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
 import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
@@ -125,8 +126,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 thresholdInMs: 5000,
             }),
             audioDesyncDetector: detectorDefault(monitorConfig.audioDesyncDetector, {
-                fractionalCorrectionAlertOffThreshold: 0.25,
-                fractionalCorrectionAlertOnThreshold: 0.5,
+                // aligned with the documented defaults; the previous 0.5/0.25
+                // required half of all samples to be corrected before alerting
+                fractionalCorrectionAlertOffThreshold: 0.05,
+                fractionalCorrectionAlertOnThreshold: 0.1,
             }),
             syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
                 minSynthesizedSamplesDuration: 0,
@@ -135,14 +138,82 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 sensitivity: 'medium',
             }),
             cpuPerformanceDetector: detectorDefault(monitorConfig.cpuPerformanceDetector, {
-                fpsVolatilityThresholds: {
-                    lowWatermark: 0.1,
-                    highWatermark: 0.3,
+                incomingDecodedFramesRatioThresholds: {
+                    alertOn: 0.7,
+                    alertOff: 0.85,
+                    minReceivedFrames: 10,
                 },
                 durationOfCollectingStatsThreshold: {
                     lowWatermark: 5000,
                     highWatermark: 10000,
                 },
+                encoderCpuLimitationShareThreshold: 0.3,
+                encodeTimeBudgetRatio: 0.8,
+            }),
+            audioConcealmentDetector: detectorDefault(monitorConfig.audioConcealmentDetector, {
+                // Webex-aligned: >3% concealment is a significant change, a
+                // "severely concealed second" is >5%
+                onThreshold: 0.03,
+                offThreshold: 0.01,
+                // must span several collections at the commonly recommended
+                // ~5s collecting period — a 5s window would hold one sample
+                windowInMs: 15000,
+                minSamplesInWindow: 24000, // half a second of 48kHz audio
+            }),
+            jitterBufferStressDetector: detectorDefault(monitorConfig.jitterBufferStressDetector, {
+                targetDelayThresholdInMs: 200,
+                timeStretchThreshold: 0.02,
+                minConsecutiveTicks: 2,
+            }),
+            decoderPerformanceDetector: detectorDefault(monitorConfig.decoderPerformanceDetector, {
+                decodeTimeBudgetRatio: 0.8,
+                dropRatioThreshold: 0.1,
+                minFramesReceived: 10,
+                quietLossThreshold: 0.02,
+                minConsecutiveTicks: 2,
+            }),
+            videoRecoveryDetector: detectorDefault(monitorConfig.videoRecoveryDetector, {
+                windowInMs: 30000,
+                // real-world storms run ~0.5-0.7 PLI/s sustained; healthy
+                // streams stay well under 0.1/s outside of joins
+                pliRateAlertOn: 0.5,
+                pliRateAlertOff: 0.15,
+                recoveryFailedThresholdInMs: 5000,
+                recoveryFailedMinPliCount: 2,
+            }),
+            sourceEncoderBottleneckDetector: detectorDefault(monitorConfig.sourceEncoderBottleneckDetector, {
+                captureFpsRatioThreshold: 0.5,
+                minSourceFps: 5,
+                encodeFpsRatioThreshold: 0.7,
+                encodeTimeBudgetRatio: 0.8,
+                cpuLimitationShareThreshold: 0.3,
+                minConsecutiveTicks: 2,
+            }),
+            simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
+                createEvent: true,
+            }),
+            captureFailureDetector: detectorDefault(monitorConfig.captureFailureDetector, {
+                silenceThresholdInMs: 30000,
+                silenceRmsThreshold: 0.001,
+                createEvent: true,
+            }),
+            codecChangeDetector: detectorDefault(monitorConfig.codecChangeDetector, {
+                createEvent: true,
+            }),
+            videoResolutionChangeDetector: detectorDefault(monitorConfig.videoResolutionChangeDetector, {
+                createEvent: true,
+            }),
+            stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
+                thresholdInMs: 4000,
+                rttMultiplier: 15,
+                minStuckTicks: 2,
+                minBitrate: 10000,
+                minPliCount: 2,
+            }),
+            statsGapDetector: detectorDefault(monitorConfig.statsGapDetector, {
+                gapRatioThreshold: 2,
+                minGapInMs: 5000,
+                createEvent: true,
             }),
             playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
                 lowSkewThreshold: 2,
@@ -151,6 +222,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             longPcConnectionEstablishmentDetector: detectorDefault(monitorConfig.longPcConnectionEstablishmentDetector, {
                 thresholdInMs: 5000,
                 createEvent: true,
+            }),
+            iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
+                disconnectedThresholdInMs: 5000,
+                transportStallThresholdInMs: 5000,
+                createEvent: true,
+                pathSwitchWindowInMs: 30000,
+                pathSwitchThreshold: 3,
+                iceRestartRecommendationThresholdInMs: 10000,
+                iceRestartRecommendationCooldownInMs: 15000,
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             appData: monitorConfig.appData ?? {} as AppData,
@@ -178,6 +258,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.detectors = new Detectors();
         if (this.config.cpuPerformanceDetector !== null) {
             this.detectors.add(new CpuPerformanceDetector(this));
+        }
+        if (this.config.statsGapDetector !== null) {
+            this.detectors.add(new StatsGapDetector(this));
         }
     }
 
@@ -280,7 +363,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     public async collect(): Promise<[string, RTCStats[]][]> {
-        if (this.closed) this.logger.warn(`[${MODULE_NAME}]:`, 'ClientMonitor is closed, cannot collet stats');
+        if (this.closed) {
+            this.logger.warn(`[${MODULE_NAME}]:`, 'ClientMonitor is closed, cannot collect stats');
+
+            return [];
+        }
 
         this.lastCollectingStatsAt = Date.now();
         const result: [string, RTCStats[]][] = [];
@@ -311,7 +398,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this.receivingVideoBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.receivingVideoBitrate ?? 0), 0);
         this.totalAvailableIncomingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableIncomingBitrate ?? 0), 0);
         this.totalAvailableOutgoingBitrate = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.totalAvailableOutgoingBitrate ?? 0), 0);
-        this.avgRttInSec = this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length;
+        // guard against division by zero (no peer connections yet) producing NaN
+        this.avgRttInSec = 0 < this.peerConnections.length
+            ? this.peerConnections.reduce((acc, peerConnection) => acc + (peerConnection.avgRttInSec ?? 0), 0) / this.peerConnections.length
+            : -1;
         this.durationOfCollectingStatsInMs = Date.now() - this.lastCollectingStatsAt;
 
         this.tracks.forEach(track => track.update());

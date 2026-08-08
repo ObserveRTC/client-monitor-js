@@ -22,8 +22,10 @@ import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
+import { IceConnectivityDetector } from "../detectors/IceConnectivityDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
+import { SelectedIcePath } from "./SelectedIcePath";
 import {
 	CertificateStats,
 	CodecStats,
@@ -66,6 +68,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public readonly mappedIceCandidateMonitors = new Map<string, IceCandidateMonitor>();
 	public readonly mappedIceCandidatePairMonitors = new Map<string, IceCandidatePairMonitor>();
 	public readonly mappedCertificateMonitors = new Map<string, CertificateMonitor>();
+	/** Live selected ICE paths, keyed by ICE transport (see `SelectedIcePath`). */
+	public readonly mappedSelectedIcePaths = new Map<string, SelectedIcePath>();
 
 	// tracks that are detected at peer connection level, but not yet picked up by stats
 	private readonly _pendingMediaStreamTracks = new Map<string, {
@@ -123,8 +127,22 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public highestSeenAvailableIncomingBitrate?: number;
 
 	public congested = false;
-	public avgRttInSec?: number;
-	public ewmaRttInSec?: number;
+
+	/**
+	 * Round trip time measured by ICE connectivity checks (STUN), averaged over
+	 * the selected candidate pairs. In an SFU topology this is the trip to
+	 * whatever terminates ICE — the SFU — **not** to the far peer.
+	 */
+	public iceRttInSec?: number;
+	public ewmaIceRttInSec?: number;
+
+	/**
+	 * Round trip time reported by RTCP, averaged over the remote RTP reports.
+	 * This is the media round trip, so it is the one that describes what the
+	 * far end actually experiences.
+	 */
+	public rtcpRttInSec?: number;
+	public ewmaRtcpRttInSec?: number;
 	public connectingStartedAt?: number;
 	public connectedAt?: number;
 	private _connectionState?: W3C.RtcPeerConnectionState;
@@ -160,6 +178,27 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			this.detectors.add(new CongestionDetector(this));
 		}
 		this.detectors.add(new IceTupleChangeDetector(this));
+		if (parent.config.iceConnectivityDetector !== null) {
+			this.detectors.add(new IceConnectivityDetector(this));
+		}
+	}
+
+	/**
+	 * The round trip time to prefer when a single number is needed: RTCP when
+	 * the remote reports are available, falling back to the ICE measurement.
+	 *
+	 * These are two different measurements — RTCP spans the media path to the
+	 * far end, ICE spans the connectivity check to whatever terminates ICE — and
+	 * they must never be averaged together. Read `rtcpRttInSec` / `iceRttInSec`
+	 * directly when the distinction matters.
+	 */
+	public get avgRttInSec(): number | undefined {
+		return this.rtcpRttInSec ?? this.iceRttInSec;
+	}
+
+	/** EWMA of whichever source `avgRttInSec` is currently reporting. */
+	public get ewmaRttInSec(): number | undefined {
+		return this.rtcpRttInSec !== undefined ? this.ewmaRtcpRttInSec : this.ewmaIceRttInSec;
 	}
 
 	public get score() {
@@ -211,15 +250,22 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		this.emit('stats', stats);
 
-		this.accept(stats);
+		this._acceptAdaptedStats(stats);
 
 		return stats;
 	}
 
 
 	public accept(stats: W3C.RtcStats[]) {
-		let sumOfRttInS =  0;
-		let rttMeasurementsCounter = 0;
+		this._acceptAdaptedStats(this.statsAdapters.adapt(stats));
+	}
+
+	private _acceptAdaptedStats(stats: W3C.RtcStats[]) {
+		// Kept apart deliberately: RTCP and ICE round trips measure different
+		// paths, and blending them makes the result move when streams come and
+		// go rather than when the network changes.
+		const rtcpRttMeasurementsInS: number[] = [];
+		const iceRttMeasurementsInS: number[] = [];
 		this.deltaVideoBytesSent = 0;
 		this.deltaAudioBytesSent = 0;
 		this.deltaVideoBytesReceived = 0;
@@ -228,6 +274,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.deltaDataChannelBytesSent = 0;
 		this.deltaOutboundPacketsLost = 0;
 		this.deltaOutboundPacketsReceived = 0;
+		this.deltaOutboundPacketsSent = 0;
 		this.deltaInboundPacketsLost = 0;
 		this.deltaInboundPacketsReceived = 0;
 
@@ -239,8 +286,6 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.inboundFractionalLost = 0;
 		this.totalAvailableIncomingBitrate = 0;
 		this.totalAvailableOutgoingBitrate = 0;
-
-		stats = this.statsAdapters.adapt(stats);
 
 		for (let i = 0, input = stats; i < 2 && 0 < input.length; ++i) {
 
@@ -272,8 +317,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						const monitor = this._updateRemoteOutboundRtp(statsItem);
 
 						if (monitor?.roundTripTime !== undefined) {
-							sumOfRttInS += monitor.roundTripTime;
-							++rttMeasurementsCounter;
+							rtcpRttMeasurementsInS.push(monitor.roundTripTime);
 						}
 						break;
 					}
@@ -296,6 +340,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 					case W3C.StatsType.remoteInboundRtp: {
 						const monitor = this._updateRemoteInboundRtp(statsItem);
+
+						// remote-inbound-rtp carries the RTT the far end measured
+						// for the stream we send: the canonical RTCP round trip.
+						if (monitor?.roundTripTime !== undefined) {
+							rtcpRttMeasurementsInS.push(monitor.roundTripTime);
+						}
 
 						this.outboundFractionLost += monitor?.deltaFractionLost ?? 0.0;
 						this.deltaOutboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
@@ -323,9 +373,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
 						this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
 
-						if (selectedPair?.currentRoundTripTime !== undefined) {
-							sumOfRttInS += selectedPair.currentRoundTripTime;
-							++rttMeasurementsCounter;
+						// interval average when a check completed this tick; the
+						// (possibly stale) latest check otherwise
+						const iceRtt = selectedPair?.avgRoundTripTimeInSec ?? selectedPair?.currentRoundTripTime;
+
+						if (iceRtt !== undefined) {
+							iceRttMeasurementsInS.push(iceRtt);
 						}
 						break;
 					}
@@ -353,9 +406,17 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		this._checkVisited();
 
-		if (0 < rttMeasurementsCounter) {
-			this.avgRttInSec = sumOfRttInS / rttMeasurementsCounter;
-			this.ewmaRttInSec = this.ewmaRttInSec !== undefined ? (this.avgRttInSec * 0.1) + (this.ewmaRttInSec * 0.9) : this.avgRttInSec;
+		if (0 < rtcpRttMeasurementsInS.length) {
+			this.rtcpRttInSec = rtcpRttMeasurementsInS.reduce((acc, rtt) => acc + rtt, 0) / rtcpRttMeasurementsInS.length;
+			this.ewmaRtcpRttInSec = this.ewmaRtcpRttInSec !== undefined
+				? (this.rtcpRttInSec * 0.1) + (this.ewmaRtcpRttInSec * 0.9)
+				: this.rtcpRttInSec;
+		}
+		if (0 < iceRttMeasurementsInS.length) {
+			this.iceRttInSec = iceRttMeasurementsInS.reduce((acc, rtt) => acc + rtt, 0) / iceRttMeasurementsInS.length;
+			this.ewmaIceRttInSec = this.ewmaIceRttInSec !== undefined
+				? (this.iceRttInSec * 0.1) + (this.ewmaIceRttInSec * 0.9)
+				: this.iceRttInSec;
 		}
 
 		this.highestSeenAvailableIncomingBitrate = Math.max(this.highestSeenAvailableIncomingBitrate ?? 0, this.totalAvailableIncomingBitrate);
@@ -365,9 +426,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
 
-		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.protocol === 'tcp');
-		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.relayProtocol) &&
-			selectedIceCandidatePairs.some(pair => pair.getLocalCandidate()?.url?.startsWith('turn'));
+		this._updateSelectedIcePaths(selectedIceCandidatePairs);
+
+		// Each flag is decided per candidate pair, so a TURN verdict can never be
+		// assembled from signals belonging to two different candidates.
+		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.usingTcp);
+		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.usingTurn);
 		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
 
 		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
@@ -491,6 +555,26 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		return [ ...this.mappedCertificateMonitors.values() ];
 	}
 
+	public get selectedIcePaths() {
+		return [ ...this.mappedSelectedIcePaths.values() ];
+	}
+
+	/**
+	 * The selected ICE path of this peer connection, or `undefined` before ICE
+	 * selects one.
+	 *
+	 * With BUNDLE negotiated — the normal case, and always the case for
+	 * mediasoup transports — a peer connection has exactly one ICE transport and
+	 * therefore exactly one path, so this is the accessor to reach for. Read
+	 * `selectedIcePaths` when you must handle a connection whose m-lines were
+	 * not bundled and can sit on different paths.
+	 */
+	public get selectedIcePath(): SelectedIcePath | undefined {
+		for (const selectedIcePath of this.mappedSelectedIcePaths.values()) return selectedIcePath;
+
+		return undefined;
+	}
+
 	public get selectedIceCandidatePairs() {
 		return this.iceTransports.map(iceTransport => iceTransport.getSelectedCandidatePair())
 		.filter(pair => pair !== undefined) as IceCandidatePairMonitor[];
@@ -512,6 +596,47 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	public get connectionState() {
 		return this._connectionState;
+	}
+
+	/**
+	 * Keeps one live `SelectedIcePath` per ICE transport that has a selected
+	 * candidate pair: creates paths as transports select one, feeds the current
+	 * pair to existing ones, and closes paths whose transport is gone.
+	 */
+	private _updateSelectedIcePaths(selectedIceCandidatePairs: IceCandidatePairMonitor[]) {
+		const seenKeys = new Set<string>();
+
+		for (const pair of selectedIceCandidatePairs) {
+			const key = pair.pathKey;
+
+			seenKeys.add(key);
+
+			const existingPath = this.mappedSelectedIcePaths.get(key);
+
+			if (existingPath) {
+				existingPath.update(pair);
+				continue;
+			}
+
+			const selectedIcePath = new SelectedIcePath(key, pair, this);
+
+			this.mappedSelectedIcePaths.set(key, selectedIcePath);
+
+			this.parent.emit('new-selected-ice-path', {
+				clientMonitor: this.parent,
+				peerConnectionMonitor: this,
+				selectedIcePath,
+			});
+
+			selectedIcePath.notifyInitialSelection();
+		}
+
+		for (const [ key, selectedIcePath ] of [ ...this.mappedSelectedIcePaths.entries() ]) {
+			if (seenKeys.has(key)) continue;
+
+			this.mappedSelectedIcePaths.delete(key);
+			selectedIcePath.close();
+		}
 	}
 
 	private _checkVisited() {
@@ -587,6 +712,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public close() {
 		if (this.closed) return;
 		this.closed = true;
+
+		this.mappedSelectedIcePaths.forEach(selectedIcePath => selectedIcePath.close());
+		this.mappedSelectedIcePaths.clear();
 
 		// this will clear up everything since the second time
 		// the visited will be false, hence will delete the monitors

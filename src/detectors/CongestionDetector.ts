@@ -130,6 +130,8 @@ export class CongestionDetector implements Detector {
 			// isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
 		}
 
+		// avgRttInSec/ewmaRttInSec prefer the RTCP round trip and fall back to
+		// ICE/STUN together, so the difference below never mixes two round trips
 		let rttDiffInS = 0;
 		if (this.peerConnection.avgRttInSec !== undefined) {
 			if (this.peerConnection.ewmaRttInSec !== undefined) {
@@ -185,7 +187,7 @@ export class CongestionDetector implements Detector {
 			availableOutgoingBitrate,
 			maxAvailableIncomingBitrate: this._maxAvailableIncomingBitrate,
 			maxAvailableOutgoingBitrate: this._maxAvailableOutgoingBitrate,
-			maxReceivingBitrate: this._maxSendingBitrate,
+			maxReceivingBitrate: this._maxReceivingBitrate,
 			maxSendingBitrate: this._maxSendingBitrate,
 		});
 

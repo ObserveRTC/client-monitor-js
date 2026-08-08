@@ -17,6 +17,11 @@ import { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
 import { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 import { ClientSample } from "./schema/ClientSample"
 import { RtcStats } from "./schema/W3cStatsIdentifiers";
+import { IcePathEvidence, IcePathTransition, SelectedIcePath } from "./monitors/SelectedIcePath";
+import { IceRestartOutcome, IceRestartRecommendedEventPayload as IceRestartRecommendationPayload } from "./detectors/IceConnectivityDetector";
+import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
+import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
+import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
 
 export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
 
@@ -136,8 +141,126 @@ export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
 }
 
+export type IcePathChangedEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	selectedIcePath: SelectedIcePath,
+	transition: IcePathTransition,
+	/** Absent for the first path observed on a transport. */
+	from?: IcePathEvidence,
+	to: IcePathEvidence,
+}
+
+export type NewSelectedIcePathEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	selectedIcePath: SelectedIcePath,
+}
+
+export type IceRestartRecommendedEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& IceRestartRecommendationPayload;
+
+export type IceRestartEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	transportId: string,
+	iceGeneration: number,
+	outcome: IceRestartOutcome,
+}
+
 export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
+}
+
+export type AudioConcealmentEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	/** Audible concealment share over the evaluation window, in `0..1`. */
+	concealmentRate: number,
+	concealmentEventRate: number,
+}
+
+export type AudioJitterBufferStressEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	targetDelayInMs: number,
+	timeStretchRate: number,
+}
+
+export type VideoDecoderOverloadedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	decodeTimePerFrameInMs?: number,
+	/** The per-frame budget the decode time was compared against. */
+	frameBudgetInMs?: number,
+}
+
+export type KeyframeStormEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	pliRate: number,
+}
+
+export type VideoRecoveryFailedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	pliCountSinceStalled: number,
+	stalledForInMs: number,
+}
+
+export type CaptureBottleneckEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+	sourceFps?: number,
+	/** What the track was configured to capture at, when the browser reports it. */
+	expectedFps?: number,
+}
+
+export type EncoderBottleneckEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+	sourceFps?: number,
+	encodedFps?: number,
+}
+
+export type CaptureTrackEndedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+}
+
+export type CaptureTrackMutedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+}
+
+export type SilentAudioSourceEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+	silentForInMs: number,
+}
+
+export type SimulcastLayerChangedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: OutboundTrackMonitor,
+	activeLayerIds: string[],
+	previousActiveLayerIds: string[],
+	layers: SimulcastLayerState[],
+}
+
+export type CodecChangedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor | OutboundTrackMonitor,
+	from: { mimeType: string, sdpFmtpLine?: string },
+	to: { mimeType: string, sdpFmtpLine?: string },
+}
+
+export type VideoResolutionChangedEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor | OutboundTrackMonitor,
+	direction: VideoResolutionChangeDirection,
+	from: { width: number, height: number },
+	to: { width: number, height: number },
+	/** Only set for outbound tracks. */
+	qualityLimitationReason?: string,
+}
+
+export type StuckDecoderEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	variant: StuckDecoderVariant,
+	stuckForInMs: number,
+	deadBytesReceived: number,
+	pliCountSinceStuck: number,
+}
+
+export type StatsCollectionGapEventPayload = ClientMonitorBaseEvent & {
+	expectedPeriodInMs: number,
+	actualPeriodInMs: number,
+	gapInMs: number,
 }
 
 export type ScoreEventPayload = ClientMonitorBaseEvent & {
@@ -236,9 +359,26 @@ export type ClientMonitorEvents = {
 	'dry-inbound-track': [DryInboundTrackEventPayload],
 	'dry-outbound-track': [DryOutboundTrackEventPayload],
 	'ice-tuple-changed': [IceTupleChangedEventPayload],
+	'ice-path-changed': [IcePathChangedEventPayload],
 	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload],
 	'inbound-video-playout-discrepancy': [InboundVideoPlayoutDiscrepancyEventPayload],
-	// 'ice-restart': [peerConnectionMonitor: PeerConnectionMonitor],
+	'ice-restart': [IceRestartEventPayload],
+	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
+	'audio-concealment': [AudioConcealmentEventPayload],
+	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
+	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],
+	'keyframe-storm': [KeyframeStormEventPayload],
+	'video-recovery-failed': [VideoRecoveryFailedEventPayload],
+	'stuck-decoder': [StuckDecoderEventPayload],
+	'capture-bottleneck': [CaptureBottleneckEventPayload],
+	'encoder-bottleneck': [EncoderBottleneckEventPayload],
+	'capture-track-ended': [CaptureTrackEndedEventPayload],
+	'capture-track-muted': [CaptureTrackMutedEventPayload],
+	'silent-audio-source': [SilentAudioSourceEventPayload],
+	'simulcast-layer-changed': [SimulcastLayerChangedEventPayload],
+	'codec-changed': [CodecChangedEventPayload],
+	'video-resolution-changed': [VideoResolutionChangedEventPayload],
+	'stats-collection-gap': [StatsCollectionGapEventPayload],
 	'score': [ScoreEventPayload],
 
 	// for appData
@@ -258,4 +398,5 @@ export type ClientMonitorEvents = {
 	'new-remote-inbound-rtp-monitor': [NewRemoteInboundRtpMonitorEventPayload],
 	'new-remote-outbound-rtp-monitor': [NewRemoteOutboundRtpMonitorEventPayload],
 	'new-certificate-monitor': [NewCertificateMonitorEventPayload],
+	'new-selected-ice-path': [NewSelectedIcePathEventPayload],
 }

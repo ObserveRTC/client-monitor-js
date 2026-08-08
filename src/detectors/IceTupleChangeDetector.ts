@@ -69,16 +69,18 @@ export class IceTupleChangeDetector implements Detector {
 		public update() {
 			if (this.pcMonitor.closed) return;
 			
-			const selectedIceCandidatePairs = this.pcMonitor.selectedIceCandidatePairs;
 			const wasEmpty = this.tuples.size === 0;
 			let changed = false;
 			const curentTuples = new Set<string>();
 
-			for (const pair of selectedIceCandidatePairs) {
-				const local = pair.getLocalCandidate();
-				const remote = pair.getRemoteCandidate();
-				const tuple = `${local?.address}:${local?.port}:${remote?.address}:${remote?.port}:${local?.protocol}`;
-			
+			// The tuple string is built by the candidate pair itself, so this
+			// detector and the connectivity detectors always agree on what the
+			// selected path is. This detector stays the low-level primitive: it
+			// reports *that* the tuple set changed. `SelectedIcePath`
+			// classifies *what kind of* change it was.
+			for (const pair of this.pcMonitor.selectedIceCandidatePairs) {
+				const tuple = pair.tuple;
+
 				curentTuples.add(tuple);
 				if (!this.tuples.has(tuple)) {
 					changed = true;

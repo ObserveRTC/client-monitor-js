@@ -1,5 +1,6 @@
 import { RemoteInboundRtpStats } from "../schema/ClientSample";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
+import { positiveDelta } from "../utils/common";
 
 export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	private _visited = true;
@@ -30,6 +31,17 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	deltaPacketsLost?: number;
 	deltaPacketsReceived?: number;
 	deltaFractionLost?: number;
+
+	/**
+	 * The RTT the far end measured for the stream we send, averaged over this
+	 * interval from `totalRoundTripTime` / `roundTripTimeMeasurements` —
+	 * `roundTripTime` alone is a single noisy measurement. `undefined` when no
+	 * new measurement arrived.
+	 */
+	avgRoundTripTimeInSec?: number;
+
+	deltaTotalRoundTripTime?: number;
+	deltaRoundTripTimeMeasurements?: number;
 
 
 	/**
@@ -84,13 +96,21 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		}
 		const elapsedInSeconds = elapsedInMs / 1000;
 
-		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
-			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
+		this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);
+		if (this.deltaPacketsReceived !== undefined) {
 			this.packetRate = this.deltaPacketsReceived / elapsedInSeconds;
 		}
-		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
-			this.deltaPacketsLost = stats.packetsLost - this.packetsLost;
-		}
+		// `packetsLost` legitimately decreases when a late packet arrives, hence positiveDelta
+		this.deltaPacketsLost = positiveDelta(stats.packetsLost, this.packetsLost);
+		this.deltaTotalRoundTripTime = positiveDelta(stats.totalRoundTripTime, this.totalRoundTripTime);
+		this.deltaRoundTripTimeMeasurements = positiveDelta(stats.roundTripTimeMeasurements, this.roundTripTimeMeasurements);
+
+		this.avgRoundTripTimeInSec = this.deltaTotalRoundTripTime !== undefined &&
+			this.deltaRoundTripTimeMeasurements !== undefined &&
+			this.deltaRoundTripTimeMeasurements > 0
+			? this.deltaTotalRoundTripTime / this.deltaRoundTripTimeMeasurements
+			: undefined;
+
 		if (this.deltaPacketsReceived !== undefined && this.deltaPacketsLost !== undefined) {
 			const totalDelta = this.deltaPacketsReceived + this.deltaPacketsLost;
 			this.deltaFractionLost = totalDelta > 0 ? this.deltaPacketsLost / totalDelta : 0.0;

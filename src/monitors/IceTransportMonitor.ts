@@ -78,19 +78,29 @@ export class IceTransportMonitor implements IceTransportStats {
 			return; // logger?
 		}
 
-		if (this.packetsSent !== undefined && stats.packetsSent !== undefined) {
+		if (this.packetsSent !== undefined && stats.packetsSent !== undefined && this.packetsSent <= stats.packetsSent) {
 			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
+		} else {
+			this.deltaPacketsSent = undefined;
 		}
-		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
+		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined && this.packetsReceived <= stats.packetsReceived) {
 			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
+		} else {
+			this.deltaPacketsReceived = undefined;
 		}
-		if (this.bytesSent !== undefined && stats.bytesSent !== undefined) {
+		if (this.bytesSent !== undefined && stats.bytesSent !== undefined && this.bytesSent <= stats.bytesSent) {
 			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
 			this.sendingBitrate = (this.deltaBytesSent * 8) / elapsedInSec;
+		} else {
+			this.deltaBytesSent = undefined;
+			this.sendingBitrate = undefined;
 		}
-		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
+		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined && this.bytesReceived <= stats.bytesReceived) {
 			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
 			this.receivingBitrate = (this.deltaBytesReceived * 8) / elapsedInSec;
+		} else {
+			this.deltaBytesReceived = undefined;
+			this.receivingBitrate = undefined;
 		}
 
 		Object.assign(this, stats);

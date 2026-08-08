@@ -5,7 +5,29 @@ import { CpuPerformanceIssuePayload } from "./detectors/CpuPerformanceDetector";
 import { DryInboundTrackIssuePayload } from "./detectors/DryInboundTrackDetector";
 import { DryOutboundTrackIssuePayload } from "./detectors/DryOutboundTrackDetector";
 import { FreezedVideoTrackIssuePayload } from "./detectors/FreezedVideoTrackDetector";
+import {
+    IceConnectionFailedIssuePayload,
+    IceDisconnectedIssuePayload,
+    IceTransportStalledIssuePayload,
+    UnstableIcePathIssuePayload,
+} from "./detectors/IceConnectivityDetector";
 import { PlayoutDiscrepancyIssuePayload } from "./detectors/PlayoutDiscrepancyDetector";
+import { AudioConcealmentIssuePayload } from "./detectors/AudioConcealmentDetector";
+import { JitterBufferStressIssuePayload } from "./detectors/JitterBufferStressDetector";
+import { DecoderPerformanceIssuePayload } from "./detectors/DecoderPerformanceDetector";
+import {
+    KeyframeStormIssuePayload,
+    VideoRecoveryFailedIssuePayload,
+} from "./detectors/FreezedVideoTrackDetector";
+import {
+    CaptureBottleneckIssuePayload,
+    EncoderBottleneckIssuePayload,
+} from "./detectors/SourceEncoderBottleneckDetector";
+import {
+    CaptureTrackEndedIssuePayload,
+    SilentAudioSourceIssuePayload,
+} from "./detectors/CaptureFailureDetector";
+import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -39,7 +61,21 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<DryInboundTrackIssuePayload>    & { type: 'dry-inbound-track' }
     | RaisedClientIssue<DryOutboundTrackIssuePayload>   & { type: 'dry-outbound-track' }
     | RaisedClientIssue<FreezedVideoTrackIssuePayload>  & { type: 'freezed-video-track' }
-    | RaisedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' };
+    | RaisedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' }
+    | RaisedClientIssue<UnstableIcePathIssuePayload>       & { type: 'unstable-ice-path' }
+    | RaisedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
+    | RaisedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
+    | RaisedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' }
+    | RaisedClientIssue<AudioConcealmentIssuePayload>       & { type: 'audio-concealment' }
+    | RaisedClientIssue<JitterBufferStressIssuePayload>    & { type: 'audio-jitter-buffer-stress' }
+    | RaisedClientIssue<DecoderPerformanceIssuePayload>    & { type: 'video-decoder-overloaded' }
+    | RaisedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
+    | RaisedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
+    | RaisedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
+    | RaisedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
+    | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
+    | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -55,7 +91,21 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<DryInboundTrackIssuePayload>    & { type: 'dry-inbound-track' }
     | ResolvedClientIssue<DryOutboundTrackIssuePayload>   & { type: 'dry-outbound-track' }
     | ResolvedClientIssue<FreezedVideoTrackIssuePayload>  & { type: 'freezed-video-track' }
-    | ResolvedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' };
+    | ResolvedClientIssue<PlayoutDiscrepancyIssuePayload> & { type: 'inbound-video-playout-discrepancy' }
+    | ResolvedClientIssue<UnstableIcePathIssuePayload>       & { type: 'unstable-ice-path' }
+    | ResolvedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
+    | ResolvedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
+    | ResolvedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' }
+    | ResolvedClientIssue<AudioConcealmentIssuePayload>       & { type: 'audio-concealment' }
+    | ResolvedClientIssue<JitterBufferStressIssuePayload>    & { type: 'audio-jitter-buffer-stress' }
+    | ResolvedClientIssue<DecoderPerformanceIssuePayload>    & { type: 'video-decoder-overloaded' }
+    | ResolvedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
+    | ResolvedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
+    | ResolvedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
+    | ResolvedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
+    | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
+    | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -76,6 +126,20 @@ export function isClientMonitorIssue(
         case 'dry-outbound-track':
         case 'freezed-video-track':
         case 'inbound-video-playout-discrepancy':
+        case 'unstable-ice-path':
+        case 'ice-disconnected':
+        case 'ice-connection-failed':
+        case 'ice-transport-stalled':
+        case 'audio-concealment':
+        case 'audio-jitter-buffer-stress':
+        case 'video-decoder-overloaded':
+        case 'keyframe-storm':
+        case 'video-recovery-failed':
+        case 'capture-bottleneck':
+        case 'encoder-bottleneck':
+        case 'capture-track-ended':
+        case 'silent-audio-source':
+        case 'stuck-decoder':
             return true;
         default:
             return false;
