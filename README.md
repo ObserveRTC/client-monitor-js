@@ -383,454 +383,453 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 
 ## Detectors
 
-Detectors are specialized components that monitor for specific anomalies and issues in WebRTC connections. Each detector focuses on a particular aspect of the connection quality.
+Detectors turn the collected stats into *verdicts*. Each one watches a specific failure mode and reports through up to three channels: **stateful issues** (raised when the condition starts, resolved when it clears — with the full lifecycle shipped to the server, see [Sample-channel behavior](#sample-channel-behavior)), **monitor events** (realtime, for the application to act on), and **client events** (buffered into samples for server-side correlation).
 
-### Built-in Detectors
+Configuration follows one convention everywhere: omit a detector's config key to get defaults, pass `null` to not construct it at all, or flip the instance's `disabled` flag at runtime to silence it without removing it (see [Controlling which detectors run](#controlling-which-detectors-run)).
+
+### Detector overview
+
+| Detector | Watches | Reports | Good for |
+|---|---|---|---|
+| [`AudioConcealmentDetector`](#audioconcealmentdetector) | inbound audio | issue `audio-concealment` | How the audio actually *sounded* — catches degradation packet loss numbers miss |
+| [`JitterBufferStressDetector`](#jitterbufferstressdetector) | inbound audio | issue `audio-jitter-buffer-stress` | The jitter buffer adding latency *and* stretching audio — delay the user hears |
+| [`AudioDesyncDetector`](#audiodesyncdetector) | inbound audio | issue `audio-desync` | Playback drifting out of sync through heavy sample correction |
+| [`SynthesizedSamplesDetector`](#synthesizedsamplesdetector) | audio playout | event `synthesized-audio` | The playout device injecting synthesized audio |
+| [`FreezedVideoTrackDetector`](#freezedvideotrackdetector) | inbound video | issues `freezed-video-track`, `keyframe-storm`, `video-recovery-failed` | Frozen pictures and a repair loop that stopped working |
+| [`DecoderPerformanceDetector`](#decoderperformancedetector) | inbound video | issue `video-decoder-overloaded` | Frames arrived but this device cannot decode them in time |
+| [`StuckDecoderDetector`](#stuckdecoderdetector) | inbound video | issue `stuck-decoder` | RTP flowing, nothing decoding — the wedge only recreating the consumer fixes |
+| [`PlayoutDiscrepancyDetector`](#playoutdiscrepancydetector) | inbound video | issue `inbound-video-playout-discrepancy` | Frames received but not rendered — a rendering pipeline backlog |
+| [`DryInboundTrackDetector` / `DryOutboundTrackDetector`](#dryinboundtrackdetector--dryoutboundtrackdetector) | tracks | issues `dry-inbound-track`, `dry-outbound-track` | A track that should be flowing but carries no bytes at all |
+| [`SourceEncoderBottleneckDetector`](#sourceencoderbottleneckdetector) | outbound video | issues `capture-bottleneck`, `encoder-bottleneck` | Whether the *camera* or the *encoder* is the reason you send fewer frames |
+| [`CaptureFailureDetector`](#capturefailuredetector) | outbound tracks | issues `capture-track-ended`, `silent-audio-source` | Vanished devices and microphones producing pure silence |
+| [`CongestionDetector`](#congestiondetector) | peer connection | issue `congestion` | Bandwidth-limited sending corroborated by RTT / loss |
+| [`CpuPerformanceDetector`](#cpuperformancedetector) | whole client | issue `cpulimitation` | The device running out of CPU for encode/decode |
+| [`LongPcConnectionEstablishmentDetector`](#longpcconnectionestablishmentdetector) | peer connection | event `too-long-pc-connection-establishment` | Connection setup taking suspiciously long |
+| [`IceConnectivityDetector`](#iceconnectivitydetector) | ICE transports | issues `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path`; events `ice-restart`, `ice-restart-recommended` | Runtime ICE health and *when* an ICE restart is warranted |
+| [`IceTupleChangeDetector`](#icetuplechangedetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
+| [`CodecChangeDetector`](#observation-detectors) | tracks | event `codec-changed` / `CODEC_CHANGED` | Which codec/profile is actually in use, and when it changed |
+| [`VideoResolutionChangeDetector`](#observation-detectors) | video tracks | event `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder, with the *reason* attached |
+| [`SimulcastLayerDetector`](#observation-detectors) | outbound video | event `simulcast-layer-changed` / `SIMULCAST_LAYER_CHANGED` | Which simulcast layers are actually being sent |
+| [`StatsGapDetector`](#observation-detectors) | the monitor itself | event `stats-collection-gap` / `STATS_COLLECTION_GAP` | Backgrounded-tab gaps that would otherwise read as network spikes |
+
+The last four are **observations**: they emit events and never raise issues, because what they report is not a fault — it is the missing context in most investigations.
+
+---
+
+### Audio detectors
+
+#### AudioConcealmentDetector
+
+Reports how the audio actually *sounded*. Opus + NetEQ conceal a lot of loss inaudibly, and audio also degrades without dramatic loss — so the **audible** concealment share (silent concealment subtracted) is both more sensitive and more specific than packet loss. Judged over a sliding window, since concealment is bursty.
+
+**Use the result:** show a "poor audio from X" indicator on the affected participant's tile; the `burstiness` field tells you whether to describe it as choppiness (`bursty`) or dropouts (`continuous`). Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
+
+```javascript
+audioConcealmentDetector: {
+    onThreshold: 0.03,         // audible concealment share that raises (Webex: >3% = significant)
+    offThreshold: 0.01,        // share below which it resolves (hysteresis)
+    windowInMs: 15000,         // sliding window; spans several ticks even at 5s collection
+    minSamplesInWindow: 24000, // don't judge on less than ~0.5s of 48kHz audio
+}
+```
+
+```typescript
+monitor.on('audio-concealment', ({ trackMonitor, concealmentRate, concealmentEventRate }) => {
+    // the user is HEARING this — mark the participant's tile
+    ui.setAudioQualityWarning(trackMonitor.track.id, { rate: concealmentRate });
+});
+monitor.on('issue-resolved', (issue) => {
+    if (issue.type === 'audio-concealment') ui.clearAudioQualityWarning(/* by key */);
+});
+```
+
+**Sources:** [Voice quality monitoring (Webex)](https://help.webex.com/article/kqh7le/Voice-quality-monitoring) · [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### JitterBufferStressDetector
+
+Fires only when the jitter buffer's target delay has grown **and** NetEQ is time-stretching audio. Either alone is the system working (buying latency to hide jitter is success); together they are added delay the user actually hears.
+
+**Use the result:** for latency-sensitive products, surface a "your connection is adding delay" hint; there is nothing to fix client-side, so the main value is attribution — this participant's audio lag is *their network jitter*, not your platform.
+
+```javascript
+jitterBufferStressDetector: {
+    targetDelayThresholdInMs: 200, // >200ms added delay is noticeable degradation
+    timeStretchThreshold: 0.02,    // share of samples stretched/compressed
+    minConsecutiveTicks: 2,        // sustained, not a one-tick blip
+}
+```
+
+```typescript
+monitor.on('audio-jitter-buffer-stress', ({ trackMonitor, targetDelayInMs }) => {
+    log.info(`audio delayed ~${Math.round(targetDelayInMs)}ms by jitter buffering`, trackMonitor.track.id);
+});
+```
+
+**Sources:** [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [NetEQ (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/neteq/) · [RTCRtpReceiver.jitterBufferTarget (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpReceiver/jitterBufferTarget)
 
 #### AudioDesyncDetector
 
-Detects audio synchronization issues by monitoring sample corrections.
+Detects heavy sample correction (acceleration/deceleration) on an inbound audio track — the signature of playback drifting and being yanked back, which the user perceives as warbly or out-of-sync audio.
 
-**Triggers on:**
-
--   Audio acceleration/deceleration corrections exceed thresholds
--   Indicates audio-video sync problems
-
-**Configuration:**
+**Use the result:** correlate with lip-sync complaints; persistent desync on one track is usually the far end's capture clock, so route the report to *that* participant's diagnostics rather than the listener's.
 
 ```javascript
 audioDesyncDetector: {
-    fractionalCorrectionAlertOnThreshold: 0.1,  // 10% correction rate triggers alert
-    fractionalCorrectionAlertOffThreshold: 0.05, // 5% correction rate clears alert
+    fractionalCorrectionAlertOnThreshold: 0.1,  // >10% of samples corrected raises
+    fractionalCorrectionAlertOffThreshold: 0.05, // <5% resolves
 }
 ```
 
-#### CongestionDetector
-
-Monitors network congestion by analyzing available bandwidth vs. usage.
-
-**Triggers on:**
-
--   Available bandwidth falls below sending/receiving bitrates
--   Network congestion conditions
-
-**Configuration:**
-
-```javascript
-congestionDetector: {
-    sensitivity: 'medium', // 'low', 'medium', 'high'
-}
+```typescript
+monitor.on('audio-desync-track', ({ trackMonitor }) => {
+    diagnostics.flag('audio-desync', trackMonitor.track.id);
+});
 ```
 
-#### CpuPerformanceDetector
-
-Detects CPU performance issues affecting media processing.
-
-**Triggers on:**
-
--   Outbound RTP quality limitation reason is `'cpu'`
--   Inbound decoded/received frames ratio drops below threshold (the decoder cannot keep up with received frames — a sign of decode-side CPU limitation)
--   Stats collection takes too long (indicating CPU stress)
-
-> **Why not FPS volatility?** Earlier versions inferred decode CPU pressure from frame-rate volatility. That false-triggered on content such as screen share, whose fps legitimately swings (e.g. 15 → 1 fps when the shared content goes static). The decoded/received ratio is robust to this: when fps drops legitimately, received and decoded frames drop together so the ratio stays near 1.0. An alert only fires when frames are received but not decoded.
-
-**Configuration:**
-
-```javascript
-cpuPerformanceDetector: {
-    incomingDecodedFramesRatioThresholds: {
-        alertOn: 0.7,        // alert ON when <70% of received frames are decoded
-        alertOff: 0.85,      // alert OFF once >=85% are decoded again (hysteresis)
-        minReceivedFrames: 10, // skip intervals with fewer received frames (low-fps noise guard)
-    },
-    durationOfCollectingStatsThreshold: {
-        lowWatermark: 5000,
-        highWatermark: 10000,
-    },
-}
-```
-
-#### DryInboundTrackDetector
-
-Detects inbound tracks that stop receiving data.
-
-**Triggers on:**
-
--   Inbound track receives no data for specified duration
--   Track stalling or connection issues
-
-**Configuration:**
-
-```javascript
-dryInboundTrackDetector: {
-    thresholdInMs: 5000,
-}
-```
-
-#### DryOutboundTrackDetector
-
-Detects outbound tracks that stop sending data.
-
-**Triggers on:**
-
--   Outbound track sends no data for specified duration
--   Local media issues or encoding problems
-
-**Configuration:**
-
-```javascript
-dryOutboundTrackDetector: {
-    thresholdInMs: 5000,
-}
-```
-
-#### FreezedVideoTrackDetector
-
-Detects frozen video tracks.
-
-**Triggers on:**
-
--   Video frames stop updating
--   Video freeze conditions
-
-**Configuration:**
-
-```javascript
-videoFreezesDetector: {
-}
-```
-
-#### PlayoutDiscrepancyDetector
-
-Detects discrepancies between received and rendered frames.
-
-**Triggers on:**
-
--   Frame skew exceeds thresholds
--   Video playout buffer issues
-
-**Configuration:**
-
-```javascript
-playoutDiscrepancyDetector: {
-    lowSkewThreshold: 2,
-    highSkewThreshold: 5,
-}
-```
+**Sources:** [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
 #### SynthesizedSamplesDetector
 
-Detects when audio playout synthesizes samples due to missing data.
+Watches `media-playout` for synthesized (concealment/generated) samples injected at the playout device level, and emits `'synthesized-audio'` plus the `EXCESSIVE_SYNTHESIZED_AUDIO` client event when the duration in one interval exceeds the configured minimum.
 
-**Triggers on:**
-
--   Synthesized audio samples exceed duration threshold
--   Audio gaps requiring interpolation
-
-**Configuration:**
+**Use the result:** sustained synthesized playout with otherwise healthy inbound stats points at the *output* path — suggest the user switch audio output device.
 
 ```javascript
 syntheticSamplesDetector: {
-    minSynthesizedSamplesDuration: 1000,
+    minSynthesizedSamplesDuration: 0, // ms of synthesized audio per interval before reporting
+    createEvent: true,                // also buffer EXCESSIVE_SYNTHESIZED_AUDIO into samples
 }
 ```
 
+**Sources:** [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+---
+
+### Video detectors
+
+#### FreezedVideoTrackDetector
+
+Owns the whole freeze/repair domain of an inbound video track. It derives the freeze state (a freeze persists until frames actually render again) and watches the repair loop — PLI/FIR out, keyframes back in:
+
+-   `freezed-video-track` — the picture is frozen (config: `videoFreezesDetector`).
+-   `keyframe-storm` — sustained PLI rate; self-reinforcing congestion, since keyframes are large (config: `videoRecoveryDetector`).
+-   `video-recovery-failed` — PLIs going out, picture still frozen, keyframes not advancing: the repair request left the client and nothing came back, which points at SFU forwarding (config: `videoRecoveryDetector`).
+
+**Use the result:** on `freezed-video-track`, overlay a spinner/last-frame treatment on the tile. `video-recovery-failed` is your escalation signal — pair it with [`stuck-decoder`](#stuckdecoderdetector): if both fire, recreate the consumer; if only recovery fails (no bytes checked here), the producer or SFU forwarding needs the look.
+
+```javascript
+videoFreezesDetector: {},          // freeze issue on/off ({} = defaults, null = off)
+videoRecoveryDetector: {
+    windowInMs: 30000,             // window for PLI/keyframe rates
+    pliRateAlertOn: 0.5,           // real-world storms run ~0.5-0.7 PLI/s sustained
+    pliRateAlertOff: 0.15,
+    recoveryFailedThresholdInMs: 5000, // frozen + PLIs out + no keyframe for this long
+    recoveryFailedMinPliCount: 2,      // proof we actually asked for repair
+}
+```
+
+```typescript
+monitor.on('freezed-video-track', ({ trackMonitor }) => ui.showFreezeOverlay(trackMonitor.track.id));
+monitor.on('video-recovery-failed', ({ trackMonitor, pliCountSinceStalled }) => {
+    // we asked for a keyframe repeatedly and nothing came back — not a local problem
+    reportToServer('recovery-failed', trackMonitor.track.id, { pliCountSinceStalled });
+});
+```
+
+**Sources:** [PLI: Picture Loss Indication (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/pli/) · [RFC 4585: RTP/AVPF (PLI/FIR)](https://datatracker.ietf.org/doc/html/rfc4585) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### DecoderPerformanceDetector
+
+Blames this device only when frames demonstrably *arrived* — healthy receive rate, quiet loss — but decode time overran a budget derived from the stream's own frame rate, or frames were dropped after arrival. This is the detector that separates "the network dropped it" from "the client could not decode it": same chart, opposite fixes.
+
+**Use the result:** reduce decode load — subscribe to lower simulcast layers, cap the number of rendered videos, or pause off-screen tiles. The payload's `decoderImplementation` / `powerEfficientDecoder` tell you whether a software decoder is doing work the hardware could.
+
+```javascript
+decoderPerformanceDetector: {
+    decodeTimeBudgetRatio: 0.8,  // share of the per-frame budget (1000/fps) decode may use
+    dropRatioThreshold: 0.1,     // frames dropped after arriving
+    minFramesReceived: 10,       // don't judge starved intervals (e.g. static screen share)
+    quietLossThreshold: 0.02,    // above this, the network is the better explanation
+    minConsecutiveTicks: 2,
+}
+```
+
+```typescript
+monitor.on('video-decoder-overloaded', ({ trackMonitor, decodeTimePerFrameInMs, frameBudgetInMs }) => {
+    // frames are arriving; this device can't keep up — lower the decode load
+    sfuClient.preferLayer(trackMonitor.track.id, 'low');
+});
+```
+
+**Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### StuckDecoderDetector
+
+Catches the per-consumer decode wedge: RTP bytes keep arriving while nothing decodes and PLIs fire continuously — a corrupted/incomplete frame broke the decode chain and it never recovers on its own. The wait is adaptive (`max(thresholdInMs, rttMultiplier × RTT)` plus a minimum number of stuck ticks), and the `minBitrate` floor separates it from a merely starved track.
+
+**Use the result:** **recreate the consumer** — that is the known mitigation, and this detector fires exactly and only when it applies (delivery confirmed, output zero). The payload's `variant` separates an `assembly` wedge (no frame ever reassembled) from a `decode` wedge, and `deadBytesReceived` quantifies the waste for the report.
+
+```javascript
+stuckDecoderDetector: {
+    thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier × RTT)
+    rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
+    minStuckTicks: 2,      // never judge on fewer observations
+    minBitrate: 10000,     // bps below which this is a dry track, not a wedge
+    minPliCount: 2,        // the browser must be asking for repair
+}
+```
+
+```typescript
+monitor.on('stuck-decoder', async ({ trackMonitor, variant, deadBytesReceived }) => {
+    // the stream is delivered but nothing decodes — recreate the consumer
+    await sfuClient.recreateConsumerFor(trackMonitor.track.id);
+    reportToServer('stuck-decoder', { variant, deadBytesReceived });
+});
+```
+
+**Sources:** [PLI: Picture Loss Indication (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/pli/) · [RFC 4585: RTP/AVPF (PLI/FIR)](https://datatracker.ietf.org/doc/html/rfc4585) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### PlayoutDiscrepancyDetector
+
+Detects a growing skew between frames *received* and frames *rendered* on an inbound video track — decode succeeded, but the rendering pipeline is falling behind.
+
+**Use the result:** re-attach the media element or recreate the `<video>` sink; this is a local rendering problem, not a network one.
+
+```javascript
+playoutDiscrepancyDetector: {
+    lowSkewThreshold: 2,  // frames of skew at which the issue resolves
+    highSkewThreshold: 5, // frames of skew at which it raises
+}
+```
+
+```typescript
+monitor.on('inbound-video-playout-discrepancy', ({ trackMonitor }) => {
+    videoSinks.reattach(trackMonitor.track.id);
+});
+```
+
+**Sources:** [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+---
+
+### Track activity
+
+#### DryInboundTrackDetector / DryOutboundTrackDetector
+
+Raise `dry-inbound-track` / `dry-outbound-track` when a track that should be flowing carries no bytes at all past a threshold. This is *starvation* — contrast with [`stuck-decoder`](#stuckdecoderdetector), where bytes flow and nothing decodes.
+
+**Use the result:** inbound dry → verify the producer is not paused, then resubscribe/reconsume; outbound dry → check the local track (`muted`, `enabled`, `readyState`) and the transport before blaming the network.
+
+```javascript
+dryInboundTrackDetector:  { thresholdInMs: 5000 },
+dryOutboundTrackDetector: { thresholdInMs: 5000 },
+```
+
+```typescript
+monitor.on('dry-inbound-track', async ({ trackMonitor }) => {
+    if (!(await sfuClient.isProducerPaused(trackMonitor.track.id))) {
+        await sfuClient.resubscribe(trackMonitor.track.id);
+    }
+});
+```
+
+**Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+---
+
+### Send side
+
+#### SourceEncoderBottleneckDetector
+
+Splits "we are sending fewer frames than we should" into its two causes, indistinguishable from RTP alone: `capture-bottleneck` (the camera/OS never produced the frames) and `encoder-bottleneck` (the source is healthy; the encoder fell behind).
+
+**Use the result:** capture-bottleneck → the fix is at the device (suggest lowering capture constraints, closing other camera apps; lighting can throttle cameras). Encoder-bottleneck → reduce encode load: drop the top simulcast layer, lower resolution/framerate, disable background effects. The payload carries `encoderImplementation`, `cpuLimitationShare` and the fps pair for the report.
+
+```javascript
+sourceEncoderBottleneckDetector: {
+    captureFpsRatioThreshold: 0.5,   // source below 50% of configured fps = starving
+    minSourceFps: 5,                 // absolute floor when getSettings() has no frameRate
+    encodeFpsRatioThreshold: 0.7,    // encoder below 70% of source fps = behind
+    encodeTimeBudgetRatio: 0.8,      // encode time per frame vs the frame budget
+    cpuLimitationShareThreshold: 0.3, // share of interval explicitly CPU-limited
+    minConsecutiveTicks: 2,
+}
+```
+
+```typescript
+monitor.on('capture-bottleneck', ({ trackMonitor, sourceFps, expectedFps }) => {
+    ui.hintCameraTrouble(trackMonitor.track.id, { sourceFps, expectedFps });
+});
+monitor.on('encoder-bottleneck', () => sender.dropTopSimulcastLayer());
+```
+
+**Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### CaptureFailureDetector
+
+Watches the source end of outbound tracks: the device is gone (`capture-track-ended`), the OS or another app took it (`capture-track-muted` event), or a live, unmuted microphone has produced nothing but silence for a long stretch (`silent-audio-source` — the threshold is deliberately long, because only duration separates a dead mic from a quiet person).
+
+**Use the result:** `capture-track-ended` → open the device picker. `silent-audio-source` → the classic "are you speaking? we can't hear you" banner, with a shortcut to switch microphone.
+
+```javascript
+captureFailureDetector: {
+    silenceThresholdInMs: 30000, // long on purpose: silence ≠ broken until it persists
+    silenceRmsThreshold: 0.001,  // interval-integrated RMS, not the flickery audioLevel
+    createEvent: true,           // also buffer CAPTURE_TRACK_ENDED / _MUTED into samples
+}
+```
+
+```typescript
+monitor.on('silent-audio-source', ({ trackMonitor, silentForInMs }) => {
+    ui.showBanner("We can't hear you — check your microphone", { switchDeviceAction: true });
+});
+monitor.on('capture-track-ended', () => ui.openDevicePicker('audioinput'));
+```
+
+**Sources:** [MediaStreamTrack mute event (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack/mute_event) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+---
+
+### Connection & client health
+
+#### CongestionDetector
+
+Detects network congestion on a peer connection: bandwidth-limited outbound streams, corroborated (depending on `sensitivity`) by an RTT jump over its own EWMA baseline or by outbound loss. The RTT it reads never mixes RTCP and ICE measurements.
+
+**Use the result:** reduce what you send — lower simulcast layers or cap the bitrate — and show a network-quality indicator. The event payload carries the available bitrates plus the maxima seen before congestion, which sizes *how much* to back off.
+
+```javascript
+congestionDetector: {
+    sensitivity: 'medium', // 'high': any bw-limitation | 'medium': + RTT rise | 'low': + >5% loss
+}
+```
+
+```typescript
+monitor.on('congestion', ({ availableOutgoingBitrate, maxSendingBitrate }) => {
+    sender.capBitrate(Math.min(availableOutgoingBitrate, maxSendingBitrate * 0.8));
+    ui.setNetworkIndicator('poor');
+});
+```
+
+**Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### CpuPerformanceDetector
+
+Client-wide CPU pressure: outbound streams explicitly CPU-limited (instantaneous label *and* sustained duration shares), encode time per frame over budget, inbound decode falling behind receive, or stats collection itself slowing down.
+
+**Use the result:** shed load in order of user impact — disable background blur/effects first, then reduce rendered remote videos, then lower capture resolution. Resolve restores them.
+
+```javascript
+cpuPerformanceDetector: {
+    incomingDecodedFramesRatioThresholds: { alertOn: 0.7, alertOff: 0.85, minReceivedFrames: 10 },
+    durationOfCollectingStatsThreshold: { lowWatermark: 5000, highWatermark: 10000 },
+    encoderCpuLimitationShareThreshold: 0.3, // share of interval spent CPU-limited
+    encodeTimeBudgetRatio: 0.8,              // encode ms per frame vs 1000/fps budget
+}
+```
+
+```typescript
+monitor.on('cpulimitation', () => effects.disableBackgroundBlur());
+monitor.on('issue-resolved', (issue) => {
+    if (issue.type === 'cpulimitation') effects.restore();
+});
+```
+
+**Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
 #### LongPcConnectionEstablishmentDetector
 
-Detects slow peer connection establishment.
+Emits `'too-long-pc-connection-establishment'` (and the `LONG_PC_CONNECTION_ESTABLISHMENT` client event) when a peer connection stays in `connecting` past the threshold. Re-arms on any exit from `connecting`, so slow *retries* are reported too.
 
-**Triggers on:**
-
--   Peer connection takes too long to establish
--   Connection setup issues
-
-**Configuration:**
+**Use the result:** show "connecting is taking longer than usual"; if it repeats, retry with `iceTransportPolicy: 'relay'` to test whether direct connectivity is the blocker. The [`never-established`](#iceconnectivitydetector) restart recommendation is this detector's escalation.
 
 ```javascript
 longPcConnectionEstablishmentDetector: {
     thresholdInMs: 5000,
-}
-```
-
-#### IceConnectivityDetector
-
-Runtime ICE and transport health, per ICE transport. Peer-connection setup latency
-is **not** in scope — `LongPcConnectionEstablishmentDetector` covers that.
-
-**Raises:**
-
--   `ice-disconnected` — the transport stayed `disconnected` past
-    `disconnectedThresholdInMs`. Transient blips, which ICE usually heals on its
-    own, never raise an issue.
--   `ice-connection-failed` — ICE reached `failed`, which is terminal for that
-    generation.
--   `ice-transport-stalled` — deliberately narrow: raised only while this endpoint
-    is still **sending** on a succeeded pair of a connected transport but receives
-    nothing, and only after inbound traffic had previously been observed. "No
-    traffic in either direction" is *not* reported, because at peer-connection
-    level it cannot be told apart from a legitimately idle or paused connection.
--   `unstable-ice-path` — the selected path switched `pathSwitchThreshold` times
-    within `pathSwitchWindowInMs`.
-
-**Emits:**
-
--   `'ice-restart-recommended'` — see below.
--   `'ice-restart'` — a new ICE generation was inferred from a changed ICE
-    username fragment, with `outcome` of `'detected'`, `'recovered'` or
-    `'failed'`. A `connected → checking` transition alone is never treated as a
-    restart.
-
-##### Recommending an ICE restart
-
-The library detects **when** a restart is warranted; performing it stays with the
-application. Only the application knows whether renegotiation is safe right now,
-whether signalling is up, and whether it would rather tear the call down — so the
-detector names the moment and gets out of the way.
-
-A recommendation fires when ICE reaches `failed` (immediately — it never
-self-heals), or when `disconnected`, an inbound stall, or an unfinished
-establishment outlasts `iceRestartRecommendationThresholdInMs`. The `reason`
-tells you which:
-
-| `reason` | Meaning |
-|---|---|
-| `ice-failed` | ICE gave up on this generation. |
-| `ice-disconnected` | `disconnected` outlasted the window in which ICE usually self-heals. |
-| `transport-stalled` | ICE still reports connected, but the selected path stopped delivering. |
-| `never-established` | The peer connection never finished connecting. Tracked from `connectionState`, which covers the DTLS handshake too — a connection can sit in `connecting` while every ICE transport reports `connected`. |
-
-`LongPcConnectionEstablishmentDetector` reports that setup is *slow* at its own
-(shorter) threshold; the `never-established` recommendation says it is not going
-to happen on its own. The two thresholds form an escalation, not a duplicate
-report. While a restart the application already started is in flight, the
-detector stays quiet. Repeat recommendations are spaced
-by `iceRestartRecommendationCooldownInMs`, and each carries a
-`recommendationCount` and the current `iceGeneration` so you can back off after
-repeated failed attempts.
-
-```typescript
-monitor.on('ice-restart-recommended', ({ peerConnectionMonitor, reason, recommendationCount }) => {
-    if (3 <= recommendationCount) return rejoinTheCall();   // restarts are not helping
-
-    // your application decides — the library never restarts ICE itself
-    myRtcPeerConnection.restartIce();
-    // or, with mediasoup: ask the server for new ICE parameters and
-    // transport.restartIce({ iceParameters })
-    console.warn(`ICE restart recommended (${reason})`, peerConnectionMonitor.peerConnectionId);
-});
-```
-
-#### AudioConcealmentDetector
-
-Reports how the audio actually *sounded*, which packet loss does not. Opus and
-NetEQ conceal a great deal of loss inaudibly, and conversely audio degrades
-without dramatic loss when the jitter buffer misbehaves — so concealment is both
-the more sensitive and the more specific signal.
-
-The rate is **audible** concealment only: `concealedSamples` also rises during
-ordinary silence, so `silentConcealedSamples` is subtracted before the detector
-sees the number. Without that subtraction this would flag every quiet moment in
-every call.
-
-**Raises:** `audio-concealment`, with `concealmentRate`, `concealmentEventRate`
-and a `burstiness` of `'bursty'` (many short clicks) or `'continuous'` (fewer,
-longer dropouts) — they sound different and have different causes.
-
-It stays silent while the remote track is paused, and while too few samples
-arrived in the window to judge.
-
-```javascript
-audioConcealmentDetector: {
-    onThreshold: 0.03,
-    offThreshold: 0.01,
-    windowInMs: 5000,
-    minSamplesInWindow: 24000,
-}
-```
-
-#### JitterBufferStressDetector
-
-The complement to `AudioConcealmentDetector`: it separates "network jitter
-absorbed cleanly" from "the jitter buffer ballooned, adding latency and
-stretching audio to cope".
-
-Both conditions are required, deliberately. A high target delay on its own means
-NetEQ is *succeeding* — buying latency to hide jitter, with the user hearing
-nothing wrong. Time stretching on its own is ordinary clock-drift correction. It
-is the two together that mean the buffer is fighting the network and losing.
-
-**Raises:** `audio-jitter-buffer-stress`.
-
-```javascript
-jitterBufferStressDetector: {
-    targetDelayThresholdInMs: 200,
-    timeStretchThreshold: 0.02,
-    minConsecutiveTicks: 2,
-}
-```
-
-#### DecoderPerformanceDetector
-
-The receive-side sibling of CPU limitation, and the piece that makes
-network-versus-client attribution possible. Frames dropped because they never
-arrived and frames dropped because the client could not decode them look
-identical in a frame-rate chart, and the fixes are opposite — so this detector
-fires only when the frames demonstrably *did* arrive: enough frames received,
-loss below `quietLossThreshold`, and either decode time past the per-frame
-budget or frames dropped after arrival.
-
-The budget is derived from the stream's own frame rate (33 ms at 30 fps, 66 ms
-at 15 fps), so a static screen share dropping to 1 fps does not trip it.
-
-**Raises:** `video-decoder-overloaded`, carrying `decoderImplementation` and
-`powerEfficientDecoder` — a software decoder on a codec the device can do in
-hardware is the most actionable finding here.
-
-```javascript
-decoderPerformanceDetector: {
-    decodeTimeBudgetRatio: 0.8,
-    dropRatioThreshold: 0.1,
-    minFramesReceived: 10,
-    quietLossThreshold: 0.02,
-    minConsecutiveTicks: 2,
-}
-```
-
-#### Video recovery (part of `FreezedVideoTrackDetector`)
-
-`FreezedVideoTrackDetector` owns the whole freeze / repair domain: it derives
-the track's freeze state (a freeze persists until frames render again, not just
-until the next tick) and watches the repair loop — PLI/FIR out, keyframes back
-in. The `videoRecoveryDetector` config gates the two repair-loop issues:
-
--   `keyframe-storm` — a sustained PLI rate. Worth its own issue because it is
-    self-reinforcing: keyframes are several times the size of delta frames, so a
-    burst of them worsens exactly the congestion that provoked the PLIs.
--   `video-recovery-failed` — PLIs going out repeatedly, the picture still
-    frozen, and `keyFramesDecoded` *not* advancing. This is the valuable one for
-    debugging an SFU: it says the repair request left the client and nothing came
-    back, which points at forwarding rather than at the first-hop network.
-
-```javascript
-videoRecoveryDetector: {
-    windowInMs: 30000,
-    pliRateAlertOn: 0.5,
-    pliRateAlertOff: 0.15,
-    recoveryFailedThresholdInMs: 5000,
-    recoveryFailedMinPliCount: 2,
-}
-```
-
-#### StuckDecoderDetector
-
-Detects the per-consumer decode wedge: RTP bytes keep arriving but no frame
-ever decodes again — a corrupt or incomplete frame broke the decode chain, PLIs
-go out continuously, keyframes may even be generated upstream, and this
-consumer never assembles a usable frame until it is recreated.
-
-The fingerprint is `bytesReceived` rising + `framesReceived` flat + `pliCount`
-rising + `keyFramesDecoded` flat. The "bytes still flowing" condition is what
-separates it from everything nearby: a dry track has no bytes, and
-`video-recovery-failed` reports an unanswered repair request without saying
-whether the pipe is dead or the decoder is. It reads only RTP deltas, so it
-works regardless of browser freeze statistics.
-
-A wedge never self-heals, so the wait only needs to outlast a *legitimate*
-PLI → keyframe recovery — and that cost scales with the connection, not with a
-fixed number of seconds. The effective wait is
-`max(thresholdInMs, rttMultiplier × RTT)`, at least `minStuckTicks`
-collections, with `minBitrate` (a rate, so it means the same thing at every
-collecting period) confirming the stream is actually being delivered.
-
-**Raises:** `stuck-decoder`, with a `variant` (`'assembly'`: no frame ever
-reassembled; `'decode'`: frames assemble but never decode), the accumulated
-dead bytes, and the PLI count since the wedge began.
-
-**Mitigation hook:** recreating the consumer is the known workaround — listen
-for the `stuck-decoder` monitor event:
-
-```typescript
-monitor.on('stuck-decoder', ({ trackMonitor, variant, deadBytesReceived }) => {
-    // the stream is being delivered but nothing decodes — recreate the consumer
-    recreateConsumerFor(trackMonitor.track.id);
-});
-```
-
-```javascript
-stuckDecoderDetector: {
-    thresholdInMs: 4000,
-    rttMultiplier: 15,
-    minStuckTicks: 2,
-    minBitrate: 10000,
-    minPliCount: 2,
-}
-```
-
-#### SourceEncoderBottleneckDetector
-
-Splits one symptom — "we are sending fewer frames than we should" — into its two
-causes, which from RTP alone are indistinguishable:
-
--   `capture-bottleneck` — the *source* never produced the frames. A camera
-    throttling in low light, an OS capture stall, a device the browser is quietly
-    downgrading. Nothing the encoder or the network can do about it.
--   `encoder-bottleneck` — the source produced frames and the encoder could not
-    keep up. Carries `encodeTimePerFrameInMs`, `cpuLimitationShare`,
-    `encoderImplementation` and `powerEfficientEncoder`.
-
-The discriminator is `MediaSourceMonitor.sourceFps` against what the highest
-active layer actually encoded.
-
-```javascript
-sourceEncoderBottleneckDetector: {
-    captureFpsRatioThreshold: 0.5,
-    minSourceFps: 5,
-    encodeFpsRatioThreshold: 0.7,
-    encodeTimeBudgetRatio: 0.8,
-    cpuLimitationShareThreshold: 0.3,
-    minConsecutiveTicks: 2,
-}
-```
-
-#### CaptureFailureDetector
-
-Watches the source end of an outbound track, where several very common
-user-visible failures originate and none of them show up in RTP.
-
-**Raises:** `capture-track-ended` (the device is gone), `silent-audio-source`
-(the microphone is live and producing nothing).
-
-**Emits:** `'capture-track-ended'`, `'capture-track-muted'` (the OS or another
-application took the device), plus the matching client events.
-
-The silence threshold is 30 seconds by default, and long on purpose: a
-microphone capturing digital silence and a person not talking are the same
-measurement, and only duration separates them. The check requires the track to
-be live, enabled and unmuted — a muted microphone is silent deliberately and is
-reported as a mute, not a failure. The level comes from
-`MediaSourceMonitor.rmsAudioLevel`, which integrates `totalAudioEnergy` over the
-interval, rather than the instantaneous `audioLevel` that reads zero between
-words.
-
-```javascript
-captureFailureDetector: {
-    silenceThresholdInMs: 30000,
-    silenceRmsThreshold: 0.001,
     createEvent: true,
 }
 ```
 
-#### Observation detectors
+**Sources:** [RTCPeerConnection.connectionState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionState) · [ICE (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice/)
 
-These four emit events and **never raise issues** — they describe things that are
-not faults but are the missing context in most investigations.
+#### IceConnectivityDetector
 
-| Detector | Monitor event | Client event | What it answers |
-|---|---|---|---|
-| `CodecChangeDetector` | `codec-changed` | `CODEC_CHANGED` | "Why do all the bad calls use H264?" Compares `sdpFmtpLine` too, so a profile switch within one mime type is caught. |
-| `VideoResolutionChangeDetector` | `video-resolution-changed` | `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder. On outbound tracks it carries `qualityLimitationReason`, which is what separates encoder adaptation from the application changing its constraints. Classified as `upgrade`, `downgrade` or `reshape` (an orientation flip). |
-| `SimulcastLayerDetector` | `simulcast-layer-changed` | `SIMULCAST_LAYER_CHANGED` | Which layers are actually being sent. A layer counts as active only if it sent bytes — `active: true` with no bytes is the common shape of a layer the encoder quietly gave up on. |
-| `StatsGapDetector` | `stats-collection-gap` | `STATS_COLLECTION_GAP` | Protects the monitor from itself: a backgrounded tab or sleeping device makes the next tick attribute a large accumulation to a short window. The gap is reported rather than corrected, because the counters cannot say when within it the traffic happened. |
+Runtime ICE and transport health, per ICE transport (a peer connection without BUNDLE has several, and they fail independently). Raises `ice-disconnected` (only after the threshold — transient blips self-heal), `ice-connection-failed` (immediately — `failed` is terminal for the generation), `ice-transport-stalled` (still sending, receiving nothing, after inbound had been seen) and `unstable-ice-path` (selected path flapping).
+
+**Use the result — the restart loop:** the library names *when* an ICE restart is warranted; performing it is the application's job. `'ice-restart-recommended'` carries a `reason` and a `recommendationCount` so you can escalate to a full rejoin when restarts stop helping; `'ice-restart'` then reports whether the restart you performed `recovered` or `failed`.
+
+| `reason` | Meaning |
+|---|---|
+| `ice-failed` | ICE gave up on this generation — restart immediately. |
+| `ice-disconnected` | `disconnected` outlasted the self-heal window. |
+| `transport-stalled` | ICE says connected, but the selected path stopped delivering. |
+| `never-established` | The connection never finished connecting (covers stuck DTLS). |
+
+```javascript
+iceConnectivityDetector: {
+    disconnectedThresholdInMs: 5000,   // how long `disconnected` may self-heal
+    transportStallThresholdInMs: 5000, // sending-but-not-receiving tolerance
+    pathSwitchWindowInMs: 30000,       // window for counting selected-path switches
+    pathSwitchThreshold: 3,            // switches in the window => unstable path
+    iceRestartRecommendationThresholdInMs: 10000,
+    iceRestartRecommendationCooldownInMs: 15000,
+    createEvent: true,                 // buffer ICE_RESTART / _RECOMMENDED into samples
+}
+```
+
+```typescript
+monitor.on('ice-restart-recommended', ({ peerConnectionMonitor, reason, recommendationCount }) => {
+    if (recommendationCount >= 3) return session.rejoin(); // restarts are not helping
+    rtcPeerConnection.restartIce();                        // or mediasoup transport.restartIce()
+});
+monitor.on('ice-restart', ({ outcome }) => metrics.count(`ice-restart.${outcome}`));
+```
+
+**Sources:** [ICE restart: recovering connectivity (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice-restart/) · [RTCPeerConnection.restartIce (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/restartIce) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675)
+
+#### IceTupleChangeDetector
+
+The low-level primitive under the path detectors: emits `'ice-tuple-changed'` whenever the set of selected `local:remote` network tuples changes. Always registered; `SelectedIcePath` classifies *what kind of* change it was, and only `IceConnectivityDetector` raises issues.
+
+**Use the result:** debugging and logging — a tuple change with no `ice-path-changed` classification usually means a port change on the same interface.
+
+**Sources:** [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [TURN server: when you need it and what it costs (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/turn/) · [RTCIceCandidateStats.relayProtocol (MDN)](https://developer.mozilla.org/docs/Web/API/RTCIceCandidateStats/relayProtocol) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+---
+
+### Observation detectors
+
+These four emit events and **never raise issues** — they record context that is not a fault but is the missing column in most investigations. Each has a single config option, `createEvent` (default `true`), which buffers the matching client event into samples for server-side use.
+
+| Detector | Monitor event / client event | Use the result for |
+|---|---|---|
+| `CodecChangeDetector` | `codec-changed` / `CODEC_CHANGED` | Answering "why do all the bad calls use H264" — compares `sdpFmtpLine` too, so an H264 profile switch is caught. Fires once or twice per call. |
+| `VideoResolutionChangeDetector` | `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | Following the adaptation ladder. On outbound tracks the event carries `qualityLimitationReason` — the field that separates encoder adaptation from your own constraint changes. Classified `upgrade` / `downgrade` / `reshape` (orientation flip). |
+| `SimulcastLayerDetector` | `simulcast-layer-changed` / `SIMULCAST_LAYER_CHANGED` | Debugging "why is this participant blurry": a layer counts as active only if it *sent bytes*, so a layer the encoder quietly gave up on becomes visible. |
+| `StatsGapDetector` | `stats-collection-gap` / `STATS_COLLECTION_GAP` | Discounting the metrics right after a backgrounded-tab / sleep gap instead of reading them as a network spike. |
+
+```javascript
+codecChangeDetector: { createEvent: true },
+videoResolutionChangeDetector: { createEvent: true },
+simulcastLayerDetector: { createEvent: true },
+statsGapDetector: {
+    gapRatioThreshold: 2, // multiple of collectingPeriodInMs that counts as a gap
+    minGapInMs: 5000,     // a single missed short tick is jitter, not a gap
+    createEvent: true,
+},
+```
+
+```typescript
+monitor.on('video-resolution-changed', ({ trackMonitor, direction, to, qualityLimitationReason }) => {
+    if (trackMonitor.direction === 'outbound' && direction === 'downgrade' && qualityLimitationReason === 'cpu') {
+        // the encoder is shrinking the picture because of CPU, not bandwidth
+        effects.disableBackgroundBlur();
+    }
+});
+monitor.on('stats-collection-gap', ({ gapInMs }) => metrics.markUnreliableWindow(gapInMs));
+```
+
+**Sources:** [Simulcast (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/simulcast/) · [Page Visibility API (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
 ### Custom Detectors
 
@@ -1740,7 +1739,16 @@ If you want a detector outright gone (not just silenced), call `detectors.remove
 
 ### Sample-channel behavior
 
-Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]`. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged. Resolutions are not currently included in the sample buffer (only in the realtime `'issue-resolved'` event). If you reconstruct state server-side from samples only, treat each `clientIssues` entry as "the issue started here" and apply your own correlation logic.
+Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]`. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged.
+
+**The issue lifecycle reaches the sample too** (`sendResolvedIssuesToServer`, default `true`). The purpose: the server keeps an on-the-fly mirror of each client's currently *active* issues and can correlate across clients or act immediately (recreate a consumer, recommend a rejoin) instead of only ever learning that issues started. On the wire, both entries of a stateful issue carry the schema-level `key` — the identity the server opens and closes on:
+
+```
+raise:      { type: 'stuck-decoder',          key, payload,                                       timestamp: raisedAt }
+resolution: { type: 'stuck-decoder-resolved', key, payload: { raisedAt, comment, ...resolution }, timestamp: resolvedAt }
+```
+
+The resolution's payload carries only what was **explicitly passed** to `resolveIssue`, flattened — the built-in detectors pass their final payload, so fields like `durationInMs` appear here, while a bare resolve carries just `raisedAt` and `comment`. The raise-time payload is not repeated; the server already has it from the raise entry. `raisedAt` equals the raise entry's `timestamp` — a secondary join for consumers that do not store keys. Issues still active at `close()` are auto-resolved and reach the final sample. Servers switching on issue `type` should ignore or handle the `-resolved` suffix; one-shot `addIssue` entries have no lifecycle and no `key`. Pass `sendResolvedIssuesToServer: false` to restore the previous wire format exactly (raise entries only, no `key`); the realtime `'issue-resolved'` event is emitted either way.
 
 ### Event listeners cheat-sheet
 
@@ -2034,24 +2042,65 @@ Stats adapters provide a powerful mechanism to customize how WebRTC statistics a
 
 ### Built-in Adapters
 
-The library includes several built-in adapters that are automatically applied based on browser detection:
+Every engine deviates from the [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/) specification — legacy aliases, spec-removed members, missing dictionaries, renamed fields. The library ships one normalizing adapter per browser family, applied automatically based on the detected browser, so the monitors (and everything downstream — detectors, samples, your own code) always see stats as close to the standard shape as possible. Each fix feature-detects from the report itself rather than parsing browser versions, so an adapter applied to an already-conformant report is a no-op.
 
-#### Firefox Adapters
+Adapters do exactly three things: **fold** a value into the standard field it provably belongs to (a renamed member, a legacy report carrying the same measurement), **infer references** — the `*Id` fields that wire one report to another — and **map** legacy enum spellings onto the values the monitors accept.
 
--   **Firefox94StatsAdapter**: Normalizes `mediaType` to `kind` field for RTP stats
--   **FirefoxTransportStatsAdapter**: Creates transport stats from ICE candidate pairs when native transport stats are missing
+Inferring a reference is safe where computing a measurement is not. A reference is a structural link, and the report graph either determines it or it doesn't; when it doesn't, the field is left unset rather than guessed. Measured values are never invented: a number a browser omits stays omitted, because an approximation is indistinguishable downstream from a measurement and a detector cannot tell that it is judging a guess.
 
-#### Browser-Specific Adaptations
+Nothing is thrown away except a value that survives elsewhere — a member folded into its standard name, or a legacy report whose contents were relocated. Members the spec dropped but a browser still fills (a candidate pair's `priority`, Chromium's `contentType`, Firefox's `selected`) are left on the stat: the browser measured them, monitors copy through whatever they receive, and removing them would only destroy information.
 
-Stats adapters are automatically added based on detected browser:
+#### ChromeStatsAdapter (Chrome, Edge, Opera)
 
-```javascript
-// Automatically applied for Firefox
-if (browser.name === "firefox") {
-    pcMonitor.statsAdapters.add(new Firefox94StatsAdapter());
-    pcMonitor.statsAdapters.add(new FirefoxTransportStatsAdapter());
+Folds: `mediaType` → `kind` (the legacy alias, still emitted on every RTP report); `ip` → `address` on ICE candidate reports (Chromium emits both spellings with identical values); the deprecated `track`/`stream` reports and their `trackId` reference (Chrome ≤ M111) → the matching `inbound-rtp` fields.
+
+Infers: `mediaSourceId`, `transportId`, the `remoteId`/`localId` cross-references and `codecId` when absent — normally a no-op on Chromium, kept as a safety net for older versions and for stats arriving through a relay that dropped them.
+
+#### SafariStatsAdapter
+
+Folds: the deprecated `track` reports (Safari ≤ 16.x) → `inbound-rtp` — most importantly `trackIdentifier`, absent on `inbound-rtp` before Safari 16.4, without which a stream cannot be bound to its `MediaStreamTrack` at all, plus freeze/pause counters, frame geometry and audio levels; `mediaType` → `kind`; `data-channel.datachannelid` → `dataChannelIdentifier` (Safari ≤ 17.6).
+
+Maps: legacy `candidate-pair.state` spellings → the spec enum (`inprogress` → `in-progress`, `cancelled` → `failed`).
+
+Infers: `codec.transportId`, spec-required but unfilled through Safari 17.3; `inbound-rtp.remoteId`, which WebKit dropped in Safari 16.4 through 16.6, severing an inbound stream from the sender's clock and RTCP round trip; plus `mediaSourceId` and `codecId` where older WebKit omits them.
+
+#### FirefoxStatsAdapter
+
+Folds: `mediaType` → `kind`; the non-standard `discardedPackets` alias → `packetsDiscarded`. Maps `candidate-pair.state: 'cancelled'` → `'failed'`. Brace-wrapped `{uuid}` track identifiers are intentionally left alone — Firefox wraps `MediaStreamTrack.id` the same way, so they match the application's track ids exactly as emitted.
+
+Reconstructs the whole `transport` report, which Firefox ships none of before Firefox 153, from the `candidate-pair` marked `selected` — accumulating that pair's measured packet and byte counters, and carrying the totals across a selected-pair change rather than jumping back to the new pair's own counters, so ICE-level monitoring behaves the same across browsers. Every number comes from the pair the browser reported. A no-op as soon as a native transport report is present.
+
+Reference inference matters most here, since Firefox omits the most: `outbound-rtp.mediaSourceId`, never emitted, and the link through which a sent stream reaches its source and its `MediaStreamTrack` — resolved by kind when a single source of that kind exists (so simulcast encodings all resolve to it), left unset when a camera and a screen share make it ambiguous. Also `transportId` on RTP, codec and ICE reports, absent before Firefox 153 — resolved to the sole transport, native or reconstructed — plus the `remoteId`/`localId` cross-references and `codecId`, which respects the `encode`/`decode` direction Firefox tags on codec entries.
+
+This is the one stateful adapter, since the reconstructed transport accumulates across ticks: one instance per peer connection, and it should see every tick. Re-adapting the same tick is harmless — the accumulation is keyed on the collection timestamp.
+
+#### Deviations the adapters do not correct
+
+These fields are absent because the browser does not measure them, and nothing in the report can stand in without guessing:
+
+-   `inbound-rtp.framesRendered` — no engine emits it.
+-   `remote-inbound-rtp.packetsReceived` — Chromium and WebKit never emit it.
+-   Firefox: `qualityLimitationReason`/`Durations`, `totalPacketSendDelay`, `targetBitrate`, `media-source` audio levels, `media-playout` reports, `remote-outbound-rtp` round-trip time.
+-   Safari: `media-playout` reports (so `playoutId` and audio-playout metrics are unavailable) and the `address` on host/peer-reflexive ICE candidates, which WebKit nulls.
+-   Chromium: `candidate-pair.requestsSent` counts only STUN checks sent before the first response — every later check lands in `consentRequestsSent`, so the sum of the two is the real total. `inbound-rtp.packetsDiscarded` is audio-only.
+
+#### Adding a version-scoped adapter
+
+There is deliberately one adapter per browser family, not one per browser version. Every fix guards on the data — fold `mediaType` if it is there, fill `transportId` if it is missing, rebuild the `transport` report if none is present — which is why a single Firefox adapter covers Firefox 96 through 155 without knowing which it is talking to. Most spec deviations are of the form "this field only exists from version N", and a presence check handles those for free, with no version matrix to maintain across the boundaries each engine has (Firefox at 96, 104, 106, 135, 142, 153, 154; Safari at 16.4, 17.0, 17.4, 18.0).
+
+A version gate is warranted only when the report cannot answer the question: the same field, present in every version, *meaning* something different in a range — a unit change, a counter switching from monotonic to per-interval, or a value that is actively wrong in known builds. None of the deviations handled today are of that kind. Prefer the data whenever it can answer, because a reported user-agent version is the less trustworthy signal: Edge, Opera and Brave lag Chromium and do not report its version, WebViews version themselves oddly, and UA reduction freezes minor versions, so a version gate can be wrong about the engine in a way a presence check cannot.
+
+When one is genuinely needed, register it alongside the browser adapter rather than gating inside shared code — `Sources.addStatsAdapters` already has the browser name and version, and `StatsAdapters` composes adapters in registration order:
+
+```typescript
+case "firefox": {
+    pcMonitor.statsAdapters.add(new FirefoxStatsAdapter());
+    if (majorVersion < 142) pcMonitor.statsAdapters.add(new FirefoxJitterUnitsAdapter());
+    break;
 }
 ```
+
+Name it after the deviation it corrects, not the version that introduced it. `FirefoxJitterUnitsAdapter` still says what it does after the next boundary moves; `Firefox94StatsAdapter` — this library's former adapter, which despite its name ran on every Firefox version — said nothing at all.
 
 ### Custom Stats Adapters
 

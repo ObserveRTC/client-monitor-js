@@ -567,6 +567,46 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     } | null;
 
     /**
+     * Ships the full issue *lifecycle* to the server instead of only the fact
+     * that issues started.
+     *
+     * **Purpose.** With this on, the server can maintain an on-the-fly mirror
+     * of every client's currently active issues — opening on the raise entry,
+     * closing on the matching `-resolved` entry — and use that live state for
+     * correlation (is this one client, one SFU, one region?) and for immediate
+     * action (recreate a consumer, recommend a rejoin, page someone) without
+     * waiting for post-hoc analysis.
+     *
+     * **What it changes on the wire.** Both entries of a stateful issue carry
+     * the schema-level `key` field, which is the identity the two sides join
+     * on:
+     *
+     * - the raise entry: `{ type, key, payload, timestamp: raisedAt }`
+     * - the resolution: `{ type: '<type>-resolved', key, timestamp: resolvedAt,
+     *   payload: { raisedAt, comment, ...resolutionPayload } }` — where
+     *   `resolutionPayload` is only what was explicitly passed to
+     *   `resolveIssue` (the built-in detectors pass their final payload, so
+     *   e.g. `durationInMs` appears here; a bare resolve carries just
+     *   `raisedAt` and `comment`). The raise-time payload is NOT repeated —
+     *   the server already has it from the raise entry. `raisedAt` equals the
+     *   raise entry's timestamp, a secondary join for consumers that do not
+     *   store keys.
+     *
+     * **Implications.** Issue volume in samples at most doubles (one
+     * resolution per raise). Servers switching on issue `type` must ignore or
+     * handle the `-resolved` suffix. One-shot issues (`addIssue`) have no
+     * lifecycle and are unaffected. Issues still active when the monitor
+     * closes are auto-resolved (comment: monitor closed) and reach the final
+     * sample. Re-raises still do not produce entries, so the server's copy of
+     * a long-lived issue holds the raise-time payload until the resolution
+     * arrives with the final one. With this off, the wire format is identical
+     * to previous releases: raise entries only, no `key`.
+     *
+     * DEFAULT: true
+     */
+    sendResolvedIssuesToServer?: boolean;
+
+    /**
      * Additional metadata to be included in the client monitor.
      *
      * OPTIONAL

@@ -81,6 +81,11 @@ export type {
     NewRemoteOutboundRtpMonitorEventPayload,
     NewPeerConnectionMonitorEventPayload,
 } from "./ClientMonitorEvents";
+export type { StatsAdapter } from './adapters/StatsAdapter';
+export { StatsAdapters } from './adapters/StatsAdapters';
+export { ChromeStatsAdapter } from './adapters/ChromeStatsAdapter';
+export { SafariStatsAdapter } from './adapters/SafariStatsAdapter';
+export { FirefoxStatsAdapter } from './adapters/FirefoxStatsAdapter';
 export type {
     Detector,
 } from './detectors/Detector';

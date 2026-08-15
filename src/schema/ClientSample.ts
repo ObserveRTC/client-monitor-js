@@ -1,5 +1,5 @@
 
-export const schemaVersion = "3.2.0";
+export const schemaVersion = "3.3.0";
 
 /**
 * The WebRTC app provided custom stats payload
@@ -61,6 +61,11 @@ export type ClientIssue = {
 	* The name of the issue
 	*/
 	type: string;
+
+	/**
+	* Identifier of the related issue or resolution when it is provided.
+	*/
+	key?: string;
 
 	/**
 	* The value associated with the event, if applicable.
@@ -165,7 +170,11 @@ export type IceCandidatePairStats = {
 	*/
 	remoteCandidateId?: string;
 
+	/**
+	* The checklist state of this candidate pair. Values follow the W3C RTCStatsIceCandidatePairState enum (frozen, waiting, in-progress, failed, succeeded). Two further values are accepted for backward compatibility and are not part of the current spec: `new` (never standardised) and `cancelled` (removed from the spec after 2016).
+	*/
 	state?: "new" | "frozen" | "in-progress" | "waiting" | "failed" | "succeeded" | "cancelled" | "inprogress";
+
 	/**
 	* Whether this candidate pair has been nominated.
 	*/
