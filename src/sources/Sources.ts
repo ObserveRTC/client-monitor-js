@@ -6,8 +6,9 @@ import { Logger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { RtcPeerConnectionStatsCollector } from "../collectors/RtcPeerConnectionStatsCollector";
 import { MediasoupTransportStatsCollector } from "../collectors/MediasoupTransportStatsCollector";
-import { Firefox94StatsAdapter } from "../adapters/Firefox94StatsAdapter";
-import { FirefoxTransportStatsAdapter } from "../adapters/FirefoxTransportStatsAdapter";
+import { ChromeStatsAdapter } from "../adapters/ChromeStatsAdapter";
+import { FirefoxStatsAdapter } from "../adapters/FirefoxStatsAdapter";
+import { SafariStatsAdapter } from "../adapters/SafariStatsAdapter";
 import { RtcPeerConnectionBinding } from "./RtcPeerConnectionBinding";
 import { MediasoupTransportBinding } from "./MediasoupTransportBinding";
 import { MediasoupDeviceBinding } from "./MediasoupDeviceBinding";
@@ -208,21 +209,18 @@ export class Sources {
 		if (!this.monitor.browser) return;
 
 		switch (this.monitor.browser.name) {
-			case 'chrome': {
-				break;
-			}
-			case 'edge': {
-				break;
-			}
+			case 'chrome':
+			case 'edge':
 			case 'opera': {
+				pcMonitor.statsAdapters.add(new ChromeStatsAdapter());
 				break;
 			}
 			case 'safari': {
+				pcMonitor.statsAdapters.add(new SafariStatsAdapter());
 				break;
 			}
 			case 'firefox': {
-				pcMonitor.statsAdapters.add(new Firefox94StatsAdapter());
-				pcMonitor.statsAdapters.add(new FirefoxTransportStatsAdapter());
+				pcMonitor.statsAdapters.add(new FirefoxStatsAdapter());
 				break;
 			}
 			case 'unknown' : {

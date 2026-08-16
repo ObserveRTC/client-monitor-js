@@ -233,6 +233,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 iceRestartRecommendationCooldownInMs: 15000,
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
+            sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             appData: monitorConfig.appData ?? {} as AppData,
         }
 
@@ -599,7 +600,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         this.activeIssues.set(issue.key, issue);
 
-        this._bufferIssueForSample(issue.type, issue.payload, now);
+        // With lifecycle tracking on, the raise entry carries the issue key so
+        // the server can open its side of the issue under the same identity it
+        // will later close on the `-resolved` entry. With it off, the wire
+        // format is unchanged from previous releases.
+        this._bufferIssueForSample(
+            issue.type,
+            issue.payload,
+            now,
+            this.config.sendResolvedIssuesToServer ? issue.key : undefined,
+        );
         this.emit('issue', issue);
 
         return issue;
@@ -633,6 +643,25 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         };
         this.emit('issue-resolved', resolution);
 
+        if (this.config.sendResolvedIssuesToServer) {
+            const extraPayload = typeof input.payload === 'object' && input.payload !== null ? input.payload : {};
+            // The schema-level `key` identifies which open issue this entry
+            // closes; `raisedAt` equals the raise entry's timestamp as a
+            // secondary join. Only a payload explicitly passed to this
+            // resolution is included (flattened) — the raise-time payload is
+            // already on the server from the raise entry.
+            this._bufferIssueForSample(
+                `${issue.type}-resolved`,
+                {
+                    raisedAt: issue.raisedAt,
+                    comment: input.comment,
+                    ...extraPayload,
+                },
+                resolution.resolvedAt,
+                issue.key,
+            );
+        }
+
         return resolution;
     }
 
@@ -651,7 +680,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return this.activeIssues.has(key);
     }
 
-    private _bufferIssueForSample(type: string, payload: ClientIssuePayload | undefined, timestamp: number): void {
+    private _bufferIssueForSample(type: string, payload: ClientIssuePayload | undefined, timestamp: number, key?: string): void {
         // Only buffer when sampling is configured (or explicitly requested),
         // matching the existing behavior of other addX methods. Event emission
         // is unconditional. Listeners always see the issue.
@@ -659,6 +688,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         this._clientIssues.push({
             type,
+            key,
             payload: payload === undefined ? undefined : JSON.stringify(payload),
             timestamp,
         });

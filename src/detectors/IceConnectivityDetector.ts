@@ -176,7 +176,7 @@ const UNSTABLE_PATH_ISSUE_TYPE = 'unstable-ice-path';
  *
  * **Known limitations:**
  * - `iceLocalUsernameFragment` is not exposed by every browser. On Firefox the
- *   transport report is synthesized by `FirefoxTransportStatsAdapter` and
+ *   transport report is reconstructed by `FirefoxStatsAdapter` and
  *   carries no username fragment, so restart inference falls back to the
  *   selected local candidate's `usernameFragment` and is silently unavailable
  *   when neither is present.

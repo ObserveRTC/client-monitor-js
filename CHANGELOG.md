@@ -1,3 +1,24 @@
+## 4.6.0
+
+### Browser stats normalization
+
+-   **One normalizing stats adapter per browser family**, applied automatically from user-agent detection, shaping each engine's `getStats()` output as close to the W3C webrtc-stats spec as possible before monitors consume it. Adapters do three things and no more: **fold** a value into the standard field it provably belongs to (a renamed member, a legacy report carrying the same measurement), **infer references** — the `*Id` fields wiring one report to another, which a browser may omit but the report graph determines — and **map** legacy enum spellings onto the values the monitors accept. Measured values are never invented: an approximated number is indistinguishable downstream from one the browser reported, so a field a browser omits stays omitted, and an ambiguous reference is left unset rather than guessed. Nothing is discarded either, except a value that survives elsewhere: members the spec dropped but a browser still fills (`candidate-pair.priority`, Chromium's `contentType`, Firefox's `selected`) are left on the stat, since the monitors carry through whatever they receive. Every fix feature-detects from the report itself (no version parsing), so an adapter over an already-conformant report is a no-op. All deviations were verified against engine sources (Blink/libwebrtc, WebKit release branches, Firefox release tags) and MDN compat data.
+    -   `ChromeStatsAdapter` (Chrome/Edge/Opera): folds the legacy `mediaType` alias into `kind`, the legacy `ip` into `address` on ICE candidates, and the deprecated `track`/`stream` reports (≤ M111) into `inbound-rtp`. Reference inference runs too, as a safety net for older versions and relayed stats.
+    -   `SafariStatsAdapter`: folds deprecated `track` reports (≤ 16.x) into `inbound-rtp` — critically recovering `trackIdentifier`, absent before Safari 16.4, without which the monitor cannot bind a stream to its `MediaStreamTrack` — and `datachannelid` into `dataChannelIdentifier` (≤ 17.6); maps legacy `candidate-pair.state` spellings (`inprogress` → `in-progress`, `cancelled` → `failed`); infers `codec.transportId`, spec-required but unfilled through 17.3, and `inbound-rtp.remoteId`, which WebKit dropped in 16.4 through 16.6.
+    -   `FirefoxStatsAdapter` (replaces both `Firefox94StatsAdapter` and `FirefoxTransportStatsAdapter`, which are merged into it — Firefox now needs exactly one adapter, with no registration-order constraint between two): folds `mediaType` into `kind` and the non-standard `discardedPackets` alias into `packetsDiscarded`; maps `candidate-pair.state: 'cancelled'` → `'failed'`; reconstructs the `transport` report Firefox ships none of before 153 from the selected candidate pair, as before. **Infers `outbound-rtp.mediaSourceId`** — never emitted by Firefox, and the reference through which a sent stream reaches its source and its `MediaStreamTrack`, so outbound track monitoring works on Firefox again; resolved by kind when a single source of that kind exists (simulcast encodings all resolve to it), left unset when several sources make it ambiguous. Also infers `transportId` on RTP, codec and ICE reports, absent before Firefox 153, resolved against the transport report native or reconstructed. Brace-wrapped `{uuid}` track identifiers are intentionally preserved, since they match Firefox's `MediaStreamTrack.id` format exactly.
+    -   Across all three: the `remoteId`/`localId` cross-references between the local and remote view of a stream are resolved by SSRC (the synchronization source *is* the stream's identity), and `codecId` by codec kind, transport and — where a browser tags codec entries with a direction — `encode`/`decode`.
+
+### Fixed
+
+-   **A native Firefox `transport` report listed after the selected candidate pair was ignored**, and a second, reconstructed transport was appended next to it. The scan for an existing transport stopped at the first selected pair, and `getStats()` does not guarantee report order, so on Firefox 153+ this could produce two transports for one connection — which in turn made the transport reference ambiguous. The whole report is now scanned before deciding.
+-   **Re-adapting one tick double-counted the reconstructed transport's totals.** Folds and reference inference are idempotent, counter accumulation is not; it is now keyed on the collection timestamp, so adapting the same tick twice is a no-op instead of inflating transport bytes and packets.
+    -   Documented, and deliberately left uncorrected: `inbound-rtp.framesRendered` (no engine emits it), `remote-inbound-rtp.packetsReceived` (Chromium/WebKit), Firefox's `qualityLimitation*` family and audio `media-source` levels, Safari's `media-playout` reports and nulled host-candidate `address`, and Chromium's `requestsSent` accounting (later checks land in `consentRequestsSent`).
+    -   The adapters (and the `StatsAdapter` interface + `StatsAdapters` registry) are now exported, so applications can reuse or extend them.
+
+### Issue lifecycle in samples
+
+-   **The issue lifecycle now reaches the server** (`sendResolvedIssuesToServer`, default `true`): the sample schema's `ClientIssue` gained an optional `key` field, and with the flag on both entries of a stateful issue carry it — the raise entry as before plus a companion `<issueType>-resolved` entry whose payload holds `raisedAt` (equal to the raise entry's timestamp, a secondary join), the resolve `comment`, and — flattened in — only a payload **explicitly passed** to the resolution (the built-in detectors pass their final payload, so `durationInMs` appears; the raise-time payload is not repeated, since the server already has it from the raise entry). The purpose is server-side, on-the-fly tracking of each client's currently active issues — open on the raise entry, close on the matching key — enabling cross-client correlation and immediate actions without waiting for post-hoc analysis. Issues still active at `close()` are auto-resolved into the final sample. With the flag off, the wire format is identical to previous releases (raise entries only, no `key`); the realtime `'issue-resolved'` event is unaffected either way. Servers switching on issue `type` should ignore or handle the `-resolved` suffix.
+
 ## 4.5.0
 
 ### Major Features
@@ -60,9 +81,9 @@ Everything the detectors do is dwarfed by `getStats()` itself (milliseconds per 
 
 Measured on the bundled output (Node 22): `InboundRtpMonitor.accept()` ≈ 1.4µs, `OutboundRtpMonitor.accept()` ≈ 0.9µs, windowed detectors ≈ 0.2µs per steady-state tick.
 
-## 4.4.0
+### ICE connectivity & recovery
 
-### Major Features
+Also part of this release:
 
 -   **ICE Connectivity Detection**: A new `IceConnectivityDetector` covers runtime ICE and transport health, per ICE transport (a peer connection without BUNDLE has several, and they fail independently). Peer-connection setup latency stays with `LongPcConnectionEstablishmentDetector`.
     -   `ice-disconnected`: raised only once `disconnected` has persisted past `disconnectedThresholdInMs`, so the transient blips ICE routinely heals on its own never produce an issue. Recovery resolves it with the episode duration.
@@ -74,7 +95,7 @@ Measured on the bundled output (Node 22): `InboundRtpMonitor.accept()` ≈ 1.4µ
 -   **`SelectedIcePath`**: The live selected path of an ICE transport, at `peerConnectionMonitor.selectedIcePath` (singular; with BUNDLE — always the case for mediasoup transports — there is exactly one) and `selectedIcePaths`. It stores no copies of candidate data: every descriptive getter reads through the linked candidate pair and its candidates, so it can never disagree with the stats. It emits `'ice-path-changed'` for direct↔relay, relay-protocol, TURN-server and tuple changes, and accumulates TURN usage facts — per-kind durations, `timeToFirstRelayInMs`, switch counters, and relay-vs-total traffic with `relayBytesRatio`. These are measurements, not verdicts; they are kept client-side rather than added to the sample, since the sample already carries everything a server needs to derive them.
 -   **ICE path helpers on the monitors**: `IceCandidatePairMonitor` gained `usingTurn`, `usingTcp`, `relayProtocol`, `pathKind`, `turnUrl`, `turnServer`, `tuple` and `pathKey`; `IceCandidateMonitor` gained `isRelay`, `turnTransport`, `turnServer` and `addressFamily`. Every path signal is now read from one candidate of one pair.
 
-### Bug Fixes
+### ICE connectivity — bug fixes
 
 -   **`usingTURN` could be true when no pair used TURN**: `PeerConnectionMonitor` evaluated `relayProtocol` and the candidate `url` in two independent `.some()` calls, so one candidate carrying `relayProtocol` and a *different* one carrying a `turn:` url together produced a false positive. TURN is now decided per pair from the local candidate's `candidateType === 'relay'`. The `url` check was dropped entirely: srflx candidates discovered through a TURN server's STUN function also carry a `turn:` url, so it never indicated a relay path.
 -   **Negative deltas after counter resets**: `IceCandidatePairMonitor` and `IceTransportMonitor` subtracted cumulative counters without guarding against a reset (stats-object replacement, ICE restart), so a delta — and the bitrate derived from it — could go negative.
@@ -85,7 +106,7 @@ Measured on the bundled output (Node 22): `InboundRtpMonitor.accept()` ≈ 1.4µ
 -   **A slow establishment after a failed attempt was never reported**: `LongPcConnectionEstablishmentDetector` cleared its one-shot flag only when `connectionState` reached `connected`, so after one failed attempt every later slow establishment on that peer connection was silent — even though a retry failing is more interesting than the first attempt. It now rearms on any exit from `connecting`.
 -   **Stale state survived an ICE restart**: a restart now closes the previous generation's issues and clears its bookkeeping. Previously a re-failure in the new generation looked like the already-reported one, so it was never reported and the transport stayed permanently mid-restart, silencing later findings.
 
-### Other Changes
+### ICE connectivity — other changes
 
 -   `PEER_CONNECTION_ICE_PATH_CHANGED`, `ICE_RESTART`, `ICE_RESTART_RECOMMENDED`, `LONG_PC_CONNECTION_ESTABLISHMENT` and `EXCESSIVE_SYNTHESIZED_AUDIO` are now members of the `ClientEventTypes` enum with payload types, instead of raw strings at the emission sites. Mirror them in the server-side schema if you switch on event types there.
 -   `IceTupleChangeDetector` now reads the tuple from the candidate pair instead of rebuilding it, so it and the connectivity detectors always agree on the selected path. It remains the low-level primitive: it reports *that* the tuple set changed, `SelectedIcePath` classifies *what kind of* change it was, and only `IceConnectivityDetector` raises issues.
