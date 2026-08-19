@@ -1012,14 +1012,19 @@ Where PC_Score = Track_Score_Avg × PC_Stability_Score
 
 #### Peer Connection Stability Score
 
-Based on Round Trip Time (RTT) and packet loss:
+Based on Round Trip Time (RTT), jitter and packet loss. RTT and jitter are penalized **separately** — a long path and a jittery path are different problems with different fixes, and the score reasons say which one it is:
 
-**RTT Penalties:**
+**RTT Penalties (`high-rtt` / `very-high-rtt`):**
 
 -   High RTT (150-300ms): -1.0 point
 -   Very High RTT (>300ms): -2.0 points
 
-**Packet Loss Penalties:**
+**Jitter Penalties (`high-jitter`)** — measured jitter averaged over the streams that reported one:
+
+-   30-100ms average jitter: -1.0 point
+-   \>100ms average jitter: -2.0 points
+
+**Packet Loss Penalties (`high-packetloss`)** — the per-interval `deltaFractionLost`, **averaged** across streams (a raw sum would read ten streams at 1% each as 10%):
 
 -   1-5% loss: -1.0 point
 -   5-20% loss: -2.0 points
@@ -1029,14 +1034,14 @@ Based on Round Trip Time (RTT) and packet loss:
 
 **Inbound Audio Track Score:**
 
--   Based on normalized bitrate and packet loss
--   Uses logarithmic bitrate normalization
--   Exponential decay for packet loss impact
+-   Based on normalized bitrate and the per-interval loss fraction (`deltaFractionLost` — rate-independent, unlike an absolute packet count)
+-   When the audio detectors run, their windowed, hysteresis-guarded verdicts drive additional penalties — the score reuses the *active issues* instead of re-deriving the conditions: `audio-concealment` issue active → -2.0, `audio-jitter-buffer-stress` → -1.0, `audio-desync` → -1.0
+-   Without the detectors the score falls back to the pure loss decay
 
 ```javascript
 normalizedBitrate = log10(max(bitrate, MIN_AUDIO_BITRATE) / MIN_AUDIO_BITRATE) / NORMALIZATION_FACTOR;
-lossPenalty = exp(-packetLoss / 2);
-score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty);
+lossPenalty = exp(-deltaFractionLost / 0.03);
+score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty) - issuePenalties;
 ```
 
 **Inbound Video Track Score:**
@@ -1044,18 +1049,33 @@ score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty);
 -   FPS volatility penalties
 -   Dropped frames penalties
 -   Frame corruption penalties
+-   Frozen picture (`frozen-video`, from the freeze state the detector derives): -2.0
+-   Sustained low fps while frames are flowing (`low-fps`, ewma fps < 10): -1.0
+-   Bitrate-per-pixel below the codec floor (`low-bitrate-per-pixel`, from `BPP_RANGES` — blur/blockiness before anything freezes): -1.0 / -2.0
 
 **Outbound Audio Track Score:**
 
 -   Similar to inbound, using sending bitrate
 -   Remote packet loss consideration
 
-**Outbound Video Track Score:**
+**Outbound Video Track Score (camera):**
 
 -   Bitrate deviation from target penalties
--   CPU limitation penalties
+-   Quality-limitation penalties from the **interval duration shares** (the instantaneous `qualityLimitationReason` flickers): cpu share ≥30% → -2.0 (`cpu-limitation`), bandwidth share ≥50% → -1.0 (`bandwidth-limitation`, milder — BWE adaptation is the system working); instantaneous reason used as fallback when shares are unavailable
 -   Bitrate volatility penalties
--   If `track.contentHint === 'screen'`, bitrate deviation and volatility penalties are skipped to better fit screen-share traffic patterns
+
+**Outbound Video Track Score (screen share):**
+
+Decided by `OutboundTrackMonitor.contentType`, **never** by `track.contentHint` (applications set `'detail'`/`'text'` on camera tracks too, so the hint is not a reliable screen-share signal). The flag is auto-detected only from `track.getSettings().displaySurface` — present exclusively on display capture — and otherwise declared by the application:
+
+```typescript
+monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
+```
+
+For screen-share tracks, sharpness is the quality: fps and bitrate volatility are meaningless on mostly-static content (VBR drops to ~zero between changes), so deviation/volatility penalties are skipped entirely. Instead:
+
+-   Quality-limitation duration share penalties (same as camera)
+-   Encoded resolution downscaled vs. the captured surface (`downscaled-screenshare`): encoded area < ½ of source area → -1.0, < ¼ → -2.0 — the point where shared text stops being readable
 
 ### Score Reasons
 
@@ -1068,8 +1088,13 @@ monitor.on("score", (event) => {
     // Example reasons:
     // {
     //   "high-rtt": 1.0,
+    //   "high-jitter": 1.0,
     //   "high-packetloss": 2.0,
     //   "cpu-limitation": 2.0,
+    //   "bandwidth-limitation": 1.0,
+    //   "frozen-video": 2.0,
+    //   "audio-concealment": 2.0,
+    //   "downscaled-screenshare": 2.0,
     //   "dropped-video-frames": 1.0
     // }
 });

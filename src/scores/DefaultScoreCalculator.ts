@@ -1,4 +1,5 @@
 import { ClientMonitor } from "../ClientMonitor";
+import { BPP_RANGES } from "./CalculatedScore";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
@@ -14,6 +15,8 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 export type DefaultScoreCalculatorSubtractionReason =
 	'high-rtt' |
 	'very-high-rtt' |
+	/** Average measured jitter across the streams is high — a jittery path. */
+	'high-jitter' |
 	'high-packetloss' |
 	'low-fps' |
 	'volatile-fps' |
@@ -21,7 +24,21 @@ export type DefaultScoreCalculatorSubtractionReason =
 	'video-frame-corruptions' |
 	'high-deviation-from-target-bitrate' |
 	'cpu-limitation' |
-	'high-volatile-bitrate';
+	/** The encoder spent most of the interval bandwidth-limited. */
+	'bandwidth-limitation' |
+	'high-volatile-bitrate' |
+	/** The inbound video track is currently frozen. */
+	'frozen-video' |
+	/** Bitrate per pixel is below the codec's floor — blur/blockiness. */
+	'low-bitrate-per-pixel' |
+	/** Audible audio concealment share is significant. */
+	'audio-concealment' |
+	/** NetEQ is stretching/compressing a significant share of samples. */
+	'audio-time-stretch' |
+	/** The jitter buffer target delay adds noticeable latency. */
+	'high-jitter-buffer-delay' |
+	/** A screen-share track is encoded well below the captured resolution. */
+	'downscaled-screenshare';
 
 export type DefaultScoreCalculatorSubtractions = {
 	[x in DefaultScoreCalculatorSubtractionReason]?: number;
@@ -81,6 +98,25 @@ export class DefaultScoreCalculator {
         return JSON.stringify(reasons ?? '{}');
     }
 
+	// The per-entity encoders of the ScoreCalculator interface all use the same
+	// JSON encoding here; they exist so the monitors' createSample() can ship
+	// the reasons without knowing which calculator is installed.
+	public encodePeerConnectionScoreReasons<T extends Record<string, number>>(reasons?: T): string {
+		return this.encodeScoreReasons(reasons);
+	}
+	public encodeInboundAudioScoreReasons<T extends Record<string, number>>(reasons?: T): string {
+		return this.encodeScoreReasons(reasons);
+	}
+	public encodeInboundVideoScoreReasons<T extends Record<string, number>>(reasons?: T): string {
+		return this.encodeScoreReasons(reasons);
+	}
+	public encodeOutboundAudioScoreReasons<T extends Record<string, number>>(reasons?: T): string {
+		return this.encodeScoreReasons(reasons);
+	}
+	public encodeOutboundVideoScoreReasons<T extends Record<string, number>>(reasons?: T): string {
+		return this.encodeScoreReasons(reasons);
+	}
+
 	public _calculateClientMonitorScore() {
 		const clientMonitor: ClientMonitor = this.clientMonitor;
 		let clientTotalScore = 0;
@@ -133,9 +169,41 @@ export class DefaultScoreCalculator {
 		// we use RTT and lost packets to calculate the base score for the connection
 		const score = pcMonitor.calculatedStabilityScore;
 		const rttInMs = (pcMonitor.avgRttInSec ?? 0) * 1000;
-		const fractionLost =
-			(pcMonitor.inboundRtps.reduce((acc, rtp) => acc + (rtp.deltaFractionLost ?? 0), 0)
-			+ pcMonitor.remoteInboundRtps.reduce((acc, rtp) => acc + (rtp.fractionLost ?? 0), 0))
+
+		// Jitter is reported per stream in seconds; average it over the streams
+		// that actually measured one. Same for the loss fractions: one stream at
+		// 10% and ten streams at 1% each are different situations, but a raw sum
+		// reads both as 10% — the average keeps the penalty about the path.
+		// Loss uses the per-interval delta fraction on both directions, so the
+		// penalty reflects the current interval, not lifetime accumulation.
+		let jitterSumInSec = 0;
+		let jitterMeasurements = 0;
+		let fractionLostSum = 0;
+		let fractionLostMeasurements = 0;
+
+		for (const rtp of pcMonitor.inboundRtps) {
+			if (rtp.jitter !== undefined) {
+				jitterSumInSec += rtp.jitter;
+				++jitterMeasurements;
+			}
+			if (rtp.deltaFractionLost !== undefined) {
+				fractionLostSum += rtp.deltaFractionLost;
+				++fractionLostMeasurements;
+			}
+		}
+		for (const rtp of pcMonitor.remoteInboundRtps) {
+			if (rtp.jitter !== undefined) {
+				jitterSumInSec += rtp.jitter;
+				++jitterMeasurements;
+			}
+			if (rtp.deltaFractionLost !== undefined) {
+				fractionLostSum += rtp.deltaFractionLost;
+				++fractionLostMeasurements;
+			}
+		}
+
+		const avgJitterInMs = 0 < jitterMeasurements ? (jitterSumInSec / jitterMeasurements) * 1000 : 0;
+		const fractionLost = 0 < fractionLostMeasurements ? fractionLostSum / fractionLostMeasurements : 0;
 
 		let scoreValue = 5.0;
 		let appData = score.appData as DefaultScoreCalculatorPeerConnectionScoreAppData | undefined;
@@ -153,10 +221,19 @@ export class DefaultScoreCalculator {
 		}
 		score.reasons = subtractions;
 
+		// RTT and jitter are penalized separately: a long path and a jittery
+		// path are different problems with different fixes, and the reasons
+		// should say which one this is.
 		if (300 < rttInMs) {
 			subtractions["very-high-rtt"] = 2.0;
 		} else if (150 < rttInMs) {
 			subtractions["high-rtt"] = 1.0;
+		}
+
+		if (100 < avgJitterInMs) {
+			subtractions["high-jitter"] = 2.0;
+		} else if (30 < avgJitterInMs) {
+			subtractions["high-jitter"] = 1.0;
 		}
 
 		if (0.01 < fractionLost) {
@@ -267,6 +344,35 @@ export class DefaultScoreCalculator {
 			subtractions['video-frame-corruptions'] = 2.0 * inboundRtp.deltaCorruptionProbability;
 		}
 
+		// A frozen picture dominates every other quality aspect of the track.
+		// `isFreezed` is derived by FreezedVideoTrackDetector; when that
+		// detector is disabled the field stays undefined and no penalty applies.
+		if (inboundRtp.isFreezed) {
+			subtractions['frozen-video'] = 2.0;
+		}
+
+		// Sustained low frame rate while frames are actually flowing — a dry or
+		// paused track is DryInboundTrackDetector's verdict, not a score matter.
+		if (inboundRtp.ewmaFps !== undefined && inboundRtp.ewmaFps < 10 && 0 < (inboundRtp.deltaFramesReceived ?? 0)) {
+			subtractions['low-fps'] = 1.0;
+		}
+
+		// Bitrate-per-pixel below the codec floor: the stream is starved for its
+		// resolution, which shows up as blur and blockiness long before freezes.
+		const codecMimeType = inboundRtp.getCodec()?.mimeType;
+		const codec = codecMimeType?.split('/')[1]?.toLowerCase();
+		const bppRange = codec === 'h264' || codec === 'h265' || codec === 'vp8' || codec === 'vp9'
+			? BPP_RANGES['standard'][codec]
+			: undefined;
+
+		if (bppRange && inboundRtp.bitPerPixel !== undefined) {
+			if (inboundRtp.bitPerPixel < bppRange.low * 0.5) {
+				subtractions['low-bitrate-per-pixel'] = 2.0;
+			} else if (inboundRtp.bitPerPixel < bppRange.low) {
+				subtractions['low-bitrate-per-pixel'] = 1.0;
+			}
+		}
+
 		const scoreValue = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
 			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
@@ -310,18 +416,32 @@ export class DefaultScoreCalculator {
 
 		// max score: 5
 		// target deviation penalty: 0-2
-		// cpu limitation penalty: 0-1
+		// cpu limitation penalty: 0-2
+		// bandwidth limitation penalty: 0-1
 		// bitrate volatility penalty: 0-2
 
-		// consider to take:
-		// plicount
-		// qpSum
+		// The interval share is the trustworthy form of the limitation signal —
+		// the instantaneous `qualityLimitationReason` flickers (see
+		// `OutboundRtpMonitor.qualityLimitationDurationShares`). The
+		// instantaneous reason remains as fallback for browsers that do not
+		// report the duration totals.
+		const limitationShares = outboundRtp.qualityLimitationDurationShares;
 
-		if (outboundRtp.qualityLimitationReason === 'cpu') {
+		if (limitationShares !== undefined) {
+			if (0.3 <= limitationShares.cpu) {
+				subtractions['cpu-limitation'] = 2.0;
+			}
+			if (0.5 <= limitationShares.bandwidth) {
+				// milder than cpu: bandwidth adaptation is the system working
+				subtractions['bandwidth-limitation'] = 1.0;
+			}
+		} else if (outboundRtp.qualityLimitationReason === 'cpu') {
 			subtractions['cpu-limitation'] = 2.0;
+		} else if (outboundRtp.qualityLimitationReason === 'bandwidth') {
+			subtractions['bandwidth-limitation'] = 1.0;
 		}
 
-		if (trackMonitor.track.contentHint !== 'screen') {
+		if (!trackMonitor.isScreenShare) {
 			// for screen share we are not calculating bitrate volatility.
 
 			if (outboundRtp.targetBitrate) {
@@ -374,6 +494,25 @@ export class DefaultScoreCalculator {
 				appData.lastBitrate = outboundRtp.bitrate;
 			}
 
+		} else {
+			// Screen share: sharpness IS the quality. Frame-rate and bitrate
+			// volatility are meaningless on mostly-static content (VBR drops to
+			// ~zero between changes), and the encoder target swings by design.
+			// What actually hurts is the encoder sending a downscaled version of
+			// the captured surface — text becomes unreadable.
+			const source = trackMonitor.getMediaSource();
+			const sourceArea = (source.width ?? 0) * (source.height ?? 0);
+			const sentArea = (outboundRtp.frameWidth ?? 0) * (outboundRtp.frameHeight ?? 0);
+
+			if (0 < sourceArea && 0 < sentArea) {
+				const areaRatio = sentArea / sourceArea;
+
+				if (areaRatio < 0.25) {
+					subtractions['downscaled-screenshare'] = 2.0;
+				} else if (areaRatio < 0.5) {
+					subtractions['downscaled-screenshare'] = 1.0;
+				}
+			}
 		}
 
 		const scoreValue = Math.max(
@@ -396,18 +535,19 @@ export class DefaultScoreCalculator {
 			return;
 		}
 
-		// const pcMonitor = trackMonitor.getPeerConnection();
 		const bitrate = trackMonitor.bitrate;
-		const packetLoss = trackMonitor.getInboundRtp().deltaPacketsLost ?? 0;
-		// const bufferDelayInMs = trackMonitor.getInboundRtp().deltaJitterBufferDelay ?? 10;
-		// const roundTripTimeInMs = (pcMonitor.avgRttInSec ?? 0.05) * 1000;
-		// const dtxMode = trackMonitor.dtxMode;
-		// const fec = (trackMonitor.getInboundRtp().fecBytesReceived ?? 0) > 0;
+		const inboundRtp = trackMonitor.getInboundRtp();
 
 		if (!bitrate) {
 			trackMonitor.calculatedScore.value = undefined;
 			return;
 		}
+
+		const clientMonitor = trackMonitor.getPeerConnection().parent;
+		const trackId = trackMonitor.track.id;
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
+
+		trackMonitor.calculatedScore.reasons = subtractions;
 
 		const normalizedBitrate = Math.log10(
 			Math.max(
@@ -416,15 +556,37 @@ export class DefaultScoreCalculator {
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
-		// console.warn('normalizedBitrate', normalizedBitrate, 'bitrate', bitrate, 'packetLoss', packetLoss);
+		// Rate-independent loss decay on the per-interval loss fraction —
+		// the absolute packet-count decay it replaces punished high-packet-rate
+		// streams harder for the same loss ratio. The decay is recorded as a
+		// track-level subtraction, so a loss-degraded track sample explains
+		// itself instead of hiding the cause inside a multiplier.
+		const fractionLost = inboundRtp.deltaFractionLost ?? 0;
+		const lossPenalty = Math.exp(-fractionLost / 0.03);
+		const baseScore = Math.min(DefaultScoreCalculator.MAX_SCORE, 5 * normalizedBitrate);
+		const lossPenaltyPoints = baseScore * (1 - lossPenalty);
 
-		const lossPenalty = Math.exp(-(packetLoss) / 2); // Exponential decay for packet loss impact
+		if (0.05 <= lossPenaltyPoints) {
+			subtractions['high-packetloss'] = this._getRoundedScore(lossPenaltyPoints);
+		}
+
+		// When the audio detectors run, their windowed, hysteresis-guarded
+		// verdicts are more robust than any per-tick reading — the score reuses
+		// the active issues instead of re-deriving the conditions. Without the
+		// detectors, the score falls back to the pure loss decay above.
+		if (clientMonitor.isIssueActive(`audio-concealment-track-${trackId}`)) {
+			subtractions['audio-concealment'] = 2.0;
+		}
+		if (clientMonitor.isIssueActive(`audio-jitter-buffer-stress-track-${trackId}`)) {
+			subtractions['high-jitter-buffer-delay'] = 1.0;
+		}
+		if (clientMonitor.isIssueActive(`audio-desync-track-${trackId}`)) {
+			subtractions['audio-time-stretch'] = 1.0;
+		}
+
 		const score = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
-			Math.min(
-				DefaultScoreCalculator.MAX_SCORE,
-				5 * normalizedBitrate * lossPenalty
-			)
+			baseScore - this._getTotalSubtraction(subtractions)
 		);
 		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
 	}
@@ -452,6 +614,10 @@ export class DefaultScoreCalculator {
 			return;
 		}
 
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
+
+		trackMonitor.calculatedScore.reasons = subtractions;
+
 		const normalizedBitrate = Math.log10(
 			Math.max(
 				outboundRtp.bitrate,
@@ -459,13 +625,21 @@ export class DefaultScoreCalculator {
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
-		const lossPenalty = Math.exp(-(outboundRtp.getRemoteInboundRtp()?.deltaPacketsLost ?? 0) / 2); // Exponential decay for packet loss impact
+		// Same rate-independent decay as the inbound side, on the loss fraction
+		// the far end reported for this stream — and recorded as a track-level
+		// subtraction, because the loss happened to *this track's* media.
+		const fractionLost = outboundRtp.getRemoteInboundRtp()?.deltaFractionLost ?? 0;
+		const lossPenalty = Math.exp(-fractionLost / 0.03);
+		const baseScore = Math.min(DefaultScoreCalculator.MAX_SCORE, 5 * normalizedBitrate);
+		const lossPenaltyPoints = baseScore * (1 - lossPenalty);
+
+		if (0.05 <= lossPenaltyPoints) {
+			subtractions['high-packetloss'] = this._getRoundedScore(lossPenaltyPoints);
+		}
+
 		const score = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,
-			Math.min(
-				DefaultScoreCalculator.MAX_SCORE,
-				5 * normalizedBitrate * lossPenalty
-			)
+			baseScore - this._getTotalSubtraction(subtractions)
 		);
 		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
 	}

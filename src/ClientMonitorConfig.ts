@@ -671,6 +671,17 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     sendResolvedIssuesToServer?: boolean;
 
     /**
+     * Whether the encoded score reasons (the per-penalty breakdown the score
+     * calculator produces) are shipped with the samples on the peer connection
+     * and track entries. Set to `false` to drop them from the wire — the
+     * scores themselves are always shipped, and the realtime `'score'` event
+     * with its reasons is unaffected.
+     *
+     * DEFAULT: true (only an explicit `false` disables shipping)
+     */
+    sendScoreReasonsToServer?: boolean;
+
+    /**
      * Additional metadata to be included in the client monitor.
      *
      * OPTIONAL

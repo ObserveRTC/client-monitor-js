@@ -244,6 +244,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
+            sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             appData: monitorConfig.appData ?? {} as AppData,
         }
 

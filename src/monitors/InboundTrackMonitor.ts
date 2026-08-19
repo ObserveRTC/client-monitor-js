@@ -127,10 +127,12 @@ export class InboundTrackMonitor {
 
 	public createSample(): InboundTrackSample {
 			let scoreReasons: string | undefined;
-			if (this.kind === 'audio') {
-				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundAudioScoreReasons?.(this.calculatedScore.reasons);
-			} else if (this.kind === 'video') {
-				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundVideoScoreReasons?.(this.calculatedScore.reasons);
+			if (this.getPeerConnection()?.parent.config.sendScoreReasonsToServer !== false) {
+				if (this.kind === 'audio') {
+					scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundAudioScoreReasons?.(this.calculatedScore.reasons);
+				} else if (this.kind === 'video') {
+					scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundVideoScoreReasons?.(this.calculatedScore.reasons);
+				}
 			}
 
 			return {

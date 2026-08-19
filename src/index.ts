@@ -10,6 +10,7 @@ export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
 export { OutboundTrackMonitor } from "./monitors/OutboundTrackMonitor";
+export type { OutboundTrackContentType } from "./monitors/OutboundTrackMonitor";
 export { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
 export { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTransportMonitor";
 export { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";

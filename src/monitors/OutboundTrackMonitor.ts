@@ -10,11 +10,32 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
 
+export type OutboundTrackContentType = 'camera' | 'screenshare';
+
 export class OutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
-	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
+
+	/**
+	 * What kind of content this track carries. Only meaningful for video
+	 * tracks — audio tracks leave it `undefined`, and an undefined video track
+	 * is scored as camera content. Screen-share tracks are scored differently
+	 * from camera tracks — sharpness over motion, no frame-rate or
+	 * bitrate-volatility expectations — so getting this right matters for the
+	 * track score.
+	 *
+	 * Auto-detected at construction only from `track.getSettings().displaySurface`,
+	 * which exists exclusively on display capture. The content hint is deliberately
+	 * NOT used for inference — applications set `'detail'`/`'text'` on camera
+	 * tracks too, so the hint is not a reliable screen-share signal. When no
+	 * `displaySurface` is available, the application declares it explicitly:
+	 *
+	 * ```ts
+	 * monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * ```
+	 */
+	public contentType?: OutboundTrackContentType;
 
 	public calculatedScore: CalculatedScore = {
 		weight: 0,
@@ -46,6 +67,11 @@ export class OutboundTrackMonitor {
 	) {
 		this.attachments = attachments;
 		this.detectors = new Detectors();
+
+		if (typeof track.getSettings === 'function' &&
+			(track.getSettings() as { displaySurface?: string }).displaySurface !== undefined) {
+			this.contentType = 'screenshare';
+		}
 
 		const monitorConfig = this.getPeerConnection().parent.config;
 
@@ -86,6 +112,25 @@ export class OutboundTrackMonitor {
 
 	public get kind() {
 		return this.track.kind;
+	}
+
+	/** True when this track carries screen-share content. See `contentType`. */
+	public get isScreenShare() {
+		return this.contentType === 'screenshare';
+	}
+
+	/**
+	 * Explicitly declares what content this track carries. Call it when the
+	 * application knows the track is a screen share and no `displaySurface`
+	 * was available to auto-detect it — typically right after the track
+	 * monitor appears:
+	 *
+	 * ```ts
+	 * monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * ```
+	 */
+	public setContentType(contentType: OutboundTrackContentType): void {
+		this.contentType = contentType;
 	}
 
 	bitrate?: number;
@@ -141,10 +186,12 @@ export class OutboundTrackMonitor {
 
 	public createSample(): OutboundTrackSample {
 		let scoreReasons: string | undefined;
-		if (this.kind === 'audio') {
-			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundAudioScoreReasons?.(this.calculatedScore.reasons);
-		} else if (this.kind === 'video') {
-			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundVideoScoreReasons?.(this.calculatedScore.reasons);
+		if (this.getPeerConnection()?.parent.config.sendScoreReasonsToServer !== false) {
+			if (this.kind === 'audio') {
+				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundAudioScoreReasons?.(this.calculatedScore.reasons);
+			} else if (this.kind === 'video') {
+				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundVideoScoreReasons?.(this.calculatedScore.reasons);
+			}
 		}
 
 		return {
