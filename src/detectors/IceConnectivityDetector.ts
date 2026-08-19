@@ -215,6 +215,7 @@ export class IceConnectivityDetector implements Detector {
 	public readonly name = 'ice-connectivity-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly _states = new Map<string, TransportState>();
 	/** Path keys with an active `unstable-ice-path` issue, and when it was raised. */
@@ -303,6 +304,7 @@ export class IceConnectivityDetector implements Detector {
 			this.peerConnection.parent.raiseIssue<UnstableIcePathIssuePayload>(
 				this._issueKey(UNSTABLE_PATH_ISSUE_TYPE, path.key),
 				{
+				includeInSample: this.includeIssueInSample,
 					type: UNSTABLE_PATH_ISSUE_TYPE,
 					payload: {
 						peerConnectionId: this.peerConnection.peerConnectionId,
@@ -410,6 +412,7 @@ export class IceConnectivityDetector implements Detector {
 				this.peerConnection.parent.raiseIssue<IceConnectionFailedIssuePayload>(
 					this._issueKey(FAILED_ISSUE_TYPE, transport.id),
 					{
+				includeInSample: this.includeIssueInSample,
 						type: FAILED_ISSUE_TYPE,
 						payload: {
 							peerConnectionId: this.peerConnection.peerConnectionId,
@@ -442,6 +445,7 @@ export class IceConnectivityDetector implements Detector {
 				this.peerConnection.parent.raiseIssue<IceDisconnectedIssuePayload>(
 					this._issueKey(DISCONNECTED_ISSUE_TYPE, transport.id),
 					{
+				includeInSample: this.includeIssueInSample,
 						type: DISCONNECTED_ISSUE_TYPE,
 						payload: {
 							peerConnectionId: this.peerConnection.peerConnectionId,
@@ -535,6 +539,7 @@ export class IceConnectivityDetector implements Detector {
 		this.peerConnection.parent.raiseIssue<IceTransportStalledIssuePayload>(
 			this._issueKey(STALLED_ISSUE_TYPE, transport.id),
 			{
+				includeInSample: this.includeIssueInSample,
 				type: STALLED_ISSUE_TYPE,
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,

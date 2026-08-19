@@ -223,6 +223,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 thresholdInMs: 5000,
                 createEvent: true,
             }),
+            blockedTransportDetector: detectorDefault(monitorConfig.blockedTransportDetector, {
+                thresholdInMs: 5000,
+                minMediaBitrateBps: 10000,
+                maxReturnBitrateBps: 2000,
+                maxSendShare: 0.1,
+                stunFreshnessInMs: 10000,
+            }),
+            noAvailableIceCandidateDetector: detectorDefault(monitorConfig.noAvailableIceCandidateDetector, {
+                thresholdInMs: 6000,
+            }),
             iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
                 disconnectedThresholdInMs: 5000,
                 transportStallThresholdInMs: 5000,
@@ -550,6 +560,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         type: string;
         payload?: T;
         timestamp?: number;
+        /**
+         * Whether to buffer this issue into the next ClientSample. Defaults
+         * to true. Pass false to keep the issue local-only (the 'issue'
+         * event still fires).
+         */
+        includeInSample?: boolean;
     }): AddedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
@@ -560,7 +576,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             timestamp,
         };
 
-        this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        if (input.includeInSample !== false) {
+            this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        }
         this.emit('issue', issue);
 
         return issue;
@@ -575,7 +593,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      *
      * Returns the resulting `RaisedClientIssue` (new or updated).
      */
-    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: { type: string, payload?: T, timestamp?: number }): RaisedClientIssue<T> | undefined {
+    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: {
+        type: string,
+        payload?: T,
+        timestamp?: number,
+        /**
+         * Whether this issue (and its later resolution) is buffered into the
+         * ClientSample. Defaults to true. The built-in detectors pass their
+         * public `includeIssueInSample` field here, so sampling of any
+         * detector's issues can be switched off at runtime without touching
+         * the local issue lifecycle.
+         */
+        includeInSample?: boolean,
+    }): RaisedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
         const now = input.timestamp ?? Date.now();
@@ -585,6 +615,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             existing.type = input.type;
             existing.payload = input.payload;
             existing.updatedAt = now;
+            existing.includeInSample = input.includeInSample ?? existing.includeInSample;
 
             this.emit('issue-updated', existing);
             return existing;
@@ -596,6 +627,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             payload: input.payload,
             raisedAt: now,
             updatedAt: now,
+            includeInSample: input.includeInSample ?? true,
         };
 
         this.activeIssues.set(issue.key, issue);
@@ -604,12 +636,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         // the server can open its side of the issue under the same identity it
         // will later close on the `-resolved` entry. With it off, the wire
         // format is unchanged from previous releases.
-        this._bufferIssueForSample(
-            issue.type,
-            issue.payload,
-            now,
-            this.config.sendResolvedIssuesToServer ? issue.key : undefined,
-        );
+        if (issue.includeInSample !== false) {
+            this._bufferIssueForSample(
+                issue.type,
+                issue.payload,
+                now,
+                this.config.sendResolvedIssuesToServer ? issue.key : undefined,
+            );
+        }
         this.emit('issue', issue);
 
         return issue;
@@ -643,7 +677,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         };
         this.emit('issue-resolved', resolution);
 
-        if (this.config.sendResolvedIssuesToServer) {
+        if (this.config.sendResolvedIssuesToServer && issue.includeInSample !== false) {
             const extraPayload = typeof input.payload === 'object' && input.payload !== null ? input.payload : {};
             // The schema-level `key` identifies which open issue this entry
             // closes; `raisedAt` equals the raise entry's timestamp as a

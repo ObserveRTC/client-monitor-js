@@ -61,6 +61,8 @@ export type {
     VideoResolutionChangedEventPayload,
     StatsCollectionGapEventPayload,
     StuckDecoderEventPayload,
+    BlockedTransportEventPayload,
+    NoAvailableIceCandidateEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
 
@@ -137,6 +139,13 @@ export { StatsGapDetector } from './detectors/StatsGapDetector';
 export { StuckDecoderDetector } from './detectors/StuckDecoderDetector';
 export type { StuckDecoderIssuePayload, StuckDecoderVariant } from './detectors/StuckDecoderDetector';
 export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
+export { BlockedTransportDetector } from './detectors/BlockedTransportDetector';
+export type {
+    BlockedTransportEvidence,
+    BlockedTransportIssuePayload,
+} from './detectors/BlockedTransportDetector';
+export { NoAvailableIceCandidateDetector } from './detectors/NoAvailableIceCandidateDetector';
+export type { NoAvailableIceCandidateIssuePayload } from './detectors/NoAvailableIceCandidateDetector';
 export type {
     IceRestartOutcome,
     IceRestartClientEventPayload,

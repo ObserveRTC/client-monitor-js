@@ -47,6 +47,7 @@ export class DecoderPerformanceDetector implements Detector {
 	public readonly name = 'decoder-performance-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly issueKey: string;
 	private _consecutiveTicks = 0;
@@ -132,6 +133,7 @@ export class DecoderPerformanceDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<DecoderPerformanceIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: DecoderPerformanceDetector.ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

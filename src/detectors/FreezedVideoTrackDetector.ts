@@ -74,6 +74,7 @@ export class FreezedVideoTrackDetector implements Detector {
 	public readonly name = 'freezed-video-track-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	/** Hard cap protecting against pathologically fast update rates. */
 	private static readonly MAX_WINDOW_ENTRIES = 128;
@@ -163,6 +164,7 @@ export class FreezedVideoTrackDetector implements Detector {
 			this._startedFreezeAt = Date.now();
 
 			clientMonitor.raiseIssue<FreezedVideoTrackIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 				type: FreezedVideoTrackDetector.ISSUE_TYPE,
 				payload: { trackId },
 			});
@@ -237,6 +239,7 @@ export class FreezedVideoTrackDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<KeyframeStormIssuePayload>(this._stormIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: FreezedVideoTrackDetector.KEYFRAME_STORM_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
@@ -299,6 +302,7 @@ export class FreezedVideoTrackDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<VideoRecoveryFailedIssuePayload>(this._recoveryIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: FreezedVideoTrackDetector.RECOVERY_FAILED_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

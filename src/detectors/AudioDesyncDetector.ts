@@ -58,6 +58,7 @@ export class AudioDesyncDetector implements Detector {
 	public readonly name = 'audio-desync-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	/**
 	 * Creates a new AudioDesyncDetector instance
@@ -151,6 +152,7 @@ export class AudioDesyncDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<AudioDesyncIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: AudioDesyncDetector.ISSUE_TYPE,
 			payload,
 		});

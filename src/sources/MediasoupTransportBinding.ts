@@ -33,6 +33,8 @@ export class MediasoupTransportBinding {
 			});
 		});
 
+		this.monitor.iceGatheringState = this.transport.iceGatheringState;
+
 		this._fireEvent(ClientEventTypes.PEER_CONNECTION_OPENED, {
 			iceGatheringState: this.transport.iceGatheringState,
 			peerConnectionId: this.monitor.peerConnectionId,
@@ -236,6 +238,8 @@ export class MediasoupTransportBinding {
 	}
 	
 	private _iceGatheringStateChanged(...args: mediasoup.types.TransportEvents['icegatheringstatechange']) {
+		this.monitor.iceGatheringState = args[0];
+
 		return this._fireEvent(ClientEventTypes.ICE_GATHERING_STATE_CHANGED, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			iceGatheringState: args[0],

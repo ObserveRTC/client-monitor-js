@@ -28,6 +28,8 @@ import {
     SilentAudioSourceIssuePayload,
 } from "./detectors/CaptureFailureDetector";
 import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
+import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -75,7 +77,9 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | RaisedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
     | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
-    | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
+    | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
+    | RaisedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
+    | RaisedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -105,7 +109,9 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | ResolvedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
     | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
-    | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
+    | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
+    | ResolvedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
+    | ResolvedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -140,6 +146,8 @@ export function isClientMonitorIssue(
         case 'capture-track-ended':
         case 'silent-audio-source':
         case 'stuck-decoder':
+        case 'blocked-transport':
+        case 'no-available-ice-candidate':
             return true;
         default:
             return false;

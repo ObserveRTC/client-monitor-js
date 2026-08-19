@@ -243,6 +243,16 @@ const monitor = new ClientMonitor({
         iceRestartRecommendationCooldownInMs: 15000,  // min gap between recommendations
         createEvent: true,
     },
+    blockedTransportDetector: {
+        thresholdInMs: 5000,          // how long the STUN-ok-but-media-blocked discrepancy must persist
+        minMediaBitrateBps: 10000,    // "producer is demonstrably producing" bar
+        maxReturnBitrateBps: 2000,    // at or below this, the return path is STUN-only
+        maxSendShare: 0.1,            // transport send below this share of produced => not leaving
+        stunFreshnessInMs: 10000,     // how recent a STUN response must be to count as verified
+    },
+    noAvailableIceCandidateDetector: {
+        thresholdInMs: 6000,          // grace for `new`/`connecting` with zero local candidates
+    },
 
     audioConcealmentDetector: {
         onThreshold: 0.03,        // Webex treats >3% concealment as significant, >5% as severe
@@ -406,6 +416,8 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`CpuPerformanceDetector`](#cpuperformancedetector) | whole client | issue `cpulimitation` | The device running out of CPU for encode/decode |
 | [`LongPcConnectionEstablishmentDetector`](#longpcconnectionestablishmentdetector) | peer connection | event `too-long-pc-connection-establishment` | Connection setup taking suspiciously long |
 | [`IceConnectivityDetector`](#iceconnectivitydetector) | ICE transports | issues `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path`; events `ice-restart`, `ice-restart-recommended` | Runtime ICE health and *when* an ICE restart is warranted |
+| [`BlockedTransportDetector`](#blockedtransportdetector) | ICE transports | issue `blocked-transport` | STUN passes but media does not — the firewall / policy-middlebox signature |
+| [`NoAvailableIceCandidateDetector`](#noavailableicecandidatedetector) | peer connection | issue `no-available-ice-candidate` | Zero local ICE candidates while the connection falls over — no usable network at all |
 | [`IceTupleChangeDetector`](#icetuplechangedetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
 | [`CodecChangeDetector`](#observation-detectors) | tracks | event `codec-changed` / `CODEC_CHANGED` | Which codec/profile is actually in use, and when it changed |
 | [`VideoResolutionChangeDetector`](#observation-detectors) | video tracks | event `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder, with the *reason* attached |
@@ -413,6 +425,44 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`StatsGapDetector`](#observation-detectors) | the monitor itself | event `stats-collection-gap` / `STATS_COLLECTION_GAP` | Backgrounded-tab gaps that would otherwise read as network spikes |
 
 The last four are **observations**: they emit events and never raise issues, because what they report is not a fault — it is the missing context in most investigations.
+
+### Which issues belong in the sample
+
+Every issue-raising detector exposes a runtime flag next to `disabled`:
+
+```ts
+/** like `disabled`, flippable at runtime */
+public includeIssueInSample = true;
+```
+
+When flipped to `false`, the detector keeps working locally — monitor events fire and the issue lifecycle (`activeIssues`, `'issue'` / `'issue-resolved'`) is maintained — but neither the raise entry nor the resolution entry is buffered into the `ClientSample`. (`raiseIssue` / `addIssue` accept the same thing directly via `includeInSample` for custom issues.)
+
+In case shrinking down the sample size is something your application wants, the table below is the useful thing to know: it says for every issue whether the server can **derive the same verdict from one component's stats that the sample already carries** (all the load-bearing counters are monotonic totals, so a server holding consecutive samples can recompute every delta). Issues that are derivable are the safe candidates for `includeIssueInSample = false`; issues that are not derivable join stats across components, depend on state that never reaches the sample (`MediaStreamTrack.muted`, `getSettings()`, connection-state transitions), or live in sub-sampling-period timing — switch those off and the information is gone.
+
+| Detector | Issue | Derivable from one component's sampled stats? | From what |
+| --- | --- | --- | --- |
+| `FreezedVideoTrackDetector` | `freezed-video-track` | **Yes** | `inbound-rtp` `freezeCount`, `totalFreezesDuration` |
+| `FreezedVideoTrackDetector` | `keyframe-storm` | **Yes** | `inbound-rtp` `pliCount`, `firCount`, `keyFramesDecoded` |
+| `FreezedVideoTrackDetector` | `video-recovery-failed` | No | tick-level sequencing of freeze + PLI + keyframe counters |
+| `AudioDesyncDetector` | `audio-desync` | **Yes** | `inbound-rtp` inserted/removed sample totals |
+| `AudioConcealmentDetector` | `audio-concealment` | **Yes** | `inbound-rtp` `concealedSamples`, `silentConcealedSamples` |
+| `JitterBufferStressDetector` | `audio-jitter-buffer-stress` | **Yes** (approx.) | `inbound-rtp` jitter-buffer totals; the consecutive-tick nuance is lost |
+| `SynthesizedSamplesDetector` | event only | **Yes** | `media-playout` synthesized-sample totals |
+| `PlayoutDiscrepancyDetector` | `inbound-video-playout-discrepancy` | **Yes** | `inbound-rtp` `framesReceived` vs `framesRendered` |
+| `DecoderPerformanceDetector` | `video-decoder-overloaded` | Partially | `inbound-rtp` decode/drop totals; frame-budget + quiet-loss guards are coarser at the sampling period |
+| `StuckDecoderDetector` | `stuck-decoder` | No | tick-level bytes-up/frames-flat/PLI-up fingerprint; drives consumer recreation |
+| `DryInboundTrackDetector` | `dry-inbound-track` | No | guards read `MediaStreamTrack.muted`/`readyState` + remote pause state — not in the sample |
+| `DryOutboundTrackDetector` | `dry-outbound-track` | No | same non-sampled track-state guards |
+| `CaptureFailureDetector` | `capture-track-ended` | No | `MediaStreamTrack` `ended` event — no stats representation |
+| `CaptureFailureDetector` | `silent-audio-source` | No | energy totals are sampled, but the live/enabled/unmuted guards are not |
+| `SourceEncoderBottleneckDetector` | `capture-bottleneck`, `encoder-bottleneck` | No | discriminator reads `track.getSettings().frameRate` — not in the sample |
+| `CongestionDetector` | `congestion` | Mostly | `candidate-pair` available bitrates + `outbound-rtp` `qualityLimitationReason` — two components, but both sampled |
+| `CpuPerformanceDetector` | `cpulimitation` | No | joins send-side and receive-side evidence plus `durationOfCollectingStatsInMs`, which is not sampled |
+| `IceConnectivityDetector` | `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path` | No | state transitions and episode timing happen *between* samples |
+| `BlockedTransportDetector` | `blocked-transport` | No | joins candidate-pair STUN counters + transport bytes + outbound-rtp bitrate per collecting tick |
+| `NoAvailableIceCandidateDetector` | `no-available-ice-candidate` | No | connection-state jumps + gathering state; with no network the next sample may never leave the device |
+
+A deeper walkthrough of the reasoning lives in [`docs/DETECTOR_SAMPLE_WORTHINESS.md`](docs/DETECTOR_SAMPLE_WORTHINESS.md).
 
 ---
 
@@ -786,6 +836,49 @@ monitor.on('ice-restart', ({ outcome }) => metrics.count(`ice-restart.${outcome}
 ```
 
 **Sources:** [ICE restart: recovering connectivity (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice-restart/) · [RTCPeerConnection.restartIce (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/restartIce) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675)
+
+#### BlockedTransportDetector
+
+The firewall signature: a middlebox that lets ICE/STUN through but blocks the media itself. Every connectivity signal looks healthy — the candidate pair is `succeeded`, consent checks keep passing, `iceConnectionState` is `connected` — yet the call carries nothing. The existing detectors structurally miss this case: STUN consent responses count into the pair's `bytesReceived`, so the pair never looks dry and the inbound-stall check never fires, while the dry-track detectors see outbound-rtp counters advancing and stay silent.
+
+Raises `blocked-transport` (per ICE transport) when, sustained for `thresholdInMs`, all three hold: STUN demonstrably alive (`responsesReceived` advanced within `stunFreshnessInMs`), the application demonstrably producing (outbound RTP on the transport ≥ `minMediaBitrateBps`), and the media demonstrably not traversing. The payload's `evidence` field says which discrepancy was observed:
+
+| `evidence` | Meaning |
+|---|---|
+| `media-not-leaving-transport` | RTP senders produce bytes but the transport's own send counter barely moves — host firewall, blocked socket, dead route. |
+| `no-return-traffic` | Media leaves at full rate, STUN answers, but nothing except STUN comes back — not even RTCP. Classic DPI / UDP-throttling firewall. |
+
+The detector judges the *sending* side, where the client holds both halves of the proof. A firewall blocking only the receive direction shows up on the remote peer's sending side, or as a dry inbound track here.
+
+```javascript
+blockedTransportDetector: {
+    thresholdInMs: 5000,          // discrepancy persistence before raising
+    minMediaBitrateBps: 10000,    // below this the transport is legitimately quiet
+    maxReturnBitrateBps: 2000,    // at/below this the return path counts as STUN-only
+    maxSendShare: 0.1,            // transport send under this share of produced => blocked on send
+    stunFreshnessInMs: 10000,     // consent checks run ~5s; must comfortably exceed one interval
+}
+```
+
+**Use the result:** tell the user their network blocks media (a TURN/TLS fallback or a network change is the fix, an ICE restart on the same path is not), and correlate server-side: many `blocked-transport` clients on one corporate network is a firewall policy, not N user problems.
+
+**Sources:** [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675) · [RTCIceCandidatePairStats (W3C webrtc-stats)](https://www.w3.org/TR/webrtc-stats/#candidatepair-dict*) · [WebRTC and firewalls (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/firewall/)
+
+#### NoAvailableIceCandidateDetector
+
+The other end of the connectivity spectrum: the client cannot even *begin* to connect because ICE gathering produced **zero local candidates**. A healthy establishment gathers a host candidate within milliseconds — even without internet, any up interface yields one. Zero candidates while the connection state jumps from `new`/`connecting` straight to `disconnected`/`failed` means there was nothing to connect *with*: no interface, airplane mode, a VPN that tore down every route. This is a different diagnosis from every other ICE issue — those describe a path that existed and stopped working; this one says no path was ever possible.
+
+Raises `no-available-ice-candidate` (per peer connection) immediately on `disconnected`/`failed` with zero local candidates on a never-connected PC, and after `thresholdInMs` when the PC just sits in `new`/`connecting` with nothing gathered. Resolves when a local candidate appears or the connection reaches `connected`. Never fires on a connection that once connected — mid-call network loss belongs to `IceConnectivityDetector`.
+
+```javascript
+noAvailableIceCandidateDetector: {
+    thresholdInMs: 6000, // grace for `new`/`connecting` before the sustained variant raises
+}
+```
+
+**Use the result:** skip the ICE-restart dance entirely — recommend the user check their connection; on the server, treat the client as offline-at-join rather than call-quality-degraded.
+
+**Sources:** [RTCPeerConnection.connectionState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionState) · [RTCPeerConnection.iceGatheringState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/iceGatheringState) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445)
 
 #### IceTupleChangeDetector
 
@@ -1683,7 +1776,7 @@ new ClientMonitor({
 });
 ```
 
-Already running and want to flip a detector on/off without restarting the monitor? Every built-in detector exposes a `public disabled = false` field, and every layer's `detectors` registry exposes ergonomic helpers for finding and toggling them.
+Already running and want to flip a detector on/off without restarting the monitor? Every built-in detector exposes a `public disabled = false` field, and every layer's `detectors` registry exposes ergonomic helpers for finding and toggling them. Issue-raising detectors additionally expose `public includeIssueInSample = true` — flip it to `false` to keep a detector running locally (events, `activeIssues`) while excluding its issues from the samples shipped to the server; see [Which issues belong in the sample](#which-issues-belong-in-the-sample).
 
 `Detectors` (the registry attached as `monitor.detectors`, `peerConnectionMonitor.detectors`, `inboundTrackMonitor.detectors`, `outboundTrackMonitor.detectors`, `mediaPlayoutMonitor.detectors`) offers:
 
@@ -1739,7 +1832,7 @@ If you want a detector outright gone (not just silenced), call `detectors.remove
 
 ### Sample-channel behavior
 
-Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]`. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged.
+Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]` — unless the issue was raised with `includeInSample: false` (what a detector's `includeIssueInSample = false` compiles down to), in which case neither the raise nor its resolution reaches the sample. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged.
 
 **The issue lifecycle reaches the sample too** (`sendResolvedIssuesToServer`, default `true`). The purpose: the server keeps an on-the-fly mirror of each client's currently *active* issues and can correlate across clients or act immediately (recreate a consumer, recommend a rejoin) instead of only ever learning that issues started. On the wire, both entries of a stateful issue carry the schema-level `key` — the identity the server opens and closes on:
 

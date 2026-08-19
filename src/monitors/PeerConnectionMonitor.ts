@@ -23,6 +23,8 @@ import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
 import { IceConnectivityDetector } from "../detectors/IceConnectivityDetector";
+import { BlockedTransportDetector } from "../detectors/BlockedTransportDetector";
+import { NoAvailableIceCandidateDetector } from "../detectors/NoAvailableIceCandidateDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
 import { SelectedIcePath } from "./SelectedIcePath";
@@ -148,6 +150,13 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	private _connectionState?: W3C.RtcPeerConnectionState;
 	public iceState?: W3C.RtcIceTransportState;
 
+	/**
+	 * The ICE gathering state of the underlying peer connection / mediasoup
+	 * transport, kept up to date by the source bindings. `undefined` until the
+	 * first gathering-state event (or when the source does not report it).
+	 */
+	public iceGatheringState?: string;
+
 	public usingTURN?: boolean;
 	public usingTCP?: boolean;
 	public calculatedStabilityScore: CalculatedScore = {
@@ -180,6 +189,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.detectors.add(new IceTupleChangeDetector(this));
 		if (parent.config.iceConnectivityDetector !== null) {
 			this.detectors.add(new IceConnectivityDetector(this));
+		}
+		if (parent.config.blockedTransportDetector !== null) {
+			this.detectors.add(new BlockedTransportDetector(this));
+		}
+		if (parent.config.noAvailableIceCandidateDetector !== null) {
+			this.detectors.add(new NoAvailableIceCandidateDetector(this));
 		}
 	}
 
@@ -387,8 +402,10 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						this._updatePeerConnectionTransport(statsItem);
 						break;
 					case W3C.StatsType.localCandidate:
+						this._updateIceCandidate(statsItem, 'local');
+						break;
 					case W3C.StatsType.remoteCandidate:
-						this._updateIceCandidate(statsItem);
+						this._updateIceCandidate(statsItem, 'remote');
 						break;
 					case W3C.StatsType.candidatePair:
 						this._updateIceCandidatePair(statsItem);
@@ -545,6 +562,11 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	public get iceCandidates() {
 		return [ ...this.mappedIceCandidateMonitors.values() ];
+	}
+
+	/** ICE candidates that came from `local-candidate` stats entries. */
+	public get localIceCandidates() {
+		return this.iceCandidates.filter((candidate) => candidate.direction === 'local');
 	}
 
 	public get iceCandidatePairs() {
@@ -1032,7 +1054,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		return iceTransportMonitor;
 	}
 
-	private _updateIceCandidate(input: Partial<IceCandidateStats>): IceCandidateMonitor | undefined | void {
+	private _updateIceCandidate(input: Partial<IceCandidateStats>, direction?: 'local' | 'remote'): IceCandidateMonitor | undefined | void {
 		if (this.closed) return;
 		if (
 			input.id === undefined ||
@@ -1047,6 +1069,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		let iceCandidateMonitor = this.mappedIceCandidateMonitors.get(stats.id);
 		if (!iceCandidateMonitor) {
 			iceCandidateMonitor = new IceCandidateMonitor(this, stats);
+			iceCandidateMonitor.direction = direction;
 			this.mappedIceCandidateMonitors.set(stats.id, iceCandidateMonitor);
 
 			this.parent.emit('new-ice-candidate-monitor', {

@@ -567,6 +567,70 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     } | null;
 
     /**
+     * Configuration for detecting a firewall (or policy middlebox) that lets
+     * STUN through but blocks the media: the candidate pair stays `succeeded`
+     * and consent checks keep passing, yet media produced by the outbound RTP
+     * streams never traverses the ICE transport.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    blockedTransportDetector: {
+        /**
+         * How long (in milliseconds) the STUN-ok-but-media-blocked
+         * discrepancy must persist before the issue is raised.
+         */
+        thresholdInMs: number;
+
+        /**
+         * Combined outbound RTP bitrate (bps) below which the transport is
+         * treated as legitimately quiet and never judged. This is the
+         * "producer is demonstrably producing" bar.
+         */
+        minMediaBitrateBps: number;
+
+        /**
+         * Transport receive bitrate (bps) at or below which the return path
+         * counts as carrying nothing but STUN — with media flowing, at least
+         * RTCP receiver reports must come back, and those alone exceed this.
+         */
+        maxReturnBitrateBps: number;
+
+        /**
+         * Fraction of the produced media bitrate the transport's own send
+         * counter must fall below to count as "media is not leaving the
+         * transport" (packets produced by the RTP senders but never making it
+         * onto the wire).
+         */
+        maxSendShare: number;
+
+        /**
+         * How recently (in milliseconds) a STUN binding/consent response must
+         * have arrived on the selected pair for the path to count as
+         * STUN-verified. Consent checks run roughly every 5 seconds, so this
+         * should comfortably exceed one consent interval.
+         */
+        stunFreshnessInMs: number;
+    } | null;
+
+    /**
+     * Configuration for detecting that the client has no usable network at
+     * all: ICE gathering produced zero local candidates while the peer
+     * connection falls to `disconnected`/`failed` (or never leaves
+     * `new`/`connecting`).
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    noAvailableIceCandidateDetector: {
+        /**
+         * How long (in milliseconds) a never-connected peer connection may
+         * sit with zero local candidates in `new`/`connecting` before the
+         * issue is raised. `disconnected`/`failed` with zero candidates
+         * raises immediately.
+         */
+        thresholdInMs: number;
+    } | null;
+
+    /**
      * Ships the full issue *lifecycle* to the server instead of only the fact
      * that issues started.
      *

@@ -81,4 +81,58 @@ describe('ClientMonitor issue lifecycle in samples', () => {
 
 		monitor.close();
 	});
+
+	it('keeps includeInSample=false issues out of the sample entirely', () => {
+		const monitor = createMonitor();
+		const seen: unknown[] = [];
+
+		monitor.on('issue', (issue) => seen.push(issue));
+		monitor.raiseIssue('local-only', {
+			type: 'freezed-video-track',
+			payload: { trackId: 'a' },
+			includeInSample: false,
+		});
+
+		// the local lifecycle is unaffected
+		expect(seen).toHaveLength(1);
+		expect(monitor.isIssueActive('local-only')).toBe(true);
+
+		monitor.resolveIssue('local-only', { comment: 'recovered' });
+
+		// neither the raise nor the resolution reached the sample
+		const issues = monitor.createSample()?.clientIssues ?? [];
+
+		expect(issues).toHaveLength(0);
+
+		monitor.close();
+	});
+
+	it('addIssue respects includeInSample=false while still emitting', () => {
+		const monitor = createMonitor();
+		const seen: unknown[] = [];
+
+		monitor.on('issue', (issue) => seen.push(issue));
+		monitor.addIssue({ type: 'custom-one-shot', includeInSample: false });
+
+		expect(seen).toHaveLength(1);
+		expect(monitor.createSample()?.clientIssues ?? []).toHaveLength(0);
+
+		monitor.close();
+	});
+
+	it('a re-raise can flip includeInSample for later resolution buffering', () => {
+		const monitor = createMonitor();
+
+		monitor.raiseIssue('k', { type: 'congestion', includeInSample: true });
+		monitor.raiseIssue('k', { type: 'congestion', includeInSample: false });
+		monitor.resolveIssue('k', { comment: 'over' });
+
+		const issues = monitor.createSample()?.clientIssues ?? [];
+
+		// the raise was buffered before the flip; the resolution was not
+		expect(issues).toHaveLength(1);
+		expect(issues[0]?.type).toBe('congestion');
+
+		monitor.close();
+	});
 });

@@ -58,6 +58,7 @@ export class SourceEncoderBottleneckDetector implements Detector {
 	public readonly name = 'source-encoder-bottleneck-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly _captureIssueKey: string;
 	private readonly _encoderIssueKey: string;
@@ -153,6 +154,7 @@ export class SourceEncoderBottleneckDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<CaptureBottleneckIssuePayload>(this._captureIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: SourceEncoderBottleneckDetector.CAPTURE_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
@@ -228,6 +230,7 @@ export class SourceEncoderBottleneckDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<EncoderBottleneckIssuePayload>(this._encoderIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: SourceEncoderBottleneckDetector.ENCODER_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

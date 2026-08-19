@@ -56,6 +56,7 @@ export class CpuPerformanceDetector {
 	public readonly name = 'cpu-performance-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	/**
 	 * CPU limitation is a per-monitor singleton, so the key is a constant
@@ -183,6 +184,7 @@ export class CpuPerformanceDetector {
 		this._startedAlertAt = Date.now();
 
 		this.clientMonitor.raiseIssue<CpuPerformanceIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: CpuPerformanceDetector.ISSUE_TYPE,
 			payload: {},
 		});

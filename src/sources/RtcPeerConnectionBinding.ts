@@ -26,6 +26,8 @@ export class RtcPeerConnectionBinding {
 		this._onIceCandidateError = this._onIceCandidateError.bind(this);
 		this._onDataChannel = this._onDataChannel.bind(this);
 
+		this.monitor.iceGatheringState = this.peerConnection.iceGatheringState;
+
 		this._fireEvent(ClientEventTypes.PEER_CONNECTION_OPENED, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			iceConnectionState: this.peerConnection.iceConnectionState,
@@ -127,6 +129,8 @@ export class RtcPeerConnectionBinding {
 	}
 
 	private _onIceGatheringStateChange() {
+		this.monitor.iceGatheringState = this.peerConnection.iceGatheringState;
+
 		return this._fireEvent(ClientEventTypes.ICE_GATHERING_STATE_CHANGED, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			iceGatheringState: this.peerConnection.iceGatheringState,

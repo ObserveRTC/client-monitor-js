@@ -22,6 +22,8 @@ import { IceRestartOutcome, IceRestartRecommendedEventPayload as IceRestartRecom
 import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
 import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
+import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 
 export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
 
@@ -51,6 +53,15 @@ export type RaisedClientIssue<T extends ClientIssuePayload = ClientIssuePayload>
 	raisedAt: number;
 	/** Wall-clock time of the most recent raise/update call. */
 	updatedAt: number;
+	/**
+	 * Whether this issue is buffered into the `ClientSample` shipped to the
+	 * server. Set from `raiseIssue`'s `includeInSample` option — the built-in
+	 * detectors populate it from their public `includeIssueInSample` field.
+	 * When `false`, neither the raise entry nor the matching resolution entry
+	 * reaches the sample; the local lifecycle (events, `activeIssues`) is
+	 * unaffected. Defaults to true when omitted.
+	 */
+	includeInSample?: boolean;
 }
 
 /**
@@ -158,6 +169,14 @@ export type NewSelectedIcePathEventPayload = ClientMonitorBaseEvent & {
 export type IceRestartRecommendedEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& IceRestartRecommendationPayload;
+
+export type BlockedTransportEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& BlockedTransportIssuePayload;
+
+export type NoAvailableIceCandidateEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& NoAvailableIceCandidateIssuePayload;
 
 export type IceRestartEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
@@ -364,6 +383,8 @@ export type ClientMonitorEvents = {
 	'inbound-video-playout-discrepancy': [InboundVideoPlayoutDiscrepancyEventPayload],
 	'ice-restart': [IceRestartEventPayload],
 	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
+	'blocked-transport': [BlockedTransportEventPayload],
+	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
 	'audio-concealment': [AudioConcealmentEventPayload],
 	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
 	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],
