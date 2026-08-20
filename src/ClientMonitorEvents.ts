@@ -26,7 +26,22 @@ import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetect
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
-export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
+/**
+ * A value the ClientSample schema (3.5.0) can carry inside a payload:
+ * payloads are flat records of primitives on the wire, never nested
+ * structures and never pre-serialised JSON strings.
+ */
+export type ClientPayloadValue = boolean | string | number;
+
+/**
+ * The shape every sampled payload must have — client events, client issues,
+ * meta items and extension stats all carry this. `undefined` and `null`
+ * entries are legal on the API (DOM types produce them); `undefined` keys
+ * disappear when the sample serialises.
+ */
+export type ClientPayload = Record<string, ClientPayloadValue | null | undefined>;
+
+export type ClientIssuePayload = ClientPayload;
 
 /**
  * One-shot issue, produced by `ClientMonitor.addIssue`. Emitted as `'issue'`
@@ -86,19 +101,19 @@ export type UpdatedClientIssue<T extends ClientIssuePayload = ClientIssuePayload
 
 export type ClientEvent = {
 	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
+	payload?: ClientPayload,
 	timestamp: number,
 }
 
 export type ClientMetaData = {
 	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
+	payload?: ClientPayload,
 	timestamp: number,
 }
 
 export type ExtensionStat = {
 	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
+	payload?: ClientPayload,
 }
 
 export type ClientMonitorBaseEvent = {

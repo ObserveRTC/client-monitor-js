@@ -40,7 +40,8 @@ import {
 	SimulcastLayerChangedEventPayload,
 	CaptureTrackEndedEventPayload,
 	CaptureTrackMutedEventPayload,
-	StatsCollectionGapEventPayload
+	StatsCollectionGapEventPayload,
+	ClientEventPayloadRecord
 } from "../schema/ClientEventTypes";
 
 
@@ -91,11 +92,11 @@ export type ClientEventPayloadMap = {
 }
 
 
-function createDefaultClientEventPayloadProviderFunction<T extends Record<string, unknown> = Record<string, unknown>>(): ClientEventPayloadProviderFunction<T, Record<string, unknown>> {
+function createDefaultClientEventPayloadProviderFunction<T extends ClientEventPayloadRecord = ClientEventPayloadRecord>(): ClientEventPayloadProviderFunction<T, ClientEventPayloadRecord> {
 	return (input: T) => input;
 }
 
-export type ClientEventPayloadProviderFunction<In extends Record<string, unknown> = Record<string, unknown>, Out extends Record<string, unknown> = Record<string, unknown>> = (input: In) => Out;
+export type ClientEventPayloadProviderFunction<In extends ClientEventPayloadRecord = ClientEventPayloadRecord, Out extends ClientEventPayloadRecord = ClientEventPayloadRecord> = (input: In) => Out;
 
 export class ClientEventPayloadProvider {
 	public createClientJoinedEventPayload: ClientEventPayloadProviderFunction<ClientJoinedEventPayload> = createDefaultClientEventPayloadProviderFunction();
@@ -138,7 +139,7 @@ export class ClientEventPayloadProvider {
 	public createDataConsumerCreatedEventPayload: ClientEventPayloadProviderFunction<DataConsumerCreatedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createDataConsumerClosedEventPayload: ClientEventPayloadProviderFunction<DataConsumerClosedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 
-	public createPayload<K extends keyof ClientEventPayloadMap>(eventType: K, input: ClientEventPayloadMap[K]): Record<string, unknown> {
+	public createPayload<K extends keyof ClientEventPayloadMap>(eventType: K, input: ClientEventPayloadMap[K]): ClientEventPayloadRecord {
 		
 		switch (eventType) {
 			case ClientEventTypes.CLIENT_JOINED:

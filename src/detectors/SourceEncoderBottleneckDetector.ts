@@ -1,5 +1,6 @@
 import { Detector } from "./Detector";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
+import { ClientIssuePayload } from "../ClientMonitorEvents";
 
 export type CaptureBottleneckIssuePayload = {
 	peerConnectionId: string;
@@ -250,11 +251,11 @@ export class SourceEncoderBottleneckDetector implements Detector {
 	private _resolve(issueKey: string, comment: string, startedAt?: number) {
 		const clientMonitor = this.peerConnection.parent;
 		const issue = clientMonitor.activeIssues.get(issueKey);
-		let payload: Record<string, unknown> | undefined;
+		let payload: ClientIssuePayload | undefined;
 
 		if (issue) {
 			payload = {
-				...(issue.payload as Record<string, unknown>),
+				...issue.payload,
 				durationInMs: startedAt ? Date.now() - startedAt : undefined,
 			};
 		}

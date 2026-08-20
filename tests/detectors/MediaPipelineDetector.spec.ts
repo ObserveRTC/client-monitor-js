@@ -195,7 +195,8 @@ describe('MediaPipelineDetector', () => {
 
             const issue = mockClientMonitor.getIssuesByType('media-pipeline-stalled')[0]!;
 
-            expect(issue.payload.suspectedIssueTypes).toEqual([ 'congestion' ]);
+            // schema 3.5.0 payloads are flat records: comma-separated string
+            expect(issue.payload.suspectedIssueTypes).toBe('congestion');
         });
     });
 

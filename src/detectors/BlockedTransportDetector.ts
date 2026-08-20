@@ -303,7 +303,7 @@ export class BlockedTransportDetector implements Detector {
 			clientMonitor.resolveIssue(key, {
 				comment,
 				payload: {
-					...(issue.payload as Record<string, unknown>),
+					...issue.payload,
 					durationInMs: state?.raisedAt !== undefined ? Date.now() - state.raisedAt : undefined,
 				},
 				resolvedAt: Date.now(),

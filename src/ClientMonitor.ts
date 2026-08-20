@@ -13,6 +13,7 @@ import {
     ClientIssuePayload,
     ClientMetaData,
     ClientMonitorEvents,
+    ClientPayload,
     RaisedClientIssue,
     ResolvedClientIssue,
 } from './ClientMonitorEvents';
@@ -36,7 +37,7 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const MODULE_NAME = 'ClientMonitor';
 
-export type ExtensionStatProvider = () => { type: string, payload?: Record<string, unknown>} | Promise<{ type: string, payload?: Record<string, unknown>}>;
+export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
 
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
@@ -511,7 +512,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
 
-    public addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+    public addClientJoinEvent(event?: { payload?: ClientPayload, timestamp?: number }): void {
         if (this.closed) return;
 
         this.addEvent({
@@ -523,7 +524,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+    public addClientLeftEvent(event?: { payload?: ClientPayload, timestamp?: number }): void {
         if (this.closed) return;
 
         this.addEvent({
@@ -535,15 +536,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addEvent<Payload = Record<string, unknown>>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
+    public addEvent<Payload extends ClientPayload = ClientPayload>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         const timestamp = event.timestamp ?? Date.now();
-        const payload = event.payload ? JSON.stringify(event.payload) : undefined;
+
+        // Schema 3.5.0 carries payloads as records — nothing to serialise.
         this._clientEvents.push({
             ...event,
-            payload,
+            payload: event.payload as ClientSampleClientEvent['payload'],
             timestamp,
         });
 
@@ -729,7 +731,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this._clientIssues.push({
             type,
             key,
-            payload: payload === undefined ? undefined : JSON.stringify(payload),
+            payload: payload as ClientSampleClientIssue['payload'],
             timestamp,
         });
     }
@@ -742,7 +744,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         this._clientMetaItems.push({
             type: metaData.type,
-            payload: metaData.payload ? JSON.stringify(metaData.payload) : undefined,
+            payload: metaData.payload as ClientSampleClientMetaData['payload'],
             timestamp,
         });
 
@@ -753,14 +755,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addExtensionStats(stats: { type: string, payload?: Record<string, unknown>}): void {
+    public addExtensionStats(stats: { type: string, payload?: ClientPayload }): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
-        const payload = stats.payload ? JSON.stringify(stats.payload) : undefined;
+        // Schema 3.5.0 carries payloads as records — nothing to serialise.
         this._extensionStats.push({
             type: stats.type,
-            payload,
+            payload: stats.payload as ExtensionStat['payload'],
         });
 
         this.emit('extension-stats', {

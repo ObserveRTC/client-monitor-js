@@ -204,7 +204,7 @@ export class NoAvailableIceCandidateDetector implements Detector {
 			clientMonitor.resolveIssue(this._issueKey, {
 				comment,
 				payload: {
-					...(issue.payload as Record<string, unknown>),
+					...issue.payload,
 					durationInMs: Date.now() - this._raisedAt,
 				},
 				resolvedAt: Date.now(),

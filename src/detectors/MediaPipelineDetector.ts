@@ -32,11 +32,11 @@ export type MediaPipelineStalledIssuePayload = {
 	/** Transport receive rate at raise time (bps), for the demux stage. */
 	transportReceivingBitrate?: number;
 	/**
-	 * Types of the specialist issues active on this peer connection when the
-	 * verdict was made — the cross-reference from the stage verdict to the
-	 * detailed evidence.
+	 * Comma-separated types of the specialist issues active on this peer
+	 * connection when the verdict was made — the cross-reference from the
+	 * stage verdict to the detailed evidence.
 	 */
-	suspectedIssueTypes: string[];
+	suspectedIssueTypes: string;
 	/** How long the boundary had been broken when the issue was raised. */
 	stalledForMs: number;
 	/** Filled in when the issue is resolved. */
@@ -260,14 +260,14 @@ export class MediaPipelineDetector implements Detector {
 	 * Types of the specialist issues currently active on this peer connection
 	 * or its tracks — the link from the stage verdict to the detailed evidence.
 	 */
-	private _activeIssueTypes(): string[] {
+	private _activeIssueTypes(): string {
 		const clientMonitor = this.peerConnection.parent;
 		const types = new Set<string>();
 
 		for (const issue of clientMonitor.activeIssues.values()) {
 			if (issue.type === ISSUE_TYPE) continue;
 
-			const payload = issue.payload as Record<string, unknown> | undefined;
+			const payload = issue.payload;
 
 			if (!payload || typeof payload !== 'object') continue;
 
@@ -281,7 +281,7 @@ export class MediaPipelineDetector implements Detector {
 			if (belongsToPc) types.add(issue.type);
 		}
 
-		return [ ...types ];
+		return [ ...types ].join(',');
 	}
 
 	private _getState<K>(states: Map<K, BoundaryState>, key: K): BoundaryState {
@@ -327,7 +327,7 @@ export class MediaPipelineDetector implements Detector {
 			clientMonitor.resolveIssue(issueKey, {
 				comment,
 				payload: {
-					...(issue.payload as Record<string, unknown>),
+					...issue.payload,
 					durationInMs: Date.now() - state.raisedAt,
 				},
 				resolvedAt: Date.now(),

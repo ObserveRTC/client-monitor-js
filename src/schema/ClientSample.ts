@@ -1,5 +1,5 @@
 
-export const schemaVersion = "3.4.0";
+export const schemaVersion = "3.5.0";
 
 /**
 * The WebRTC app provided custom stats payload
@@ -13,7 +13,7 @@ export type ExtensionStat = {
 	/**
 	* The payload of the extension stats the custom app provides
 	*/
-	payload?: string;
+	payload?: Record<string, boolean | string | number>;
 
 }
 
@@ -27,9 +27,9 @@ export type ClientMetaData = {
 	type: string;
 
 	/**
-	* The value associated with the event, if applicable.
+	* The attributes of the meta data entry, if applicable.
 	*/
-	payload?: string;
+	payload?: Record<string, boolean | string | number>;
 
 	/**
 	* The unique identifier of the peer connection for which the event was generated.
@@ -68,9 +68,9 @@ export type ClientIssue = {
 	key?: string;
 
 	/**
-	* The value associated with the event, if applicable.
+	* The attributes of the issue, if applicable.
 	*/
-	payload?: string;
+	payload?: Record<string, boolean | string | number>;
 
 	/**
 	* The timestamp in epoch format when the event was generated.
@@ -89,9 +89,9 @@ export type ClientEvent = {
 	type: string;
 
 	/**
-	* The value associated with the event, if applicable.
+	* The attributes of the event, if applicable.
 	*/
-	payload?: string;
+	payload?: Record<string, boolean | string | number>;
 
 	/**
 	* The timestamp in epoch format when the event was generated.

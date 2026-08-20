@@ -1,8 +1,13 @@
-## 4.7.0
+## 4.8.0
 
 ### Schema
 
--   **ClientSample schema `3.4.0`.** The `scoreReasons` field on the client, peer-connection and track sample entries is a `string[]` — the keys of the score reasons attached to that entity's calculated score.
+-   **ClientSample schema `3.5.0`.**
+    -   `scoreReasons` on the client, peer-connection and track sample entries is a `string[]` — the keys of the score reasons attached to that entity's calculated score.
+    -   **Payloads are records, never pre-serialised strings.** `ClientEvent.payload`, `ClientIssue.payload`, `ClientMetaData.payload` and `ExtensionStat.payload` are `Record<string, boolean | string | number>` on the wire. The monitor no longer calls `JSON.stringify` on any payload — `addEvent`, `raiseIssue`/`addIssue`, `addMetaData` and `addExtensionStats` all accept and buffer the record directly (the new `ClientPayload` type: a flat record of primitives; `null`/`undefined` entries are legal on the API, `undefined` keys disappear at sample serialisation). Measured effect: ~12% escaping overhead removed from payload bytes, ~18% faster whole-sample serialisation, 30–40 per-sample stringify calls eliminated.
+    -   Producers whose payloads carried nested structures now flatten or JSON-encode just those values: `MEDIA_TRACK_ADDED` ships `constraints`/`capabilities`/`settings` as JSON documents, `PEER_CONNECTION_ICE_PATH_CHANGED` ships `from`/`to` as JSON documents, `SIMULCAST_LAYER_CHANGED` ships comma-separated layer id lists and the layer snapshot as a JSON document, and `media-pipeline-stalled`'s `suspectedIssueTypes` is a comma-separated string. Event payload interfaces extend the new `ClientEventPayloadRecord` instead of `Record<string, unknown>`, so a nested structure in a payload is now a compile error.
+    -   **Servers must read `payload` as an object, not parse it as a JSON string.** Custom `ClientEventPayloadProvider` functions and `addIssue`/`raiseIssue`/`addEvent` callers that passed nested objects must flatten them.
+    -   Fixed along the way: the `ICE_CANDIDATE` event payload was built by spreading an `RTCIceCandidate` instance, whose properties are prototype getters — the spread copied nothing. The fields are now copied explicitly, so the payload is actually populated.
 
 ### New detectors
 

@@ -734,7 +734,7 @@ export class IceConnectivityDetector implements Detector {
 		clientMonitor.resolveIssue(key, {
 			comment,
 			payload: {
-				...(issue.payload as Record<string, unknown>),
+				...issue.payload,
 				durationInMs: raisedAt !== undefined ? Date.now() - raisedAt : undefined,
 			},
 			resolvedAt: Date.now(),

@@ -1535,7 +1535,7 @@ type ResolvedClientIssue<T = ClientIssuePayload> = RaisedClientIssue<T> & {
 
 Narrow between the two by checking for `'key' in issue` — that's the discriminant.
 
-> **Wire format**: `ClientSample.clientIssues[]` ships a stripped shape: `{ type, payload?: string (JSON-stringified), timestamp }`. The richer in-memory `id`-less, key-bearing object is a runtime concern; the server schema is unchanged.
+> **Wire format** (schema 3.5.0): `ClientSample.clientIssues[]` ships a stripped shape: `{ type, key?, payload?: Record<string, boolean | string | number>, timestamp }`. Payloads are flat records of primitives on the wire — never pre-serialised JSON strings — so nothing is stringified per issue or per event, and the server reads payload fields directly.
 
 ### Lifecycle: the events you can listen to
 

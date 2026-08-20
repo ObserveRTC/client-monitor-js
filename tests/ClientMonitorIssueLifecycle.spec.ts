@@ -39,7 +39,8 @@ describe('ClientMonitor issue lifecycle in samples', () => {
 		expect(resolution?.type).toBe('stuck-decoder-resolved');
 		expect(resolution?.key).toBe('stuck-decoder-track-a');
 
-		const payload = JSON.parse(resolution?.payload as string);
+		// schema 3.5.0: the payload is a record, not a JSON string
+		const payload = resolution?.payload as Record<string, unknown>;
 
 		// secondary join for consumers that do not store keys
 		expect(payload.raisedAt).toBe(issues[0]?.timestamp);
