@@ -253,6 +253,10 @@ const monitor = new ClientMonitor({
     noAvailableIceCandidateDetector: {
         thresholdInMs: 6000,          // grace for `new`/`connecting` with zero local candidates
     },
+    mediaPipelineDetector: {
+        thresholdInMs: 4000,               // how long a broken pipeline boundary must persist
+        minTransportReceiveBitrateBps: 20000, // above this, incoming transport traffic must demux
+    },
 
     audioConcealmentDetector: {
         onThreshold: 0.03,        // Webex treats >3% concealment as significant, >5% as severe
@@ -418,6 +422,7 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`IceConnectivityDetector`](#iceconnectivitydetector) | ICE transports | issues `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path`; events `ice-restart`, `ice-restart-recommended` | Runtime ICE health and *when* an ICE restart is warranted |
 | [`BlockedTransportDetector`](#blockedtransportdetector) | ICE transports | issue `blocked-transport` | STUN passes but media does not — the firewall / policy-middlebox signature |
 | [`NoAvailableIceCandidateDetector`](#noavailableicecandidatedetector) | peer connection | issue `no-available-ice-candidate` | Zero local ICE candidates while the connection falls over — no usable network at all |
+| [`MediaPipelineDetector`](#mediapipelinedetector) | peer connection | issue `media-pipeline-stalled` | The first broken stage of the media pipeline nothing else covers: encoded frames never leave the sender, or transport traffic never demuxes |
 | [`IceTupleChangeDetector`](#icetuplechangedetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
 | [`CodecChangeDetector`](#observation-detectors) | tracks | event `codec-changed` / `CODEC_CHANGED` | Which codec/profile is actually in use, and when it changed |
 | [`VideoResolutionChangeDetector`](#observation-detectors) | video tracks | event `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder, with the *reason* attached |
@@ -461,8 +466,8 @@ In case shrinking down the sample size is something your application wants, the 
 | `IceConnectivityDetector` | `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path` | No | state transitions and episode timing happen *between* samples |
 | `BlockedTransportDetector` | `blocked-transport` | No | joins candidate-pair STUN counters + transport bytes + outbound-rtp bitrate per collecting tick |
 | `NoAvailableIceCandidateDetector` | `no-available-ice-candidate` | No | connection-state jumps + gathering state; with no network the next sample may never leave the device |
+| `MediaPipelineDetector` | `media-pipeline-stalled` | No | cross-references outbound-rtp vs its own packet counters and transport bytes vs inbound-rtp bytes per collecting tick |
 
-A deeper walkthrough of the reasoning lives in [`docs/DETECTOR_SAMPLE_WORTHINESS.md`](docs/DETECTOR_SAMPLE_WORTHINESS.md).
 
 ---
 
@@ -880,6 +885,26 @@ noAvailableIceCandidateDetector: {
 
 **Sources:** [RTCPeerConnection.connectionState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionState) · [RTCPeerConnection.iceGatheringState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/iceGatheringState) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445)
 
+#### MediaPipelineDetector
+
+The pipeline stage classifier: media moves through a fixed chain (capture → encoder → RTP sender → transport → wire, mirrored on receive), every stage has a monotonic counter proving progress, and a disruption is locatable as the *first* boundary where the upstream counter advances and the downstream one does not. Most boundaries are owned by specialist detectors; this one raises `media-pipeline-stalled` for the two nothing else covers:
+
+| `stage` | Direction | Meaning |
+|---|---|---|
+| `rtp-sender` | send | `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` — an encoded frame always packetizes, so a sustained violation is a wedged sender/pacer (seen after `replaceTrack` races and simulcast reconfigurations). Guarded by track live + unmuted + layer active. |
+| `transport-demux` | receive | The ICE transport receives ≥ `minTransportReceiveBitrateBps` — well above what RTCP + STUN can explain — while every inbound RTP of the transport stays flat: traffic arrives that never demuxes (SSRC mismatch after renegotiation, a consumer against a dead producer). Requires at least one inbound RTP to exist. |
+
+The payload carries `suspectedIssueTypes` — the specialist issues active on this peer connection at raise time — so one entry both localizes the stage and links the detailed evidence. Registered last among the peer-connection detectors for exactly that reason.
+
+```javascript
+mediaPipelineDetector: {
+    thresholdInMs: 4000,               // how long a broken boundary must persist
+    minTransportReceiveBitrateBps: 20000, // above this, incoming traffic must demux
+}
+```
+
+**Use the result:** `rtp-sender` → renegotiate or replace the sender (the encoder is fine, the pipe after it is wedged); `transport-demux` → recreate the consumers / re-signal SSRCs (the network is fine, the demux is not).
+
 #### IceTupleChangeDetector
 
 The low-level primitive under the path detectors: emits `'ice-tuple-changed'` whenever the set of selected `local:remote` network tuples changes. Always registered; `SelectedIcePath` classifies *what kind of* change it was, and only `IceConnectivityDetector` raises issues.
@@ -982,12 +1007,6 @@ The scoring system provides quantitative quality assessment ranging from 0.0 (wo
 ```typescript
 interface ScoreCalculator {
     update(): void;
-    encodeClientScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodePeerConnectionScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeInboundAudioScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeInboundVideoScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeOutboundAudioScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeOutboundVideoScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
 }
 ```
 
@@ -1079,26 +1098,40 @@ For screen-share tracks, sharpness is the quality: fps and bitrate volatility ar
 
 ### Score Reasons
 
-Each score calculation includes detailed reasons for penalties:
+Every penalty the `DefaultScoreCalculator` applies is recorded as a **reason**: a map from a reason key to the points it subtracted (`Record<string, number>`). The reasons are the explanation of the score — a `3.0` alone says something is wrong; `{ "frozen-video": 2.0 }` says *what*. They are produced by default, attributed to the entity that caused them, and readable in three places:
 
-```javascript
-monitor.on("score", (event) => {
-    console.log("Client Score:", event.clientScore);
-    console.log("Score Reasons:", event.scoreReasons);
-    // Example reasons:
+**1. The realtime `'score'` event** — carries the client-level aggregate of the current tick's reasons across every peer connection and track (as `currentReasons`):
+
+```typescript
+monitor.on("score", ({ clientScore, currentReasons }) => {
+    console.log("Client Score:", clientScore);
+    console.log("Score Reasons:", currentReasons);
+    // Example:
     // {
-    //   "high-rtt": 1.0,
-    //   "high-jitter": 1.0,
-    //   "high-packetloss": 2.0,
-    //   "cpu-limitation": 2.0,
-    //   "bandwidth-limitation": 1.0,
-    //   "frozen-video": 2.0,
-    //   "audio-concealment": 2.0,
-    //   "downscaled-screenshare": 2.0,
-    //   "dropped-video-frames": 1.0
+    //   "high-rtt": 1.0,             // pc: raw RTT above 150ms
+    //   "high-jitter": 1.0,          // pc: avg measured jitter above 30ms
+    //   "high-packetloss": 2.0,      // pc: avg delta fraction lost 5-20%
+    //   "cpu-limitation": 2.0,       // outbound video: cpu-limited >=30% of the interval
+    //   "bandwidth-limitation": 1.0, // outbound video: bandwidth-limited >=50%
+    //   "frozen-video": 2.0,         // inbound video: picture currently frozen
+    //   "audio-concealment": 2.0,    // inbound audio: audible concealment issue active
+    //   "downscaled-screenshare": 2.0, // screenshare sent below 1/4 of source area
+    //   "dropped-video-frames": 1.0  // inbound video: >10% frames dropped
     // }
 });
 ```
+
+**2. On the monitors** — each entity holds only its *own* reasons, so a low track score is explained on the track, not on the peer connection:
+
+```typescript
+pcMonitor.scoreReasons;                              // rtt / jitter / packetloss only
+monitor.getInboundTrackMonitor(id)?.scoreReasons;    // e.g. frozen-video, audio-concealment
+monitor.getOutboundTrackMonitor(id)?.scoreReasons;   // e.g. cpu-limitation, downscaled-screenshare
+```
+
+**3. In the samples** — the client, peer-connection and track sample entries carry `scoreReasons` as an **array of the reason keys** (`string[]`), with the same per-entity attribution; the penalty magnitudes stay local, readable on the monitors and the `'score'` event. The field is omitted when there is nothing to explain. Set `sendScoreReasonsToServer: false` in the config to drop the keys from the wire — the scores themselves and the realtime event are unaffected.
+
+The full key set and the penalty tiers behind each are listed per entity in the score sections above; the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
 
 ### Custom Score Calculator
 

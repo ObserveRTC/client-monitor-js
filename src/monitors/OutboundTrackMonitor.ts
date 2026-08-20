@@ -6,6 +6,7 @@ import { SourceEncoderBottleneckDetector } from "../detectors/SourceEncoderBottl
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { OutboundTrackSample } from "../schema/ClientSample";
+import { scoreReasonKeys } from "../scores/utils";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -185,22 +186,16 @@ export class OutboundTrackMonitor {
 	}
 
 	public createSample(): OutboundTrackSample {
-		let scoreReasons: string | undefined;
-		if (this.getPeerConnection()?.parent.config.sendScoreReasonsToServer !== false) {
-			if (this.kind === 'audio') {
-				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundAudioScoreReasons?.(this.calculatedScore.reasons);
-			} else if (this.kind === 'video') {
-				scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundVideoScoreReasons?.(this.calculatedScore.reasons);
-			}
-		}
-
 		return {
 			id: this.track.id,
 			kind: this.kind,
 			timestamp: Date.now(),
 			attachments: this.attachments,
 			score: this.score,
-			scoreReasons,
+			scoreReasons: scoreReasonKeys(
+				this.calculatedScore.reasons,
+				this.getPeerConnection()?.parent.config.sendScoreReasonsToServer,
+			),
 		};
 	}
 }

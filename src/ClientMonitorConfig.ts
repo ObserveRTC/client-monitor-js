@@ -671,6 +671,30 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     sendResolvedIssuesToServer?: boolean;
 
     /**
+     * Configuration for the media-pipeline stage classifier: raises
+     * `media-pipeline-stalled` on the two stage boundaries no specialist
+     * detector covers — frames encoding while no packet leaves the RTP sender
+     * (`rtp-sender`), and the ICE transport receiving at a media-level rate
+     * while no inbound RTP accounts for it (`transport-demux`).
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    mediaPipelineDetector: {
+        /**
+         * How long (in milliseconds) a broken stage boundary must persist
+         * before the issue is raised.
+         */
+        thresholdInMs: number;
+
+        /**
+         * Transport receive bitrate (bps) at or above which incoming traffic
+         * counts as media that must demux into some inbound RTP — set well
+         * above what RTCP + STUN alone can explain.
+         */
+        minTransportReceiveBitrateBps: number;
+    } | null;
+
+    /**
      * Whether the encoded score reasons (the per-penalty breakdown the score
      * calculator produces) are shipped with the samples on the peer connection
      * and track entries. Set to `false` to drop them from the wire — the

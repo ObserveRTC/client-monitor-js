@@ -24,6 +24,7 @@ import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChang
 import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
 import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
+import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
 export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
 
@@ -177,6 +178,10 @@ export type BlockedTransportEventPayload = ClientMonitorBaseEvent
 export type NoAvailableIceCandidateEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& NoAvailableIceCandidateIssuePayload;
+
+export type MediaPipelineStalledEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& MediaPipelineStalledIssuePayload;
 
 export type IceRestartEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
@@ -385,6 +390,7 @@ export type ClientMonitorEvents = {
 	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
 	'blocked-transport': [BlockedTransportEventPayload],
 	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
+	'media-pipeline-stalled': [MediaPipelineStalledEventPayload],
 	'audio-concealment': [AudioConcealmentEventPayload],
 	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
 	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],

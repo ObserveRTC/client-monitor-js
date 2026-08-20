@@ -25,9 +25,11 @@ import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
 import { IceConnectivityDetector } from "../detectors/IceConnectivityDetector";
 import { BlockedTransportDetector } from "../detectors/BlockedTransportDetector";
 import { NoAvailableIceCandidateDetector } from "../detectors/NoAvailableIceCandidateDetector";
+import { MediaPipelineDetector } from "../detectors/MediaPipelineDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
 import { SelectedIcePath } from "./SelectedIcePath";
+import { scoreReasonKeys } from "../scores/utils";
 import {
 	CertificateStats,
 	CodecStats,
@@ -195,6 +197,11 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 		if (parent.config.noAvailableIceCandidateDetector !== null) {
 			this.detectors.add(new NoAvailableIceCandidateDetector(this));
+		}
+		// Registered last on purpose: its `suspectedIssueTypes` link reads the
+		// specialist issues already raised in this tick.
+		if (parent.config.mediaPipelineDetector !== null) {
+			this.detectors.add(new MediaPipelineDetector(this));
 		}
 	}
 
@@ -490,9 +497,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			inboundTracks: [ ...this.mappedInboundTracks.values() ].map(inboundTrack => inboundTrack.createSample()),
 			outboundTracks: [ ...this.mappedOutboundTracks.values() ].map(outboundTrack => outboundTrack.createSample()),
 			score: this.score,
-			scoreReasons: this.parent.config.sendScoreReasonsToServer === false
-				? undefined
-				: this.parent.scoreCalculator.encodePeerConnectionScoreReasons?.(this.calculatedStabilityScore.reasons)
+			scoreReasons: scoreReasonKeys(this.calculatedStabilityScore.reasons, this.parent.config.sendScoreReasonsToServer)
 		}
 	}
 

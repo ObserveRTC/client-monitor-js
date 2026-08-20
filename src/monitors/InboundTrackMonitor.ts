@@ -5,6 +5,7 @@ import { DryInboundTrackDetector } from "../detectors/DryInboundTrackDetector";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { InboundTrackSample } from "../schema/ClientSample";
+import { scoreReasonKeys } from "../scores/utils";
 import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetector";
 import { AudioConcealmentDetector } from "../detectors/AudioConcealmentDetector";
 import { JitterBufferStressDetector } from "../detectors/JitterBufferStressDetector";
@@ -126,22 +127,16 @@ export class InboundTrackMonitor {
 	}
 
 	public createSample(): InboundTrackSample {
-			let scoreReasons: string | undefined;
-			if (this.getPeerConnection()?.parent.config.sendScoreReasonsToServer !== false) {
-				if (this.kind === 'audio') {
-					scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundAudioScoreReasons?.(this.calculatedScore.reasons);
-				} else if (this.kind === 'video') {
-					scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeInboundVideoScoreReasons?.(this.calculatedScore.reasons);
-				}
-			}
-
 			return {
 				id: this.track.id,
 				kind: this.track.kind,
 				timestamp: Date.now(),
 				attachments: this.attachments,
 				score: this.score,
-				scoreReasons,
+				scoreReasons: scoreReasonKeys(
+					this.calculatedScore.reasons,
+					this.getPeerConnection()?.parent.config.sendScoreReasonsToServer,
+				),
 			};
 		}
 }

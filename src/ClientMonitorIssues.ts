@@ -30,6 +30,7 @@ import {
 import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
 import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
+import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -79,7 +80,8 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
     | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
     | RaisedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
-    | RaisedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' };
+    | RaisedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' }
+    | RaisedClientIssue<MediaPipelineStalledIssuePayload>       & { type: 'media-pipeline-stalled' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -111,7 +113,8 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
     | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
     | ResolvedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
-    | ResolvedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' };
+    | ResolvedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' }
+    | ResolvedClientIssue<MediaPipelineStalledIssuePayload>       & { type: 'media-pipeline-stalled' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -148,6 +151,7 @@ export function isClientMonitorIssue(
         case 'stuck-decoder':
         case 'blocked-transport':
         case 'no-available-ice-candidate':
+        case 'media-pipeline-stalled':
             return true;
         default:
             return false;

@@ -39,8 +39,20 @@ describe('sendScoreReasonsToServer', () => {
 		const sample = monitor.createSample();
 		const pcSample = sample?.peerConnections?.[0];
 
-		expect(pcSample?.scoreReasons).toBeDefined();
-		expect(JSON.parse(pcSample?.scoreReasons as string)).toEqual({ 'high-rtt': 1.0 });
+		// the sample carries the reason keys; magnitudes stay local
+		expect(pcSample?.scoreReasons).toEqual([ 'high-rtt' ]);
+
+		monitor.close();
+	});
+
+	it('ships the client-level reason keys on the client sample', () => {
+		const monitor = createMonitor();
+
+		monitor.scoreReasons = { 'high-rtt': 1.0, 'frozen-video': 2.0 };
+
+		const sample = monitor.createSample();
+
+		expect(sample?.scoreReasons).toEqual([ 'high-rtt', 'frozen-video' ]);
 
 		monitor.close();
 	});
@@ -90,10 +102,10 @@ describe('sendScoreReasonsToServer', () => {
 		const pcSample = sample?.peerConnections?.[0];
 		const trackSample = pcSample?.inboundTracks?.[0];
 
-		// the track's reasons ship on the track's own sample...
-		expect(JSON.parse(trackSample?.scoreReasons as string)).toEqual({ 'frozen-video': 2.0 });
+		// the track's reason keys ship on the track's own sample...
+		expect(trackSample?.scoreReasons).toEqual([ 'frozen-video' ]);
 		// ...and the peer connection sample carries only its own (rtt/jitter/loss) reasons
-		expect(JSON.parse(pcSample?.scoreReasons as string)).toEqual({ 'high-rtt': 1.0 });
+		expect(pcSample?.scoreReasons).toEqual([ 'high-rtt' ]);
 
 		monitor.close();
 	});

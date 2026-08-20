@@ -94,29 +94,6 @@ export class DefaultScoreCalculator {
 		this._calculateClientMonitorScore();
 	}
 
-	public encodeScoreReasons<T extends Record<string, number>>(reasons?: T): string {
-        return JSON.stringify(reasons ?? '{}');
-    }
-
-	// The per-entity encoders of the ScoreCalculator interface all use the same
-	// JSON encoding here; they exist so the monitors' createSample() can ship
-	// the reasons without knowing which calculator is installed.
-	public encodePeerConnectionScoreReasons<T extends Record<string, number>>(reasons?: T): string {
-		return this.encodeScoreReasons(reasons);
-	}
-	public encodeInboundAudioScoreReasons<T extends Record<string, number>>(reasons?: T): string {
-		return this.encodeScoreReasons(reasons);
-	}
-	public encodeInboundVideoScoreReasons<T extends Record<string, number>>(reasons?: T): string {
-		return this.encodeScoreReasons(reasons);
-	}
-	public encodeOutboundAudioScoreReasons<T extends Record<string, number>>(reasons?: T): string {
-		return this.encodeScoreReasons(reasons);
-	}
-	public encodeOutboundVideoScoreReasons<T extends Record<string, number>>(reasons?: T): string {
-		return this.encodeScoreReasons(reasons);
-	}
-
 	public _calculateClientMonitorScore() {
 		const clientMonitor: ClientMonitor = this.clientMonitor;
 		let clientTotalScore = 0;
