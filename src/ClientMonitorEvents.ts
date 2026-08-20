@@ -22,8 +22,26 @@ import { IceRestartOutcome, IceRestartRecommendedEventPayload as IceRestartRecom
 import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
 import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
+import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
+import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
-export type ClientIssuePayload = Record<string, unknown> | boolean | string | number;
+/**
+ * A value the ClientSample schema (3.5.0) can carry inside a payload:
+ * payloads are flat records of primitives on the wire, never nested
+ * structures and never pre-serialised JSON strings.
+ */
+export type ClientPayloadValue = boolean | string | number;
+
+/**
+ * The shape every sampled payload must have — client events, client issues,
+ * meta items and extension stats all carry this. `undefined` and `null`
+ * entries are legal on the API (DOM types produce them); `undefined` keys
+ * disappear when the sample serialises.
+ */
+export type ClientPayload = Record<string, ClientPayloadValue | null | undefined>;
+
+export type ClientIssuePayload = ClientPayload;
 
 /**
  * One-shot issue, produced by `ClientMonitor.addIssue`. Emitted as `'issue'`
@@ -51,6 +69,15 @@ export type RaisedClientIssue<T extends ClientIssuePayload = ClientIssuePayload>
 	raisedAt: number;
 	/** Wall-clock time of the most recent raise/update call. */
 	updatedAt: number;
+	/**
+	 * Whether this issue is buffered into the `ClientSample` shipped to the
+	 * server. Set from `raiseIssue`'s `includeInSample` option — the built-in
+	 * detectors populate it from their public `includeIssueInSample` field.
+	 * When `false`, neither the raise entry nor the matching resolution entry
+	 * reaches the sample; the local lifecycle (events, `activeIssues`) is
+	 * unaffected. Defaults to true when omitted.
+	 */
+	includeInSample?: boolean;
 }
 
 /**
@@ -74,19 +101,19 @@ export type UpdatedClientIssue<T extends ClientIssuePayload = ClientIssuePayload
 
 export type ClientEvent = {
 	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
+	payload?: ClientPayload,
 	timestamp: number,
 }
 
 export type ClientMetaData = {
 	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
+	payload?: ClientPayload,
 	timestamp: number,
 }
 
 export type ExtensionStat = {
 	type: string,
-	payload?: Record<string, unknown> | boolean | string | number,
+	payload?: ClientPayload,
 }
 
 export type ClientMonitorBaseEvent = {
@@ -158,6 +185,18 @@ export type NewSelectedIcePathEventPayload = ClientMonitorBaseEvent & {
 export type IceRestartRecommendedEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& IceRestartRecommendationPayload;
+
+export type BlockedTransportEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& BlockedTransportIssuePayload;
+
+export type NoAvailableIceCandidateEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& NoAvailableIceCandidateIssuePayload;
+
+export type MediaPipelineStalledEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& MediaPipelineStalledIssuePayload;
 
 export type IceRestartEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
@@ -364,6 +403,9 @@ export type ClientMonitorEvents = {
 	'inbound-video-playout-discrepancy': [InboundVideoPlayoutDiscrepancyEventPayload],
 	'ice-restart': [IceRestartEventPayload],
 	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
+	'blocked-transport': [BlockedTransportEventPayload],
+	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
+	'media-pipeline-stalled': [MediaPipelineStalledEventPayload],
 	'audio-concealment': [AudioConcealmentEventPayload],
 	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
 	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],

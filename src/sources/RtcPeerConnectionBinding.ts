@@ -26,6 +26,8 @@ export class RtcPeerConnectionBinding {
 		this._onIceCandidateError = this._onIceCandidateError.bind(this);
 		this._onDataChannel = this._onDataChannel.bind(this);
 
+		this.monitor.iceGatheringState = this.peerConnection.iceGatheringState;
+
 		this._fireEvent(ClientEventTypes.PEER_CONNECTION_OPENED, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			iceConnectionState: this.peerConnection.iceConnectionState,
@@ -120,13 +122,33 @@ export class RtcPeerConnectionBinding {
 	}
 
 	private _onIceCandidate(event: RTCPeerConnectionIceEvent) {
+		const candidate = event.candidate;
+
+		// Explicit field list on purpose: RTCIceCandidate's properties are
+		// prototype getters, so a spread copies nothing but `toJSON` — the
+		// explicit copy is what actually populates the payload.
 		return this._fireEvent(ClientEventTypes.ICE_CANDIDATE, {
 			peerConnectionId: this.monitor.peerConnectionId,
-			...event.candidate,
+			address: candidate?.address,
+			candidate: candidate?.candidate,
+			component: candidate?.component,
+			foundation: candidate?.foundation,
+			port: candidate?.port,
+			priority: candidate?.priority,
+			protocol: candidate?.protocol,
+			relatedAddress: candidate?.relatedAddress,
+			relatedPort: candidate?.relatedPort,
+			sdpMLineIndex: candidate?.sdpMLineIndex,
+			sdpMid: candidate?.sdpMid,
+			tcpType: candidate?.tcpType,
+			type: candidate?.type,
+			usernameFragment: candidate?.usernameFragment,
 		});
 	}
 
 	private _onIceGatheringStateChange() {
+		this.monitor.iceGatheringState = this.peerConnection.iceGatheringState;
+
 		return this._fireEvent(ClientEventTypes.ICE_GATHERING_STATE_CHANGED, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			iceGatheringState: this.peerConnection.iceGatheringState,
@@ -232,9 +254,11 @@ export function bindMediaStreamTrackEvents(options: {
 			enabled: track.enabled,
 			readyState: track.readyState,
 			contentHint: track.contentHint,
-			constraints: track.getConstraints(),
-			capabilities: track.getCapabilities(),
-			settings: track.getSettings(),
+			// schema 3.5.0 payloads are flat records of primitives: these DOM
+			// dictionaries travel as JSON documents
+			constraints: JSON.stringify(track.getConstraints()),
+			capabilities: JSON.stringify(track.getCapabilities()),
+			settings: JSON.stringify(track.getSettings()),
 			...(attachments ?? {}),
 		}
 	);

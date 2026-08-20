@@ -1,5 +1,6 @@
 import { Detector } from "./Detector";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
+import { ClientIssuePayload } from "../ClientMonitorEvents";
 
 export type CaptureBottleneckIssuePayload = {
 	peerConnectionId: string;
@@ -58,6 +59,7 @@ export class SourceEncoderBottleneckDetector implements Detector {
 	public readonly name = 'source-encoder-bottleneck-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly _captureIssueKey: string;
 	private readonly _encoderIssueKey: string;
@@ -153,6 +155,7 @@ export class SourceEncoderBottleneckDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<CaptureBottleneckIssuePayload>(this._captureIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: SourceEncoderBottleneckDetector.CAPTURE_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
@@ -228,6 +231,7 @@ export class SourceEncoderBottleneckDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<EncoderBottleneckIssuePayload>(this._encoderIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: SourceEncoderBottleneckDetector.ENCODER_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
@@ -247,11 +251,11 @@ export class SourceEncoderBottleneckDetector implements Detector {
 	private _resolve(issueKey: string, comment: string, startedAt?: number) {
 		const clientMonitor = this.peerConnection.parent;
 		const issue = clientMonitor.activeIssues.get(issueKey);
-		let payload: Record<string, unknown> | undefined;
+		let payload: ClientIssuePayload | undefined;
 
 		if (issue) {
 			payload = {
-				...(issue.payload as Record<string, unknown>),
+				...issue.payload,
 				durationInMs: startedAt ? Date.now() - startedAt : undefined,
 			};
 		}

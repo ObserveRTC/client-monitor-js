@@ -53,6 +53,7 @@ export class CaptureFailureDetector implements Detector {
 	public readonly name = 'capture-failure-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly _endedIssueKey: string;
 	private readonly _silentIssueKey: string;
@@ -104,6 +105,7 @@ export class CaptureFailureDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<CaptureTrackEndedIssuePayload>(this._endedIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: CaptureFailureDetector.ENDED_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
@@ -199,6 +201,7 @@ export class CaptureFailureDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<SilentAudioSourceIssuePayload>(this._silentIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: CaptureFailureDetector.SILENT_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

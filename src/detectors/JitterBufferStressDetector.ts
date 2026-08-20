@@ -41,6 +41,7 @@ export class JitterBufferStressDetector implements Detector {
 	public readonly name = 'jitter-buffer-stress-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly issueKey: string;
 	private _consecutiveTicks = 0;
@@ -110,6 +111,7 @@ export class JitterBufferStressDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<JitterBufferStressIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: JitterBufferStressDetector.ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

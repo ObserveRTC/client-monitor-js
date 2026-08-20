@@ -55,6 +55,7 @@ export class DryOutboundTrackDetector implements Detector {
 	public readonly name = 'dry-outbound-track-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 	
 	private readonly issueKey: string;
 
@@ -148,6 +149,7 @@ export class DryOutboundTrackDetector implements Detector {
 		this._startedDryAt = this._startedDryAt ?? Date.now();
 
 		this.peerConnection.parent.raiseIssue<DryOutboundTrackIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: DryOutboundTrackDetector.ISSUE_TYPE,
 			payload,
 		});

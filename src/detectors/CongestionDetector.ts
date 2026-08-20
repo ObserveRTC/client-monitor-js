@@ -67,6 +67,7 @@ export class CongestionDetector implements Detector {
 	public readonly name = 'congestion-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 	
 	/** Maximum available incoming bitrate observed during non-congested periods */
 	private _maxAvailableIncomingBitrate = 0;
@@ -211,6 +212,7 @@ export class CongestionDetector implements Detector {
 		this._startedCongestionAt = Date.now();
 
 		this.peerConnection.parent.raiseIssue<CongestionIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: CongestionDetector.ISSUE_TYPE,
 			payload,
 		});

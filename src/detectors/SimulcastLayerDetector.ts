@@ -119,9 +119,11 @@ export class SimulcastLayerDetector implements Detector {
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
 				trackId: this.trackMonitor.track.id,
-				activeLayerIds: activeKeys.length ? activeKeys.split(',') : [],
-				previousActiveLayerIds: from.length ? from.split(',') : [],
-				layers: layers as unknown as Record<string, unknown>[],
+				// schema 3.5.0 payloads are flat records of primitives: the id
+				// lists travel comma-separated and the layer snapshot as JSON
+				activeLayerIds: activeKeys,
+				previousActiveLayerIds: from,
+				layers: JSON.stringify(layers),
 			},
 		});
 	}

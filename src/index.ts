@@ -10,6 +10,7 @@ export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
 export { OutboundTrackMonitor } from "./monitors/OutboundTrackMonitor";
+export type { OutboundTrackContentType } from "./monitors/OutboundTrackMonitor";
 export { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
 export { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTransportMonitor";
 export { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
@@ -61,6 +62,9 @@ export type {
     VideoResolutionChangedEventPayload,
     StatsCollectionGapEventPayload,
     StuckDecoderEventPayload,
+    BlockedTransportEventPayload,
+    NoAvailableIceCandidateEventPayload,
+    MediaPipelineStalledEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
 
@@ -137,6 +141,18 @@ export { StatsGapDetector } from './detectors/StatsGapDetector';
 export { StuckDecoderDetector } from './detectors/StuckDecoderDetector';
 export type { StuckDecoderIssuePayload, StuckDecoderVariant } from './detectors/StuckDecoderDetector';
 export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
+export { BlockedTransportDetector } from './detectors/BlockedTransportDetector';
+export type {
+    BlockedTransportEvidence,
+    BlockedTransportIssuePayload,
+} from './detectors/BlockedTransportDetector';
+export { NoAvailableIceCandidateDetector } from './detectors/NoAvailableIceCandidateDetector';
+export type { NoAvailableIceCandidateIssuePayload } from './detectors/NoAvailableIceCandidateDetector';
+export { MediaPipelineDetector } from './detectors/MediaPipelineDetector';
+export type {
+    MediaPipelineStage,
+    MediaPipelineStalledIssuePayload,
+} from './detectors/MediaPipelineDetector';
 export type {
     IceRestartOutcome,
     IceRestartClientEventPayload,
@@ -158,6 +174,7 @@ export type { IceRelayProtocol, IceAddressFamily } from './monitors/IceCandidate
 export type {
     ScoreCalculator
 } from './scores/ScoreCalculator';
+export { scoreReasonKeys } from './scores/utils';
 
 export type {
     DefaultScoreCalculator,

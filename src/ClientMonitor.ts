@@ -13,10 +13,12 @@ import {
     ClientIssuePayload,
     ClientMetaData,
     ClientMonitorEvents,
+    ClientPayload,
     RaisedClientIssue,
     ResolvedClientIssue,
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
+import { scoreReasonKeys } from './scores/utils';
 import { ClientEventTypes } from './schema/ClientEventTypes';
 import { AppliedClientMonitorConfig, ClientMonitorConfig, ClientMonitorSourceType } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
@@ -35,7 +37,7 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const MODULE_NAME = 'ClientMonitor';
 
-export type ExtensionStatProvider = () => { type: string, payload?: Record<string, unknown>} | Promise<{ type: string, payload?: Record<string, unknown>}>;
+export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
 
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
@@ -223,6 +225,20 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 thresholdInMs: 5000,
                 createEvent: true,
             }),
+            blockedTransportDetector: detectorDefault(monitorConfig.blockedTransportDetector, {
+                thresholdInMs: 5000,
+                minMediaBitrateBps: 10000,
+                maxReturnBitrateBps: 2000,
+                maxSendShare: 0.1,
+                stunFreshnessInMs: 10000,
+            }),
+            noAvailableIceCandidateDetector: detectorDefault(monitorConfig.noAvailableIceCandidateDetector, {
+                thresholdInMs: 6000,
+            }),
+            mediaPipelineDetector: detectorDefault(monitorConfig.mediaPipelineDetector, {
+                thresholdInMs: 4000,
+                minTransportReceiveBitrateBps: 20000,
+            }),
             iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
                 disconnectedThresholdInMs: 5000,
                 transportStallThresholdInMs: 5000,
@@ -234,6 +250,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
+            sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             appData: monitorConfig.appData ?? {} as AppData,
         }
 
@@ -457,7 +474,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
-            // scoreReasons: this.scoreCalculator.encodeClientScoreReasons?.(this.scoreReasons),
+            scoreReasons: scoreReasonKeys(this.scoreReasons, this.config.sendScoreReasonsToServer),
         };
         this._clientEvents = [];
         this._clientMetaItems = [];
@@ -495,7 +512,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
 
-    public addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+    public addClientJoinEvent(event?: { payload?: ClientPayload, timestamp?: number }): void {
         if (this.closed) return;
 
         this.addEvent({
@@ -507,7 +524,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+    public addClientLeftEvent(event?: { payload?: ClientPayload, timestamp?: number }): void {
         if (this.closed) return;
 
         this.addEvent({
@@ -519,15 +536,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addEvent<Payload = Record<string, unknown>>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
+    public addEvent<Payload extends ClientPayload = ClientPayload>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         const timestamp = event.timestamp ?? Date.now();
-        const payload = event.payload ? JSON.stringify(event.payload) : undefined;
+
+        // Schema 3.5.0 carries payloads as records — nothing to serialise.
         this._clientEvents.push({
             ...event,
-            payload,
+            payload: event.payload as ClientSampleClientEvent['payload'],
             timestamp,
         });
 
@@ -550,6 +568,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         type: string;
         payload?: T;
         timestamp?: number;
+        /**
+         * Whether to buffer this issue into the next ClientSample. Defaults
+         * to true. Pass false to keep the issue local-only (the 'issue'
+         * event still fires).
+         */
+        includeInSample?: boolean;
     }): AddedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
@@ -560,7 +584,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             timestamp,
         };
 
-        this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        if (input.includeInSample !== false) {
+            this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        }
         this.emit('issue', issue);
 
         return issue;
@@ -575,7 +601,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      *
      * Returns the resulting `RaisedClientIssue` (new or updated).
      */
-    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: { type: string, payload?: T, timestamp?: number }): RaisedClientIssue<T> | undefined {
+    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: {
+        type: string,
+        payload?: T,
+        timestamp?: number,
+        /**
+         * Whether this issue (and its later resolution) is buffered into the
+         * ClientSample. Defaults to true. The built-in detectors pass their
+         * public `includeIssueInSample` field here, so sampling of any
+         * detector's issues can be switched off at runtime without touching
+         * the local issue lifecycle.
+         */
+        includeInSample?: boolean,
+    }): RaisedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
         const now = input.timestamp ?? Date.now();
@@ -585,6 +623,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             existing.type = input.type;
             existing.payload = input.payload;
             existing.updatedAt = now;
+            existing.includeInSample = input.includeInSample ?? existing.includeInSample;
 
             this.emit('issue-updated', existing);
             return existing;
@@ -596,6 +635,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             payload: input.payload,
             raisedAt: now,
             updatedAt: now,
+            includeInSample: input.includeInSample ?? true,
         };
 
         this.activeIssues.set(issue.key, issue);
@@ -604,12 +644,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         // the server can open its side of the issue under the same identity it
         // will later close on the `-resolved` entry. With it off, the wire
         // format is unchanged from previous releases.
-        this._bufferIssueForSample(
-            issue.type,
-            issue.payload,
-            now,
-            this.config.sendResolvedIssuesToServer ? issue.key : undefined,
-        );
+        if (issue.includeInSample !== false) {
+            this._bufferIssueForSample(
+                issue.type,
+                issue.payload,
+                now,
+                this.config.sendResolvedIssuesToServer ? issue.key : undefined,
+            );
+        }
         this.emit('issue', issue);
 
         return issue;
@@ -643,7 +685,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         };
         this.emit('issue-resolved', resolution);
 
-        if (this.config.sendResolvedIssuesToServer) {
+        if (this.config.sendResolvedIssuesToServer && issue.includeInSample !== false) {
             const extraPayload = typeof input.payload === 'object' && input.payload !== null ? input.payload : {};
             // The schema-level `key` identifies which open issue this entry
             // closes; `raisedAt` equals the raise entry's timestamp as a
@@ -689,7 +731,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this._clientIssues.push({
             type,
             key,
-            payload: payload === undefined ? undefined : JSON.stringify(payload),
+            payload: payload as ClientSampleClientIssue['payload'],
             timestamp,
         });
     }
@@ -702,7 +744,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         this._clientMetaItems.push({
             type: metaData.type,
-            payload: metaData.payload ? JSON.stringify(metaData.payload) : undefined,
+            payload: metaData.payload as ClientSampleClientMetaData['payload'],
             timestamp,
         });
 
@@ -713,14 +755,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addExtensionStats(stats: { type: string, payload?: Record<string, unknown>}): void {
+    public addExtensionStats(stats: { type: string, payload?: ClientPayload }): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
-        const payload = stats.payload ? JSON.stringify(stats.payload) : undefined;
+        // Schema 3.5.0 carries payloads as records — nothing to serialise.
         this._extensionStats.push({
             type: stats.type,
-            payload,
+            payload: stats.payload as ExtensionStat['payload'],
         });
 
         this.emit('extension-stats', {

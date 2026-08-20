@@ -57,6 +57,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 	public readonly name = 'playout-discrepancy-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 	
 	private readonly issueKey: string;
 
@@ -140,6 +141,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 		this._startedDiscrepancyAt = Date.now();
 
 		this.peerConnection.parent.raiseIssue<PlayoutDiscrepancyIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: PlayoutDiscrepancyDetector.ISSUE_TYPE,
 			payload,
 		});

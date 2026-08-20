@@ -54,6 +54,7 @@ export class AudioConcealmentDetector implements Detector {
 	public readonly name = 'audio-concealment-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	/** Hard cap protecting against pathologically fast update rates. */
 	private static readonly MAX_WINDOW_ENTRIES = 128;
@@ -162,6 +163,7 @@ export class AudioConcealmentDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<AudioConcealmentIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: AudioConcealmentDetector.ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

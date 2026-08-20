@@ -1,5 +1,12 @@
 /* eslint-disable no-shadow */
 
+/**
+ * The shape schema 3.5.0 allows for every client event payload: a flat record
+ * of primitives. `null`/`undefined` entries are legal on the API (DOM types
+ * produce them); `undefined` keys disappear when the sample serialises.
+ */
+export type ClientEventPayloadRecord = Record<string, boolean | string | number | null | undefined>;
+
 
 export enum ClientEventTypes {
 	CLIENT_JOINED = 'CLIENT_JOINED',
@@ -52,25 +59,25 @@ export enum ClientEventTypes {
 	DATA_CONSUMER_CLOSED = 'DATA_CONSUMER_CLOSED',
 }
 
-export type ClientJoinedEventPayload = Record<string, unknown>;
+export type ClientJoinedEventPayload = ClientEventPayloadRecord;
 
-export type ClientLeftEventPayload = Record<string, unknown>;
+export type ClientLeftEventPayload = ClientEventPayloadRecord;
 
-export interface PeerConnectionOpenedEventPayload extends Record<string, unknown> {
+export interface PeerConnectionOpenedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	iceConnectionState?: string;
 	iceGatheringState?: string;
 	signalingState?: string;
 }
 
-export interface PeerConnectionClosedEventPayload extends Record<string, unknown> {
+export interface PeerConnectionClosedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	iceConnectionState?: string;
 	iceGatheringState?: string;
 	signalingState?: string;
 }
 
-export interface MediaTrackAddedEventPayload extends Record<string, unknown> {
+export interface MediaTrackAddedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
 	kind: 'audio' | 'video';
@@ -79,34 +86,15 @@ export interface MediaTrackAddedEventPayload extends Record<string, unknown> {
 	enabled: boolean;
 	readyState: string;
 	contentHint?: string;
-	constraints: MediaTrackConstraints,
-	capabilities: MediaTrackCapabilities,
-	settings: MediaTrackSettings,
+	/** `MediaTrackConstraints`, as a JSON document. */
+	constraints: string,
+	/** `MediaTrackCapabilities`, as a JSON document. */
+	capabilities: string,
+	/** `MediaTrackSettings`, as a JSON document. */
+	settings: string,
 }
 
-export interface MediaTrackRemovedEventPayload extends Record<string, unknown> {
-	peerConnectionId: string;
-	trackId: string;
-	kind: 'audio' | 'video';
-	label?: string;
-	muted: boolean;
-	enabled: boolean;
-	readyState: string;
-	contentHint?: string;
-}
-
-export interface MediaTrackMutedEventPayload extends Record<string, unknown> {
-	peerConnectionId: string;
-	trackId: string;
-	kind: 'audio' | 'video';
-	label?: string;
-	muted: boolean;
-	enabled: boolean;
-	readyState: string;
-	contentHint?: string;
-}
-
-export interface MediaTrackUnmutedEventPayload extends Record<string, unknown> {
+export interface MediaTrackRemovedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
 	kind: 'audio' | 'video';
@@ -117,22 +105,44 @@ export interface MediaTrackUnmutedEventPayload extends Record<string, unknown> {
 	contentHint?: string;
 }
 
-export interface IceGatheringStateChangedEventPayload extends Record<string, unknown> {
+export interface MediaTrackMutedEventPayload extends ClientEventPayloadRecord {
+	peerConnectionId: string;
+	trackId: string;
+	kind: 'audio' | 'video';
+	label?: string;
+	muted: boolean;
+	enabled: boolean;
+	readyState: string;
+	contentHint?: string;
+}
+
+export interface MediaTrackUnmutedEventPayload extends ClientEventPayloadRecord {
+	peerConnectionId: string;
+	trackId: string;
+	kind: 'audio' | 'video';
+	label?: string;
+	muted: boolean;
+	enabled: boolean;
+	readyState: string;
+	contentHint?: string;
+}
+
+export interface IceGatheringStateChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	iceGatheringState: string;
 }
 
-export interface PeerConnectionStateChangedEventPayload extends Record<string, unknown> {
+export interface PeerConnectionStateChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	connectionState: string;
 }
 
-export interface IceConnectionStateChangedEventPayload extends Record<string, unknown> {
+export interface IceConnectionStateChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	iceConnectionState: string;
 }
 
-export interface DataChannelErrorEventPayload extends Record<string, unknown> {
+export interface DataChannelErrorEventPayload extends ClientEventPayloadRecord {
 	label: string;
 	peerConnectionId: string;
 	readyState: string;
@@ -140,25 +150,25 @@ export interface DataChannelErrorEventPayload extends Record<string, unknown> {
 	error: string | null,
 }
 
-export interface DataChannelOpenEventPayload extends Record<string, unknown> {
+export interface DataChannelOpenEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	label: string;
 	readyState: string;
 	dataChannelId: string | number | null,
 }
 
-export interface DataChannelClosedEventPayload extends Record<string, unknown> {
+export interface DataChannelClosedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	label: string;
 	readyState: string;
 	dataChannelId: string | number | null,
 }
 
-export interface NegotiationNeededEventPayload extends Record<string, unknown> {
+export interface NegotiationNeededEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 }
 
-export interface IceCandidateEventPayload extends Record<string, unknown> {
+export interface IceCandidateEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/RTCIceCandidate/address) */
 	address?: string | null;
@@ -190,7 +200,7 @@ export interface IceCandidateEventPayload extends Record<string, unknown> {
     usernameFragment?: string | null;
 }
 
-export interface IceCandidateErrorEventPayload extends Record<string, unknown> {
+export interface IceCandidateErrorEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	errorCode?: number;
 	errorText?: string;
@@ -199,92 +209,92 @@ export interface IceCandidateErrorEventPayload extends Record<string, unknown> {
 	url?: string | null;
 }
 
-export interface SignalingStateChangedEventPayload extends Record<string, unknown> {
+export interface SignalingStateChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	signalingState: string;
 }
 
-export interface ProducerAddedEventPayload extends Record<string, unknown> {
+export interface ProducerAddedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 }
 
-export interface ProducerRemovedEventPayload extends Record<string, unknown> {
+export interface ProducerRemovedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 }
 
-export interface ProducerPausedEventPayload extends Record<string, unknown> {
+export interface ProducerPausedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 }
 
-export interface ProducerResumedEventPayload extends Record<string, unknown> {
+export interface ProducerResumedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 }
 
-export interface ConsumerAddedEventPayload extends Record<string, unknown> {
-	peerConnectionId: string;
-	producerId: string;
-	consumerId: string;
-	trackId: string;
-}
-
-export interface ConsumerRemovedEventPayload extends Record<string, unknown> {
+export interface ConsumerAddedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 	consumerId: string;
 	trackId: string;
 }
 
-export interface ConsumerPausedEventPayload extends Record<string, unknown> {
+export interface ConsumerRemovedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 	consumerId: string;
 	trackId: string;
 }
 
-export interface ConsumerResumedEventPayload extends Record<string, unknown> {
+export interface ConsumerPausedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	producerId: string;
 	consumerId: string;
 	trackId: string;
 }
 
-export interface DataProducerCreatedEventPayload extends Record<string, unknown> {
+export interface ConsumerResumedEventPayload extends ClientEventPayloadRecord {
+	peerConnectionId: string;
+	producerId: string;
+	consumerId: string;
+	trackId: string;
+}
+
+export interface DataProducerCreatedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	dataProducerId: string;
 }
 
-export interface DataProducerClosedEventPayload extends Record<string, unknown> {
+export interface DataProducerClosedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	dataProducerId: string;
 }
 
-export interface DataConsumerCreatedEventPayload extends Record<string, unknown> {
-	peerConnectionId: string;
-	dataProducerId: string;
-	dataConsumerId: string;
-}
-
-export interface DataConsumerClosedEventPayload extends Record<string, unknown> {
+export interface DataConsumerCreatedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	dataProducerId: string;
 	dataConsumerId: string;
 }
 
-export interface PeerConnectionIcePathChangedEventPayload extends Record<string, unknown> {
+export interface DataConsumerClosedEventPayload extends ClientEventPayloadRecord {
+	peerConnectionId: string;
+	dataProducerId: string;
+	dataConsumerId: string;
+}
+
+export interface PeerConnectionIcePathChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	/** Why the path changed: 'initial-selection', 'direct-to-relay', ... */
 	transition: string;
-	/** The previous path. Absent for the first path observed on a transport. */
-	from?: Record<string, unknown>;
-	/** The path that is selected now. */
-	to: Record<string, unknown>;
+	/** The previous path evidence as a JSON document. Absent for the first path observed on a transport. */
+	from?: string;
+	/** The path evidence that is selected now, as a JSON document. */
+	to: string;
 }
 
-export interface IceRestartEventPayload extends Record<string, unknown> {
+export interface IceRestartEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	transportId: string;
 	iceGeneration: number;
@@ -296,16 +306,16 @@ export interface IceRestartEventPayload extends Record<string, unknown> {
 	timestamp: number;
 }
 
-export interface LongPcConnectionEstablishmentEventPayload extends Record<string, unknown> {
+export interface LongPcConnectionEstablishmentEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	duration: number;
 }
 
-export interface ExcessiveSynthesizedAudioEventPayload extends Record<string, unknown> {
+export interface ExcessiveSynthesizedAudioEventPayload extends ClientEventPayloadRecord {
 	deltaSynthesizedSamplesDuration?: number;
 }
 
-export interface CodecChangedEventPayload extends Record<string, unknown> {
+export interface CodecChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
 	/** 'inbound' or 'outbound'. */
@@ -320,7 +330,7 @@ export interface CodecChangedEventPayload extends Record<string, unknown> {
 	channels?: number;
 }
 
-export interface VideoResolutionChangedEventPayload extends Record<string, unknown> {
+export interface VideoResolutionChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
 	/** 'inbound' or 'outbound'. */
@@ -339,37 +349,38 @@ export interface VideoResolutionChangedEventPayload extends Record<string, unkno
 	qualityLimitationReason?: string;
 }
 
-export interface SimulcastLayerChangedEventPayload extends Record<string, unknown> {
+export interface SimulcastLayerChangedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
-	/** RIDs (or SSRCs, where no RID is set) of the layers currently sending. */
-	activeLayerIds: string[];
-	previousActiveLayerIds: string[];
-	layers: Record<string, unknown>[];
+	/** Comma-separated RIDs (or SSRCs, where no RID is set) of the layers currently sending. */
+	activeLayerIds: string;
+	previousActiveLayerIds: string;
+	/** The per-layer snapshot as a JSON document. */
+	layers: string;
 }
 
-export interface CaptureTrackEndedEventPayload extends Record<string, unknown> {
-	peerConnectionId: string;
-	trackId: string;
-	kind: string;
-	deviceLabel?: string;
-}
-
-export interface CaptureTrackMutedEventPayload extends Record<string, unknown> {
+export interface CaptureTrackEndedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
 	kind: string;
 	deviceLabel?: string;
 }
 
-export interface StatsCollectionGapEventPayload extends Record<string, unknown> {
+export interface CaptureTrackMutedEventPayload extends ClientEventPayloadRecord {
+	peerConnectionId: string;
+	trackId: string;
+	kind: string;
+	deviceLabel?: string;
+}
+
+export interface StatsCollectionGapEventPayload extends ClientEventPayloadRecord {
 	expectedPeriodInMs: number;
 	actualPeriodInMs: number;
 	gapInMs: number;
 	durationOfCollectingStatsInMs?: number;
 }
 
-export interface IceRestartRecommendedEventPayload extends Record<string, unknown> {
+export interface IceRestartRecommendedEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	/** Absent for a `never-established` recommendation, which is not per transport. */
 	transportId?: string;

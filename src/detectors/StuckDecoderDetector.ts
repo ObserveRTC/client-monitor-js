@@ -57,6 +57,7 @@ export class StuckDecoderDetector implements Detector {
 	public readonly name = 'stuck-decoder-detector';
 	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly issueKey: string;
 
@@ -150,6 +151,7 @@ export class StuckDecoderDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<StuckDecoderIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: StuckDecoderDetector.ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
