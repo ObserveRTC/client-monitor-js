@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { DefaultScoreCalculator } from "../../src/scores/DefaultScoreCalculator";
 import { OutboundTrackMonitor } from "../../src/monitors/OutboundTrackMonitor";
+import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 
 const noDetectorsConfig = {
     dryOutboundTrackDetector: null,
@@ -52,6 +53,57 @@ describe('OutboundTrackMonitor contentType', () => {
     it('is settable explicitly through setContentType', () => {
         const track = createMockTrack();
         const monitor = new OutboundTrackMonitor(track as any, createMockMediaSource() as any);
+
+        expect(monitor.isScreenShare).toBe(false);
+
+        monitor.setContentType('screenshare');
+
+        expect(monitor.contentType).toBe('screenshare');
+        expect(monitor.isScreenShare).toBe(true);
+    });
+});
+
+describe('InboundTrackMonitor contentType', () => {
+    const noInboundDetectorsConfig = {
+        dryInboundTrackDetector: null,
+        codecChangeDetector: null,
+        videoFreezesDetector: null,
+        videoRecoveryDetector: null,
+        playoutDiscrepancyDetector: null,
+        decoderPerformanceDetector: null,
+        stuckDecoderDetector: null,
+        videoResolutionChangeDetector: null,
+        audioDesyncDetector: null,
+        audioConcealmentDetector: null,
+        jitterBufferStressDetector: null,
+    };
+
+    function createMockInboundRtp() {
+        return {
+            kind: 'video',
+            getPeerConnection: () => ({ parent: { config: noInboundDetectorsConfig } }),
+        };
+    }
+
+    it('stays undefined by default and is NOT inferred from the content hint', () => {
+        const track = createMockTrack({ contentHint: 'detail' });
+        const monitor = new InboundTrackMonitor(track as any, createMockInboundRtp() as any);
+
+        expect(monitor.contentType).toBeUndefined();
+        expect(monitor.isScreenShare).toBe(false);
+    });
+
+    it('is inferred from getSettings().displaySurface when present', () => {
+        const track = createMockTrack({ getSettings: () => ({ displaySurface: 'monitor' }) });
+        const monitor = new InboundTrackMonitor(track as any, createMockInboundRtp() as any);
+
+        expect(monitor.contentType).toBe('screenshare');
+        expect(monitor.isScreenShare).toBe(true);
+    });
+
+    it('is settable explicitly through setContentType', () => {
+        const track = createMockTrack();
+        const monitor = new InboundTrackMonitor(track as any, createMockInboundRtp() as any);
 
         expect(monitor.isScreenShare).toBe(false);
 
@@ -181,30 +233,61 @@ describe('DefaultScoreCalculator', () => {
             expect((track.calculatedScore as any).reasons['high-packetloss']).toBeUndefined();
         });
 
-        it('uses the active audio-concealment issue as the penalty when the detector runs', () => {
+        it('scales the audio-concealment penalty with the audible concealment rate', () => {
             const track = createAudioTrackMock({
                 activeIssueKeys: [ 'audio-concealment-track-audio-1' ],
+                inboundRtp: { concealmentRate: 0.065 },
             });
 
             calculator._calculateInboundAudioTrackScore(track);
 
-            expect(track.calculatedScore.value).toBe(3.0);
-            expect((track.calculatedScore as any).reasons['audio-concealment']).toBe(2.0);
+            // (0.065 - 0.03) / (0.1 - 0.03) = 0.5
+            expect((track.calculatedScore as any).reasons['audio-concealment']).toBe(0.5);
+            expect(track.calculatedScore.value).toBe(4.5);
         });
 
-        it('stacks jitter-buffer-stress and desync issue penalties', () => {
+        it('saturates the audio-concealment penalty at 1.0', () => {
+            const track = createAudioTrackMock({
+                activeIssueKeys: [ 'audio-concealment-track-audio-1' ],
+                inboundRtp: { concealmentRate: 0.2 },
+            });
+
+            calculator._calculateInboundAudioTrackScore(track);
+
+            expect((track.calculatedScore as any).reasons['audio-concealment']).toBe(1.0);
+            expect(track.calculatedScore.value).toBe(4.0);
+        });
+
+        it('adds no concealment penalty on a tick where the rate fell back under the threshold', () => {
+            // hysteresis keeps the issue open, but this tick sounds fine
+            const track = createAudioTrackMock({
+                activeIssueKeys: [ 'audio-concealment-track-audio-1' ],
+                inboundRtp: { concealmentRate: 0.01 },
+            });
+
+            calculator._calculateInboundAudioTrackScore(track);
+
+            expect((track.calculatedScore as any).reasons['audio-concealment']).toBeUndefined();
+            expect(track.calculatedScore.value).toBe(5.0);
+        });
+
+        it('stacks jitter-buffer-stress and desync issue penalties, each scaled by its metric', () => {
             const track = createAudioTrackMock({
                 activeIssueKeys: [
                     'audio-jitter-buffer-stress-track-audio-1',
                     'audio-desync-track-audio-1',
                 ],
+                inboundRtp: {
+                    jitterBufferTargetDelayInMs: 350, // (350 - 200) / (500 - 200) = 0.5
+                    timeStretchRate: 0.2, // (0.2 - 0.1) / (0.3 - 0.1) = 0.5
+                },
             });
 
             calculator._calculateInboundAudioTrackScore(track);
 
-            expect(track.calculatedScore.value).toBe(3.0);
-            expect((track.calculatedScore as any).reasons['high-jitter-buffer-delay']).toBe(1.0);
-            expect((track.calculatedScore as any).reasons['audio-time-stretch']).toBe(1.0);
+            expect((track.calculatedScore as any).reasons['high-jitter-buffer-delay']).toBe(0.5);
+            expect((track.calculatedScore as any).reasons['audio-time-stretch']).toBe(0.5);
+            expect(track.calculatedScore.value).toBe(4.0);
         });
     });
 
@@ -243,9 +326,10 @@ describe('DefaultScoreCalculator', () => {
     });
 
     describe('inbound video track score', () => {
-        function createVideoTrackMock(inboundRtp: Record<string, unknown>) {
+        function createVideoTrackMock(inboundRtp: Record<string, unknown>, options: { isScreenShare?: boolean } = {}) {
             return {
                 track: { id: 'video-1', enabled: true, muted: false },
+                isScreenShare: options.isScreenShare ?? false,
                 calculatedScore: { weight: 2, value: undefined as number | undefined },
                 getInboundRtp: () => ({
                     lastNFramesPerSec: [],
@@ -279,7 +363,7 @@ describe('DefaultScoreCalculator', () => {
             expect((dry.calculatedScore as any).reasons['low-fps']).toBeUndefined();
         });
 
-        it('penalizes bitrate-per-pixel below the codec floor', () => {
+        it('saturates the bitrate-per-pixel penalty at half the codec floor', () => {
             const track = createVideoTrackMock({
                 bitPerPixel: 0.03, // < 0.5 * 0.15 (vp8 standard low)
                 getCodec: () => ({ mimeType: 'video/VP8' }),
@@ -287,7 +371,61 @@ describe('DefaultScoreCalculator', () => {
 
             ticks(track, 1);
 
-            expect((track.calculatedScore as any).reasons['low-bitrate-per-pixel']).toBe(2.0);
+            expect((track.calculatedScore as any).reasons['low-bitrate-per-pixel']).toBe(1.0);
+        });
+
+        it('ramps the bitrate-per-pixel penalty between the floor and half of it', () => {
+            const track = createVideoTrackMock({
+                bitPerPixel: 0.1125, // (0.15 - 0.1125) / (0.15 * 0.5) = 0.5
+                getCodec: () => ({ mimeType: 'video/VP8' }),
+            });
+
+            ticks(track, 1);
+
+            expect((track.calculatedScore as any).reasons['low-bitrate-per-pixel']).toBe(0.5);
+        });
+
+        it('penalizes jitter only beyond one sampling interval, normalized to 1', () => {
+            const clean = createVideoTrackMock({ jitter: 0.015 }); // 15ms < 20ms
+            const jittery = createVideoTrackMock({ jitter: 0.04 }); // (40 - 20) / (100 - 20) = 0.25
+            const saturated = createVideoTrackMock({ jitter: 0.25 }); // 250ms >= 100ms
+
+            ticks(clean, 1);
+            ticks(jittery, 1);
+            ticks(saturated, 1);
+
+            expect((clean.calculatedScore as any).reasons['high-jitter']).toBeUndefined();
+            expect((jittery.calculatedScore as any).reasons['high-jitter']).toBe(0.25);
+            expect((saturated.calculatedScore as any).reasons['high-jitter']).toBe(1.0);
+        });
+
+        it('normalizes the volatile-fps penalty from the activation threshold', () => {
+            const track = createVideoTrackMock({
+                framesPerSecond: 20,
+                ewmaFps: 20,
+                // mean 20, stdDev 3, volatility 0.15 -> (0.15 - 0.1) / (0.2 - 0.1) = 0.5
+                lastNFramesPerSec: [ 17, 23 ],
+            });
+
+            ticks(track, 1);
+
+            expect((track.calculatedScore as any).reasons['volatile-fps']).toBe(0.5);
+        });
+
+        it('skips low-fps and volatile-fps for inbound screen share', () => {
+            const track = createVideoTrackMock({
+                ewmaFps: 2,
+                deltaFramesReceived: 4,
+                framesPerSecond: 2,
+                lastNFramesPerSec: [ 1, 8 ], // wildly volatile, normal for a screen share
+            }, { isScreenShare: true });
+
+            ticks(track, 1);
+
+            const reasons = (track.calculatedScore as any).reasons;
+
+            expect(reasons['low-fps']).toBeUndefined();
+            expect(reasons['volatile-fps']).toBeUndefined();
         });
     });
 
@@ -339,6 +477,21 @@ describe('DefaultScoreCalculator', () => {
             ticks(track);
 
             expect((track.calculatedScore as any).reasons['cpu-limitation']).toBe(2.0);
+        });
+
+        it('normalizes the target-bitrate deviation penalty', () => {
+            const track = createOutboundTrackMock({
+                isScreenShare: false,
+                outboundRtp: {
+                    targetBitrate: 1_000_000,
+                    bitrate: 900_000,
+                    payloadBitrate: 900_000, // 10% under target -> (0.1 - 0.05) / (0.15 - 0.05) = 0.5
+                },
+            });
+
+            ticks(track, 1);
+
+            expect((track.calculatedScore as any).reasons['high-deviation-from-target-bitrate']).toBe(0.5);
         });
 
         it('penalizes a downscaled screen share and skips volatility/deviation', () => {

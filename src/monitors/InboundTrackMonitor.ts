@@ -14,12 +14,33 @@ import { StuckDecoderDetector } from "../detectors/StuckDecoderDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
 
+export type InboundTrackContentType = 'camera' | 'screenshare';
+
 export class InboundTrackMonitor {
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 	public dtxMode = false;
 	public remoteOutboundTrackPaused = false;
+
+	/**
+	 * What kind of content this track carries. Only meaningful for video
+	 * tracks — audio tracks leave it `undefined`, and an undefined video track
+	 * is scored as camera content. Screen-share tracks are scored differently
+	 * from camera tracks — no frame-rate expectations, since mostly-static
+	 * content legitimately runs at very low and bursty frame rates — so
+	 * getting this right matters for the track score.
+	 *
+	 * Unlike the outbound side, a remote track exposes no `displaySurface`
+	 * to auto-detect from (the construction-time check below almost never
+	 * fires for received tracks), so the application usually declares it
+	 * explicitly — typically right after the track monitor appears:
+	 *
+	 * ```ts
+	 * monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * ```
+	 */
+	public contentType?: InboundTrackContentType;
 
 	public calculatedScore: CalculatedScore = {
 		weight: 0,
@@ -50,6 +71,15 @@ export class InboundTrackMonitor {
 		attachments?: Record<string, unknown>,
 	) {
 		this.attachments = attachments;
+
+		// Kept for symmetry with the outbound side: `displaySurface` exists
+		// exclusively on display capture, so when it is present the verdict is
+		// safe. Remote tracks practically never expose it — see `contentType`.
+		if (typeof track.getSettings === 'function' &&
+			(track.getSettings() as { displaySurface?: string }).displaySurface !== undefined) {
+			this.contentType = 'screenshare';
+		}
+
 		const monitorConfig = this.getPeerConnection().parent.config;
 		this.detectors = new Detectors();
 		if (monitorConfig.dryInboundTrackDetector !== null) {
@@ -100,6 +130,24 @@ export class InboundTrackMonitor {
 
 	public getInboundRtp() {
 		return this._inboundRtp;
+	}
+
+	/** True when this track carries screen-share content. See `contentType`. */
+	public get isScreenShare() {
+		return this.contentType === 'screenshare';
+	}
+
+	/**
+	 * Explicitly declares what content this track carries. Call it when the
+	 * application knows the received track is a screen share — inbound tracks
+	 * cannot be auto-detected, so this is the primary way to mark one:
+	 *
+	 * ```ts
+	 * monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * ```
+	 */
+	public setContentType(contentType: InboundTrackContentType): void {
+		this.contentType = contentType;
 	}
 
 	public getPeerConnection() {

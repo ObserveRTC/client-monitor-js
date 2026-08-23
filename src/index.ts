@@ -6,6 +6,7 @@ export { IceCandidatePairMonitor } from "./monitors/IceCandidatePairMonitor";
 export { IceTransportMonitor } from "./monitors/IceTransportMonitor";
 export { InboundRtpMonitor } from "./monitors/InboundRtpMonitor";
 export { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
+export type { InboundTrackContentType } from "./monitors/InboundTrackMonitor";
 export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";

@@ -15,7 +15,12 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 export type DefaultScoreCalculatorSubtractionReason =
 	'high-rtt' |
 	'very-high-rtt' |
-	/** Average measured jitter across the streams is high — a jittery path. */
+	/**
+	 * On the peer connection: average measured jitter across the streams is
+	 * high — a jittery path. On an inbound video track: the track's own jitter
+	 * exceeds one sampling interval (20 ms at the 90 kHz video clock),
+	 * normalized `0..1` up to the saturation point.
+	 */
 	'high-jitter' |
 	'high-packetloss' |
 	'low-fps' |
@@ -75,6 +80,37 @@ export class DefaultScoreCalculator {
 	// public static readonly MAX_AUDIO_BITRATE = 510000; // 510 kbps is a good quality for Opus
 	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
 	private static readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
+
+	// ---- normalized penalty ramps: 0 at the activation threshold, 1 at saturation ----
+
+	/**
+	 * Inbound video jitter is free below one sampling interval — 20 ms at the
+	 * 90 kHz video clock — because the receiver absorbs that much by design.
+	 */
+	public static readonly INBOUND_VIDEO_JITTER_ACTIVATION_IN_MS = 20;
+	/** Matches the peer-connection-level "high" jitter threshold. */
+	public static readonly INBOUND_VIDEO_JITTER_SATURATION_IN_MS = 100;
+	/** Below this share of the EWMA fps as std deviation, fps volatility is noise. */
+	public static readonly FPS_VOLATILITY_ACTIVATION = 0.1;
+	public static readonly FPS_VOLATILITY_SATURATION = 0.2;
+	public static readonly DROPPED_FRAMES_FRACTION_ACTIVATION = 0.1;
+	public static readonly DROPPED_FRAMES_FRACTION_SATURATION = 0.2;
+	public static readonly FRAME_CORRUPTION_PROBABILITY_ACTIVATION = 0.05;
+	public static readonly FRAME_CORRUPTION_PROBABILITY_SATURATION = 0.5;
+	public static readonly TARGET_BITRATE_DEVIATION_ACTIVATION = 0.05;
+	public static readonly TARGET_BITRATE_DEVIATION_SATURATION = 0.15;
+	public static readonly BITRATE_VOLATILITY_ACTIVATION = 0.1;
+	public static readonly BITRATE_VOLATILITY_SATURATION = 0.2;
+	/** Audible concealment share at which the penalty saturates (~"severely concealed"). */
+	public static readonly AUDIO_CONCEALMENT_SATURATION = 0.1;
+	/** Fallback activation when the concealment detector config is absent. */
+	public static readonly DEFAULT_AUDIO_CONCEALMENT_ACTIVATION = 0.03;
+	public static readonly TIME_STRETCH_SATURATION = 0.3;
+	/** Fallback activation when the desync detector config is absent. */
+	public static readonly DEFAULT_TIME_STRETCH_ACTIVATION = 0.1;
+	public static readonly JITTER_BUFFER_TARGET_DELAY_SATURATION_IN_MS = 500;
+	/** Fallback activation when the jitter-buffer-stress detector config is absent. */
+	public static readonly DEFAULT_JITTER_BUFFER_TARGET_DELAY_ACTIVATION_IN_MS = 200;
 
 	public currentReasons: DefaultScoreCalculatorSubtractions = {};
 	public totalReasons: DefaultScoreCalculatorSubtractions = {};
@@ -291,7 +327,29 @@ export class DefaultScoreCalculator {
 		}
 		trackMonitor.calculatedScore.reasons = subtractions;
 
-		if (inboundRtp.framesPerSecond && inboundRtp.ewmaFps && inboundRtp.lastNFramesPerSec.length >= 2) {
+		// Screen-share content legitimately runs at very low and bursty frame
+		// rates (nothing changes between keystrokes), so the fps-based
+		// penalties below are noise for it — same reasoning as the outbound
+		// side skipping bitrate volatility for screen share.
+		const isScreenShare = trackMonitor.isScreenShare;
+
+		// Jitter below one sampling interval (20 ms at the 90 kHz video clock)
+		// is absorbed by design; beyond it the penalty ramps to 1 at the
+		// saturation point.
+		if (inboundRtp.jitter !== undefined) {
+			const jitterInMs = inboundRtp.jitter * 1000;
+			const jitterPenalty = this._normalizedPenalty(
+				jitterInMs,
+				DefaultScoreCalculator.INBOUND_VIDEO_JITTER_ACTIVATION_IN_MS,
+				DefaultScoreCalculator.INBOUND_VIDEO_JITTER_SATURATION_IN_MS,
+			);
+
+			if (0 < jitterPenalty) {
+				subtractions['high-jitter'] = jitterPenalty;
+			}
+		}
+
+		if (!isScreenShare && inboundRtp.framesPerSecond && inboundRtp.ewmaFps && inboundRtp.lastNFramesPerSec.length >= 2) {
 			const n = inboundRtp.lastNFramesPerSec.length;
 			const mean = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + fps, 0) / n;
 			const variance = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + Math.pow(fps - mean, 2), 0) / n;
@@ -300,25 +358,40 @@ export class DefaultScoreCalculator {
 
 			// console.warn('volatility', volatility, 'stdDev', stdDev, 'mean', mean, 'ewmaFps', inboundRtp.ewmaFps);
 
-			if (0.1 < volatility && volatility < 0.2) {
-				subtractions["volatile-fps"] = 1.0;
-			} else if (0.2 <= volatility) {
-				subtractions["volatile-fps"] = 2.0;
+			const volatilityPenalty = this._normalizedPenalty(
+				volatility,
+				DefaultScoreCalculator.FPS_VOLATILITY_ACTIVATION,
+				DefaultScoreCalculator.FPS_VOLATILITY_SATURATION,
+			);
+
+			if (0 < volatilityPenalty) {
+				subtractions['volatile-fps'] = volatilityPenalty;
 			}
 		}
 
 		if (inboundRtp.framesDropped && inboundRtp.framesRendered) {
 			const fractionOfDroppedFrames = inboundRtp.framesDropped / (inboundRtp.framesDropped + inboundRtp.framesRendered);
+			const droppedFramesPenalty = this._normalizedPenalty(
+				fractionOfDroppedFrames,
+				DefaultScoreCalculator.DROPPED_FRAMES_FRACTION_ACTIVATION,
+				DefaultScoreCalculator.DROPPED_FRAMES_FRACTION_SATURATION,
+			);
 
-			if (0.1 < fractionOfDroppedFrames && fractionOfDroppedFrames < 0.2) {
-				subtractions['dropped-video-frames'] = 1.0;
-			} else if (0.2 < fractionOfDroppedFrames) {
-				subtractions['dropped-video-frames'] = 2.0;
+			if (0 < droppedFramesPenalty) {
+				subtractions['dropped-video-frames'] = droppedFramesPenalty;
 			}
 		}
 
 		if (inboundRtp.deltaCorruptionProbability) {
-			subtractions['video-frame-corruptions'] = 2.0 * inboundRtp.deltaCorruptionProbability;
+			const corruptionPenalty = this._normalizedPenalty(
+				inboundRtp.deltaCorruptionProbability,
+				DefaultScoreCalculator.FRAME_CORRUPTION_PROBABILITY_ACTIVATION,
+				DefaultScoreCalculator.FRAME_CORRUPTION_PROBABILITY_SATURATION,
+			);
+
+			if (0 < corruptionPenalty) {
+				subtractions['video-frame-corruptions'] = corruptionPenalty;
+			}
 		}
 
 		// A frozen picture dominates every other quality aspect of the track.
@@ -330,7 +403,8 @@ export class DefaultScoreCalculator {
 
 		// Sustained low frame rate while frames are actually flowing — a dry or
 		// paused track is DryInboundTrackDetector's verdict, not a score matter.
-		if (inboundRtp.ewmaFps !== undefined && inboundRtp.ewmaFps < 10 && 0 < (inboundRtp.deltaFramesReceived ?? 0)) {
+		// Screen share is exempt: static content at 1-2 fps is healthy.
+		if (!isScreenShare && inboundRtp.ewmaFps !== undefined && inboundRtp.ewmaFps < 10 && 0 < (inboundRtp.deltaFramesReceived ?? 0)) {
 			subtractions['low-fps'] = 1.0;
 		}
 
@@ -343,10 +417,16 @@ export class DefaultScoreCalculator {
 			: undefined;
 
 		if (bppRange && inboundRtp.bitPerPixel !== undefined) {
-			if (inboundRtp.bitPerPixel < bppRange.low * 0.5) {
-				subtractions['low-bitrate-per-pixel'] = 2.0;
-			} else if (inboundRtp.bitPerPixel < bppRange.low) {
-				subtractions['low-bitrate-per-pixel'] = 1.0;
+			// Ramps from 0 as bpp drops below the codec floor to 1 at half the
+			// floor — the point the old step penalty treated as severe.
+			const bppPenalty = this._normalizedPenalty(
+				bppRange.low - inboundRtp.bitPerPixel,
+				0,
+				bppRange.low * 0.5,
+			);
+
+			if (0 < bppPenalty) {
+				subtractions['low-bitrate-per-pixel'] = bppPenalty;
 			}
 		}
 
@@ -392,10 +472,10 @@ export class DefaultScoreCalculator {
 		score.reasons = subtractions;
 
 		// max score: 5
-		// target deviation penalty: 0-2
+		// target deviation penalty: 0-1 (normalized)
 		// cpu limitation penalty: 0-2
 		// bandwidth limitation penalty: 0-1
-		// bitrate volatility penalty: 0-2
+		// bitrate volatility penalty: 0-1 (normalized)
 
 		// The interval share is the trustworthy form of the limitation signal —
 		// the instantaneous `qualityLimitationReason` flickers (see
@@ -431,11 +511,14 @@ export class DefaultScoreCalculator {
 					const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
 
 					if (0 < deviation && lowThreshold < deviation) {
+						const deviationPenalty = this._normalizedPenalty(
+							percentage,
+							DefaultScoreCalculator.TARGET_BITRATE_DEVIATION_ACTIVATION,
+							DefaultScoreCalculator.TARGET_BITRATE_DEVIATION_SATURATION,
+						);
 
-						if (0.05 <= percentage && percentage < 0.15) {
-							subtractions['high-deviation-from-target-bitrate'] = 1.0;
-						} else if (0.15 <= percentage) {
-							subtractions['high-deviation-from-target-bitrate'] = 2.0;
+						if (0 < deviationPenalty) {
+							subtractions['high-deviation-from-target-bitrate'] = deviationPenalty;
 						}
 					}
 				}
@@ -462,10 +545,14 @@ export class DefaultScoreCalculator {
 					const volatility = stdDev / appData.ewmaBitrate;
 
 					// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgBitrateSquare', avgBitrateSquare);
-					if (0.1 < volatility && volatility < 0.2) {
-						subtractions['high-volatile-bitrate'] = 1.0;
-					} else if (0.2 < volatility) {
-						subtractions['high-volatile-bitrate'] = 2.0;
+					const bitrateVolatilityPenalty = this._normalizedPenalty(
+						volatility,
+						DefaultScoreCalculator.BITRATE_VOLATILITY_ACTIVATION,
+						DefaultScoreCalculator.BITRATE_VOLATILITY_SATURATION,
+					);
+
+					if (0 < bitrateVolatilityPenalty) {
+						subtractions['high-volatile-bitrate'] = bitrateVolatilityPenalty;
 					}
 				}
 				appData.lastBitrate = outboundRtp.bitrate;
@@ -548,17 +635,48 @@ export class DefaultScoreCalculator {
 		}
 
 		// When the audio detectors run, their windowed, hysteresis-guarded
-		// verdicts are more robust than any per-tick reading — the score reuses
-		// the active issues instead of re-deriving the conditions. Without the
-		// detectors, the score falls back to the pure loss decay above.
+		// verdicts are more robust than any per-tick reading — the issue gates
+		// *whether* a penalty applies. The per-tick metric then scales *how
+		// much*, normalized 0..1 from the detector's own activation threshold
+		// up to a saturation point. A tick where the metric dipped back under
+		// the threshold (or measured nothing) contributes no penalty even
+		// while hysteresis keeps the issue open. Without the detectors, the
+		// score falls back to the pure loss decay above.
 		if (clientMonitor.isIssueActive(`audio-concealment-track-${trackId}`)) {
-			subtractions['audio-concealment'] = 2.0;
+			const concealmentPenalty = this._normalizedPenalty(
+				inboundRtp.concealmentRate ?? 0,
+				clientMonitor.config?.audioConcealmentDetector?.onThreshold
+					?? DefaultScoreCalculator.DEFAULT_AUDIO_CONCEALMENT_ACTIVATION,
+				DefaultScoreCalculator.AUDIO_CONCEALMENT_SATURATION,
+			);
+
+			if (0 < concealmentPenalty) {
+				subtractions['audio-concealment'] = concealmentPenalty;
+			}
 		}
 		if (clientMonitor.isIssueActive(`audio-jitter-buffer-stress-track-${trackId}`)) {
-			subtractions['high-jitter-buffer-delay'] = 1.0;
+			const jitterBufferPenalty = this._normalizedPenalty(
+				inboundRtp.jitterBufferTargetDelayInMs ?? 0,
+				clientMonitor.config?.jitterBufferStressDetector?.targetDelayThresholdInMs
+					?? DefaultScoreCalculator.DEFAULT_JITTER_BUFFER_TARGET_DELAY_ACTIVATION_IN_MS,
+				DefaultScoreCalculator.JITTER_BUFFER_TARGET_DELAY_SATURATION_IN_MS,
+			);
+
+			if (0 < jitterBufferPenalty) {
+				subtractions['high-jitter-buffer-delay'] = jitterBufferPenalty;
+			}
 		}
 		if (clientMonitor.isIssueActive(`audio-desync-track-${trackId}`)) {
-			subtractions['audio-time-stretch'] = 1.0;
+			const timeStretchPenalty = this._normalizedPenalty(
+				inboundRtp.timeStretchRate ?? 0,
+				clientMonitor.config?.audioDesyncDetector?.fractionalCorrectionAlertOnThreshold
+					?? DefaultScoreCalculator.DEFAULT_TIME_STRETCH_ACTIVATION,
+				DefaultScoreCalculator.TIME_STRETCH_SATURATION,
+			);
+
+			if (0 < timeStretchPenalty) {
+				subtractions['audio-time-stretch'] = timeStretchPenalty;
+			}
 		}
 
 		const score = Math.max(
@@ -643,6 +761,19 @@ export class DefaultScoreCalculator {
 
 	private _getRoundedScore(score: number) {
 		return Math.round(score * 100) / 100;
+	}
+
+	/**
+	 * Linear penalty ramp: 0 at or below `activation`, 1 at or beyond
+	 * `saturation`, proportional in between (rounded to two decimals).
+	 * Degenerates to a binary 0/1 step when a caller configures
+	 * `saturation <= activation`.
+	 */
+	private _normalizedPenalty(value: number, activation: number, saturation: number): number {
+		if (value <= activation) return 0;
+		if (saturation <= value) return 1;
+
+		return this._getRoundedScore((value - activation) / (saturation - activation));
 	}
 
 	private _getTotalSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
