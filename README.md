@@ -1002,6 +1002,8 @@ See [Controlling which detectors run](#controlling-which-detectors-run) for the 
 
 The scoring system provides quantitative quality assessment ranging from 0.0 (worst) to 5.0 (best). The library includes a `DefaultScoreCalculator` implementation and allows custom score calculators via the `ScoreCalculator` interface.
 
+> **Full reference:** every reason key, threshold, ramp and formula is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md). This section is the overview.
+
 ### ScoreCalculator Interface
 
 ```typescript
@@ -1043,18 +1045,34 @@ Based on Round Trip Time (RTT), jitter and packet loss. RTT and jitter are penal
 -   30-100ms average jitter: -1.0 point
 -   \>100ms average jitter: -2.0 points
 
+(The same `high-jitter` key also appears on inbound **video tracks**, where it is a normalized 0–1 penalty on the track's own jitter — see the track scores below.)
+
 **Packet Loss Penalties (`high-packetloss`)** — the per-interval `deltaFractionLost`, **averaged** across streams (a raw sum would read ten streams at 1% each as 10%):
 
 -   1-5% loss: -1.0 point
 -   5-20% loss: -2.0 points
 -   > 20% loss: -5.0 points
 
+#### Normalized penalty ramps
+
+Most metric-driven penalties are **normalized to `0..1`**: nothing is subtracted while the metric stays at or below an *activation threshold*, then the penalty ramps up linearly and saturates at `1.0` at a *saturation point*:
+
+```
+penalty(value) = clamp((value − activation) / (saturation − activation), 0, 1)
+```
+
+The activation/saturation constants are `public static readonly` on `DefaultScoreCalculator`. Penalties that are effectively binary (a frozen picture, a CPU-limited encoder) stay stepped. The tables in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md) list every ramp.
+
 #### Track Score Calculations
 
 **Inbound Audio Track Score:**
 
 -   Based on normalized bitrate and the per-interval loss fraction (`deltaFractionLost` — rate-independent, unlike an absolute packet count)
--   When the audio detectors run, their windowed, hysteresis-guarded verdicts drive additional penalties — the score reuses the *active issues* instead of re-deriving the conditions: `audio-concealment` issue active → -2.0, `audio-jitter-buffer-stress` → -1.0, `audio-desync` → -1.0
+-   When the audio detectors run, their windowed, hysteresis-guarded verdicts **gate** additional penalties, and the current per-tick metric **scales** them as a normalized `0..1` ramp starting at the detector's own configured threshold:
+    -   `audio-concealment` issue active → scaled by `concealmentRate` (detector `onThreshold` → 0.10)
+    -   `audio-jitter-buffer-stress` issue active → `high-jitter-buffer-delay`, scaled by `jitterBufferTargetDelayInMs` (detector `targetDelayThresholdInMs` → 500 ms)
+    -   `audio-desync` issue active → `audio-time-stretch`, scaled by `timeStretchRate` (detector `fractionalCorrectionAlertOnThreshold` → 0.3)
+    -   A tick where the metric dipped back under the threshold contributes no penalty even while hysteresis keeps the issue open
 -   Without the detectors the score falls back to the pure loss decay
 
 ```javascript
@@ -1065,12 +1083,19 @@ score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty) - issuePenalties;
 
 **Inbound Video Track Score:**
 
--   FPS volatility penalties
--   Dropped frames penalties
--   Frame corruption penalties
+-   Jitter beyond one sampling interval (`high-jitter`, normalized 0–1): free below 20 ms (one interval at the 90 kHz video clock), saturating at 100 ms
+-   FPS volatility (`volatile-fps`, normalized 0–1): activation 0.1, saturation 0.2 — *skipped for screen share*
+-   Sustained low fps while frames are flowing (`low-fps`, ewma fps < 10): -1.0 — *skipped for screen share*
+-   Dropped frames (`dropped-video-frames`, normalized 0–1): activation 10%, saturation 20% of frames dropped instead of rendered
+-   Frame corruptions (`video-frame-corruptions`, normalized 0–1): per-interval corruption probability, activation 0.05, saturation 0.5
 -   Frozen picture (`frozen-video`, from the freeze state the detector derives): -2.0
--   Sustained low fps while frames are flowing (`low-fps`, ewma fps < 10): -1.0
--   Bitrate-per-pixel below the codec floor (`low-bitrate-per-pixel`, from `BPP_RANGES` — blur/blockiness before anything freezes): -1.0 / -2.0
+-   Bitrate-per-pixel below the codec floor (`low-bitrate-per-pixel`, normalized 0–1, from `BPP_RANGES` — blur/blockiness before anything freezes): 0 at the floor, 1.0 at half the floor
+
+Whether an inbound video track is a screen share is decided by `InboundTrackMonitor.contentType` — same mechanism as the outbound side (see below), except a received track exposes no `displaySurface` to auto-detect from, so the application declares it:
+
+```typescript
+monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
+```
 
 **Outbound Audio Track Score:**
 
@@ -1079,9 +1104,9 @@ score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty) - issuePenalties;
 
 **Outbound Video Track Score (camera):**
 
--   Bitrate deviation from target penalties
+-   Bitrate deviation from target (`high-deviation-from-target-bitrate`, normalized 0–1): activation 5%, saturation 15% under target, gated on the absolute shortfall also exceeding `max(20 kbps, 5% of target)`
 -   Quality-limitation penalties from the **interval duration shares** (the instantaneous `qualityLimitationReason` flickers): cpu share ≥30% → -2.0 (`cpu-limitation`), bandwidth share ≥50% → -1.0 (`bandwidth-limitation`, milder — BWE adaptation is the system working); instantaneous reason used as fallback when shares are unavailable
--   Bitrate volatility penalties
+-   Bitrate volatility (`high-volatile-bitrate`, normalized 0–1): activation 0.1, saturation 0.2
 
 **Outbound Video Track Score (screen share):**
 
@@ -1106,17 +1131,17 @@ Every penalty the `DefaultScoreCalculator` applies is recorded as a **reason**: 
 monitor.on("score", ({ clientScore, currentReasons }) => {
     console.log("Client Score:", clientScore);
     console.log("Score Reasons:", currentReasons);
-    // Example:
+    // Example (normalized penalties carry fractional magnitudes):
     // {
     //   "high-rtt": 1.0,             // pc: raw RTT above 150ms
-    //   "high-jitter": 1.0,          // pc: avg measured jitter above 30ms
+    //   "high-jitter": 0.25,         // inbound video: jitter 40ms, ramp 20->100ms
     //   "high-packetloss": 2.0,      // pc: avg delta fraction lost 5-20%
     //   "cpu-limitation": 2.0,       // outbound video: cpu-limited >=30% of the interval
     //   "bandwidth-limitation": 1.0, // outbound video: bandwidth-limited >=50%
     //   "frozen-video": 2.0,         // inbound video: picture currently frozen
-    //   "audio-concealment": 2.0,    // inbound audio: audible concealment issue active
+    //   "audio-concealment": 0.5,    // inbound audio: issue active, rate midway to saturation
     //   "downscaled-screenshare": 2.0, // screenshare sent below 1/4 of source area
-    //   "dropped-video-frames": 1.0  // inbound video: >10% frames dropped
+    //   "dropped-video-frames": 0.4  // inbound video: 14% frames dropped, ramp 10->20%
     // }
 });
 ```
@@ -1131,7 +1156,7 @@ monitor.getOutboundTrackMonitor(id)?.scoreReasons;   // e.g. cpu-limitation, dow
 
 **3. In the samples** — the client, peer-connection and track sample entries carry `scoreReasons` as an **array of the reason keys** (`string[]`), with the same per-entity attribution; the penalty magnitudes stay local, readable on the monitors and the `'score'` event. The field is omitted when there is nothing to explain. Set `sendScoreReasonsToServer: false` in the config to drop the keys from the wire — the scores themselves and the realtime event are unaffected.
 
-The full key set and the penalty tiers behind each are listed per entity in the score sections above; the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
+The full key set — with every threshold, ramp and what each reason means for the user experience — is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md); the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
 
 ### Custom Score Calculator
 
