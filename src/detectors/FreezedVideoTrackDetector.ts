@@ -122,6 +122,22 @@ export class FreezedVideoTrackDetector implements Detector {
 
 		if (!inboundRtp) return;
 
+		if (!this.peerConnection.parent.activeTab) {
+			// A background tab does not render, so freeze accounting there is the
+			// browser's throttling, not a media problem. Swallow the counter delta
+			// (so returning to the tab does not replay throttling-induced freezes)
+			// and end any freeze episode that was still open.
+			this._lastFreezeCount = inboundRtp.freezeCount ?? 0;
+
+			if (inboundRtp.isFreezed) {
+				inboundRtp.isFreezed = false;
+				this._resolve(this.issueKey, 'tab in background', this._startedFreezeAt);
+				this._startedFreezeAt = undefined;
+			}
+
+			return;
+		}
+
 		const config = this.peerConnection.parent.config;
 		const wasFrozen = inboundRtp.isFreezed === true;
 		const freezeCount = inboundRtp.freezeCount ?? 0;

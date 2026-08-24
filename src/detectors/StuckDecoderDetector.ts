@@ -92,6 +92,9 @@ export class StuckDecoderDetector implements Detector {
 		if (!inboundRtp || inboundRtp.kind !== 'video') return;
 		if (this.trackMonitor.paused) return this._reset('consumer paused');
 		if (this.trackMonitor.remoteOutboundTrackPaused) return this._reset('remote track paused');
+		// a background tab may suspend decoding entirely; bytes flowing while
+		// nothing decodes is expected there, not a wedged decoder
+		if (!this.peerConnection.parent.activeTab) return this._reset('tab in background');
 
 		const deltaBytes = inboundRtp.deltaBytesReceived ?? 0;
 		const deltaFramesDecoded = inboundRtp.deltaFramesDecoded;

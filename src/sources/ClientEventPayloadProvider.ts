@@ -41,6 +41,7 @@ import {
 	CaptureTrackEndedEventPayload,
 	CaptureTrackMutedEventPayload,
 	StatsCollectionGapEventPayload,
+	TabVisibilityChangedEventPayload,
 	ClientEventPayloadRecord
 } from "../schema/ClientEventTypes";
 
@@ -57,6 +58,7 @@ export type ClientEventPayloadMap = {
 	[ClientEventTypes.CAPTURE_TRACK_ENDED]: CaptureTrackEndedEventPayload;
 	[ClientEventTypes.CAPTURE_TRACK_MUTED]: CaptureTrackMutedEventPayload;
 	[ClientEventTypes.STATS_COLLECTION_GAP]: StatsCollectionGapEventPayload;
+	[ClientEventTypes.TAB_VISIBILITY_CHANGED]: TabVisibilityChangedEventPayload;
 	[ClientEventTypes.CLIENT_JOINED]: ClientJoinedEventPayload;
 	[ClientEventTypes.CLIENT_LEFT]: ClientLeftEventPayload;
 	[ClientEventTypes.PEER_CONNECTION_OPENED]: PeerConnectionOpenedEventPayload;
@@ -124,6 +126,7 @@ export class ClientEventPayloadProvider {
 	public createCaptureTrackEndedEventPayload: ClientEventPayloadProviderFunction<CaptureTrackEndedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createCaptureTrackMutedEventPayload: ClientEventPayloadProviderFunction<CaptureTrackMutedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createStatsCollectionGapEventPayload: ClientEventPayloadProviderFunction<StatsCollectionGapEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createTabVisibilityChangedEventPayload: ClientEventPayloadProviderFunction<TabVisibilityChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 
 	public createProducerAddedEventPayload: ClientEventPayloadProviderFunction<ProducerAddedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createProducerRemovedEventPayload: ClientEventPayloadProviderFunction<ProducerRemovedEventPayload> = createDefaultClientEventPayloadProviderFunction();
@@ -190,6 +193,8 @@ export class ClientEventPayloadProvider {
 				return this.createCaptureTrackMutedEventPayload(input as CaptureTrackMutedEventPayload);
 			case ClientEventTypes.STATS_COLLECTION_GAP:
 				return this.createStatsCollectionGapEventPayload(input as StatsCollectionGapEventPayload);
+			case ClientEventTypes.TAB_VISIBILITY_CHANGED:
+				return this.createTabVisibilityChangedEventPayload(input as TabVisibilityChangedEventPayload);
 			case ClientEventTypes.PRODUCER_ADDED:
 				return this.createProducerAddedEventPayload(input as ProducerAddedEventPayload);
 			case ClientEventTypes.PRODUCER_REMOVED:

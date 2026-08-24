@@ -50,6 +50,20 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     integrateNavigatorMediaDevices: boolean | MediaDevices;
 
     /**
+     * If true, the monitor subscribes to `document.visibilitychange` and keeps
+     * `ClientMonitor.activeTab` up to date. A background tab is throttled by
+     * the browser (timers, rendering, sometimes decoding), so detectors that
+     * would read the throttling as a quality problem stand down while the tab
+     * is hidden, and a `TAB_VISIBILITY_CHANGED` client event marks each
+     * transition in the sample stream. When the watcher is disabled — or no
+     * `document` is available (SSR, tests, workers, react-native) —
+     * `activeTab` simply stays `true`.
+     *
+     * DEFAULT: true
+     */
+    watchTabVisibility: boolean;
+
+    /**
      * If true, the monitor generates a `CLIENT_JOINED` event when it is created.
      *
      * DEFAULT: true

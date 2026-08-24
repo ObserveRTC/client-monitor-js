@@ -75,6 +75,14 @@ export class DecoderPerformanceDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'video') return;
 
+		// a background tab throttles decoding; slow decode there says nothing
+		// about the decoder's real capability
+		if (!this.peerConnection.parent.activeTab) {
+			this._consecutiveTicks = 0;
+
+			return this._alertOn ? this._clear('tab in background') : undefined;
+		}
+
 		const framesReceived = inboundRtp.deltaFramesReceived ?? 0;
 
 		// too few frames to judge (e.g. a static screen share)

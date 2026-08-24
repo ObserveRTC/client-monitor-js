@@ -43,6 +43,7 @@ export enum ClientEventTypes {
 	CAPTURE_TRACK_ENDED = 'CAPTURE_TRACK_ENDED',
 	CAPTURE_TRACK_MUTED = 'CAPTURE_TRACK_MUTED',
 	STATS_COLLECTION_GAP = 'STATS_COLLECTION_GAP',
+	TAB_VISIBILITY_CHANGED = 'TAB_VISIBILITY_CHANGED',
 
 	// mediasoup events
 	PRODUCER_ADDED = 'PRODUCER_ADDED',
@@ -378,6 +379,11 @@ export interface StatsCollectionGapEventPayload extends ClientEventPayloadRecord
 	actualPeriodInMs: number;
 	gapInMs: number;
 	durationOfCollectingStatsInMs?: number;
+}
+
+export interface TabVisibilityChangedEventPayload extends ClientEventPayloadRecord {
+	/** True when the tab became visible, false when it went to the background. */
+	visible: boolean;
 }
 
 export interface IceRestartRecommendedEventPayload extends ClientEventPayloadRecord {

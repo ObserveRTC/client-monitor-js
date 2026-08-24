@@ -30,6 +30,7 @@ export type TestClientEvent = {
 
 export class MockClientMonitor {
 	public config: Record<string, any> = {};
+	public activeTab = true;
 	public readonly activeIssues = new Map<string, TestIssue>();
 	public readonly raisedIssues: TestIssue[] = [];
 	public readonly resolvedIssues: TestResolvedIssue[] = [];

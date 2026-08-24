@@ -103,6 +103,18 @@ export class PlayoutDiscrepancyDetector implements Detector {
 	public update() {
 
 		if (this.disabled) return;
+
+		// a background tab stops rendering entirely, so received-vs-rendered
+		// skew is the browser's throttling there, not a playout problem
+		if (!this.peerConnection.parent.activeTab) {
+			if (this.active) {
+				this._resolve('tab in background');
+				this.active = false;
+			}
+
+			return;
+		}
+
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		if (!inboundRtp || !inboundRtp.deltaFramesReceived || !inboundRtp.deltaFramesRendered || !inboundRtp.ewmaFps) return;

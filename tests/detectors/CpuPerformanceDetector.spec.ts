@@ -57,6 +57,7 @@ class MockClientMonitor {
     };
 
     public cpuPerformanceAlertOn = false;
+    public activeTab = true;
     public durationOfCollectingStatsInMs = 0;
     public outboundRtps: MockOutboundRtp[] = [];
     public inboundRtps: MockInboundRtp[] = [];
@@ -159,6 +160,47 @@ describe('CpuPerformanceDetector', () => {
             expect(monitor.cpuPerformanceAlertOn).toBe(false);
             expect(eventSpy).not.toHaveBeenCalled();
             expect(monitor.getIssues()).toHaveLength(0);
+        });
+    });
+
+    describe('background tab', () => {
+        it('does not alert while the tab is in the background, even with a clear CPU signal', () => {
+            const eventSpy = jest.fn();
+            monitor.on('cpulimitation', eventSpy);
+            monitor.activeTab = false;
+
+            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(eventSpy).not.toHaveBeenCalled();
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('resolves an active alert when the tab goes to the background', () => {
+            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(monitor.getIssues()).toHaveLength(1);
+
+            monitor.activeTab = false;
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('alerts again once the tab is active and the CPU signal persists', () => {
+            monitor.activeTab = false;
+            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+
+            monitor.activeTab = true;
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(monitor.getIssues()).toHaveLength(1);
         });
     });
 

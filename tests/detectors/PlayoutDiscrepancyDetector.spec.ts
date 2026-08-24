@@ -26,6 +26,7 @@ interface InboundRtpStats {
 
 // Mock dependencies
 class MockClientMonitor {
+    public activeTab = true;
     public config = {
         playoutDiscrepancyDetector: {
             disabled: false,

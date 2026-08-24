@@ -2,6 +2,7 @@ import { ClientMonitor } from "..";
 import { fetchUserAgentData } from "./fetchUserAgentData";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { watchMediaDevices } from "./watchMediaDevice";
+import { watchTabVisibility } from "./watchTabVisibility";
 import { Logger } from "../utils/logger";
 import * as mediasoup from 'mediasoup-client';
 import { RtcPeerConnectionStatsCollector } from "../collectors/RtcPeerConnectionStatsCollector";
@@ -17,6 +18,7 @@ const MODULE_NAME = 'Sources';
 
 export class Sources {
 	public mediaDevicesAreWatched = false;
+	public tabVisibilityIsWatched = false;
 	public userAgentMetaDataSent = false;
 	public userAgentStatsAdapterAdded = false;
 	public mediasoupStatsAdapterAdded = false;
@@ -196,6 +198,17 @@ export class Sources {
 			this.mediaDevicesAreWatched = true;
 		} catch (err) {
 			this.logger.error(`[${MODULE_NAME}]:`, 'Failed to watch media devices', err);
+		}
+	}
+
+	public watchTabVisibility() {
+		if (this.tabVisibilityIsWatched) return;
+
+		try {
+			watchTabVisibility(this.monitor, this.logger);
+			this.tabVisibilityIsWatched = true;
+		} catch (err) {
+			this.logger.error(`[${MODULE_NAME}]:`, 'Failed to watch tab visibility', err);
 		}
 	}
 

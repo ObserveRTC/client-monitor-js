@@ -66,6 +66,20 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public cpuPerformanceAlertOn = false;
 
+    /**
+     * Whether the browser tab running this monitor is currently visible.
+     *
+     * Kept up to date by the tab-visibility watcher (`config.watchTabVisibility`,
+     * on by default) from `document.visibilityState`. Defaults to `true`, and
+     * stays `true` when the watcher is disabled or no `document` exists (SSR,
+     * tests, workers) — so `false` always means the tab really is in the
+     * background. Browsers throttle background tabs (timers, rendering,
+     * sometimes decoding), so detectors whose signals the throttling corrupts
+     * (CPU limitation, decoder performance, stuck decoder, playout
+     * discrepancy, video freezes) stand down while this is `false`.
+     */
+    public activeTab = true;
+
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
     public receivingAudioBitrate = -1;
@@ -117,6 +131,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             samplingPeriodInMs: monitorConfig.samplingPeriodInMs ?? 8000,
 
             integrateNavigatorMediaDevices: monitorConfig.integrateNavigatorMediaDevices ?? true,
+            watchTabVisibility: monitorConfig.watchTabVisibility ?? true,
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
 
@@ -266,6 +281,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         }
         if (this.config.integrateNavigatorMediaDevices) {
             this._sources.watchNavigatorMediaDevices();
+        }
+        if (this.config.watchTabVisibility) {
+            this._sources.watchTabVisibility();
         }
         try {
             this._sources.fetchUserAgentData();

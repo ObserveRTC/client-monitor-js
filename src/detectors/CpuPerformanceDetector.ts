@@ -78,6 +78,19 @@ export class CpuPerformanceDetector {
 
 	public update() {
 		if (this.disabled) return;
+
+		if (!this.clientMonitor.activeTab) {
+			// A background tab is throttled by the browser: stats collection runs
+			// late, rendering stops and decoding slows down — every signal below
+			// would read as CPU limitation without the CPU being the problem.
+			if (this.clientMonitor.cpuPerformanceAlertOn) {
+				this.clientMonitor.cpuPerformanceAlertOn = false;
+				this._resolve('tab in background');
+			}
+
+			return;
+		}
+
 		const isLimited = this.clientMonitor.cpuPerformanceAlertOn;
 		let gotLimited = false;
 		const { alertOn, alertOff, minReceivedFrames } = this.config.incomingDecodedFramesRatioThresholds ?? {};

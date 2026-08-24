@@ -24,6 +24,7 @@ interface InboundRtpStats {
 
 // Mock dependencies
 class MockClientMonitor {
+    public activeTab = true;
     public config = {
         videoFreezesDetector: {
             disabled: false,
