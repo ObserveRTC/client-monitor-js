@@ -1116,6 +1116,12 @@ Decided by `OutboundTrackMonitor.contentType`, **never** by `track.contentHint` 
 monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
 ```
 
+Both forms require the track's monitor to already exist, which only happens on the first stats tick after the track appears on a peer connection. When the application knows the content type earlier — signaling announces a guest's upcoming screen-share track before any media arrives — declare it by track id on the monitor itself; it is applied immediately if the monitor exists, and otherwise kept pending and picked up the moment the track manifests on any peer connection:
+
+```typescript
+monitor.setTrackContentType(trackId, 'screenshare');
+```
+
 For screen-share tracks, sharpness is the quality: fps and bitrate volatility are meaningless on mostly-static content (VBR drops to ~zero between changes), so deviation/volatility penalties are skipped entirely. Instead:
 
 -   Quality-limitation duration share penalties (same as camera)

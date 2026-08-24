@@ -26,7 +26,7 @@ import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { StatsGapDetector } from './detectors/StatsGapDetector';
-import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
+import { OutboundTrackContentType, OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
 import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
 import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
@@ -79,6 +79,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      * discrepancy, video freezes) stand down while this is `false`.
      */
     public activeTab = true;
+
+    /**
+     * Content types declared via `setTrackContentType` for tracks whose
+     * monitors do not exist yet, keyed by track id. Consumed (via
+     * `takePendingTrackContentType`) by the peer connection that first
+     * creates the track's monitor.
+     */
+    private readonly _pendingTrackContentTypes = new Map<string, OutboundTrackContentType>();
 
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
@@ -920,6 +928,48 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return this.peerConnections.find(peerConnection =>
             peerConnection.mappedOutboundTracks.has(trackId)
         )?.mappedOutboundTracks.get(trackId);
+    }
+
+    /**
+     * Declares what content a track carries, by track id — whether or not the
+     * track's monitor exists yet.
+     *
+     * `getInboundTrackMonitor(id)?.setContentType(...)` only works once the
+     * track has been observed on a peer connection and its monitor was created
+     * from stats. But the application often knows the content type *earlier*:
+     * signaling announces that a guest's upcoming track is a screen share
+     * before a single packet has arrived, so at that moment there is no
+     * monitor to call `setContentType` on, and the declaration would be lost.
+     *
+     * This method closes that gap. If the track's monitor already exists
+     * (inbound or outbound, on any peer connection), the content type is
+     * applied immediately. Otherwise it is remembered as a pending
+     * declaration, and whichever peer connection first manifests the track
+     * picks it up when it creates the track's monitor. One pending entry per
+     * track id (the newest declaration wins), consumed when the monitor is
+     * created — no timeout, no cleanup needed: an entry for a track that never
+     * shows up is a single map entry for the lifetime of the monitor.
+     *
+     * ```ts
+     * // signaling told us track "abc-123" will be a screen share,
+     * // possibly before the track exists on any peer connection:
+     * monitor.setTrackContentType('abc-123', 'screenshare');
+     * ```
+     */
+    public setTrackContentType(trackId: string, contentType: OutboundTrackContentType): void {
+        const trackMonitor = this.getTrackMonitor(trackId);
+
+        if (trackMonitor) return trackMonitor.setContentType(contentType);
+
+        this._pendingTrackContentTypes.set(trackId, contentType);
+    }
+
+    public takePendingTrackContentType(trackId: string): OutboundTrackContentType | undefined {
+        const contentType = this._pendingTrackContentTypes.get(trackId);
+
+        if (contentType !== undefined) this._pendingTrackContentTypes.delete(trackId);
+
+        return contentType;
     }
 
     public setCollectingPeriod(collectingPeriodInMs: number): void {

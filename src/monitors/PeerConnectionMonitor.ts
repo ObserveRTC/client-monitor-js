@@ -1176,6 +1176,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			trackMonitor.mappedOutboundRtps.set(outboundRtp.ssrc, outboundRtp);
 		}
 
+		const pendingContentType = this.parent.takePendingTrackContentType(track.id);
+		if (pendingContentType) trackMonitor.setContentType(pendingContentType);
+
 		this.parent.emit('new-outbound-track-monitor', {
 			clientMonitor: this.parent,
 			outboundTrackMonitor: trackMonitor,
@@ -1193,6 +1196,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		this._pendingMediaStreamTracks.delete(track.id);
 		this.mappedInboundTracks.set(track.id, trackMonitor);
+
+		const pendingContentType = this.parent.takePendingTrackContentType(track.id);
+		if (pendingContentType) trackMonitor.setContentType(pendingContentType);
 
 		this.parent.emit('new-inbound-track-monitor', {
 			clientMonitor: this.parent,
