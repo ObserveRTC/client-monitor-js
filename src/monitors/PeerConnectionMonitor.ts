@@ -29,7 +29,7 @@ import { MediaPipelineDetector } from "../detectors/MediaPipelineDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
 import { SelectedIcePath } from "./SelectedIcePath";
-import { scoreReasonKeys } from "../scores/utils";
+import { sampledScoreReasons } from "../scores/utils";
 import {
 	CertificateStats,
 	CodecStats,
@@ -46,6 +46,7 @@ import {
 	RemoteInboundRtpStats,
 	RemoteOutboundRtpStats
 } from "../schema/ClientSample";
+import { TrackMonitor } from './TrackMonitor';
 
 const MODULE_NAME = 'PeerConnectionMonitor';
 
@@ -497,7 +498,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			inboundTracks: [ ...this.mappedInboundTracks.values() ].map(inboundTrack => inboundTrack.createSample()),
 			outboundTracks: [ ...this.mappedOutboundTracks.values() ].map(outboundTrack => outboundTrack.createSample()),
 			score: this.score,
-			scoreReasons: scoreReasonKeys(this.calculatedStabilityScore.reasons, this.parent.config.sendScoreReasonsToServer)
+			scoreReasons: sampledScoreReasons(this.calculatedStabilityScore.reasons, this.parent.config.sendScoreReasonsToServer)
 		}
 	}
 
@@ -736,6 +737,18 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			if (monitor.visited) continue;
 			this.mappedDataChannelMonitors.delete(id);
 		}
+	}
+
+	public getTrackMonitor(trackId: string): TrackMonitor | undefined {
+			return this.getInboundTrackMonitor(trackId) ?? this.getOutboundTrackMonitor(trackId);
+	}
+
+	public getInboundTrackMonitor(trackId: string): InboundTrackMonitor | undefined {
+			return this.mappedInboundTracks.get(trackId);
+	}
+
+	public getOutboundTrackMonitor(trackId: string): OutboundTrackMonitor | undefined {
+			return this.mappedOutboundTracks.get(trackId);
 	}
 
 	public close() {

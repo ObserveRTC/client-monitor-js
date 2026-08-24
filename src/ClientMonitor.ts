@@ -18,7 +18,7 @@ import {
     ResolvedClientIssue,
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
-import { scoreReasonKeys } from './scores/utils';
+import { sampledScoreReasons } from './scores/utils';
 import { ClientEventTypes } from './schema/ClientEventTypes';
 import { AppliedClientMonitorConfig, ClientMonitorConfig, ClientMonitorSourceType } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
@@ -474,7 +474,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
-            scoreReasons: scoreReasonKeys(this.scoreReasons, this.config.sendScoreReasonsToServer),
+            scoreReasons: sampledScoreReasons(this.scoreReasons, this.config.sendScoreReasonsToServer),
         };
         this._clientEvents = [];
         this._clientMetaItems = [];

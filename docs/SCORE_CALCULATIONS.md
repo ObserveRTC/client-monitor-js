@@ -278,9 +278,9 @@ Every key of the `DefaultScoreCalculatorSubtractionReason` union:
 - **Each monitor** (`pcMonitor.scoreReasons`, `trackMonitor.scoreReasons`)
   holds only its *own* reasons — a low track score is explained on the track,
   not on the peer connection.
-- **The samples** carry `scoreReasons` as an array of the reason *keys*
-  (`string[]`) per entity; magnitudes stay local. Set
-  `sendScoreReasonsToServer: false` to drop the keys from the wire.
+- **The samples** carry `scoreReasons` as a record of reason key → subtracted
+  points (`Record<string, number>`) per entity, magnitudes included. Set
+  `sendScoreReasonsToServer: false` to drop the reasons from the wire.
 
 See the README's [Score Reasons](../README.md#score-reasons) section for
 examples.

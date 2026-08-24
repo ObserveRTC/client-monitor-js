@@ -1154,7 +1154,7 @@ monitor.getInboundTrackMonitor(id)?.scoreReasons;    // e.g. frozen-video, audio
 monitor.getOutboundTrackMonitor(id)?.scoreReasons;   // e.g. cpu-limitation, downscaled-screenshare
 ```
 
-**3. In the samples** — the client, peer-connection and track sample entries carry `scoreReasons` as an **array of the reason keys** (`string[]`), with the same per-entity attribution; the penalty magnitudes stay local, readable on the monitors and the `'score'` event. The field is omitted when there is nothing to explain. Set `sendScoreReasonsToServer: false` in the config to drop the keys from the wire — the scores themselves and the realtime event are unaffected.
+**3. In the samples** — the client, peer-connection and track sample entries carry `scoreReasons` as a **record of reason key → subtracted points** (`Record<string, number>`), with the same per-entity attribution, so a degraded score explains itself on the wire, magnitudes included. The field is omitted when there is nothing to explain. Set `sendScoreReasonsToServer: false` in the config to drop the reasons from the wire — the scores themselves and the realtime event are unaffected.
 
 The full key set — with every threshold, ramp and what each reason means for the user experience — is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md); the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
 

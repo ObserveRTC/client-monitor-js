@@ -5,7 +5,7 @@ import { DryInboundTrackDetector } from "../detectors/DryInboundTrackDetector";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { InboundTrackSample } from "../schema/ClientSample";
-import { scoreReasonKeys } from "../scores/utils";
+import { sampledScoreReasons } from "../scores/utils";
 import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetector";
 import { AudioConcealmentDetector } from "../detectors/AudioConcealmentDetector";
 import { JitterBufferStressDetector } from "../detectors/JitterBufferStressDetector";
@@ -181,7 +181,7 @@ export class InboundTrackMonitor {
 				timestamp: Date.now(),
 				attachments: this.attachments,
 				score: this.score,
-				scoreReasons: scoreReasonKeys(
+				scoreReasons: sampledScoreReasons(
 					this.calculatedScore.reasons,
 					this.getPeerConnection()?.parent.config.sendScoreReasonsToServer,
 				),

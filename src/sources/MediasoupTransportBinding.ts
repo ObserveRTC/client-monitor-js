@@ -15,7 +15,7 @@ export class MediasoupTransportBinding {
 		public readonly transport: mediasoup.types.Transport,
 		public readonly monitor: PeerConnectionMonitor,
 	) {
-		
+
 		this._consumerAdded = this._consumerAdded.bind(this);
 		this._producerAdded = this._producerAdded.bind(this);
 		this._dataProducerAdded = this._dataProducerAdded.bind(this);
@@ -50,14 +50,14 @@ export class MediasoupTransportBinding {
 		this.transport.observer.off('newdataconsumer', this._dataConsumerAdded);
 		this.transport.off('connectionstatechange', this._connectionStateChanged);
 		this.transport.off('icegatheringstatechange', this._iceGatheringStateChanged);
-		
+
 		this.monitor.close();
 
 	}
 
 	public bind() {
 		this.transport.observer.once('close', this.unbind);
-	
+
 		this.transport.observer.on('newconsumer', this._consumerAdded);
 		this.transport.observer.on('newdataproducer', this._dataProducerAdded);
 		this.transport.observer.on('newproducer', this._producerAdded);
@@ -120,7 +120,7 @@ export class MediasoupTransportBinding {
 
 		producer.observer.on('pause', pauseListener);
 		producer.observer.on('resume', resumeListener);
-		
+
 		this.monitor.on('stats', onMonitorStats);
 		this.monitor.once('close', () => this.monitor.off('stats', onMonitorStats));
 
@@ -144,7 +144,7 @@ export class MediasoupTransportBinding {
 			public onStats() {
 				if (!producer.track) return;
 				if (this.registeredTrackId === producer.track.id) return;
-				
+
 				this.registeredTrackId = producer.track.id;
 
 				return bindMediaStreamTrackEvents({
@@ -197,7 +197,7 @@ export class MediasoupTransportBinding {
 		});
 	}
 
-	
+
 
 	private _dataConsumerAdded(dataConsumer: mediasoup.types.DataConsumer) {
 		dataConsumer.observer.once('close', () => {
@@ -228,7 +228,7 @@ export class MediasoupTransportBinding {
 			dataProducerId: dataProducer.id,
 		});
 	}
-	
+
 	private _connectionStateChanged(...args: mediasoup.types.TransportEvents['connectionstatechange']) {
 		this.monitor.connectionState = args[0];
 		return this._fireEvent(ClientEventTypes.PEER_CONNECTION_STATE_CHANGED, {
@@ -236,7 +236,7 @@ export class MediasoupTransportBinding {
 			connectionState: args[0],
 		});
 	}
-	
+
 	private _iceGatheringStateChanged(...args: mediasoup.types.TransportEvents['icegatheringstatechange']) {
 		this.monitor.iceGatheringState = args[0];
 

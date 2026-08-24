@@ -6,7 +6,7 @@ import { SourceEncoderBottleneckDetector } from "../detectors/SourceEncoderBottl
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { OutboundTrackSample } from "../schema/ClientSample";
-import { scoreReasonKeys } from "../scores/utils";
+import { sampledScoreReasons } from "../scores/utils";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -192,7 +192,7 @@ export class OutboundTrackMonitor {
 			timestamp: Date.now(),
 			attachments: this.attachments,
 			score: this.score,
-			scoreReasons: scoreReasonKeys(
+			scoreReasons: sampledScoreReasons(
 				this.calculatedScore.reasons,
 				this.getPeerConnection()?.parent.config.sendScoreReasonsToServer,
 			),

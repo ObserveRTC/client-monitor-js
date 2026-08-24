@@ -1,5 +1,5 @@
 
-export const schemaVersion = "3.5.0";
+export const schemaVersion = "3.6.0";
 
 /**
 * The WebRTC app provided custom stats payload
@@ -1575,9 +1575,9 @@ export type OutboundTrackSample = {
 	score?: number;
 
 	/**
-	* Details for score calculation
+	* Reasons for the score calculation, mapping each reason to how much it contributed to the score
 	*/
-	scoreReasons?: string[];
+	scoreReasons?: Record<string, number>;
 
 	/**
 	* Additional information attached to this stats
@@ -1611,9 +1611,9 @@ export type InboundTrackSample = {
 	score?: number;
 
 	/**
-	* Details for score calculation
+	* Reasons for the score calculation, mapping each reason to how much it contributed to the score
 	*/
-	scoreReasons?: string[];
+	scoreReasons?: Record<string, number>;
 
 	/**
 	* Additional information attached to this stats
@@ -1642,9 +1642,9 @@ export type PeerConnectionSample = {
 	score?: number;
 
 	/**
-	* Details for score calculation
+	* Reasons for the score calculation, mapping each reason to how much it contributed to the score
 	*/
-	scoreReasons?: string[];
+	scoreReasons?: Record<string, number>;
 
 	/**
 	* Inbound Track Stats items
@@ -1753,9 +1753,9 @@ export type ClientSample = {
 	score?: number;
 
 	/**
-	* Details for score calculation
+	* Reasons for the score calculation, mapping each reason to how much it contributed to the score
 	*/
-	scoreReasons?: string[];
+	scoreReasons?: Record<string, number>;
 
 	/**
 	* Samples taken PeerConnections

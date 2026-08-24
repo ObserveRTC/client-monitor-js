@@ -175,7 +175,7 @@ export type { IceRelayProtocol, IceAddressFamily } from './monitors/IceCandidate
 export type {
     ScoreCalculator
 } from './scores/ScoreCalculator';
-export { scoreReasonKeys } from './scores/utils';
+export { sampledScoreReasons } from './scores/utils';
 
 export type {
     DefaultScoreCalculator,

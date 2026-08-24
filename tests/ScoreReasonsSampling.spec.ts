@@ -31,28 +31,30 @@ function addPcWithReasons(monitor: ClientMonitor) {
 }
 
 describe('sendScoreReasonsToServer', () => {
-	it('ships the encoded score reasons by default', () => {
+	it('ships the score reasons with their magnitudes by default', () => {
 		const monitor = createMonitor();
 
-		addPcWithReasons(monitor);
+		const pcMonitor = addPcWithReasons(monitor);
 
 		const sample = monitor.createSample();
 		const pcSample = sample?.peerConnections?.[0];
 
-		// the sample carries the reason keys; magnitudes stay local
-		expect(pcSample?.scoreReasons).toEqual([ 'high-rtt' ]);
+		// the sample carries the reasons with the points each subtracted
+		expect(pcSample?.scoreReasons).toEqual({ 'high-rtt': 1.0 });
+		// ...as a copy, never aliasing the live reasons object
+		expect(pcSample?.scoreReasons).not.toBe(pcMonitor.calculatedStabilityScore.reasons);
 
 		monitor.close();
 	});
 
-	it('ships the client-level reason keys on the client sample', () => {
+	it('ships the client-level reasons on the client sample', () => {
 		const monitor = createMonitor();
 
 		monitor.scoreReasons = { 'high-rtt': 1.0, 'frozen-video': 2.0 };
 
 		const sample = monitor.createSample();
 
-		expect(sample?.scoreReasons).toEqual([ 'high-rtt', 'frozen-video' ]);
+		expect(sample?.scoreReasons).toEqual({ 'high-rtt': 1.0, 'frozen-video': 2.0 });
 
 		monitor.close();
 	});
@@ -102,10 +104,10 @@ describe('sendScoreReasonsToServer', () => {
 		const pcSample = sample?.peerConnections?.[0];
 		const trackSample = pcSample?.inboundTracks?.[0];
 
-		// the track's reason keys ship on the track's own sample...
-		expect(trackSample?.scoreReasons).toEqual([ 'frozen-video' ]);
+		// the track's reasons ship on the track's own sample...
+		expect(trackSample?.scoreReasons).toEqual({ 'frozen-video': 2.0 });
 		// ...and the peer connection sample carries only its own (rtt/jitter/loss) reasons
-		expect(pcSample?.scoreReasons).toEqual([ 'high-rtt' ]);
+		expect(pcSample?.scoreReasons).toEqual({ 'high-rtt': 1.0 });
 
 		monitor.close();
 	});
