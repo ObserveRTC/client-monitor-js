@@ -51,15 +51,55 @@ jobs:
             - name: Setup Custom Contexts
               shell: bash
               run: |
-                  echo "branch=$(echo ${GITHUB_REF##*/})" >> $GITHUB_OUTPUT
-                  echo "version=$(cat ./package.json | grep version | head -1 | awk -F: '{ print $2 }' | sed 's/[",]//g' | tr -d '[[:space:]]')" >> $GITHUB_OUTPUT
-                  echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+                  echo "branch=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
+                  echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+                  echo "package=$(node -p "require('./package.json').name")" >> $GITHUB_OUTPUT
               id: job_context
 
-            - name: Make snapshot version
+            # RC versions are X.Y.Z-rc.<run_number>.
+            #
+            # The prerelease identifier MUST increase monotonically. Semver
+            # compares prerelease identifiers as ASCII strings, and git SHAs have
+            # no chronological order, so the previous scheme (X.Y.Z-<sha>.0) made
+            # the "highest" RC effectively random: of the nine 4.7.1 RCs, the
+            # newest by publish time (4.7.1-28d5bf5.0) was the LOWEST by semver
+            # precedence, because "2" sorts below every other leading character.
+            # Consumers on `^4.7.1-28d5bf5.0` silently resolved to an older build
+            # and `yarn up` could never move them off it.
+            #
+            # github.run_number is strictly increasing per workflow, and semver
+            # compares all-numeric identifiers numerically (rc.9 < rc.10), so
+            # `rc.<run_number>` orders by build order.
+            #
+            # "rc" is also chosen so the first publish under this scheme sorts
+            # ABOVE the highest SHA-based RC already published (4.7.1-ee698a7.0):
+            # 'r' > 'e', so any rc.N beats every legacy SHA RC and consumers with
+            # existing ranges can see it. "dev"/"alpha"/"beta" would have sorted
+            # BELOW it and been invisible.
+            #
+            # Build metadata (X.Y.Z-rc.N+<sha>) is deliberately NOT used to carry
+            # the SHA: semver treats versions differing only in build metadata as
+            # equal and npm rejects the second publish as a duplicate. npm already
+            # records the commit in the published `gitHead` field.
+            - name: Make RC version
               if: steps.job_context.outputs.branch != 'master'
+              env:
+                  BASE_VERSION: ${{ steps.job_context.outputs.version }}
+                  RUN_NUMBER: ${{ github.run_number }}
               run: |
-                  npm version prerelease --preid=${{ steps.job_context.outputs.short_sha }} --git-tag-version false
+                  RC_VERSION="$(node -e '
+                    const base = process.env.BASE_VERSION
+                    const [core, pre] = base.split("-")
+                    const [major, minor, patch] = core.split(".").map(Number)
+                    // A stable base (4.7.0) targets the next patch (4.7.1); a base
+                    // that is already a prerelease (4.7.1-rc.3) keeps its own patch.
+                    const target = pre ? core : [major, minor, patch + 1].join(".")
+                    process.stdout.write(target + "-rc." + process.env.RUN_NUMBER)
+                  ')"
+                  echo "Publishing RC $RC_VERSION"
+                  npm version "$RC_VERSION" --git-tag-version false
+                  echo "rc_version=$RC_VERSION" >> $GITHUB_OUTPUT
+              id: rc_version
 
             # With trusted publishing, npm authenticates via OIDC automatically
             # and generates provenance — no token env var required.
@@ -67,6 +107,44 @@ jobs:
               if: steps.job_context.outputs.branch == 'master'
               run: npm publish --ignore-scripts --access public
 
-            - name: Publish package to branch-tag
+            # `next` is the stable, moving tag consumers should depend on: it
+            # always points at the newest RC across all version lines, so a
+            # dependency of "next" never has to be edited when the line bumps.
+            # It is set by `npm publish` itself, so it moves atomically with the
+            # publish and needs no second authenticated call.
+            - name: Publish RC to the next tag
               if: steps.job_context.outputs.branch != 'master'
-              run: npm publish --ignore-scripts --access public --tag $(echo "develop-${{ steps.job_context.outputs.version }}-rc" | sed 's/[.]//g')
+              run: npm publish --ignore-scripts --access public --tag next
+
+            # The per-line tag (develop-470-rc, ...) is kept for consumers pinned
+            # to one version line. It needs a SECOND registry write, and npm only
+            # performs the OIDC token exchange inside `npm publish` — the minted
+            # token lives in that process's memory and is never written to
+            # ~/.npmrc, and `npm dist-tag` has no OIDC code path. So a plain
+            # `npm dist-tag add` here would fail with ENEEDAUTH on this tokenless
+            # setup; the helper below mints a token the same way npm does.
+            #
+            # Best-effort on purpose: the published version and the `next` tag are
+            # already correct at this point, so a failure here degrades to a stale
+            # legacy tag and a warning rather than a failed release.
+            - name: Point the per-line tag at this RC
+              if: steps.job_context.outputs.branch != 'master'
+              env:
+                  PACKAGE: ${{ steps.job_context.outputs.package }}
+                  BASE_VERSION: ${{ steps.job_context.outputs.version }}
+                  RC_VERSION: ${{ steps.rc_version.outputs.rc_version }}
+              run: |
+                  LINE_TAG="develop-$(echo "$BASE_VERSION" | tr -d '.')-rc"
+                  echo "Pointing $LINE_TAG at $RC_VERSION"
+
+                  if ! NPM_AUTH_TOKEN="$(node .github/scripts/npm-oidc-token.mjs)"; then
+                      echo "::warning::Could not mint an npm OIDC token; '$LINE_TAG' still points at the previous RC. The published version and the 'next' tag are unaffected."
+                      exit 0
+                  fi
+
+                  echo "::add-mask::$NPM_AUTH_TOKEN"
+                  echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" >> ~/.npmrc
+
+                  if ! npm dist-tag add "$PACKAGE@$RC_VERSION" "$LINE_TAG"; then
+                      echo "::warning::'npm dist-tag add' failed; '$LINE_TAG' still points at the previous RC. The published version and the 'next' tag are unaffected."
+                  fi

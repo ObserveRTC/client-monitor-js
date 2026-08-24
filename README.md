@@ -40,6 +40,26 @@ or
 yarn add @observertc/client-monitor-js
 ```
 
+### Release candidates
+
+Every push to `develop` publishes a release candidate as `X.Y.Z-rc.<N>`, where `N` increases with every build. Depend on the **`next` dist-tag** to track them:
+
+```jsonc
+// package.json
+"dependencies": {
+    "@observertc/client-monitor-js": "next"
+}
+```
+
+`next` always points at the newest RC across all version lines, so this dependency never has to be edited when the line bumps from `4.7.x` to `4.8.x`. Per-line tags (`develop-470-rc`, `develop-460-rc`, ...) are still maintained if you want to stay on one line.
+
+**Do not use a caret range to track RCs** — it cannot work, for two separate reasons rooted in how semver ranges treat prereleases:
+
+- `"^4.6.0"` resolves to the stable `4.6.0` and silently excludes every RC. A range with no prerelease in it never matches prerelease versions.
+- `"^4.7.1-rc.5"` does match RCs, but only of `4.7.1` — it will never see `4.8.1-rc.N`, so it stops updating the moment the line bumps.
+
+Historically RCs were published as `X.Y.Z-<git-sha>.0`. Semver compares prerelease identifiers as ASCII strings and git SHAs have no chronological order, so the "highest" RC of that scheme was effectively random — a caret range on one of them resolved to an arbitrary older build and never moved. Those versions are still published and untouched, but they are superseded: any `rc.N` sorts above all of them.
+
 ## Quick Start
 
 ```javascript
