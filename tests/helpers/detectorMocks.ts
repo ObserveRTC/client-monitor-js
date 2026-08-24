@@ -169,6 +169,7 @@ export class MockMediaStreamTrack {
 
 export class MockInboundTrackMonitor {
 	public readonly direction = 'inbound';
+	public paused = false;
 	public remoteOutboundTrackPaused = false;
 	public track: MockMediaStreamTrack;
 

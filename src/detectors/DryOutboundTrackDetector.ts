@@ -17,7 +17,8 @@ export type DryOutboundTrackIssuePayload = {
  * **Detection Logic:**
  * - Monitors `bytesSent` from outbound RTP statistics
  * - Triggers when no bytes are being sent for a configured duration
- * - Ignores muted tracks or tracks not in 'live' state
+ * - Ignores muted tracks, tracks not in 'live' state, and paused tracks
+ *   (`trackMonitor.paused` — e.g. a paused mediasoup producer)
  * - Uses timer-based detection with configurable threshold
  * - One-time event emission using `_evented` flag
  * 
@@ -96,15 +97,22 @@ export class DryOutboundTrackDetector implements Detector {
 	 * 
 	 * **Processing Steps:**
 	 * 1. Skip if already evented, disabled, or bytes are being sent
-	 * 2. Reset timer if track is muted or not live
+	 * 2. Reset timer if track is paused (e.g. paused mediasoup producer), muted or not live —
+	 *    silence is expected then, and an active dry issue is resolved rather than kept open
 	 * 3. Start timer when no bytes are being sent
 	 * 4. Trigger detection when threshold duration is exceeded
 	 * 5. Emit event and create issue (one-time only)
 	 */
 	public update() {
 		if (this.disabled) return;
-		if (this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
+		if (this.trackMonitor.paused || this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
 			this._activatedAt = undefined;
+			if (this._evented) {
+				// The silence is now explained (deliberate pause / mute / ended),
+				// so the dry episode is over even though no bytes flowed yet.
+				this._resolve('track paused, muted or not live');
+				this._evented = false;
+			}
 			return;
 		}
 

@@ -113,6 +113,7 @@ class MockInboundTrackMonitor {
     public track = { id: 'test-track-id' };
     private peerConnection = new MockPeerConnectionMonitor();
     private inboundRtp: InboundRtpStats | null = null;
+    public paused = false;
     public remoteOutboundTrackPaused = false;
 
     getPeerConnection() {
@@ -188,6 +189,18 @@ describe('DryInboundTrackDetector', () => {
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
+
+        it('should return early if this leg\'s consumer is paused (trackMonitor.paused)', () => {
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
+            // The local mediasoup consumer got pause()d: the producer may still be
+            // sending to everyone else, but this leg deliberately opted out.
+            mockTrackMonitor.paused = true;
+
+            jest.advanceTimersByTime(6000);
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+        });
     });
 
     describe('update() - Dry track detection', () => {
@@ -258,6 +271,55 @@ describe('DryInboundTrackDetector', () => {
             detector.update();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
+        });
+
+        it('should resolve an active dry issue when the remote track becomes paused', () => {
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
+
+            // Raise the dry issue
+            detector.update();
+            jest.advanceTimersByTime(6000);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+            // The producer/consumer gets paused - the silence is now explained,
+            // so the active issue must be resolved instead of staying open.
+            mockTrackMonitor.setRemoteOutboundTrackPaused(true);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            // After resume, a new dry episode needs the full threshold again
+            mockTrackMonitor.setRemoteOutboundTrackPaused(false);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            jest.advanceTimersByTime(6000);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+        });
+
+        it('should resolve an active dry issue when the consumer gets paused', () => {
+            mockTrackMonitor.setInboundRtp({ bytesReceived: 0, deltaBytesReceived: 0 });
+
+            // Raise the dry issue
+            detector.update();
+            jest.advanceTimersByTime(6000);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+            // This leg's consumer gets paused - the silence is now explained
+            mockTrackMonitor.paused = true;
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            // After resume, a new dry episode needs the full threshold again
+            mockTrackMonitor.paused = false;
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            jest.advanceTimersByTime(6000);
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
 
         it('should emit the detector event only once per dry episode', () => {

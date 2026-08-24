@@ -17,7 +17,9 @@ export type DryInboundTrackIssuePayload = {
  * **Detection Logic:**
  * - Monitors `bytesReceived` from inbound RTP statistics
  * - Tracks duration when bytesReceived remains at 0
- * - Ignores periods when remote track is paused (expected behavior)
+ * - Ignores periods when this leg's consumer is paused (`trackMonitor.paused`)
+ *   or the remote track/producer is paused (`remoteOutboundTrackPaused`) —
+ *   silence is expected then
  * - Triggers alert after configured threshold duration
  * - Only triggers once per track until reset
  * 
@@ -96,7 +98,8 @@ export class DryInboundTrackDetector implements Detector {
 	 * **Processing Steps:**
 	 * 1. Skip if already evented or detector is disabled
 	 * 2. Check if track is receiving data (bytesReceived > 0)
-	 * 3. Reset timer if remote track is paused (expected behavior)
+	 * 3. Reset timer if the consumer or the remote track is paused (expected
+	 *    behavior), resolving an already-raised dry issue
 	 * 4. Start timing if no data is flowing and track should be active
 	 * 5. Trigger alert if dry duration exceeds threshold
 	 * 6. Emit event and create issue when dry condition is detected
@@ -104,8 +107,17 @@ export class DryInboundTrackDetector implements Detector {
 	public update() {
 		if (this.disabled) return;
 		// if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
-		if (this.trackMonitor.remoteOutboundTrackPaused) {
+		// Silence is expected while this leg's consumer is paused (local opt-out)
+		// or while the remote producer is paused (nobody receives) — two distinct
+		// situations, and the detector stands down on either.
+		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
 			this._activatedAt = undefined;
+			if (this._evented) {
+				// The silence is now explained, so the dry episode is over even
+				// though no bytes flowed yet.
+				this._resolve(this.trackMonitor.paused ? 'consumer paused' : 'remote track paused');
+				this._evented = false;
+			}
 			return;
 		}
 

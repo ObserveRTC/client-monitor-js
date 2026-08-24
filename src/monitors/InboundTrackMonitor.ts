@@ -21,6 +21,32 @@ export class InboundTrackMonitor {
 	public readonly detectors: Detectors;
 	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 	public dtxMode = false;
+
+	/**
+	 * True while THIS receiving leg is deliberately paused — the local
+	 * mediasoup consumer got `pause()`d (kept in sync by
+	 * `MediasoupTransportBinding`). Distinct from
+	 * {@link remoteOutboundTrackPaused}: a paused consumer only means this leg
+	 * opted out of the flow — the producer may well keep sending to everyone
+	 * else. While true, detectors that read the missing bytes as a failure
+	 * (dry-inbound-track, stuck decoder, audio concealment, jitter-buffer
+	 * stress) stand down instead of raising false issues.
+	 */
+	public paused = false;
+
+	/**
+	 * True while the SENDING side is deliberately silent — the remote producer
+	 * got paused, so nobody receives anything on this track. mediasoup-client
+	 * has no local signal for this (the pause travels over the application's
+	 * own signaling), so the application sets it when that notification
+	 * arrives:
+	 *
+	 * ```ts
+	 * monitor.getInboundTrackMonitor(track.id)!.remoteOutboundTrackPaused = true;
+	 * ```
+	 *
+	 * The same detectors that respect {@link paused} respect this flag too.
+	 */
 	public remoteOutboundTrackPaused = false;
 
 	/**

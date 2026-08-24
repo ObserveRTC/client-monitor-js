@@ -101,10 +101,31 @@ export class MediasoupTransportBinding {
 	}
 
 	private _producerAdded(producer: mediasoup.types.Producer) {
-		const pauseListener = () => this._producerPaused(producer);
-		const resumeListener = () => this._producerResumed(producer);
+		// Mirror the producer's paused state onto its outbound track monitor, so
+		// detectors that read silence as a failure (dry-outbound-track) know the
+		// silence is deliberate. Synced both on the pause/resume events and on
+		// every stats tick: the track monitor is created lazily when its stats
+		// first appear (and re-created after `replaceTrack`), so an event-only
+		// sync would lose a pause that happened before the monitor existed.
+		const syncPausedState = () => {
+			const trackId = producer.track?.id;
+			if (!trackId) return;
+			const trackMonitor = this.monitor.getOutboundTrackMonitor(trackId);
+			if (trackMonitor) trackMonitor.paused = producer.paused;
+		};
+		const pauseListener = () => {
+			syncPausedState();
+			this._producerPaused(producer);
+		};
+		const resumeListener = () => {
+			syncPausedState();
+			this._producerResumed(producer);
+		};
 		const trackWatcher = this._createProducerTrackWatcher(producer);
-		const onMonitorStats = () => trackWatcher.onStats();
+		const onMonitorStats = () => {
+			trackWatcher.onStats();
+			syncPausedState();
+		};
 
 		producer.observer.once('close', () => {
 			producer.observer.off('pause', pauseListener);
@@ -130,8 +151,10 @@ export class MediasoupTransportBinding {
 			trackId: producer.track?.id,
 		});
 
-		// register the initial track if any
+		// register the initial track if any, and pick up a producer that was
+		// created in the paused state
 		trackWatcher.onStats();
+		syncPausedState();
 	}
 
 	private _createProducerTrackWatcher(producer: mediasoup.types.Producer): { onStats: () => void } {
@@ -160,13 +183,34 @@ export class MediasoupTransportBinding {
 	}
 
 	private _consumerAdded(consumer: mediasoup.types.Consumer) {
-		const pauseListener = () => this._consumerPaused(consumer);
-		const resumeListener = () => this._consumerResumed(consumer);
-
+		// Mirror the consumer's paused state onto its inbound track monitor's
+		// `paused` flag, so detectors that read the missing bytes as a failure
+		// (dry-inbound-track, stuck decoder, ...) know this leg opted out of
+		// the flow deliberately. NOT `remoteOutboundTrackPaused` — that flag
+		// means the remote producer went silent for everyone, which mediasoup
+		// only tells the application over its own signaling; the application
+		// sets that one itself. Synced on pause/resume events and on every
+		// stats tick, because the inbound track monitor is created lazily when
+		// its inbound-rtp stats first appear — an event-only sync would lose a
+		// pause that happened before the monitor existed.
+		const syncPausedState = () => {
+			const trackMonitor = this.monitor.getInboundTrackMonitor(consumer.track.id);
+			if (trackMonitor) trackMonitor.paused = consumer.paused;
+		};
+		const pauseListener = () => {
+			syncPausedState();
+			this._consumerPaused(consumer);
+		};
+		const resumeListener = () => {
+			syncPausedState();
+			this._consumerResumed(consumer);
+		};
+		const onMonitorStats = () => syncPausedState();
 
 		consumer.observer.once('close', () => {
 			consumer.observer.off('pause', pauseListener);
 			consumer.observer.off('resume', resumeListener);
+			this.monitor.off('stats', onMonitorStats);
 
 			this._fireEvent(ClientEventTypes.CONSUMER_REMOVED, {
 				peerConnectionId: this.monitor.peerConnectionId,
@@ -178,6 +222,12 @@ export class MediasoupTransportBinding {
 
 		consumer.observer.on('pause', pauseListener);
 		consumer.observer.on('resume', resumeListener);
+
+		this.monitor.on('stats', onMonitorStats);
+		this.monitor.once('close', () => this.monitor.off('stats', onMonitorStats));
+
+		// pick up a consumer that was created in the paused state
+		syncPausedState();
 
 		this._fireEvent(ClientEventTypes.CONSUMER_ADDED, {
 			peerConnectionId: this.monitor.peerConnectionId,
@@ -200,7 +250,17 @@ export class MediasoupTransportBinding {
 
 
 	private _dataConsumerAdded(dataConsumer: mediasoup.types.DataConsumer) {
+		const stopWatching = this._watchDataChannelAttachments(
+			dataConsumer.sctpStreamParameters?.streamId,
+			{
+				dataProducerId: dataConsumer.dataProducerId,
+				dataConsumerId: dataConsumer.id,
+			},
+		);
+
 		dataConsumer.observer.once('close', () => {
+			stopWatching();
+
 			this._fireEvent(ClientEventTypes.DATA_CONSUMER_CLOSED, {
 				peerConnectionId: this.monitor.peerConnectionId,
 				dataProducerId: dataConsumer.dataProducerId,
@@ -216,7 +276,16 @@ export class MediasoupTransportBinding {
 	}
 
 	private _dataProducerAdded(dataProducer: mediasoup.types.DataProducer) {
+		const stopWatching = this._watchDataChannelAttachments(
+			dataProducer.sctpStreamParameters?.streamId,
+			{
+				dataProducerId: dataProducer.id,
+			},
+		);
+
 		dataProducer.observer.once('close', () => {
+			stopWatching();
+
 			this._fireEvent(ClientEventTypes.DATA_PRODUCER_CLOSED, {
 				peerConnectionId: this.monitor.peerConnectionId,
 				dataProducerId: dataProducer.id,
@@ -227,6 +296,51 @@ export class MediasoupTransportBinding {
 			peerConnectionId: this.monitor.peerConnectionId,
 			dataProducerId: dataProducer.id,
 		});
+	}
+
+	/**
+	 * Stamps mediasoup identity (`dataProducerId` / `dataConsumerId`) onto the
+	 * DataChannelMonitor that carries the DataProducer's / DataConsumer's
+	 * RTCDataChannel, so DataChannelStats samples ship with their mediasoup ids
+	 * in `attachments`.
+	 *
+	 * The join key is the SCTP stream id: mediasoup exposes it as
+	 * `sctpStreamParameters.streamId`, and the same value surfaces in getStats
+	 * as `RTCDataChannelStats.dataChannelIdentifier`. The DataChannelMonitor is
+	 * created lazily when its stats first appear, so the match is retried on
+	 * every stats tick until it lands, then the listener detaches itself.
+	 *
+	 * Returns a function that stops watching (used when the data producer or
+	 * consumer closes before its stats ever appeared).
+	 */
+	private _watchDataChannelAttachments(
+		sctpStreamId: number | undefined,
+		attachments: Record<string, unknown>,
+	): () => void {
+		if (sctpStreamId === undefined) return () => void 0;
+
+		const onMonitorStats = () => {
+			for (const dataChannelMonitor of this.monitor.dataChannels) {
+				if (dataChannelMonitor.dataChannelIdentifier !== sctpStreamId) continue;
+
+				dataChannelMonitor.attachments = {
+					...(dataChannelMonitor.attachments ?? {}),
+					...attachments,
+				};
+
+				stop();
+				return;
+			}
+		};
+		const stop = () => this.monitor.off('stats', onMonitorStats);
+
+		this.monitor.on('stats', onMonitorStats);
+		this.monitor.once('close', stop);
+
+		// the monitor may already exist when the data producer/consumer appears
+		onMonitorStats();
+
+		return stop;
 	}
 
 	private _connectionStateChanged(...args: mediasoup.types.TransportEvents['connectionstatechange']) {

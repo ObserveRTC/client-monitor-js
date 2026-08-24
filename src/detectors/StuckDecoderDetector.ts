@@ -90,6 +90,7 @@ export class StuckDecoderDetector implements Detector {
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		if (!inboundRtp || inboundRtp.kind !== 'video') return;
+		if (this.trackMonitor.paused) return this._reset('consumer paused');
 		if (this.trackMonitor.remoteOutboundTrackPaused) return this._reset('remote track paused');
 
 		const deltaBytes = inboundRtp.deltaBytesReceived ?? 0;

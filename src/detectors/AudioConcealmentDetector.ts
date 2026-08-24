@@ -89,7 +89,13 @@ export class AudioConcealmentDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 
-		// a paused remote track would otherwise look like total concealment failure
+		// a paused consumer or a paused remote track would otherwise look like
+		// total concealment failure
+		if (this.trackMonitor.paused) {
+			this._resetWindow();
+
+			return this._alertOn ? this._clear('consumer paused') : undefined;
+		}
 		if (this.trackMonitor.remoteOutboundTrackPaused) {
 			this._resetWindow();
 

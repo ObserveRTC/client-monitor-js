@@ -19,6 +19,16 @@ export class OutboundTrackMonitor {
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
 
 	/**
+	 * True while the sender behind this track is deliberately paused — a
+	 * mediasoup producer that got `pause()`d (kept in sync by
+	 * `MediasoupTransportBinding`), or whatever the application sets it to on
+	 * plain RTCPeerConnection setups. While paused, the track legitimately
+	 * sends nothing, so detectors that read silence as a failure
+	 * (dry-outbound-track) stand down instead of raising a false issue.
+	 */
+	public paused = false;
+
+	/**
 	 * What kind of content this track carries. Only meaningful for video
 	 * tracks — audio tracks leave it `undefined`, and an undefined video track
 	 * is scored as camera content. Screen-share tracks are scored differently
