@@ -36,6 +36,49 @@ function inbound(kind: 'audio' | 'video', first: Record<string, unknown>) {
 }
 
 describe('InboundRtpMonitor derived fields', () => {
+	describe('avgQpPerFrame', () => {
+		it('averages the quantizer over the frames decoded in the interval', () => {
+			const monitor = inbound('video', { framesDecoded: 100, qpSum: 2000 });
+
+			monitor.accept({
+				id: 'in-1', timestamp: 3000, ssrc: 1, kind: 'video', trackIdentifier: 'track-1',
+				framesDecoded: 130, qpSum: 2900, // 900 / 30 frames
+			} as any);
+
+			expect(monitor.avgQpPerFrame).toBe(30);
+		});
+
+		it('stays undefined when the browser does not report qpSum', () => {
+			const monitor = inbound('video', { framesDecoded: 100 });
+
+			monitor.accept({
+				id: 'in-1', timestamp: 3000, ssrc: 1, kind: 'video', trackIdentifier: 'track-1',
+				framesDecoded: 130,
+			} as any);
+
+			expect(monitor.avgQpPerFrame).toBeUndefined();
+		});
+
+		it('does not carry a stale average forward when no frames decoded', () => {
+			// Otherwise a frozen or dry track keeps reporting the quantizer of
+			// media that is no longer being shown.
+			const monitor = inbound('video', { framesDecoded: 100, qpSum: 2000 });
+
+			monitor.accept({
+				id: 'in-1', timestamp: 3000, ssrc: 1, kind: 'video', trackIdentifier: 'track-1',
+				framesDecoded: 130, qpSum: 2900,
+			} as any);
+			expect(monitor.avgQpPerFrame).toBe(30);
+
+			monitor.accept({
+				id: 'in-1', timestamp: 5000, ssrc: 1, kind: 'video', trackIdentifier: 'track-1',
+				framesDecoded: 130, qpSum: 2900, // nothing decoded
+			} as any);
+
+			expect(monitor.avgQpPerFrame).toBeUndefined();
+		});
+	});
+
 	// The guard that every delta-based detector rests on: on SSRC reuse or a
 	// stats-object replacement the counters restart, and an unguarded
 	// subtraction would hand every downstream rate a negative number.

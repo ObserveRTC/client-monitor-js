@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { VIDEO_QP_THRESHOLDS } from '../../src/scores/CalculatedScore';
 import { DefaultScoreCalculator } from "../../src/scores/DefaultScoreCalculator";
 import { OutboundTrackMonitor } from "../../src/monitors/OutboundTrackMonitor";
 import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
@@ -326,10 +327,14 @@ describe('DefaultScoreCalculator', () => {
     });
 
     describe('inbound video track score', () => {
-        function createVideoTrackMock(inboundRtp: Record<string, unknown>, options: { isScreenShare?: boolean } = {}) {
+        function createVideoTrackMock(
+            inboundRtp: Record<string, unknown>,
+            options: { isScreenShare?: boolean, motionType?: 'lowmotion' | 'standard' | 'highmotion' } = {},
+        ) {
             return {
                 track: { id: 'video-1', enabled: true, muted: false },
                 isScreenShare: options.isScreenShare ?? false,
+                motionType: options.motionType,
                 calculatedScore: { weight: 2, value: undefined as number | undefined },
                 getInboundRtp: () => ({
                     lastNFramesPerSec: [],
@@ -363,26 +368,157 @@ describe('DefaultScoreCalculator', () => {
             expect((dry.calculatedScore as any).reasons['low-fps']).toBeUndefined();
         });
 
-        it('saturates the bitrate-per-pixel penalty at half the codec floor', () => {
-            const track = createVideoTrackMock({
-                bitPerPixel: 0.03, // < 0.5 * 0.15 (vp8 standard low)
+        const qpTrack = (
+            inboundRtp: Record<string, unknown> = {},
+            options: { isScreenShare?: boolean, motionType?: 'lowmotion' | 'standard' | 'highmotion' } = {},
+        ) =>
+            createVideoTrackMock({
+                frameWidth: 640,
+                frameHeight: 360,
+                framesPerSecond: 30,
+                lastNFramesPerSec: [30],
+                bitrate: 500_000,
                 getCodec: () => ({ mimeType: 'video/VP8' }),
-            });
+                ...inboundRtp,
+            }, options);
+        const qpReason = (track: unknown) =>
+            ((track as any).calculatedScore.reasons ?? {})['pixelated-video'];
+
+        it('makes no judgement when the browser does not report qpSum', () => {
+            // A starved-looking bitrate is NOT enough to conclude anything about
+            // the picture, so no reason is emitted at all.
+            const track = qpTrack();
 
             ticks(track, 1);
 
-            expect((track.calculatedScore as any).reasons['low-bitrate-per-pixel']).toBe(1.0);
+            expect(qpReason(track)).toBeUndefined();
         });
 
-        it('ramps the bitrate-per-pixel penalty between the floor and half of it', () => {
-            const track = createVideoTrackMock({
-                bitPerPixel: 0.1125, // (0.15 - 0.1125) / (0.15 * 0.5) = 0.5
-                getCodec: () => ({ mimeType: 'video/VP8' }),
-            });
+        it('does not penalize a finely quantized picture', () => {
+            const track = qpTrack({ avgQpPerFrame: 20 }); // < vp8 activation 40
 
             ticks(track, 1);
 
-            expect((track.calculatedScore as any).reasons['low-bitrate-per-pixel']).toBe(0.5);
+            expect(qpReason(track)).toBeUndefined();
+        });
+
+        it('ramps the penalty between the codec activation and saturation QP', () => {
+            const track = qpTrack({ avgQpPerFrame: 60 }); // (60-40)/(80-40) = 0.5
+
+            ticks(track, 1);
+
+            expect(qpReason(track)).toBe(0.5);
+        });
+
+        it('saturates the penalty for a coarsely quantized picture', () => {
+            const track = qpTrack({ avgQpPerFrame: 90 }); // >= vp8 saturation 80
+
+            ticks(track, 1);
+
+            expect(qpReason(track)).toBe(1.0);
+        });
+
+        it('uses each codec its own QP scale rather than a shared range', () => {
+            // QP 45 is past saturation on H.264's 0-51 scale but still healthy on
+            // VP8's 0-127 scale - normalizing both to 0..1 would conflate them.
+            const h264 = qpTrack({ avgQpPerFrame: 45, getCodec: () => ({ mimeType: 'video/H264' }) });
+            const vp8 = qpTrack({ avgQpPerFrame: 45 });
+
+            ticks(h264, 1);
+            ticks(vp8, 1);
+
+            expect(qpReason(h264)).toBe(1.0);
+            expect(qpReason(vp8)).toBeLessThan(0.5);
+        });
+
+        it('makes no judgement for a codec it has no QP scale for', () => {
+            const track = qpTrack({ avgQpPerFrame: 200, getCodec: () => ({ mimeType: 'video/H266' }) });
+
+            ticks(track, 1);
+
+            expect(qpReason(track)).toBeUndefined();
+        });
+
+        it('tolerates a coarser quantizer on high-motion content than on low', () => {
+            // vp8 activation 40: lowmotion 32, standard 40, highmotion 50.
+            // QP 45 is past the bar for static content and under it for motion.
+            const low = qpTrack({ avgQpPerFrame: 45 }, { motionType: 'lowmotion' });
+            const standard = qpTrack({ avgQpPerFrame: 45 });
+            const high = qpTrack({ avgQpPerFrame: 45 }, { motionType: 'highmotion' });
+
+            ticks(low, 1);
+            ticks(standard, 1);
+            ticks(high, 1);
+
+            expect(qpReason(high)).toBeUndefined();
+            expect(qpReason(standard)).toBeGreaterThan(0);
+            expect(qpReason(low)).toBeGreaterThan(qpReason(standard));
+        });
+
+        it('judges undeclared screen share strictly, as low motion', () => {
+            const screenShare = qpTrack({ avgQpPerFrame: 36 }, { isScreenShare: true });
+            const camera = qpTrack({ avgQpPerFrame: 36 });
+
+            ticks(screenShare, 1);
+            ticks(camera, 1);
+
+            // 36 is under the standard activation of 40 but over lowmotion's 32
+            expect(qpReason(camera)).toBeUndefined();
+            expect(qpReason(screenShare)).toBeGreaterThan(0);
+        });
+
+        it('lets an explicit motion type override the screen-share default', () => {
+            const screenShare = qpTrack({ avgQpPerFrame: 36 }, { isScreenShare: true, motionType: 'standard' });
+
+            ticks(screenShare, 1);
+
+            expect(qpReason(screenShare)).toBeUndefined();
+        });
+
+        it('keeps every band inside its codec QP range', () => {
+            // H.264 tops out at 51: a band reaching past it could never saturate.
+            for (const [codec, bands] of Object.entries(VIDEO_QP_THRESHOLDS)) {
+                const max = codec === 'h264' || codec === 'h265' ? 51 : codec === 'vp8' ? 127 : 255;
+
+                for (const band of Object.values(bands!)) {
+                    expect(band.activation).toBeLessThan(band.saturation);
+                    expect(band.saturation).toBeLessThanOrEqual(max);
+                }
+            }
+        });
+
+        it('honours retuned thresholds', () => {
+            const original = VIDEO_QP_THRESHOLDS.vp8!.highmotion;
+
+            VIDEO_QP_THRESHOLDS.vp8!.highmotion = { activation: 100, saturation: 120 };
+            try {
+                const track = qpTrack({ avgQpPerFrame: 90 }, { motionType: 'highmotion' });
+
+                ticks(track, 1);
+
+                expect(qpReason(track)).toBeUndefined();
+            } finally {
+                VIDEO_QP_THRESHOLDS.vp8!.highmotion = original;
+            }
+        });
+
+        it('honours retuned QP thresholds', () => {
+            const original = VIDEO_QP_THRESHOLDS.vp8;
+
+            VIDEO_QP_THRESHOLDS.vp8 = {
+                lowmotion: { activation: 10, saturation: 20 },
+                standard: { activation: 10, saturation: 20 },
+                highmotion: { activation: 10, saturation: 20 },
+            };
+            try {
+                const track = qpTrack({ avgQpPerFrame: 25 });
+
+                ticks(track, 1);
+
+                expect(qpReason(track)).toBe(1.0);
+            } finally {
+                VIDEO_QP_THRESHOLDS.vp8 = original;
+            }
         });
 
         it('penalizes jitter only beyond one sampling interval, normalized to 1', () => {

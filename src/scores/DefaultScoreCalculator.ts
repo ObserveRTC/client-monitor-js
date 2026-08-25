@@ -1,5 +1,5 @@
 import { ClientMonitor } from "../ClientMonitor";
-import { BPP_RANGES } from "./CalculatedScore";
+import { VIDEO_QP_THRESHOLDS } from "./CalculatedScore";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
@@ -34,8 +34,13 @@ export type DefaultScoreCalculatorSubtractionReason =
 	'high-volatile-bitrate' |
 	/** The inbound video track is currently frozen. */
 	'frozen-video' |
-	/** Bitrate per pixel is below the codec's floor — blur/blockiness. */
-	'low-bitrate-per-pixel' |
+	/**
+	 * The decoded picture was coarsely quantized enough to show — blocking and
+	 * loss of detail. Derived from the inbound `qpSum`, so it describes the
+	 * frames this viewer actually saw; absent when the browser does not report
+	 * `qpSum` for the codec in use.
+	 */
+	'pixelated-video' |
 	/** Audible audio concealment share is significant. */
 	'audio-concealment' |
 	/** NetEQ is stretching/compressing a significant share of samples. */
@@ -87,20 +92,21 @@ export class DefaultScoreCalculator {
 	 * Inbound video jitter is free below one sampling interval — 20 ms at the
 	 * 90 kHz video clock — because the receiver absorbs that much by design.
 	 */
-	public static readonly INBOUND_VIDEO_JITTER_ACTIVATION_IN_MS = 20;
+	public static INBOUND_VIDEO_JITTER_ACTIVATION_IN_MS = 20;
 	/** Matches the peer-connection-level "high" jitter threshold. */
-	public static readonly INBOUND_VIDEO_JITTER_SATURATION_IN_MS = 100;
+	public static INBOUND_VIDEO_JITTER_SATURATION_IN_MS = 100;
 	/** Below this share of the EWMA fps as std deviation, fps volatility is noise. */
-	public static readonly FPS_VOLATILITY_ACTIVATION = 0.1;
-	public static readonly FPS_VOLATILITY_SATURATION = 0.2;
-	public static readonly DROPPED_FRAMES_FRACTION_ACTIVATION = 0.1;
-	public static readonly DROPPED_FRAMES_FRACTION_SATURATION = 0.2;
-	public static readonly FRAME_CORRUPTION_PROBABILITY_ACTIVATION = 0.05;
-	public static readonly FRAME_CORRUPTION_PROBABILITY_SATURATION = 0.5;
-	public static readonly TARGET_BITRATE_DEVIATION_ACTIVATION = 0.05;
-	public static readonly TARGET_BITRATE_DEVIATION_SATURATION = 0.15;
-	public static readonly BITRATE_VOLATILITY_ACTIVATION = 0.1;
-	public static readonly BITRATE_VOLATILITY_SATURATION = 0.2;
+	public static FPS_VOLATILITY_ACTIVATION = 0.1;
+	public static FPS_VOLATILITY_SATURATION = 0.2;
+	public static DROPPED_FRAMES_FRACTION_ACTIVATION = 0.1;
+	public static DROPPED_FRAMES_FRACTION_SATURATION = 0.2;
+	public static FRAME_CORRUPTION_PROBABILITY_ACTIVATION = 0.05;
+	public static FRAME_CORRUPTION_PROBABILITY_SATURATION = 0.5;
+	public static TARGET_BITRATE_DEVIATION_ACTIVATION = 0.05;
+	public static TARGET_BITRATE_DEVIATION_SATURATION = 0.15;
+	public static BITRATE_VOLATILITY_ACTIVATION = 0.1;
+	public static BITRATE_VOLATILITY_SATURATION = 0.2;
+
 	/** Audible concealment share at which the penalty saturates (~"severely concealed"). */
 	public static readonly AUDIO_CONCEALMENT_SATURATION = 0.1;
 	/** Fallback activation when the concealment detector config is absent. */
@@ -408,25 +414,36 @@ export class DefaultScoreCalculator {
 			subtractions['low-fps'] = 1.0;
 		}
 
-		// Bitrate-per-pixel below the codec floor: the stream is starved for its
-		// resolution, which shows up as blur and blockiness long before freezes.
+		// Pixelation, judged from the quantizer of the frames this viewer actually
+		// decoded. QP is the encoder stating how coarsely it had to quantize, so
+		// it measures the blockiness and loss of detail the user is looking at —
+		// unlike bitrate, which cannot separate "starved" from "this content
+		// needed few bits".
+		//
+		// Not every browser reports `qpSum` for every codec. Where it is missing
+		// the reason is simply absent: no judgement is better than one inferred
+		// from bitrate.
+		const avgQpPerFrame = inboundRtp.avgQpPerFrame;
 		const codecMimeType = inboundRtp.getCodec()?.mimeType;
 		const codec = codecMimeType?.split('/')[1]?.toLowerCase();
-		const bppRange = codec === 'h264' || codec === 'h265' || codec === 'vp8' || codec === 'vp9'
-			? BPP_RANGES['standard'][codec]
-			: undefined;
+		// Motion decides how visible a given quantizer is: movement masks
+		// artifacts, static content shows every one. The application declares it;
+		// undeclared screen share is judged strictly, since blocked text is a
+		// hard failure.
+		const motionType = trackMonitor.motionType ?? (isScreenShare ? 'lowmotion' : 'standard');
+		const qpThresholds = codec ? VIDEO_QP_THRESHOLDS[codec]?.[motionType] : undefined;
 
-		if (bppRange && inboundRtp.bitPerPixel !== undefined) {
-			// Ramps from 0 as bpp drops below the codec floor to 1 at half the
-			// floor — the point the old step penalty treated as severe.
-			const bppPenalty = this._normalizedPenalty(
-				bppRange.low - inboundRtp.bitPerPixel,
-				0,
-				bppRange.low * 0.5,
+		if (avgQpPerFrame !== undefined && qpThresholds) {
+			// QP scales differ per codec and are not comparable as fractions of
+			// their ranges, so each codec brings its own pair of thresholds.
+			const qpPenalty = this._normalizedPenalty(
+				avgQpPerFrame,
+				qpThresholds.activation,
+				qpThresholds.saturation,
 			);
 
-			if (0 < bppPenalty) {
-				subtractions['low-bitrate-per-pixel'] = bppPenalty;
+			if (0 < qpPenalty) {
+				subtractions['pixelated-video'] = qpPenalty;
 			}
 		}
 

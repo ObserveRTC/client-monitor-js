@@ -2,7 +2,7 @@ import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
 import { Detectors } from "../detectors/Detectors";
 import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetector";
 import { DryInboundTrackDetector } from "../detectors/DryInboundTrackDetector";
-import { CalculatedScore } from "../scores/CalculatedScore";
+import { CalculatedScore, VideoMotionType } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { InboundTrackSample } from "../schema/ClientSample";
 import { sampledScoreReasons } from "../scores/utils";
@@ -67,6 +67,26 @@ export class InboundTrackMonitor {
 	 * ```
 	 */
 	public contentType?: InboundTrackContentType;
+
+	/**
+	 * How much motion this track's content carries, which decides how visible a
+	 * given quantizer is and therefore where the `pixelated-video` thresholds
+	 * sit. Fast movement masks compression artifacts, so high-motion content
+	 * tolerates a coarser quantizer; a slide or a still face shows every blocked
+	 * edge and is judged more strictly.
+	 *
+	 * Nothing in the stats reveals it, so the application declares it when it
+	 * knows:
+	 *
+	 * ```ts
+	 * monitor.getInboundTrackMonitor(track.id)?.setMotionType('highmotion');
+	 * ```
+	 *
+	 * Left undeclared, screen share is judged as `lowmotion` - unreadable text
+	 * is a hard failure - and everything else as `standard`.
+	 */
+	public motionType?: VideoMotionType;
+
 
 	public calculatedScore: CalculatedScore = {
 		weight: 0,
@@ -174,6 +194,15 @@ export class InboundTrackMonitor {
 	 */
 	public setContentType(contentType: InboundTrackContentType): void {
 		this.contentType = contentType;
+	}
+
+	/**
+	 * Declares how much motion this track's content carries. See
+	 * {@link motionType}; `ClientMonitor.setTrackMotionType()` does the same by
+	 * track id and works before the track's monitor exists.
+	 */
+	public setMotionType(motionType: VideoMotionType): void {
+		this.motionType = motionType;
 	}
 
 	public getPeerConnection() {

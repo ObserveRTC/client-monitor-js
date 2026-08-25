@@ -1109,7 +1109,26 @@ score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty) - issuePenalties;
 -   Dropped frames (`dropped-video-frames`, normalized 0–1): activation 10%, saturation 20% of frames dropped instead of rendered
 -   Frame corruptions (`video-frame-corruptions`, normalized 0–1): per-interval corruption probability, activation 0.05, saturation 0.5
 -   Frozen picture (`frozen-video`, from the freeze state the detector derives): -2.0
--   Bitrate-per-pixel below the codec floor (`low-bitrate-per-pixel`, normalized 0–1, from `BPP_RANGES` — blur/blockiness before anything freezes): 0 at the floor, 1.0 at half the floor
+-   Pixelation (`pixelated-video`, normalized 0–1): ramps from 0 at the codec's activation QP to 1.0 at its saturation QP (`VIDEO_QP_THRESHOLDS`), from the mean quantizer of the frames actually decoded (`avgQpPerFrame`, derived from the inbound `qpSum`).
+
+    QP is the encoder stating how coarsely it had to quantize, so it measures the blockiness and detail loss the viewer is looking at. Bitrate cannot: the same 500 kbps is generous for a static talking head and starvation for a fast pan, and nothing observable separates those two from bits alone. **Where the browser does not report `qpSum` for the codec in use, the reason is simply absent** — no judgement is better than one inferred from bitrate.
+
+    QP scales are codec-specific and *not* comparable as fractions of their ranges — H.264 runs 0–51, VP8 0–127, VP9 0–255 — so each codec carries its own pair, and an unrecognised codec yields no judgement. The shipped values are literature starting points, not measurements of any deployment; calibrate against your own corpus:
+
+    **Motion class.** The same quantizer is not equally visible on all content: fast movement masks compression artifacts, while a slide or a still face shows every blocked edge. `VIDEO_QP_THRESHOLDS` is therefore indexed `[codec][motionType]` — note the bands run the *opposite* way to bitrate, since high-motion content needs more bits to reach a given QP yet tolerates a higher one once there. Nothing in the stats reveals motion, so the application declares it; undeclared, screen share is judged as `lowmotion` (blocked text is a hard failure) and everything else as `standard`:
+
+    ```typescript
+    monitor.setTrackMotionType(trackId, 'highmotion');           // by id, works before the track exists
+    monitor.getInboundTrackMonitor(track.id)?.setMotionType('lowmotion');
+    ```
+
+    ```typescript
+    import { VIDEO_QP_THRESHOLDS } from '@observertc/client-monitor-js';
+
+    VIDEO_QP_THRESHOLDS.vp8!.standard = { activation: 45, saturation: 90 };
+    ```
+
+    Every penalty ramp on `DefaultScoreCalculator` is a mutable static and can be retuned the same way.
 
 Whether an inbound video track is a screen share is decided by `InboundTrackMonitor.contentType` — same mechanism as the outbound side (see below), except a received track exposes no `displaySurface` to auto-detect from, so the application declares it:
 

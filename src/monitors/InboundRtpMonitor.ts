@@ -101,6 +101,14 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaCorruptionProbability?: number;
 	deltaFractionLost?: number;
 	deltaFramesDecoded?: number;
+	deltaQpSum?: number | undefined;
+	/**
+	 * Mean quantizer of the frames decoded in this interval — how coarsely the
+	 * picture the viewer actually saw was compressed. `undefined` when the
+	 * browser does not report `qpSum` for this codec, in which case no picture
+	 * quality judgement is made at all.
+	 */
+	avgQpPerFrame?: number | undefined;
 	deltaFramesReceived?: number;
 	deltaFramesRendered?: number;
 	deltaTime?: number;
@@ -258,6 +266,16 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.deltaFramesRendered = positiveDelta(stats.framesRendered, this.framesRendered);
 		this.deltaFramesDropped = positiveDelta(stats.framesDropped, this.framesDropped);
 		this.deltaKeyFramesDecoded = positiveDelta(stats.keyFramesDecoded, this.keyFramesDecoded);
+		this.deltaQpSum = positiveDelta(stats.qpSum, this.qpSum);
+
+		if (this.deltaQpSum !== undefined && this.deltaFramesDecoded !== undefined && 0 < this.deltaFramesDecoded) {
+			this.avgQpPerFrame = this.deltaQpSum / this.deltaFramesDecoded;
+		} else {
+			// No frames decoded this interval, or the browser does not report
+			// qpSum: carrying the previous average forward would describe media
+			// that is no longer being shown.
+			this.avgQpPerFrame = undefined;
+		}
 		this.deltaTotalDecodeTime = positiveDelta(stats.totalDecodeTime, this.totalDecodeTime);
 		this.deltaPliCount = positiveDelta(stats.pliCount, this.pliCount);
 		this.deltaFirCount = positiveDelta(stats.firCount, this.firCount);

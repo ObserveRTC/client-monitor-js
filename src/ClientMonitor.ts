@@ -31,6 +31,7 @@ import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
 import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
 import { ScoreCalculator } from "./scores/ScoreCalculator";
+import { VideoMotionType } from "./scores/CalculatedScore";
 import * as mediasoup from 'mediasoup-client';
 import { inferSourceType } from './sources/inferSourceType';
 import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider';
@@ -87,6 +88,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      * creates the track's monitor.
      */
     private readonly _pendingTrackContentTypes = new Map<string, OutboundTrackContentType>();
+
+    /**
+     * Motion types declared via `setTrackMotionType` for inbound tracks whose
+     * monitors do not exist yet, keyed by track id. Consumed by the peer
+     * connection that first creates the track's monitor.
+     */
+    private readonly _pendingTrackMotionTypes = new Map<string, VideoMotionType>();
 
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
@@ -167,6 +175,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                     alertOn: 0.7,
                     alertOff: 0.85,
                     minReceivedFrames: 10,
+                    // ~2.5x the smoothed arrival rate reads as a burst (layer
+                    // switch / keyframe recovery), not as CPU limitation.
+                    frameArrivalBurstFactor: 2.5,
                 },
                 durationOfCollectingStatsThreshold: {
                     lowWatermark: 5000,
@@ -970,6 +981,49 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         if (contentType !== undefined) this._pendingTrackContentTypes.delete(trackId);
 
         return contentType;
+    }
+
+    /**
+     * Declares how much motion an inbound track's content carries, by track id -
+     * whether or not the track's monitor exists yet.
+     *
+     * Motion decides how visible a given quantizer is, and so where the
+     * `pixelated-video` thresholds sit: fast movement masks compression
+     * artifacts, while a slide or a still face shows every blocked edge. Nothing
+     * in the stats reveals this, so only the application can say. Left
+     * undeclared, screen share is judged as `lowmotion` and everything else as
+     * `standard`.
+     *
+     * Like `setTrackContentType`, this applies immediately when the track's
+     * monitor already exists and is otherwise remembered as a pending
+     * declaration that whichever peer connection first manifests the track picks
+     * up - so it can be called as soon as signaling reveals what the track will
+     * carry, before any media has arrived.
+     *
+     * ```ts
+     * monitor.setTrackMotionType(trackId, 'highmotion');
+     * ```
+     */
+    public setTrackMotionType(trackId: string, motionType: VideoMotionType): void {
+        const trackMonitor = this.getInboundTrackMonitor(trackId);
+
+        if (trackMonitor) return trackMonitor.setMotionType(motionType);
+
+        this._pendingTrackMotionTypes.set(trackId, motionType);
+    }
+
+    /**
+     * Hands over - and forgets - a motion type declared via
+     * {@link setTrackMotionType} before the track's monitor existed. Called by
+     * the peer connection monitor at track-monitor creation; not intended for
+     * applications.
+     */
+    public takePendingTrackMotionType(trackId: string): VideoMotionType | undefined {
+        const motionType = this._pendingTrackMotionTypes.get(trackId);
+
+        if (motionType !== undefined) this._pendingTrackMotionTypes.delete(trackId);
+
+        return motionType;
     }
 
     public setCollectingPeriod(collectingPeriodInMs: number): void {

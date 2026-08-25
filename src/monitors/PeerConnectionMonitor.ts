@@ -1200,6 +1200,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		const pendingContentType = this.parent.takePendingTrackContentType(track.id);
 		if (pendingContentType) trackMonitor.setContentType(pendingContentType);
 
+		const pendingMotionType = this.parent.takePendingTrackMotionType(track.id);
+		if (pendingMotionType) trackMonitor.setMotionType(pendingMotionType);
+
 		this.parent.emit('new-inbound-track-monitor', {
 			clientMonitor: this.parent,
 			inboundTrackMonitor: trackMonitor,

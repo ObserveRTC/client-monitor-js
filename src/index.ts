@@ -7,6 +7,8 @@ export { IceTransportMonitor } from "./monitors/IceTransportMonitor";
 export { InboundRtpMonitor } from "./monitors/InboundRtpMonitor";
 export { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
 export type { InboundTrackContentType } from "./monitors/InboundTrackMonitor";
+export { VIDEO_QP_THRESHOLDS } from "./scores/CalculatedScore";
+export type { VideoMotionType, VideoQpThresholds } from "./scores/CalculatedScore";
 export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";

@@ -196,11 +196,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * - `minReceivedFrames`: the minimum number of frames that must have
          *   been received in an interval before the ratio is evaluated, guarding
          *   against noise at low frame rates (e.g. 1 received, 0 decoded).
+         * - `frameArrivalBurstFactor`: burst guard against bursty frame
+         *   *arrival* being read as CPU limitation. The detector keeps a
+         *   smoothed (EWMA) frames-received-per-interval baseline per track;
+         *   an interval whose received count exceeds
+         *   `frameArrivalBurstFactor * baseline` is a burst — a simulcast
+         *   layer switch, keyframe recovery or post-stall queue flush
+         *   momentarily outpaces the decoder without the CPU being the
+         *   problem — and its ratio is skipped rather than judged. A track's
+         *   first interval (no baseline yet) is also skipped, since a fresh
+         *   consumer routinely starts with a keyframe burst. Sustained decoder
+         *   starvation still alerts because its low ratio persists across
+         *   ordinary-arrival intervals. Set to `undefined` to disable the
+         *   guard and judge every interval.
          */
         incomingDecodedFramesRatioThresholds: {
             alertOn: number;
             alertOff: number;
             minReceivedFrames: number;
+            frameArrivalBurstFactor?: number;
         };
 
         /**
