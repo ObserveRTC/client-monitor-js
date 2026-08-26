@@ -1,4 +1,4 @@
-## 4.8.0
+## 4.7.0
 
 ### CPU performance detector: frame-arrival burst guard
 
