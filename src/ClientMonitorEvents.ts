@@ -304,6 +304,12 @@ export type StatsCollectionGapEventPayload = ClientMonitorBaseEvent & {
 
 export type ScoreEventPayload = ClientMonitorBaseEvent & {
 	clientScore: number,
+	/**
+	 * Every component's score reasons summed by key — each peer connection's own
+	 * plus each track's. This is the aggregated view, for reacting live to a
+	 * drop; the per-entity attribution is on each monitor's `scoreReasons` and in
+	 * the sample.
+	 */
 	currentReasons: Record<string, number>,
 }
 

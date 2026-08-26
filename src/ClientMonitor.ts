@@ -485,15 +485,28 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return this.mappedPeerConnections.get(peerConnectionId);
     }
 
-    public setScore<T extends Record<string, number>>(score: number, reasons?: T): void {
+    /**
+     * Sets the client score, keeping the two kinds of reason separate.
+     *
+     * `ownReasons` are the client's own subtractions and are what
+     * {@link scoreReasons} holds and the sample ships — there are none today.
+     * `aggregatedReasons` are every component's reasons summed by key and are
+     * emitted on the `'score'` event, so applications still react to the whole
+     * picture without that picture being duplicated onto the wire.
+     */
+    public setScore<T extends Record<string, number>>(
+        score: number,
+        ownReasons?: T,
+        aggregatedReasons?: Record<string, number>,
+    ): void {
         if (this.closed) return;
 
         this.score = score;
-        this.scoreReasons = reasons;
+        this.scoreReasons = ownReasons;
         this.emit('score', {
             clientMonitor: this,
             clientScore: score,
-            currentReasons: reasons ?? {},
+            currentReasons: aggregatedReasons ?? ownReasons ?? {},
         });
     }
 
@@ -511,6 +524,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
+            // The client's own reasons only. The aggregate lives on the 'score'
+            // event, never on the wire: every reason already ships on the
+            // component that caused it, and a server re-aggregates them.
             scoreReasons: sampledScoreReasons(this.scoreReasons, this.config.sendScoreReasonsToServer),
         };
         this._clientEvents = [];

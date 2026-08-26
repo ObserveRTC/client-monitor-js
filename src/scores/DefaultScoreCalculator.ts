@@ -178,7 +178,10 @@ export class DefaultScoreCalculator {
 		}
 
 		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
-		clientMonitor.setScore(clientScore, this.currentReasons);
+		// The client score subtracts nothing of its own — it is a weighted
+		// aggregate — so it has no own reasons to record. The accumulated view
+		// goes out on the 'score' event only.
+		clientMonitor.setScore(clientScore, undefined, this.currentReasons);
 
 		accumulateSubtractions(this.totalReasons, this.currentReasons);
 	}

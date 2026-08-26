@@ -1199,7 +1199,23 @@ monitor.getInboundTrackMonitor(id)?.scoreReasons;    // e.g. frozen-video, audio
 monitor.getOutboundTrackMonitor(id)?.scoreReasons;   // e.g. cpu-limitation, downscaled-screenshare
 ```
 
-**3. In the samples** — the client, peer-connection and track sample entries carry `scoreReasons` as a **record of reason key → subtracted points** (`Record<string, number>`), with the same per-entity attribution, so a degraded score explains itself on the wire, magnitudes included. The field is omitted when there is nothing to explain. Set `sendScoreReasonsToServer: false` in the config to drop the reasons from the wire — the scores themselves and the realtime event are unaffected.
+`ClientMonitor.scoreReasons` follows the same rule: it holds the client's **own** reasons, and there are none today — the client score subtracts nothing directly, being a weighted aggregate of the peer-connection and track scores. So it stays undefined.
+
+The aggregated view lives on the `'score'` **event** instead, as `currentReasons` — every component's reasons summed by key. Score and reasons are kept separate on purpose: the event gives an application the whole picture to react to, while each monitor's `scoreReasons` stays scoped to what that entity itself caused.
+
+```typescript
+monitor.on('score', ({ clientScore, currentReasons }) => {
+    // currentReasons: { 'high-rtt': 1.0, 'pixelated-video': 0.27 } — the aggregate
+});
+
+monitor.scoreReasons;   // the client's OWN reasons — undefined today
+```
+
+**3. In the samples — every entity ships only its own reasons.** The peer-connection and track sample entries carry `scoreReasons` as a **record of reason key → subtracted points** (`Record<string, number>`), so a degraded score explains itself on the wire, magnitudes included. The field is omitted when there is nothing to explain.
+
+The **client sample entry carries no reasons**, because the client score subtracts nothing of its own. Shipping the aggregate there would put every reason on the wire a second time in the same sample, and would read as though the client itself were pixelating or losing packets when the cause was one inbound track. A server reconstructs the client-level view in post-analysis by re-aggregating the components of the same sample — the information is not lost, only sent once. If a client-level penalty is ever added it lands on `ClientMonitor.scoreReasons` like any other component's, and ships automatically.
+
+Set `sendScoreReasonsToServer: false` in the config to drop the reasons from the wire entirely — the scores themselves and the realtime event are unaffected.
 
 The full key set — with every threshold, ramp and what each reason means for the user experience — is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md); the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
 
@@ -3009,8 +3025,9 @@ class MonitoringDashboard {
     }
 
     setupEventListeners() {
-        this.monitor.on("score", ({ clientScore, scoreReasons }) => {
-            this.updateScoreDisplay(clientScore, scoreReasons);
+        this.monitor.on("score", ({ clientScore, currentReasons }) => {
+            // currentReasons is the AGGREGATE: every component's reasons summed
+            this.updateScoreDisplay(clientScore, currentReasons);
         });
 
         this.monitor.on("congestion", ({ availableIncomingBitrate, availableOutgoingBitrate }) => {
@@ -3201,7 +3218,7 @@ interface ClientMonitorEvents {
         durationOfCollectingStatsInMs: number;
         collectedStats: [string, RTCStats[]][];
     }) => void;
-    score: (data: { clientScore: number; scoreReasons?: Record<string, number> }) => void;
+    score: (data: { clientScore: number; currentReasons: Record<string, number> }) => void;
     issue: (issue: ClientIssue) => void;
     congestion: (data: CongestionEvent) => void;
     close: () => void;

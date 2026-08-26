@@ -47,14 +47,73 @@ describe('sendScoreReasonsToServer', () => {
 		monitor.close();
 	});
 
-	it('ships the client-level reasons on the client sample', () => {
+	it('emits the aggregate but keeps the client\'s own reasons separate', () => {
+		const monitor = createMonitor();
+		const emitted: Record<string, number>[] = [];
+
+		monitor.on('score', ({ currentReasons }) => emitted.push(currentReasons));
+
+		// the calculator's two views: nothing of the client's own, and the sum of
+		// every component's reasons
+		monitor.setScore(4.5, undefined, { 'high-rtt': 1.0, 'frozen-video': 2.0 });
+
+		// the event carries the aggregate, so applications react to the whole picture
+		expect(emitted).toEqual([{ 'high-rtt': 1.0, 'frozen-video': 2.0 }]);
+		// ...but the monitor's own reasons stay empty, like any other component
+		expect(monitor.scoreReasons).toBeUndefined();
+		// ...and nothing lands on the wire, since each reason ships on its component
+		expect(monitor.createSample()?.scoreReasons).toBeUndefined();
+
+		monitor.close();
+	});
+
+	it('ships client-level reasons when the client itself has any', () => {
 		const monitor = createMonitor();
 
-		monitor.scoreReasons = { 'high-rtt': 1.0, 'frozen-video': 2.0 };
+		monitor.setScore(4.5, { 'high-packetloss': 0.5 }, { 'high-packetloss': 0.5, 'frozen-video': 2.0 });
+
+		expect(monitor.scoreReasons).toEqual({ 'high-packetloss': 0.5 });
+		expect(monitor.createSample()?.scoreReasons).toEqual({ 'high-packetloss': 0.5 });
+
+		monitor.close();
+	});
+
+	it('does not duplicate a component reason at the client level', () => {
+		// The regression: a track pixelating used to surface `pixelated-video`
+		// on the client sample too, so one event was counted twice on the wire
+		// and the client looked like the thing that was pixelating.
+		const monitor = createMonitor();
+		const pcMonitor = addPcWithReasons(monitor);
+
+		const track = {
+			id: 'inbound-video-1',
+			kind: 'video',
+			enabled: true,
+			muted: false,
+			readyState: 'live',
+		} as unknown as MediaStreamTrack;
+		const inboundRtp = new InboundRtpMonitor(pcMonitor, {
+			id: 'rtp-1',
+			timestamp: Date.now(),
+			ssrc: 1111,
+			kind: 'video',
+			trackIdentifier: track.id,
+		});
+		const trackMonitor = new InboundTrackMonitor(track, inboundRtp);
+
+		pcMonitor.mappedInboundTracks.set(track.id, trackMonitor);
+		trackMonitor.calculatedScore.value = 4.9;
+		trackMonitor.calculatedScore.reasons = { 'pixelated-video': 0.27 };
+
+		// the calculator's aggregate reaches the event, not the monitor field
+		monitor.setScore(4.975, undefined, { 'high-rtt': 1.0, 'pixelated-video': 0.27 });
 
 		const sample = monitor.createSample();
 
-		expect(sample?.scoreReasons).toEqual({ 'high-rtt': 1.0, 'frozen-video': 2.0 });
+		expect(sample?.scoreReasons).toBeUndefined();
+		expect(sample?.peerConnections?.[0]?.scoreReasons).toEqual({ 'high-rtt': 1.0 });
+		expect(sample?.peerConnections?.[0]?.inboundTracks?.[0]?.scoreReasons)
+			.toEqual({ 'pixelated-video': 0.27 });
 
 		monitor.close();
 	});
