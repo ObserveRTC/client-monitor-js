@@ -247,6 +247,14 @@ export type CaptureBottleneckEventPayload = ClientMonitorBaseEvent & {
 	expectedFps?: number,
 }
 
+export type DecoderBottleneckEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	/** Frames per second the decoder managed. */
+	decodedFps?: number,
+	/** Frames per second that actually arrived — the bar it fell short of. */
+	receivedFps?: number,
+}
+
 export type EncoderBottleneckEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: OutboundTrackMonitor,
 	sourceFps?: number,
@@ -419,6 +427,7 @@ export type ClientMonitorEvents = {
 	'video-recovery-failed': [VideoRecoveryFailedEventPayload],
 	'stuck-decoder': [StuckDecoderEventPayload],
 	'capture-bottleneck': [CaptureBottleneckEventPayload],
+	'decoder-bottleneck': [DecoderBottleneckEventPayload],
 	'encoder-bottleneck': [EncoderBottleneckEventPayload],
 	'capture-track-ended': [CaptureTrackEndedEventPayload],
 	'capture-track-muted': [CaptureTrackMutedEventPayload],

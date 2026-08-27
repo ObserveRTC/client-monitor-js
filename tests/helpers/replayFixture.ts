@@ -8,9 +8,9 @@ import { StatsReplayer } from './StatsReplayer';
 const FIXTURES_DIR = path.join(process.cwd(), 'tests', 'fixtures');
 
 export type ReplayFixtureResult = {
-	/** The monitor after the whole recording was replayed — inspect any monitor/track/derived field on it. */
+	/** The monitor after the whole session was replayed — inspect any monitor/track/derived field on it. */
 	monitor: ClientMonitor;
-	/** Every `'issue'` raised during the replay, in order, stamped with recorded (virtual) time. */
+	/** Every `'issue'` raised during the replay, in order, stamped with captured (virtual) time. */
 	issues: ClientIssue[];
 	/** Every `'issue-resolved'` fired during the replay, in order. */
 	resolvedIssues: ResolvedClientIssue[];
@@ -21,7 +21,7 @@ export type ReplayFixtureResult = {
 };
 
 /**
- * Replays a recorded session (`tests/fixtures/<name>.jsonl` — one
+ * Replays a captured session (`tests/fixtures/<name>.jsonl` — one
  * `ReplayEntry` per line) through a fresh `ClientMonitor` and returns
  * everything the detectors did.
  *
@@ -72,7 +72,7 @@ export async function replayFixture(
 	};
 }
 
-/** Lists every `.jsonl` recording under `tests/fixtures/`. */
+/** Lists every `.jsonl` capture under `tests/fixtures/`. */
 export function listFixtures(): string[] {
 	if (!fs.existsSync(FIXTURES_DIR)) return [];
 

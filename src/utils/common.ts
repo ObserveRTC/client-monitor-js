@@ -65,3 +65,16 @@ export function positiveDelta(current?: number, previous?: number): number | und
 	return current - previous;
 }
 
+
+/**
+ * How long a gap between stats collections has to be before it means the ticks
+ * themselves stopped rather than the thing being measured.
+ *
+ * Derived from the monitor's own cadence instead of configured, because a fixed
+ * millisecond value means something different at every collecting period. The
+ * floor keeps it sane when collection is externally driven (`collectingPeriodInMs: 0`,
+ * as in a replay).
+ */
+export function maxTickGapInMs(collectingPeriodInMs: number): number {
+	return Math.max(collectingPeriodInMs * 3, 15_000);
+}

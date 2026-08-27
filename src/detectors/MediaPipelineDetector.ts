@@ -60,7 +60,7 @@ const ISSUE_TYPE = 'media-pipeline-stalled';
  * advances and the downstream one does not.
  *
  * Most boundaries are already owned by specialist detectors
- * (`SourceEncoderBottleneckDetector`, `BlockedTransportDetector`,
+ * (`OutboundFrameSupplyDetector`, `BlockedTransportDetector`,
  * `StuckDecoderDetector`, `DecoderPerformanceDetector`,
  * `PlayoutDiscrepancyDetector`), so this detector raises only for the two
  * boundaries nothing else covers:

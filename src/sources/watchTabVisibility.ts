@@ -13,7 +13,7 @@ const MODULE_NAME = 'WatchTabVisibility';
  * discrepancy, video freezes). Those detectors read `monitor.activeTab` and
  * stand down while the tab is hidden.
  *
- * Every transition is also recorded as a `TAB_VISIBILITY_CHANGED` client
+ * Every transition is also emitted as a `TAB_VISIBILITY_CHANGED` client
  * event, so the sample stream shows exactly when the tab went to the
  * background and came back.
  *

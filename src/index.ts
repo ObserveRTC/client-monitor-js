@@ -107,6 +107,7 @@ export type {
     ClientMonitorIssue,
     ClientMonitorResolvedIssue,
     ClientMonitorIssueType,
+    FrameSupplyIssuePayload,
 } from './ClientMonitorIssues';
 export type { AudioDesyncIssuePayload } from './detectors/AudioDesyncDetector';
 export type { CongestionIssuePayload } from './detectors/CongestionDetector';
@@ -125,11 +126,13 @@ export type {
     KeyframeStormIssuePayload,
     VideoRecoveryFailedIssuePayload,
 } from './detectors/FreezedVideoTrackDetector';
-export { SourceEncoderBottleneckDetector } from './detectors/SourceEncoderBottleneckDetector';
+export { OutboundFrameSupplyDetector } from './detectors/OutboundFrameSupplyDetector';
 export type {
     CaptureBottleneckIssuePayload,
     EncoderBottleneckIssuePayload,
-} from './detectors/SourceEncoderBottleneckDetector';
+} from './detectors/OutboundFrameSupplyDetector';
+export { InboundFrameSupplyDetector } from './detectors/InboundFrameSupplyDetector';
+export type { DecoderBottleneckIssuePayload } from './detectors/InboundFrameSupplyDetector';
 export { SimulcastLayerDetector } from './detectors/SimulcastLayerDetector';
 export type { SimulcastLayerState } from './detectors/SimulcastLayerDetector';
 export { CaptureFailureDetector } from './detectors/CaptureFailureDetector';

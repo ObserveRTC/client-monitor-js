@@ -10,6 +10,7 @@ import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetec
 import { AudioConcealmentDetector } from "../detectors/AudioConcealmentDetector";
 import { JitterBufferStressDetector } from "../detectors/JitterBufferStressDetector";
 import { DecoderPerformanceDetector } from "../detectors/DecoderPerformanceDetector";
+import { InboundFrameSupplyDetector } from "../detectors/InboundFrameSupplyDetector";
 import { StuckDecoderDetector } from "../detectors/StuckDecoderDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
@@ -155,6 +156,9 @@ export class InboundTrackMonitor {
 			}
 			if (monitorConfig.playoutDiscrepancyDetector !== null) {
 				this.detectors.add(new PlayoutDiscrepancyDetector(this));
+			}
+			if (monitorConfig.inboundFrameSupplyDetector !== null) {
+				this.detectors.add(new InboundFrameSupplyDetector(this));
 			}
 			if (monitorConfig.decoderPerformanceDetector !== null) {
 				this.detectors.add(new DecoderPerformanceDetector(this));

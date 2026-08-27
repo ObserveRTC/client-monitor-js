@@ -203,9 +203,12 @@ export class MockInboundTrackMonitor {
 export class MockOutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public track: MockMediaStreamTrack;
+	public isScreenShare = false;
+	public paused = false;
 
 	private _mediaSource: any = null;
 	private _outboundRtps: any[] = [];
+	private _mediaSourceTimestamp = 0;
 
 	public constructor(
 		kind: string,
@@ -223,6 +226,15 @@ export class MockOutboundTrackMonitor {
 	}
 
 	public getMediaSource() {
+		// Each read is a fresh collection tick. Detectors that measure the gap
+		// between collections need the stamp to move; specs that care about the
+		// exact value set `timestamp` themselves and this leaves it alone.
+		if (this._mediaSource && this._mediaSource.timestamp === undefined) {
+			this._mediaSourceTimestamp += 2000;
+
+			return { ...this._mediaSource, timestamp: this._mediaSourceTimestamp };
+		}
+
 		return this._mediaSource;
 	}
 

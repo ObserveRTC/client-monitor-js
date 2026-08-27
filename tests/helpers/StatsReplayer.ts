@@ -15,13 +15,13 @@ export type ReplayTrackState = {
 	muted?: boolean;
 	enabled?: boolean;
 	readyState?: 'live' | 'ended';
-	/** The value of `track.getSettings()` at recording time. */
+	/** The value of `track.getSettings()` at capture time. */
 	settings?: Record<string, unknown>;
 	label?: string;
 };
 
 /**
- * One recorded collection tick — the JSONL line format this harness consumes.
+ * One captured collection tick — the JSONL line format this harness consumes.
  * `peerConnections` is exactly the `collectedStats` payload of the monitor's
  * `'stats-collected'` event: `[peerConnectionId, rawGetStatsArray]` pairs.
  * How the lines are produced (server-side capture, a listener in an app, a
@@ -36,8 +36,8 @@ export type ReplayEntry = {
 };
 
 /**
- * Test-side stats source: serves pre-recorded stats instead of querying a
- * live `RTCPeerConnection`. The replayer enqueues one batch per recorded
+ * Test-side stats source: serves pre-captured stats instead of querying a
+ * live `RTCPeerConnection`. The replayer enqueues one batch per captured
  * tick; when a tick has no data for this peer connection the last batch is
  * re-served, which the monitors treat as "no change".
  */
@@ -88,7 +88,7 @@ class ReplayMediaStreamTrack {
 
 	public removeEventListener() { /* replay tracks live for the whole replay */ }
 
-	/** Applies a recorded state snapshot; fires `'ended'` on the transition. */
+	/** Applies a captured state snapshot; fires `'ended'` on the transition. */
 	public apply(state: ReplayTrackState) {
 		this.muted = state.muted ?? this.muted;
 		this.enabled = state.enabled ?? this.enabled;
@@ -104,7 +104,7 @@ class ReplayMediaStreamTrack {
 }
 
 /**
- * Sandbox harness that replays recorded stats through a `ClientMonitor`, so a
+ * Sandbox harness that replays captured stats through a `ClientMonitor`, so a
  * saved session can be re-run in a spec — against current or experimental
  * detector thresholds — and produces the same monitors, derived fields,
  * detector issues, events and samples the live run would have. Use it for
@@ -115,8 +115,8 @@ class ReplayMediaStreamTrack {
  *
  * **Virtual time.** Detectors judge durations with `Date.now()`, so replaying
  * faster than real time would break every threshold and window. By default the
- * replayer pins `Date.now` to each entry's recorded timestamp for the duration
- * of the replay — hours of recording replay in milliseconds while every
+ * replayer pins `Date.now` to each entry's captured timestamp for the duration
+ * of the replay — hours of captured time replay in milliseconds while every
  * duration-based verdict stays faithful. The clock is restored when `replay()`
  * finishes (or `finish()` is called). Do not run other time-sensitive work on
  * the same event loop while a virtual-time replay is in progress.
@@ -144,7 +144,7 @@ export class StatsReplayer {
 		private readonly _options: { useVirtualTime?: boolean } = {},
 	) {}
 
-	/** Replays a full recording: an (async) iterable of JSONL lines or parsed entries. */
+	/** Replays a full session: an (async) iterable of JSONL lines or parsed entries. */
 	public async replay(entries: Iterable<string | ReplayEntry> | AsyncIterable<string | ReplayEntry>): Promise<void> {
 		try {
 			for await (const entry of entries) {
@@ -161,7 +161,7 @@ export class StatsReplayer {
 		await this.replayEntry(JSON.parse(line) as ReplayEntry);
 	}
 
-	/** Feeds one recorded tick and runs a full collection round on it. */
+	/** Feeds one captured tick and runs a full collection round on it. */
 	public async replayEntry(entry: ReplayEntry): Promise<void> {
 		if (this._options.useVirtualTime !== false) {
 			this._originalNow ??= Date.now;

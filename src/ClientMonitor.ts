@@ -217,13 +217,21 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 recoveryFailedThresholdInMs: 5000,
                 recoveryFailedMinPliCount: 2,
             }),
-            sourceEncoderBottleneckDetector: detectorDefault(monitorConfig.sourceEncoderBottleneckDetector, {
-                captureFpsRatioThreshold: 0.5,
-                minSourceFps: 5,
+            outboundFrameSupplyDetector: detectorDefault(monitorConfig.outboundFrameSupplyDetector, {
+                fpsRatioThreshold: 0.8,
+                minProducedFps: 5,
+                windowInMs: 120_000,
+                minStarvingTimeInMs: 30_000,
                 encodeFpsRatioThreshold: 0.7,
                 encodeTimeBudgetRatio: 0.8,
                 cpuLimitationShareThreshold: 0.3,
                 minConsecutiveTicks: 2,
+            }),
+            inboundFrameSupplyDetector: detectorDefault(monitorConfig.inboundFrameSupplyDetector, {
+                fpsRatioThreshold: 0.8,
+                minProducedFps: 5,
+                windowInMs: 120_000,
+                minStarvingTimeInMs: 30_000,
             }),
             simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
                 createEvent: true,

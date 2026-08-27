@@ -42,7 +42,7 @@ export type DefaultScoreCalculatorSubtractionReason =
 	 */
 	'pixelated-video' |
 	/** Audible audio concealment share is significant. */
-	'audio-concealment' |
+	'audio-concealment' | // we are overpenalizing it becasue the pc is already penalized 
 	/** NetEQ is stretching/compressing a significant share of samples. */
 	'audio-time-stretch' |
 	/** The jitter buffer target delay adds noticeable latency. */
@@ -642,7 +642,7 @@ export class DefaultScoreCalculator {
 
 		// Rate-independent loss decay on the per-interval loss fraction —
 		// the absolute packet-count decay it replaces punished high-packet-rate
-		// streams harder for the same loss ratio. The decay is recorded as a
+		// streams harder for the same loss ratio. The decay is attributed as a
 		// track-level subtraction, so a loss-degraded track sample explains
 		// itself instead of hiding the cause inside a multiplier.
 		const fractionLost = inboundRtp.deltaFractionLost ?? 0;
@@ -741,7 +741,7 @@ export class DefaultScoreCalculator {
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
 		// Same rate-independent decay as the inbound side, on the loss fraction
-		// the far end reported for this stream — and recorded as a track-level
+		// the far end reported for this stream — and attributed as a track-level
 		// subtraction, because the loss happened to *this track's* media.
 		const fractionLost = outboundRtp.getRemoteInboundRtp()?.deltaFractionLost ?? 0;
 		const lossPenalty = Math.exp(-fractionLost / 0.03);

@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { SourceEncoderBottleneckDetector } from "../../src/detectors/SourceEncoderBottleneckDetector";
+import { OutboundFrameSupplyDetector } from "../../src/detectors/OutboundFrameSupplyDetector";
 import { MockClientMonitor, MockOutboundTrackMonitor } from "../helpers/detectorMocks";
 
 const CONFIG = {
-	captureFpsRatioThreshold: 0.5,
-	minSourceFps: 5,
+	fpsRatioThreshold: 0.9,
+	minProducedFps: 5,
+	windowInMs: 120_000,
+	minStarvingTimeInMs: 15_000,
 	encodeFpsRatioThreshold: 0.7,
 	encodeTimeBudgetRatio: 0.8,
 	cpuLimitationShareThreshold: 0.3,
@@ -15,12 +17,17 @@ function setup() {
 	const trackMonitor = new MockOutboundTrackMonitor('video');
 	const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-	clientMonitor.config.sourceEncoderBottleneckDetector = { ...CONFIG };
+	clientMonitor.config.outboundFrameSupplyDetector = { ...CONFIG };
 	trackMonitor.track.setSettings({ frameRate: 30 });
 
-	const detector = new SourceEncoderBottleneckDetector(trackMonitor as any);
+	const detector = new OutboundFrameSupplyDetector(trackMonitor as any);
+	// The first update only establishes the timestamp baseline — there is no
+	// interval to measure yet — so `n` judged intervals need `n + 1` updates.
+	const ticks = (count: number) => {
+		for (let i = 0; i <= count; ++i) detector.update();
+	};
 
-	return { detector, trackMonitor, clientMonitor };
+	return { detector, ticks, trackMonitor, clientMonitor };
 }
 
 function layer(options: {
@@ -47,107 +54,108 @@ function layer(options: {
 	};
 }
 
-describe('SourceEncoderBottleneckDetector', () => {
+describe('OutboundFrameSupplyDetector, encoder half', () => {
 	it('stays silent when source and encoder are both healthy', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
-		trackMonitor.setMediaSource({ sourceFps: 30, width: 1280, height: 720 });
+		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer()]);
-		detector.update();
-		detector.update();
+		ticks(2);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
-	it('blames capture when the source produces far fewer frames than configured', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
-
-		trackMonitor.setMediaSource({ sourceFps: 3, width: 1280, height: 720 });
-		trackMonitor.setOutboundRtps([layer({ fps: 3 })]);
-		detector.update();
-		detector.update();
-
-		const issue = clientMonitor.issueOfType('capture-bottleneck');
-
-		expect(issue).toBeDefined();
-		expect(issue?.payload.sourceFps).toBe(3);
-		expect(issue?.payload.expectedFps).toBe(30);
-		// The encoder is keeping up with what little it is given — not its fault.
-		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
-	});
-
 	it('blames the encoder when a healthy source outruns it', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
-		trackMonitor.setMediaSource({ sourceFps: 30, width: 1280, height: 720 });
+		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer({ fps: 10 })]);
-		detector.update();
-		detector.update();
+		ticks(2);
 
 		const issue = clientMonitor.issueOfType('encoder-bottleneck');
 
 		expect(issue).toBeDefined();
 		expect(issue?.payload.sourceFps).toBe(30);
 		expect(issue?.payload.encodedFps).toBe(10);
-		expect(clientMonitor.issueOfType('capture-bottleneck')).toBeUndefined();
+	});
+
+	it('does not blame the encoder for frames it was never handed', () => {
+		// A starving source is the capture half's story, and an encoder keeping
+		// up with a trickle is not at fault.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		trackMonitor.setMediaSource({ sourceFps: 3 });
+		trackMonitor.setOutboundRtps([layer({ fps: 3 })]);
+		ticks(3);
+
+		// The capture half has its own opinion about a source at 3fps; this is
+		// only about the encoder not being blamed for it.
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
 	});
 
 	it('blames the encoder on a sustained CPU limitation share', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
 		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer({ fps: 30, cpuShare: 0.9 })]);
-		detector.update();
-		detector.update();
+		ticks(2);
 
 		expect(clientMonitor.issueOfType('encoder-bottleneck')?.payload.cpuLimitationShare).toBeCloseTo(0.9);
 	});
 
 	it('blames the encoder when encoding one frame overruns its budget', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
 		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer({ fps: 30, encodeTimePerFrameInMs: 30 })]);
-		detector.update();
-		detector.update();
+		ticks(2);
 
 		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
 	});
 
 	it('requires the condition to persist', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
 		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer({ fps: 10 })]);
-		detector.update();
+		ticks(1);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
 	it('resolves once the encoder catches up', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
 		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer({ fps: 10 })]);
-		detector.update();
-		detector.update();
+		ticks(2);
 		expect(clientMonitor.activeIssues.size).toBe(1);
 
 		trackMonitor.setOutboundRtps([layer({ fps: 30 })]);
-		detector.update();
+		ticks(1);
 
 		expect(clientMonitor.activeIssues.size).toBe(0);
 	});
 
-	// A stopped or muted sender is not a bottleneck.
+	// A stopped, muted or paused sender is not encoding anything.
 	it('stays silent when the track is not live', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
+		const { ticks, trackMonitor, clientMonitor } = setup();
 
 		trackMonitor.track.readyState = 'ended';
-		trackMonitor.setMediaSource({ sourceFps: 0 });
+		trackMonitor.setMediaSource({ sourceFps: 30 });
 		trackMonitor.setOutboundRtps([layer({ fps: 0 })]);
-		detector.update();
-		detector.update();
+		ticks(2);
+
+		expect(clientMonitor.getIssues()).toHaveLength(0);
+	});
+
+	it('stays silent while the sender is paused', () => {
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		trackMonitor.paused = true;
+		trackMonitor.setMediaSource({ sourceFps: 30 });
+		trackMonitor.setOutboundRtps([layer({ fps: 0 })]);
+		ticks(2);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
@@ -156,12 +164,13 @@ describe('SourceEncoderBottleneckDetector', () => {
 		const trackMonitor = new MockOutboundTrackMonitor('audio');
 		const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-		clientMonitor.config.sourceEncoderBottleneckDetector = { ...CONFIG };
+		clientMonitor.config.outboundFrameSupplyDetector = { ...CONFIG };
 
-		const detector = new SourceEncoderBottleneckDetector(trackMonitor as any);
+		const detector = new OutboundFrameSupplyDetector(trackMonitor as any);
 
 		trackMonitor.setMediaSource({ sourceFps: 0 });
 		trackMonitor.setOutboundRtps([layer({ fps: 0 })]);
+		detector.update();
 		detector.update();
 		detector.update();
 

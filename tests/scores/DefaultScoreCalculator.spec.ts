@@ -8,7 +8,8 @@ const noDetectorsConfig = {
     dryOutboundTrackDetector: null,
     captureFailureDetector: null,
     codecChangeDetector: null,
-    sourceEncoderBottleneckDetector: null,
+    outboundFrameSupplyDetector: null,
+    inboundFrameSupplyDetector: null,
     simulcastLayerDetector: null,
     videoResolutionChangeDetector: null,
 };

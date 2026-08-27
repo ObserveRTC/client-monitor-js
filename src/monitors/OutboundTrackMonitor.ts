@@ -2,7 +2,7 @@ import { Detectors } from "../detectors/Detectors";
 import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector";
 import { CaptureFailureDetector } from "../detectors/CaptureFailureDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
-import { SourceEncoderBottleneckDetector } from "../detectors/SourceEncoderBottleneckDetector";
+import { OutboundFrameSupplyDetector } from "../detectors/OutboundFrameSupplyDetector";
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { OutboundTrackSample } from "../schema/ClientSample";
@@ -98,8 +98,8 @@ export class OutboundTrackMonitor {
 
 		if (this.kind === 'audio') this.calculatedScore.weight = 1;
 		else if (this.kind === 'video') {
-			if (monitorConfig.sourceEncoderBottleneckDetector !== null) {
-				this.detectors.add(new SourceEncoderBottleneckDetector(this));
+			if (monitorConfig.outboundFrameSupplyDetector !== null) {
+				this.detectors.add(new OutboundFrameSupplyDetector(this));
 			}
 			if (monitorConfig.simulcastLayerDetector !== null) {
 				this.detectors.add(new SimulcastLayerDetector(this));

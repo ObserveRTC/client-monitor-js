@@ -91,7 +91,18 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		this.deltaTotalAudioEnergy = positiveDelta(stats.totalAudioEnergy, this.totalAudioEnergy);
 		this.deltaSamplesDuration = positiveDelta(stats.totalSamplesDuration, this.totalSamplesDuration);
 
-		this.sourceFps = this.deltaFrames !== undefined ? this.deltaFrames / elapsedInSec : undefined;
+		// Deliberately NOT `deltaFrames / elapsed`. `positiveDelta` clamps a
+		// counter that went backwards to 0, and a source whose counter restarted
+		// — a replaced track, a re-acquired device — would then read as 0 fps,
+		// which is indistinguishable from a camera that has died. A restart is
+		// not a measurement, so the interval yields no frame rate at all.
+		const framesDelta = stats.frames !== undefined && this.frames !== undefined
+			? stats.frames - this.frames
+			: undefined;
+
+		this.sourceFps = framesDelta !== undefined && 0 <= framesDelta
+			? framesDelta / elapsedInSec
+			: undefined;
 
 		this.rmsAudioLevel = this.deltaTotalAudioEnergy !== undefined &&
 			this.deltaSamplesDuration !== undefined &&

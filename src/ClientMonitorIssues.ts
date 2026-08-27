@@ -22,7 +22,8 @@ import {
 import {
     CaptureBottleneckIssuePayload,
     EncoderBottleneckIssuePayload,
-} from "./detectors/SourceEncoderBottleneckDetector";
+} from "./detectors/OutboundFrameSupplyDetector";
+import { DecoderBottleneckIssuePayload } from "./detectors/InboundFrameSupplyDetector";
 import {
     CaptureTrackEndedIssuePayload,
     SilentAudioSourceIssuePayload,
@@ -31,6 +32,55 @@ import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
 import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
+
+/**
+ * The payload both frame-supply detectors raise. They ask the same question of
+ * different things — is whatever supplies this track's frames delivering what it
+ * should? — so `capture-bottleneck` and `decoder-bottleneck` report it the same
+ * way, and it is defined here rather than in either detector.
+ */
+export type FrameSupplyIssuePayload = {
+	peerConnectionId: string;
+	trackId: string;
+	/**
+	 * Frames per second whatever supplies this track's frames actually
+	 * delivered: the capture device on an outbound track, the decoder on an
+	 * inbound one.
+	 */
+	sourceFps?: number;
+	/**
+	 * What it should have delivered: `getSettings().frameRate` on an outbound
+	 * track, the rate frames actually arrived at on an inbound one.
+	 */
+	expectedFps?: number;
+	sourceWidth?: number;
+	sourceHeight?: number;
+	/**
+	 * How much of the rolling window was spent starving — the summed duration of
+	 * the intervals that fell short, not a consecutive run and not a tick count.
+	 * A supply that is failing rather than merely busy interleaves healthy
+	 * intervals with starving ones, so a consecutive rule misses it by
+	 * construction; counting ticks instead would mean something different at
+	 * every collecting period.
+	 */
+	starvingTimeInMs: number;
+	/** Width of that window, in seconds. */
+	windowSeconds?: number;
+	/** Lowest frame rate inside the window — the depth of the dip. */
+	worstSourceFps?: number;
+	/** How long ago the oldest starving interval still in the window happened. */
+	msSinceFirstStarvingTick?: number;
+	/**
+	 * The track's own view of itself. On a camera degrading in place both read
+	 * healthy — `"live"` and `false` — while frames go missing, and that
+	 * combination is the signature: an unplugged or muted device reports
+	 * `ended`/`muted` instead, so a reader seeing "live, unmuted, no frames"
+	 * knows the fault is upstream.
+	 */
+	trackReadyState?: string;
+	trackMuted?: boolean;
+	durationInMs?: number;
+}
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -75,6 +125,7 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
     | RaisedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
     | RaisedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | RaisedClientIssue<DecoderBottleneckIssuePayload>     & { type: 'decoder-bottleneck' }
     | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | RaisedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
     | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
@@ -108,6 +159,7 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
     | ResolvedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
     | ResolvedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | ResolvedClientIssue<DecoderBottleneckIssuePayload>     & { type: 'decoder-bottleneck' }
     | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | ResolvedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
     | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
@@ -145,6 +197,7 @@ export function isClientMonitorIssue(
         case 'keyframe-storm':
         case 'video-recovery-failed':
         case 'capture-bottleneck':
+        case 'decoder-bottleneck':
         case 'encoder-bottleneck':
         case 'capture-track-ended':
         case 'silent-audio-source':
