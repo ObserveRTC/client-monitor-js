@@ -1171,13 +1171,15 @@ Based on Round Trip Time (RTT), jitter and packet loss. RTT and jitter are penal
 -   30-100ms average jitter: -1.0 point
 -   \>100ms average jitter: -2.0 points
 
-(The same `high-jitter` key also appears on inbound **video tracks**, where it is a normalized 0–1 penalty on the track's own jitter — see the track scores below.)
-
 **Packet Loss Penalties (`high-packetloss`)** — the per-interval `deltaFractionLost`, **averaged** across streams (a raw sum would read ten streams at 1% each as 10%):
 
 -   1-5% loss: -1.0 point
 -   5-20% loss: -2.0 points
 -   > 20% loss: -5.0 points
+
+**Loss and jitter are attributed here and nowhere else.** They are properties of the *path*, shared by every stream on the transport, so track scores do not subtract for them — see [Track Score Calculations](#track-score-calculations).
+
+**Only streams carrying media measure the path.** Both averages skip any stream that shows no evidence of carrying media in the interval: under `MIN_PATH_SAMPLE_BITRATE` (8 kbps) *and* under `MIN_PATH_SAMPLE_PACKETS` (25 packets) *and* delivering no frames. An SFU's bandwidth-probation stream — mediasoup sends one on `mid: "probator"` — is a handful of deliberately discardable packets with no frames, and its loss and jitter figures are not measurements of anything: observed at ~2 kbps with ~50% "loss" and ~490 ms "jitter" while the real streams beside it ran at 0% loss and 2 ms jitter. Averaged in with equal weight it used to pin the connection at the minimum score for an entire session.
 
 #### Normalized penalty ramps
 
@@ -1191,9 +1193,11 @@ The activation/saturation constants are `public static readonly` on `DefaultScor
 
 #### Track Score Calculations
 
+**Track scores measure what the user perceived, not what the network did.** Freezes, low and volatile fps, dropped frames, pixelation, concealment, time-stretch and jitter-buffer delay are all measurements of damage. Packet loss and jitter are *causes*, they are properties of the path rather than of any one track, and they are attributed once on the peer connection — so no track penalty subtracts for them. A server attributing a degradation joins a track's symptoms to its peer connection's path reasons, which arrive in the same sample.
+
 **Inbound Audio Track Score:**
 
--   Based on normalized bitrate and the per-interval loss fraction (`deltaFractionLost` — rate-independent, unlike an absolute packet count)
+-   Based on normalized bitrate. **Packet loss is not subtracted here** — it belongs to the peer connection; what the loss *did* to the audio is measured directly as concealment and time-stretch below
 -   When the audio detectors run, their windowed, hysteresis-guarded verdicts **gate** additional penalties, and the current per-tick metric **scales** them as a normalized `0..1` ramp starting at the detector's own configured threshold:
     -   `audio-concealment` issue active → scaled by `concealmentRate` (detector `onThreshold` → 0.10)
     -   `audio-jitter-buffer-stress` issue active → `high-jitter-buffer-delay`, scaled by `jitterBufferTargetDelayInMs` (detector `targetDelayThresholdInMs` → 500 ms)
@@ -1203,13 +1207,11 @@ The activation/saturation constants are `public static readonly` on `DefaultScor
 
 ```javascript
 normalizedBitrate = log10(max(bitrate, MIN_AUDIO_BITRATE) / MIN_AUDIO_BITRATE) / NORMALIZATION_FACTOR;
-lossPenalty = exp(-deltaFractionLost / 0.03);
-score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty) - issuePenalties;
+score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
 ```
 
 **Inbound Video Track Score:**
 
--   Jitter beyond one sampling interval (`high-jitter`, normalized 0–1): free below 20 ms (one interval at the 90 kHz video clock), saturating at 100 ms
 -   FPS volatility (`volatile-fps`, normalized 0–1): activation 0.1, saturation 0.2 — *skipped for screen share*
 -   Sustained low fps while frames are flowing (`low-fps`, ewma fps < 10): -1.0 — *skipped for screen share*
 -   Dropped frames (`dropped-video-frames`, normalized 0–1): activation 10%, saturation 20% of frames dropped instead of rendered

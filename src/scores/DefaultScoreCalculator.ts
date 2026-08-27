@@ -42,7 +42,7 @@ export type DefaultScoreCalculatorSubtractionReason =
 	 */
 	'pixelated-video' |
 	/** Audible audio concealment share is significant. */
-	'audio-concealment' | // we are overpenalizing it becasue the pc is already penalized 
+	'audio-concealment' | // we are overpenalizing it becasue the pc is already penalized
 	/** NetEQ is stretching/compressing a significant share of samples. */
 	'audio-time-stretch' |
 	/** The jitter buffer target delay adds noticeable latency. */
@@ -118,6 +118,28 @@ export class DefaultScoreCalculator {
 	/** Fallback activation when the jitter-buffer-stress detector config is absent. */
 	public static readonly DEFAULT_JITTER_BUFFER_TARGET_DELAY_ACTIVATION_IN_MS = 200;
 
+	/**
+	 * Traffic a stream has to carry in an interval before its loss and jitter
+	 * count as a measurement of the path. Set an order of magnitude below real
+	 * media and an order of magnitude above a probe stream: observed traffic was
+	 * ~2 kbps / 8 packets for a probation stream against ≥22 kbps / ≥250 packets
+	 * for every real audio and video stream on the same transport.
+	 */
+	public static readonly MIN_PATH_SAMPLE_BITRATE = 8_000;
+	public static readonly MIN_PATH_SAMPLE_PACKETS = 25;
+
+	/**
+	 * Whether this stream carried enough in the interval for its ratios to mean
+	 * anything. Any one kind of evidence is enough — a stream delivering frames
+	 * is real whatever its bitrate, and a codec in DTX can fall under the
+	 * bitrate floor while still sending plenty of packets.
+	 */
+	public static carriesMedia(bitrate?: number, deltaPackets?: number, deltaFrames?: number): boolean {
+		return DefaultScoreCalculator.MIN_PATH_SAMPLE_BITRATE <= (bitrate ?? 0) ||
+			DefaultScoreCalculator.MIN_PATH_SAMPLE_PACKETS <= (deltaPackets ?? 0) ||
+			0 < (deltaFrames ?? 0);
+	}
+
 	public currentReasons: DefaultScoreCalculatorSubtractions = {};
 	public totalReasons: DefaultScoreCalculatorSubtractions = {};
 
@@ -142,39 +164,32 @@ export class DefaultScoreCalculator {
 		let clientTotalWeight = 0;
 		this.currentReasons = {};
 
+		// The peer connection contributes as a *sibling* of its tracks, not as a
+		// multiplier over them. It used to scale the weighted track score by
+		// `pcScore / 5`, which charged every path problem twice: once inside the
+		// track scores and again as the factor. With the network penalties now
+		// living only on the peer connection (see below), one weighted average
+		// over peer connections and tracks counts each thing exactly once.
 		for (const pcMonitor of clientMonitor.peerConnections) {
-			if (pcMonitor.calculatedStabilityScore.value === undefined) continue;
+			const pcScore = pcMonitor.calculatedStabilityScore;
 
-			let trackTotalScore = 0;
-			let trackTotalWeight = 0;
-			let noTrack = true;
+			if (pcScore.value === undefined) continue;
+
+			clientTotalScore += pcScore.value * pcScore.weight;
+			clientTotalWeight += pcScore.weight;
+
+			accumulateSubtractions(this.currentReasons, pcMonitor.scoreReasons ?? {});
 
 			for (const trackMonitor of pcMonitor.tracks) {
 				const trackScore = trackMonitor.calculatedScore;
 
 				if (trackScore.value === undefined) continue;
 
-				trackTotalScore += trackScore.value * trackScore.weight;
-				trackTotalWeight += trackScore.weight;
-				noTrack = false;
+				clientTotalScore += trackScore.value * trackScore.weight;
+				clientTotalWeight += trackScore.weight;
 
 				accumulateSubtractions(this.currentReasons, trackScore.reasons ?? {});
 			}
-
-
-			const weightedTrackScore = noTrack ? DefaultScoreCalculator.MAX_SCORE : trackTotalScore / Math.max(trackTotalWeight, 1);
-			const normalizedPcScore = Math.max(
-				DefaultScoreCalculator.MIN_SCORE,
-				pcMonitor.calculatedStabilityScore.value
-			) / DefaultScoreCalculator.MAX_SCORE;
-			const totalPcScore = weightedTrackScore * normalizedPcScore;
-
-			// console.warn('trackTotalScore', trackTotalScore, 'trackTotalWeight', trackTotalWeight, 'weightedTrackScore', weightedTrackScore, 'normalizedPcScore', normalizedPcScore, pcMonitor.attachments?.direaction);
-
-			clientTotalScore += totalPcScore * pcMonitor.calculatedStabilityScore.weight;
-			clientTotalWeight += pcMonitor.calculatedStabilityScore.weight;
-
-			accumulateSubtractions(this.currentReasons, pcMonitor.scoreReasons ?? {});
 		}
 
 		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
@@ -198,12 +213,23 @@ export class DefaultScoreCalculator {
 		// reads both as 10% — the average keeps the penalty about the path.
 		// Loss uses the per-interval delta fraction on both directions, so the
 		// penalty reflects the current interval, not lifetime accumulation.
+		//
+		// Streams carrying no media are excluded, because their ratios are not
+		// measurements. An SFU's bandwidth-probation stream (mediasoup sends one
+		// on `mid: "probator"`) delivers a handful of deliberately discardable
+		// packets per interval and no frames at all: observed at ~2 kbps with
+		// ~50% "loss" and ~490 ms "jitter" while the real streams on the same
+		// transport ran at 0% loss and 2 ms jitter. Averaged in with equal
+		// weight it pinned the connection at the minimum score for a whole
+		// session.
 		let jitterSumInSec = 0;
 		let jitterMeasurements = 0;
 		let fractionLostSum = 0;
 		let fractionLostMeasurements = 0;
 
 		for (const rtp of pcMonitor.inboundRtps) {
+			if (!DefaultScoreCalculator.carriesMedia(rtp.bitrate, rtp.deltaPacketsReceived, rtp.deltaFramesReceived)) continue;
+
 			if (rtp.jitter !== undefined) {
 				jitterSumInSec += rtp.jitter;
 				++jitterMeasurements;
@@ -214,6 +240,10 @@ export class DefaultScoreCalculator {
 			}
 		}
 		for (const rtp of pcMonitor.remoteInboundRtps) {
+			// The far end reports no byte counter, so packets are the only
+			// evidence of traffic available on the send side.
+			if (!DefaultScoreCalculator.carriesMedia(undefined, rtp.deltaPacketsReceived, undefined)) continue;
+
 			if (rtp.jitter !== undefined) {
 				jitterSumInSec += rtp.jitter;
 				++jitterMeasurements;
@@ -341,22 +371,6 @@ export class DefaultScoreCalculator {
 		// penalties below are noise for it — same reasoning as the outbound
 		// side skipping bitrate volatility for screen share.
 		const isScreenShare = trackMonitor.isScreenShare;
-
-		// Jitter below one sampling interval (20 ms at the 90 kHz video clock)
-		// is absorbed by design; beyond it the penalty ramps to 1 at the
-		// saturation point.
-		if (inboundRtp.jitter !== undefined) {
-			const jitterInMs = inboundRtp.jitter * 1000;
-			const jitterPenalty = this._normalizedPenalty(
-				jitterInMs,
-				DefaultScoreCalculator.INBOUND_VIDEO_JITTER_ACTIVATION_IN_MS,
-				DefaultScoreCalculator.INBOUND_VIDEO_JITTER_SATURATION_IN_MS,
-			);
-
-			if (0 < jitterPenalty) {
-				subtractions['high-jitter'] = jitterPenalty;
-			}
-		}
 
 		if (!isScreenShare && inboundRtp.framesPerSecond && inboundRtp.ewmaFps && inboundRtp.lastNFramesPerSec.length >= 2) {
 			const n = inboundRtp.lastNFramesPerSec.length;
@@ -640,19 +654,7 @@ export class DefaultScoreCalculator {
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
-		// Rate-independent loss decay on the per-interval loss fraction —
-		// the absolute packet-count decay it replaces punished high-packet-rate
-		// streams harder for the same loss ratio. The decay is attributed as a
-		// track-level subtraction, so a loss-degraded track sample explains
-		// itself instead of hiding the cause inside a multiplier.
-		const fractionLost = inboundRtp.deltaFractionLost ?? 0;
-		const lossPenalty = Math.exp(-fractionLost / 0.03);
 		const baseScore = Math.min(DefaultScoreCalculator.MAX_SCORE, 5 * normalizedBitrate);
-		const lossPenaltyPoints = baseScore * (1 - lossPenalty);
-
-		if (0.05 <= lossPenaltyPoints) {
-			subtractions['high-packetloss'] = this._getRoundedScore(lossPenaltyPoints);
-		}
 
 		// When the audio detectors run, their windowed, hysteresis-guarded
 		// verdicts are more robust than any per-tick reading — the issue gates
@@ -740,17 +742,7 @@ export class DefaultScoreCalculator {
 			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
 		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
 
-		// Same rate-independent decay as the inbound side, on the loss fraction
-		// the far end reported for this stream — and attributed as a track-level
-		// subtraction, because the loss happened to *this track's* media.
-		const fractionLost = outboundRtp.getRemoteInboundRtp()?.deltaFractionLost ?? 0;
-		const lossPenalty = Math.exp(-fractionLost / 0.03);
 		const baseScore = Math.min(DefaultScoreCalculator.MAX_SCORE, 5 * normalizedBitrate);
-		const lossPenaltyPoints = baseScore * (1 - lossPenalty);
-
-		if (0.05 <= lossPenaltyPoints) {
-			subtractions['high-packetloss'] = this._getRoundedScore(lossPenaltyPoints);
-		}
 
 		const score = Math.max(
 			DefaultScoreCalculator.MIN_SCORE,

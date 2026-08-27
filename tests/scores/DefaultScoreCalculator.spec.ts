@@ -152,7 +152,7 @@ describe('DefaultScoreCalculator', () => {
         it('penalizes a jittery path as high-jitter without an rtt penalty', () => {
             const pc = createPcMock({
                 avgRttInSec: 0.05,
-                remoteInboundRtps: [ { jitter: 0.05, deltaFractionLost: 0 } ],
+                remoteInboundRtps: [ { jitter: 0.05, deltaFractionLost: 0, deltaPacketsReceived: 250 } ],
             });
 
             ticks(pc);
@@ -168,15 +168,51 @@ describe('DefaultScoreCalculator', () => {
             // the old sum (12%) would have been two tiers
             const pc = createPcMock({
                 remoteInboundRtps: [
-                    { jitter: 0, deltaFractionLost: 0.04 },
-                    { jitter: 0, deltaFractionLost: 0.04 },
-                    { jitter: 0, deltaFractionLost: 0.04 },
+                    { jitter: 0, deltaFractionLost: 0.04, deltaPacketsReceived: 250 },
+                    { jitter: 0, deltaFractionLost: 0.04, deltaPacketsReceived: 250 },
+                    { jitter: 0, deltaFractionLost: 0.04, deltaPacketsReceived: 250 },
                 ],
             });
 
             ticks(pc);
 
             expect((pc.calculatedStabilityScore as any).reasons['high-packetloss']).toBe(1.0);
+        });
+
+        it('ignores streams that carry no media, whatever their ratios say', () => {
+            // An SFU's bandwidth-probation stream: a handful of deliberately
+            // discardable packets, no frames, ~2 kbps — and therefore a loss
+            // ratio and a jitter figure that are not measurements of anything.
+            // Averaged in with equal weight it used to pin the whole connection
+            // at the minimum score.
+            const pc = createPcMock({
+                inboundRtps: [
+                    { jitter: 0.002, deltaFractionLost: 0, bitrate: 500_000, deltaPacketsReceived: 344, deltaFramesReceived: 150 },
+                    { jitter: 0.493, deltaFractionLost: 0.5, bitrate: 1_900, deltaPacketsReceived: 8, deltaFramesReceived: 0 },
+                ],
+            });
+
+            ticks(pc);
+
+            const reasons = (pc.calculatedStabilityScore as any).reasons;
+
+            expect(reasons['high-jitter']).toBeUndefined();
+            expect(reasons['high-packetloss']).toBeUndefined();
+        });
+
+        it('still judges a thin stream that is delivering frames', () => {
+            const pc = createPcMock({
+                inboundRtps: [
+                    { jitter: 0.12, deltaFractionLost: 0.08, bitrate: 2_000, deltaPacketsReceived: 5, deltaFramesReceived: 3 },
+                ],
+            });
+
+            ticks(pc);
+
+            const reasons = (pc.calculatedStabilityScore as any).reasons;
+
+            expect(reasons['high-jitter']).toBe(2.0);
+            expect(reasons['high-packetloss']).toBe(2.0);
         });
 
         it('produces a smoothed score value after enough ticks', () => {
@@ -215,16 +251,17 @@ describe('DefaultScoreCalculator', () => {
             expect(track.calculatedScore.value).toBe(5.0);
         });
 
-        it('decays on the per-interval loss fraction when no detector issue is active', () => {
+        it('does not subtract packet loss — that belongs to the peer connection', () => {
+            // Loss is a property of the path, shared by every stream on the
+            // transport, so it is attributed once on the peer connection. What
+            // the loss *did* to this audio is measured directly, and penalized,
+            // as concealment and time-stretch below.
             const track = createAudioTrackMock({ inboundRtp: { deltaFractionLost: 0.03 } });
 
             calculator._calculateInboundAudioTrackScore(track);
 
-            // exp(-0.03/0.03) ≈ 0.37 -> ≈ 1.84
-            expect(track.calculatedScore.value!).toBeLessThan(2.0);
-            expect(track.calculatedScore.value!).toBeGreaterThan(1.5);
-            // the decay is attributed on the track itself
-            expect((track.calculatedScore as any).reasons['high-packetloss']).toBeGreaterThan(3.0);
+            expect(track.calculatedScore.value).toBe(5.0);
+            expect((track.calculatedScore as any).reasons['high-packetloss']).toBeUndefined();
         });
 
         it('records no loss reason for clean audio', () => {
@@ -317,13 +354,17 @@ describe('DefaultScoreCalculator', () => {
             expect((track.calculatedScore as any).reasons['high-packetloss']).toBeUndefined();
         });
 
-        it('attributes remote loss on this stream as a track-level reason', () => {
+        it('does not subtract remote loss — that belongs to the peer connection', () => {
+            // The send side has no perception to measure, so a track score here
+            // is what we chose to send; what the path then did to it is the
+            // connection's story, and charging it twice took this track to ~0
+            // on a path measured at 0% loss for 95% of a session.
             const track = createOutboundAudioTrackMock({ deltaFractionLost: 0.03 });
 
             calculator._calculateOutboundAudioTrackScore(track);
 
-            expect(track.calculatedScore.value!).toBeLessThan(2.0);
-            expect((track.calculatedScore as any).reasons['high-packetloss']).toBeGreaterThan(3.0);
+            expect(track.calculatedScore.value).toBe(5.0);
+            expect((track.calculatedScore as any).reasons['high-packetloss']).toBeUndefined();
         });
     });
 
@@ -522,18 +563,17 @@ describe('DefaultScoreCalculator', () => {
             }
         });
 
-        it('penalizes jitter only beyond one sampling interval, normalized to 1', () => {
-            const clean = createVideoTrackMock({ jitter: 0.015 }); // 15ms < 20ms
-            const jittery = createVideoTrackMock({ jitter: 0.04 }); // (40 - 20) / (100 - 20) = 0.25
-            const saturated = createVideoTrackMock({ jitter: 0.25 }); // 250ms >= 100ms
+        it('does not subtract jitter — that belongs to the peer connection', () => {
+            // Same rule as loss: jitter is a path property. What it does to the
+            // picture is measured as freezes, volatile fps and dropped frames.
+            const jittery = createVideoTrackMock({ jitter: 0.04 });
+            const saturated = createVideoTrackMock({ jitter: 0.25 });
 
-            ticks(clean, 1);
             ticks(jittery, 1);
             ticks(saturated, 1);
 
-            expect((clean.calculatedScore as any).reasons['high-jitter']).toBeUndefined();
-            expect((jittery.calculatedScore as any).reasons['high-jitter']).toBe(0.25);
-            expect((saturated.calculatedScore as any).reasons['high-jitter']).toBe(1.0);
+            expect((jittery.calculatedScore as any).reasons['high-jitter']).toBeUndefined();
+            expect((saturated.calculatedScore as any).reasons['high-jitter']).toBeUndefined();
         });
 
         it('normalizes the volatile-fps penalty from the activation threshold', () => {

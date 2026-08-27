@@ -1,5 +1,19 @@
 ## 4.7.0
 
+### Score attribution: the network is the connection's problem, not the track's
+
+Three changes that together stop the same network condition being charged up to three times. Measured on a captured session whose real streams ran at 0.00% loss and 2 ms jitter throughout: mean client score **2.93 → 4.86**, and the share of samples below 3.0 went from **85% to 0%**.
+
+-   **Streams that carry no media no longer measure the path.** `_calculatePeerConnectionStabilityScore` averages jitter and loss across streams, unweighted, so a stream with a handful of packets counted as much as one carrying half a megabit. An SFU's bandwidth-probation stream (mediasoup sends one on `mid: "probator"`) delivers deliberately discardable packets and no frames at all: observed at ~2 kbps with ~50% "loss" and ~490 ms "jitter" beside real streams at 0% and 2 ms. Averaged in with equal weight it produced `high-jitter: 2` **and** `high-packetloss: 2` on **99% of samples**, pinning an otherwise healthy connection at the minimum score for the entire session.
+
+    A stream now has to show evidence of carrying media before its ratios count — `MIN_PATH_SAMPLE_BITRATE` (8 kbps), `MIN_PATH_SAMPLE_PACKETS` (25 per interval), or any frames delivered. Any one is enough, so a codec in DTX or a thin-but-real video stream still counts. On the captured session this alone moved the peer connection's mean score from 1.08 to 4.92.
+
+-   **Track scores no longer subtract for packet loss or jitter.** Loss and jitter are properties of the *path*, shared by every stream on the transport, and they are already attributed on the peer connection. Charging them again on the track meant a single bad interval could take a track to the floor: an outbound audio track scored **0.03** with `high-packetloss: 4.42` on a path whose loss was 0% at the 95th percentile. The decay was also far steeper than audio warrants — `exp(-loss / 0.03)` costs 28% of the score at 1% loss and 63% at 3%, where PLC and FEC make both inaudible.
+
+    Tracks keep every penalty that measures what the user actually perceived — freezes, low and volatile fps, dropped frames, pixelation, audio concealment, time-stretch, jitter-buffer delay. Those are measurements of the damage; loss and jitter were inferences about its cause. **`high-packetloss` and `high-jitter` no longer appear on track score reasons**; a server attributing a degradation joins the track's symptoms to its peer connection's path reasons, which it has in the same sample.
+
+-   **The peer connection score no longer multiplies its tracks' scores.** `_calculateClientMonitorScore` computed `weightedTrackScore × (pcScore / 5)`, so a path penalty was applied once inside each track score and again as a factor over all of them. The client score is now one weighted average over peer connections *and* tracks as siblings, counting each contribution exactly once. Weights are unchanged (peer connection 1, audio track 1, video track 2).
+
 ### `SourceEncoderBottleneckDetector` becomes `OutboundFrameSupplyDetector`, with an inbound counterpart
 
 **Breaking config change:** `sourceEncoderBottleneckDetector` is gone, replaced by `outboundFrameSupplyDetector` and `inboundFrameSupplyDetector` — one block per attachment point. Code that passed `sourceEncoderBottleneckDetector` (including `: null` to disable) must be updated; TypeScript flags it, JavaScript does not.
