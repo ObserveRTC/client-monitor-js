@@ -2,22 +2,16 @@
 import { OutboundFrameSupplyDetector } from "../../src/detectors/OutboundFrameSupplyDetector";
 
 /**
- * Tick sequences are expressed as frames-per-tick, the way the ground truth
- * reads: a 30fps camera on a 5s collecting period delivers 150.
+ * Sequences are frames-per-tick, the way the ground truth reads: a 30fps camera
+ * on a 5s collecting period delivers 150.
  */
 const TICK_MS = 5000;
 const EXPECTED_FPS = 30;
 const NOMINAL = 150;
 
 const CONFIG = {
-	fpsRatioThreshold: 0.9,
-	minProducedFps: 5,
-	windowInMs: 120_000,
-	minStarvingTimeInMs: 15_000,
-	encodeFpsRatioThreshold: 0.7,
-	encodeTimeBudgetRatio: 0.8,
-	cpuLimitationShareThreshold: 0.3,
-	minConsecutiveTicks: 2,
+	durationInMs: 15_000,
+	captureFpsRatioThreshold: 0.9,
 };
 
 type Issue = { type: string; payload: Record<string, unknown> };
@@ -56,13 +50,11 @@ function createHarness() {
 	};
 
 	const trackMonitor = {
-		direction: 'outbound' as const,
 		kind: 'video',
 		isScreenShare: false,
 		paused: false,
 		track,
 		getMediaSource: () => mediaSource,
-		// undefined: the encoder half has its own spec
 		getHighestLayer: () => undefined,
 		getPeerConnection: () => ({ peerConnectionId: 'pc-1', parent: clientMonitor }),
 	};
@@ -74,34 +66,23 @@ function createHarness() {
 
 	return {
 		detector, raised, resolved, track, settings, mediaSource, clientMonitor, trackMonitor,
-		/** Advance one tick delivering `framesThisTick` frames over `elapsedMs`. */
+		/** One tick delivering `framesThisTick` frames over `elapsedMs`. */
 		tick(framesThisTick: number, elapsedMs = TICK_MS) {
 			now += elapsedMs;
 			mediaSource.timestamp = now;
 			// What MediaSourceMonitor derives: the frame counter differenced
-			// against measured elapsed time, and `undefined` when it went
-			// backwards, because a restart is not a measurement.
+			// against measured elapsed time, undefined when it went backwards.
 			mediaSource.sourceFps = counterReset ? undefined : framesThisTick / (elapsedMs / 1000);
 			counterReset = false;
-			jest.setSystemTime(now);
 			detector.update();
 		},
-		/** Reset the counter the way a replaced track does. */
 		replaceTrack() { counterReset = true; },
-		captureIssues() { return raised.filter(i => i.type === 'capture-bottleneck'); },
+		issues() { return raised.filter(i => i.type === 'capture-bottleneck'); },
 	};
 }
 
 describe('OutboundFrameSupplyDetector, capture half', () => {
-	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(0);
-	});
-	afterEach(() => jest.useRealTimers());
-
-	it('stays silent through a steady metronomic source', () => {
-		// A healthy camera holds 149-151 frames per 5s tick indefinitely: the
-		// jitter is real but it never approaches the ratio.
+	it('stays silent through a steady source', () => {
 		const h = createHarness();
 
 		for (let i = 0; i < 60; ++i) h.tick(i % 7 === 0 ? 149 : NOMINAL);
@@ -109,10 +90,10 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 		expect(h.raised).toHaveLength(0);
 	});
 
-	it('catches the real interleaved timeline that a consecutive-run rule cannot', () => {
-		// A degrading camera at a 5s collecting period: the starving intervals
-		// are separated by healthy ones, which is exactly why counting a
-		// consecutive run misses the whole degradation.
+	it('catches a camera degrading in bursts, while it is still delivering', () => {
+		// A degrading camera dips and recovers rather than falling off a cliff,
+		// so most individual ticks look fine. The average over the window does
+		// not: 150, 97 and 123 in one window is 24.7fps against a configured 30.
 		const h = createHarness();
 		const dips = new Map([[745, 132], [755, 97], [760, 123], [795, 132], [830, 133]]);
 
@@ -121,85 +102,59 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 		for (let t = 700; t <= 860; t += 5) {
 			h.tick(dips.get(t) ?? NOMINAL);
 
-			if (firedAtSecond === undefined && 0 < h.captureIssues().length) firedAtSecond = t;
+			if (firedAtSecond === undefined && 0 < h.issues().length) firedAtSecond = t;
 		}
 
-		// the third starving interval, ~99s before this camera stops delivering
-		// entirely, and while it is still delivering something
 		expect(firedAtSecond).toBe(760);
 
-		const payload = h.captureIssues()[0]!.payload;
+		const payload = h.issues()[0]!.payload;
 
 		expect(payload.expectedFps).toBe(30);
-		// three 5s intervals fell short, spread across 745..760
-		expect(payload.starvingTimeInMs).toBe(15_000);
-		// the deepest dip so far: 97 frames over 5s
-		expect(payload.worstSourceFps).toBeCloseTo(19.4, 5);
-		// the three ticks span 745..760, and never three in a row
-		expect(payload.msSinceFirstStarvingTick).toBe(15_000);
+		expect(payload.sourceFps as number).toBeCloseTo(24.67, 1);
+		expect(payload.averagedOverInMs).toBe(15_000);
 		// the signature of this failure: the track still looks perfectly healthy
 		expect(payload.trackReadyState).toBe('live');
 		expect(payload.trackMuted).toBe(false);
 	});
 
-	it('raises after the same starving time whatever the collecting period', () => {
-		// The reason the threshold is a duration: a tick count would mean six
-		// seconds at 2s collection and thirty at 10s, so the same config would
-		// judge two deployments differently.
-		const starvingMsBeforeRaising = (tickMs: number) => {
+	it('judges the same elapsed time whatever the collecting period', () => {
+		// The window is a duration, so the same degradation is judged after the
+		// same number of seconds at 1s, 2s or 5s collection.
+		const elapsedBeforeRaising = (tickMs: number) => {
 			const h = createHarness();
-			const healthy = Math.round(EXPECTED_FPS * tickMs / 1000);
-			let starving = 0;
+			const halfRate = Math.round(EXPECTED_FPS * tickMs / 1000 * 0.5);
+			let elapsed = 0;
 
-			for (let i = 0; i < 5; ++i) h.tick(healthy, tickMs);
+			h.tick(Math.round(EXPECTED_FPS * tickMs / 1000), tickMs); // baseline
 
-			while (h.captureIssues().length === 0 && starving < 60_000) {
-				h.tick(Math.round(healthy * 0.5), tickMs);
-				starving += tickMs;
+			while (h.issues().length === 0 && elapsed < 60_000) {
+				h.tick(halfRate, tickMs);
+				elapsed += tickMs;
 			}
 
-			return starving;
+			return elapsed;
 		};
 
-		expect(starvingMsBeforeRaising(1000)).toBe(15_000);
-		// 2s intervals cannot land exactly on 15s; the first one past it wins
-		expect(starvingMsBeforeRaising(2000)).toBe(16_000);
-		expect(starvingMsBeforeRaising(5000)).toBe(15_000);
+		expect(elapsedBeforeRaising(1000)).toBe(15_000);
+		expect(elapsedBeforeRaising(5000)).toBe(15_000);
+		// 2s intervals cannot land exactly on 15s; the first window past it wins
+		expect(elapsedBeforeRaising(2000)).toBe(16_000);
 	});
 
-	it('does not raise on less starving time than the window requires', () => {
+	it('resolves once a window comes back healthy', () => {
 		const h = createHarness();
 
-		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
-		h.tick(97);
-		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
-		h.tick(97);
-		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
-
-		expect(h.raised).toHaveLength(0);
-	});
-
-	it('resolves once the window holds no starving ticks', () => {
-		const h = createHarness();
-
-		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
-		h.tick(132);
-		h.tick(97);
-		h.tick(123);
-		expect(h.captureIssues()).toHaveLength(1);
-		expect(h.resolved).toHaveLength(0);
-
-		// healthy ticks alone do not resolve while starving ones are still in
-		// the window; only aging them out does
 		h.tick(NOMINAL);
+		for (let i = 0; i < 3; ++i) h.tick(75);
+		expect(h.issues()).toHaveLength(1);
 		expect(h.resolved).toHaveLength(0);
 
-		for (let i = 0; i < 26; ++i) h.tick(NOMINAL);
+		for (let i = 0; i < 3; ++i) h.tick(NOMINAL);
 
 		expect(h.resolved).toContain('capture-bottleneck-track-video-1');
 	});
 
-	it('does not raise on a deliberate frame-rate change', () => {
+	it('does not judge a deliberate frame-rate change', () => {
 		const h = createHarness();
 
 		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
@@ -211,17 +166,13 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 		expect(h.raised).toHaveLength(0);
 	});
 
-	it('does not raise across a collection gap', () => {
+	it('restarts the window across a collection gap', () => {
 		const h = createHarness();
 
 		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
 
-		// one very long tick delivering almost nothing: the ticks stopped, which
-		// says nothing about the device
 		h.tick(12, 60_000);
-		h.tick(NOMINAL);
-		h.tick(NOMINAL);
-		h.tick(NOMINAL);
+		for (let i = 0; i < 4; ++i) h.tick(NOMINAL);
 
 		expect(h.raised).toHaveLength(0);
 	});
@@ -232,8 +183,7 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
 
 		h.replaceTrack();
-		h.tick(NOMINAL);
-		h.tick(NOMINAL);
+		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
 
 		expect(h.raised).toHaveLength(0);
 	});
@@ -249,18 +199,19 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 		expect(h.raised).toHaveLength(0);
 	});
 
-	it('falls back to the absolute floor when the configured frame rate is unknown', () => {
+	it('makes no judgement at all when the configured frame rate is unknown', () => {
+		// Nothing is substituted for a missing baseline. Without a stated frame
+		// rate there is nothing for the measured rate to fall short of — not
+		// even a source delivering almost nothing is a shortfall against an
+		// expectation that was never expressed.
 		const h = createHarness();
 
 		delete (h.settings as Record<string, unknown>).frameRate;
 
-		// 20fps is a big shortfall against 30, but nothing configured 30
-		for (let i = 0; i < 10; ++i) h.tick(100);
-		expect(h.raised).toHaveLength(0);
+		for (let i = 0; i < 6; ++i) h.tick(100);
+		for (let i = 0; i < 6; ++i) h.tick(1);
 
-		// below minSourceFps, though, needs no configured rate to judge
-		for (let i = 0; i < 3; ++i) h.tick(10);
-		expect(h.captureIssues()).toHaveLength(1);
+		expect(h.raised).toHaveLength(0);
 	});
 
 	it('stays silent while the sender is muted on purpose', () => {
@@ -274,8 +225,6 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 	});
 
 	it('does not judge a screen share, whose frame rate is content-driven', () => {
-		// A static document delivers almost nothing and a still one delivers
-		// nothing at all - indistinguishable here from a camera dying.
 		const h = createHarness();
 
 		h.trackMonitor.isScreenShare = true;
@@ -287,8 +236,6 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 	});
 
 	it('does not judge while the tab is in the background', () => {
-		// The browser throttles capture in a backgrounded tab; frames stopping
-		// there is the browser doing its job, not the device failing.
 		const h = createHarness();
 
 		for (let i = 0; i < 5; ++i) h.tick(NOMINAL);
@@ -298,10 +245,8 @@ describe('OutboundFrameSupplyDetector, capture half', () => {
 
 		expect(h.raised).toHaveLength(0);
 
-		// and the window it left behind is not held against the tab on return
 		h.clientMonitor.activeTab = true;
-		h.tick(NOMINAL);
-		h.tick(NOMINAL);
+		for (let i = 0; i < 3; ++i) h.tick(NOMINAL);
 
 		expect(h.raised).toHaveLength(0);
 	});

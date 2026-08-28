@@ -6,19 +6,19 @@ export { IceCandidatePairMonitor } from "./monitors/IceCandidatePairMonitor";
 export { IceTransportMonitor } from "./monitors/IceTransportMonitor";
 export { InboundRtpMonitor } from "./monitors/InboundRtpMonitor";
 export { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
-export type { InboundTrackContentType } from "./monitors/InboundTrackMonitor";
+export type { InboundTrackContext } from "./monitors/InboundTrackMonitor";
 export { VIDEO_QP_THRESHOLDS } from "./scores/CalculatedScore";
 export type { VideoMotionType, VideoQpThresholds } from "./scores/CalculatedScore";
 export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
 export { OutboundTrackMonitor } from "./monitors/OutboundTrackMonitor";
-export type { OutboundTrackContentType } from "./monitors/OutboundTrackMonitor";
+export type { OutboundTrackContext } from "./monitors/OutboundTrackMonitor";
 export { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
 export { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTransportMonitor";
 export { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
 export { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
-export type { TrackMonitor }  from "./monitors/TrackMonitor";
+export type { TrackMonitor, TrackContentType }  from "./monitors/TrackMonitor";
 export {
     ClientMonitor,
 } from "./ClientMonitor";
@@ -127,10 +127,9 @@ export type {
     VideoRecoveryFailedIssuePayload,
 } from './detectors/FreezedVideoTrackDetector';
 export { OutboundFrameSupplyDetector } from './detectors/OutboundFrameSupplyDetector';
-export type {
-    CaptureBottleneckIssuePayload,
-    EncoderBottleneckIssuePayload,
-} from './detectors/OutboundFrameSupplyDetector';
+export type { CaptureBottleneckIssuePayload } from './detectors/OutboundFrameSupplyDetector';
+export { EncoderPerformanceDetector } from './detectors/EncoderPerformanceDetector';
+export type { EncoderBottleneckIssuePayload } from './detectors/EncoderPerformanceDetector';
 export { InboundFrameSupplyDetector } from './detectors/InboundFrameSupplyDetector';
 export type { DecoderBottleneckIssuePayload } from './detectors/InboundFrameSupplyDetector';
 export { SimulcastLayerDetector } from './detectors/SimulcastLayerDetector';

@@ -3,6 +3,7 @@ import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector"
 import { CaptureFailureDetector } from "../detectors/CaptureFailureDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
 import { OutboundFrameSupplyDetector } from "../detectors/OutboundFrameSupplyDetector";
+import { EncoderPerformanceDetector } from "../detectors/EncoderPerformanceDetector";
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { OutboundTrackSample } from "../schema/ClientSample";
@@ -10,8 +11,20 @@ import { sampledScoreReasons } from "../scores/utils";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
+import type { TrackContentType } from "./TrackMonitor";
 
-export type OutboundTrackContentType = 'camera' | 'screenshare';
+/**
+ * What the application knows about an outbound track and the stats never
+ * reveal. Narrower than its inbound counterpart on purpose: motion class and
+ * presentation describe how a track is *watched*, which the sender does not
+ * know. See {@link OutboundTrackMonitor.setContext} for the merge semantics,
+ * and `ClientMonitor.setOutboundTrackContext()` to declare it by track id
+ * before the monitor exists.
+ */
+export type OutboundTrackContext = {
+	/** See {@link OutboundTrackMonitor.contentType}. */
+	contentType?: TrackContentType;
+}
 
 export class OutboundTrackMonitor {
 	public readonly direction = 'outbound';
@@ -43,10 +56,10 @@ export class OutboundTrackMonitor {
 	 * `displaySurface` is available, the application declares it explicitly:
 	 *
 	 * ```ts
-	 * monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * monitor.getOutboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
 	 * ```
 	 */
-	public contentType?: OutboundTrackContentType;
+	public contentType?: TrackContentType;
 
 	public calculatedScore: CalculatedScore = {
 		weight: 0,
@@ -98,8 +111,14 @@ export class OutboundTrackMonitor {
 
 		if (this.kind === 'audio') this.calculatedScore.weight = 1;
 		else if (this.kind === 'video') {
+			// Order matters: EncoderPerformanceDetector reads whether
+			// `capture-bottleneck` is active, so the capture check has to have
+			// run this tick. `Detectors.update()` preserves registration order.
 			if (monitorConfig.outboundFrameSupplyDetector !== null) {
 				this.detectors.add(new OutboundFrameSupplyDetector(this));
+			}
+			if (monitorConfig.encoderPerformanceDetector !== null) {
+				this.detectors.add(new EncoderPerformanceDetector(this));
 			}
 			if (monitorConfig.simulcastLayerDetector !== null) {
 				this.detectors.add(new SimulcastLayerDetector(this));
@@ -131,17 +150,22 @@ export class OutboundTrackMonitor {
 	}
 
 	/**
-	 * Explicitly declares what content this track carries. Call it when the
-	 * application knows the track is a screen share and no `displaySurface`
-	 * was available to auto-detect it — typically right after the track
-	 * monitor appears:
+	 * Declares what the application knows about this track and the stats do
+	 * not reveal. Today that is the content type, for the case where no
+	 * `displaySurface` was available to auto-detect a screen share.
+	 *
+	 * **Merges.** Only the fields present in `context` are written; an
+	 * explicit `undefined` is treated as "not declared here", not as a reset.
 	 *
 	 * ```ts
-	 * monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * monitor.getOutboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
 	 * ```
+	 *
+	 * `ClientMonitor.setOutboundTrackContext()` does the same by track id and
+	 * works before this monitor exists.
 	 */
-	public setContentType(contentType: OutboundTrackContentType): void {
-		this.contentType = contentType;
+	public setContext(context: OutboundTrackContext): void {
+		if (context.contentType !== undefined) this.contentType = context.contentType;
 	}
 
 	bitrate?: number;

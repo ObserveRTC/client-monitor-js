@@ -310,25 +310,23 @@ const monitor = new ClientMonitor({
         minBitrate: 10000,     // bps below which this is a dry track, not a wedge
         minPliCount: 2,
     },
-    // Frame supply: whatever produces this track's frames falling short of
-    // what it should produce, counted over a rolling window. One detector, one
-    // per direction — the capture device (and the encoder behind it) outbound,
-    // the decoder inbound.
+    // Frame supply: is whatever produces this track's frames delivering what it
+    // should? Average over a duration, compare, judge. The config *types* live
+    // in the detector files; the defaults are here with every other detector's.
     outboundFrameSupplyDetector: {
-        fpsRatioThreshold: 0.8,        // an interval below 80% of configured fps is starving
-        minProducedFps: 5,             // floor without a configured fps, and the encoder's "source healthy" bar
-        windowInMs: 120000,            // rolling window starving time is summed over ...
-        minStarvingTimeInMs: 30000,    // ... and how much of it inside the window raises
+        durationInMs: 15000,           // average the capture device over this long ...
+        captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
+    },
+    encoderPerformanceDetector: {
         encodeFpsRatioThreshold: 0.7,  // encoder below 70% of source fps = behind
         encodeTimeBudgetRatio: 0.8,    // encode time per frame vs the frame budget
-        cpuLimitationShareThreshold: 0.3, // share of interval explicitly CPU-limited
-        minConsecutiveTicks: 2,        // encoder half only
+        cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
+        minConsecutiveTicks: 2,        // two reads agreeing, not a span of time
     },
     inboundFrameSupplyDetector: {
-        fpsRatioThreshold: 0.8,        // decoded below 80% of what arrived is starving
-        minProducedFps: 5,             // too thin a stream to judge a decoder on
-        windowInMs: 120000,
-        minStarvingTimeInMs: 30000,
+        durationInMs: 15000,           // average the decoder over this long ...
+        decodeFpsRatioThreshold: 0.9,  // ... then require 90% of what arrived
+        minReceivedFps: 5,             // too thin a stream to judge a decoder on
     },
     captureFailureDetector: {
         silenceThresholdInMs: 30000, // long on purpose: silence != a broken mic
@@ -446,7 +444,8 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`StuckDecoderDetector`](#stuckdecoderdetector) | inbound video | issue `stuck-decoder` | RTP flowing, nothing decoding — the wedge only recreating the consumer fixes |
 | [`PlayoutDiscrepancyDetector`](#playoutdiscrepancydetector) | inbound video | issue `inbound-video-playout-discrepancy` | Frames received but not rendered — a rendering pipeline backlog |
 | [`DryInboundTrackDetector` / `DryOutboundTrackDetector`](#dryinboundtrackdetector--dryoutboundtrackdetector) | tracks | issues `dry-inbound-track`, `dry-outbound-track` | A track that should be flowing but carries no bytes at all |
-| [`OutboundFrameSupplyDetector`](#outboundframesupplydetector) | outbound video | issues `capture-bottleneck`, `encoder-bottleneck` | Whether the *camera* or the *encoder* is the reason you send fewer frames — caught *while it degrades*, not once it has stopped |
+| [`OutboundFrameSupplyDetector`](#outboundframesupplydetector) | outbound video | issue `capture-bottleneck` | The camera is not delivering the frames it was configured for — caught *while it degrades*, not once it has stopped |
+| [`EncoderPerformanceDetector`](#encoderperformancedetector) | outbound video | issue `encoder-bottleneck` | The camera is delivering and the encoder cannot keep up with it |
 | [`InboundFrameSupplyDetector`](#inboundframesupplydetector) | inbound video | issue `decoder-bottleneck` | Frames arrived and the decoder did not turn enough of them into pictures |
 | [`CaptureFailureDetector`](#capturefailuredetector) | outbound tracks | issues `capture-track-ended`, `silent-audio-source` | Vanished devices and microphones producing pure silence |
 | [`CongestionDetector`](#congestiondetector) | peer connection | issue `congestion` | Bandwidth-limited sending corroborated by RTT / loss |
@@ -493,7 +492,8 @@ In case shrinking down the sample size is something your application wants, the 
 | `DryOutboundTrackDetector` | `dry-outbound-track` | No | same non-sampled track-state guards |
 | `CaptureFailureDetector` | `capture-track-ended` | No | `MediaStreamTrack` `ended` event — no stats representation |
 | `CaptureFailureDetector` | `silent-audio-source` | No | energy totals are sampled, but the live/enabled/unmuted guards are not |
-| `OutboundFrameSupplyDetector` | `capture-bottleneck`, `encoder-bottleneck` | No | the frame rate is a counter differenced against measured elapsed time, the encoder half joins it with the highest active layer's encode time and CPU-limitation shares, and the guards read `track.getSettings()`, pause state, screen-share content type and live track state — none of it reconstructable from a sample |
+| `OutboundFrameSupplyDetector` | `capture-bottleneck` | No | the frame rate is a counter differenced against measured elapsed time, and the guards read `track.getSettings()`, pause state, screen-share content type and live track state — none of it reconstructable from a sample |
+| `EncoderPerformanceDetector` | `encoder-bottleneck` | No | joins the media source's frame rate with the highest active layer's encode time and CPU-limitation shares per collecting tick, and chains off whether `capture-bottleneck` is active |
 | `InboundFrameSupplyDetector` | `decoder-bottleneck` | No | differences `framesDecoded` against `framesReceived` per collecting tick, behind pause and live-track guards that are not sampled |
 | `CongestionDetector` | `congestion` | Mostly | `candidate-pair` available bitrates + `outbound-rtp` `qualityLimitationReason` — two components, but both sampled |
 | `CpuPerformanceDetector` | `cpulimitation` | No | joins send-side and receive-side evidence plus `durationOfCollectingStatsInMs`, which is not sampled |
@@ -656,20 +656,19 @@ monitor.on('video-decoder-overloaded', ({ trackMonitor, decodeTimePerFrameInMs, 
 
 The receive-side counterpart of `capture-bottleneck`: frames arrived and the decoder did not turn enough of them into pictures. Raises `decoder-bottleneck`.
 
-**The bar is the arrival rate, never the sender's.** Frames that never arrived are the network's story — `FreezedVideoTrackDetector` and the loss metrics tell it — so this compares `framesDecoded` against `framesReceived` over the same interval and nothing else. A stream throttled to 5fps that decodes cleanly is silent.
-
-**Why a rolling window.** A decoder that is stumbling rather than uniformly overloaded drops frames on some intervals and recovers on others, so a consecutive-run rule never reaches its threshold. This is what separates it from [`DecoderPerformanceDetector`](#decoderperformancedetector), which asks whether decoding *cost* too much over consecutive ticks: that one is about the price of decoding, this one about frames going missing. Both firing at once is the honest answer when both are true.
-
-**Use the result:** the client cannot decode what it was handed — drop to a lower simulcast layer, or ask the SFU for one.
+**The rule, in full:** add up the frames that arrived and the frames that were decoded; once `durationInMs` has accumulated, compare them. Decoded below `decodeFpsRatioThreshold` of arrived → raise. At or above → resolve. Start a new window.
 
 ```javascript
 inboundFrameSupplyDetector: {
-    fpsRatioThreshold: 0.8,        // decoded below 80% of what arrived is starving
-    minProducedFps: 5,             // too thin a stream to judge a decoder on
-    windowInMs: 120000,            // rolling window starving time is summed over ...
-    minStarvingTimeInMs: 30000,    // ... and how much of it inside the window raises
+    durationInMs: 15000,        // average the decoder over this long ...
+    decodeFpsRatioThreshold: 0.9, // ... then require 90% of what arrived
+    minReceivedFps: 5,          // too thin a stream to judge a decoder on
 }
 ```
+
+**The bar is the arrival rate, never the sender's.** Frames that never arrived are the network's story — `FreezedVideoTrackDetector` and the peer connection's loss reasons tell it — so a stream throttled to 5fps that decodes cleanly is silent. That is also what separates it from [`DecoderPerformanceDetector`](#decoderperformancedetector), which asks whether decoding *cost* too much over consecutive ticks: that one is about the price of decoding, this one about frames going missing. Both firing at once is the honest answer when both are true.
+
+**Use the result:** the client cannot decode what it was handed — drop to a lower simulcast layer, or ask the SFU for one.
 
 ```typescript
 monitor.on('decoder-bottleneck', ({ trackMonitor, decodedFps, receivedFps }) => {
@@ -677,7 +676,7 @@ monitor.on('decoder-bottleneck', ({ trackMonitor, decodedFps, receivedFps }) => 
 });
 ```
 
-**What it refuses to judge**, because a low decode rate there is legitimate: a backgrounded tab (`ClientMonitor.activeTab === false`), a paused consumer, a paused remote sender, a track that is not live and unmuted, and a stream too thin to say anything. Like the outbound side, the threshold is a *duration* rather than a tick count, and the collection gap that discards the window is derived from `collectingPeriodInMs` rather than configured — so the same configuration means the same thing at every collecting period.
+**What it refuses to judge**, because a low decode rate there is legitimate: a backgrounded tab, a paused consumer, a paused remote sender, a track that is not live and unmuted, and a stream thinner than `minReceivedFps`. The window restarts after a collection gap.
 
 #### StuckDecoderDetector
 
@@ -757,45 +756,65 @@ monitor.on('dry-inbound-track', async ({ trackMonitor }) => {
 
 #### OutboundFrameSupplyDetector
 
-Splits "we are sending fewer frames than we should" into its two causes, indistinguishable from RTP alone: `capture-bottleneck` (the capture device never produced the frames) and `encoder-bottleneck` (it did; the encoder fell behind). One reading of the source frame rate answers both, which is why they are one detector — the encoder question is "given a source delivering *this much*, is the encoder keeping up?", and it needs the number and the track guards the capture question already established.
+Is the capture device delivering the frames the track was configured to capture? The send-side mirror of [`InboundFrameSupplyDetector`](#inboundframesupplydetector), which asks the same of the decoder. Raises `capture-bottleneck`.
 
-**Use the result:** `capture-bottleneck` → the fix is at the device (suggest lowering capture constraints, closing other camera apps; lighting can throttle cameras). `encoder-bottleneck` → reduce encode load: drop the top simulcast layer, lower resolution or frame rate, disable background effects. The payload carries `encoderImplementation`, `cpuLimitationShare` and the fps pair for the report.
+**The rule, in full:** add up the frames the source delivered and the time it had to deliver them; once `durationInMs` has accumulated, compare the average against `getSettings().frameRate`. Below `captureFpsRatioThreshold` of it → raise. At or above → resolve. Start again. Two running totals, no history buffer.
 
 ```javascript
 outboundFrameSupplyDetector: {
-    fpsRatioThreshold: 0.8,            // an interval below 80% of configured fps is starving
-    minProducedFps: 5,                 // floor without a configured fps, and the encoder's "source healthy" bar
-    windowInMs: 120000,                // rolling window starving time is summed over ...
-    minStarvingTimeInMs: 30000,        // ... and how much of it inside the window raises
-    encodeFpsRatioThreshold: 0.7,      // encoder below 70% of source fps = behind
-    encodeTimeBudgetRatio: 0.8,        // encode time per frame vs the frame budget
-    cpuLimitationShareThreshold: 0.3,  // share of interval explicitly CPU-limited
-    minConsecutiveTicks: 2,            // encoder half only
+    durationInMs: 15000,           // average the capture device over this long ...
+    captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
 }
 ```
 
-**The capture window rolls; it does not count consecutive intervals.** A camera that is failing rather than merely busy produces starving intervals *interleaved* with healthy ones — 150 frames per 5s tick becomes 132, back to 150, then 97 — so an "N in a row" rule never reaches N. On a degrading camera the window raises 99 seconds before capture stops; a consecutive-run rule stays silent until after. The encoder half *does* count consecutive ticks: an encoder falling behind does so continuously while the load lasts.
+**Why average rather than threshold each tick.** A camera that is failing rather than merely busy dips and recovers: 150 frames per 5s tick becomes 132, back to 150, then 97. Tick by tick most of it looks fine. The average over 15s does not — 26.3fps against a configured 30 — so it raises while the camera is still delivering, about half a minute before this one stopped entirely. Averaging also weights *how far* the source fell short rather than merely how often.
 
-**The threshold is a duration, not a tick count.** Each interval contributes the time it actually measured, and the issue raises once `minStarvingTimeInMs` of starving time has accumulated anywhere inside `windowInMs`. Ticks would mean something different at every collecting period — three of them is six seconds at 2s collection and thirty at 10s — so the same configuration would judge two deployments differently. The payload reports `starvingTimeInMs`, not a count.
+**Why a duration and not a tick count.** What matters here is that the device stayed short for a stretch of time that means something. A tick count would mean six seconds at a 2s collecting period and thirty at a 10s one. ([`EncoderPerformanceDetector`](#encoderperformancedetector) is the other way round, and says why.)
 
-**The rate is always the counter, never `framesPerSecond`.** `sourceFps` is `mediaSource.frames` differenced against *measured* elapsed time. The browser's own `framesPerSecond` is coarse and smooths real stutter away — it can read `30` across an interval that actually delivered 132 frames in five seconds. No counter means no judgement.
+**The rate is always the counter, never `mediaSource.framesPerSecond`.** `sourceFps` is the frame counter differenced against *measured* elapsed time. The browser's own figure is coarse and smooths this exact stutter away — it can read `30` across an interval that actually delivered 132 frames in five seconds. When `sourceFps` is undefined the counter restarted, and a restart is not a measurement.
 
-**What the capture half refuses to judge**, because a low frame rate there is legitimate: a backgrounded tab (`ClientMonitor.activeTab === false`), a paused or stopped sender, and screen shares, whose frame rate is content-driven (a still document delivers nothing). The window is discarded rather than interpreted after a settings change, a counter reset, or a collection gap. **There is no gap knob**: a gap worth discarding is a multiple of the monitor's own `collectingPeriodInMs`, so it is derived rather than configured — a fixed millisecond value would mean something different at every collecting period. If you capture a moving surface that should be watched, declare it with `monitor.setTrackContentType(trackId, 'camera')`. The encoder half shares every guard except the screen-share one — an encoder falling behind a screen share is as real as any other.
+**No baseline, no judgement.** If the browser does not report `getSettings().frameRate`, nothing is substituted for it: there is no rate for the measurement to fall short *of*, so the check stays quiet.
 
-The `capture-bottleneck` payload carries `worstSourceFps` (how deep the dips went), `starvingTimeInMs` (how much of the window was spent starving), `msSinceFirstStarvingTick`, and `trackReadyState`/`trackMuted` — the last two because "live, unmuted, no frames" is the signature of a pipeline failing upstream, where an unplugged or OS-muted device would instead report `ended`/`muted` and be `CaptureFailureDetector`'s story.
+**What it refuses to judge**, because a low frame rate there is legitimate: a backgrounded tab (`ClientMonitor.activeTab === false`), a paused or stopped sender, and screen shares, whose frame rate is content-driven (a still document delivers nothing). If you capture a moving surface that should be watched, declare it with `monitor.setOutboundTrackContext(trackId, { contentType: 'camera' })`. The totals also restart after a settings change or a collection gap — that threshold is derived from `collectingPeriodInMs` rather than configured.
 
 ```typescript
 monitor.on('capture-bottleneck', ({ trackMonitor, sourceFps, expectedFps }) => {
     ui.hintCameraTrouble(trackMonitor.track.id, { sourceFps, expectedFps });
 });
-monitor.on('encoder-bottleneck', () => sender.dropTopSimulcastLayer());
 ```
 
-**Threshold caveat.** The shipped `0.8` and 30s-in-120s are deliberately conservative and come from two captured sessions — one failure, one control, one camera model — so they are unvalidated in both directions: treat `capture-bottleneck` as observation-grade until a corpus sets the numbers.
-
-At these defaults the detector reports the captured failure only *after* the camera stopped. `minStarvingTimeInMs: 30000` is more starving time than that degradation accumulates while it is still delivering: at `0.8` only three of its five dips count as starving at all. Dropping `minStarvingTimeInMs` to `15000` moves the fire 20 seconds earlier, while the camera is still producing 15.2fps — the case the window exists for. Both behaviours are pinned in `tests/detectors/OutboundFrameSupplyDetector.replay.spec.ts`. See [Replaying a captured session](#replaying-a-captured-session) for sweeping the numbers over your own corpus.
+**Threshold caveat.** `0.9` over 15s came from two captured sessions — one failure, one control, one camera model. They catch that failure and stay silent on that control, and are otherwise unvalidated: treat `capture-bottleneck` as observation-grade until a corpus sets the numbers.
 
 **Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### EncoderPerformanceDetector
+
+Given a capture source that *is* delivering, is the encoder keeping up with it? The send-side mirror of [`DecoderPerformanceDetector`](#decoderperformancedetector). Raises `encoder-bottleneck`.
+
+Any one of three signals is enough: the highest active layer encodes below `encodeFpsRatioThreshold` of what the source delivered, encoding one frame costs more than `encodeTimeBudgetRatio` of the per-frame budget (`1000 / sourceFps`), or — only if you configure it — the browser reported itself CPU-limited for more than `cpuLimitationShareThreshold` of the interval.
+
+```javascript
+encoderPerformanceDetector: {
+    encodeFpsRatioThreshold: 0.7,      // encoder below 70% of source fps = behind
+    encodeTimeBudgetRatio: 0.8,        // encode time per frame vs the frame budget
+    cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
+    minConsecutiveTicks: 2,            // two reads agreeing, not a span of time
+}
+```
+
+**Everything is measured against what the source actually delivered**, never against what the track was configured to capture at. An encoder handed 3fps and emitting 3fps is doing its job perfectly; comparing it to a configured 30 would call that a catastrophic failure. Whether the source itself is short is the *other* detector's question — and while its `capture-bottleneck` is active, this one says nothing at all. The frames were never there to encode. The two issues are mutually exclusive by construction.
+
+That chain is read from the issue rather than shared through a field: this detector checks `ClientMonitor.isIssueActive('capture-bottleneck-track-<id>')`. `OutboundTrackMonitor` registers the capture detector first and `Detectors.update()` preserves registration order, so the verdict is same-tick.
+
+**Why `minConsecutiveTicks` here and a duration on the capture side.** They answer different questions. A tick count is a *confidence* floor — every signal above is a per-interval ratio that a single stats read can get wrong, so what is wanted is two independent reads agreeing, which is two samples whatever the collecting period happens to be. A duration is a *persistence* bar — the capture case, where the device has to stay short long enough to matter. `DecoderPerformanceDetector` and `JitterBufferStressDetector` use ticks for the same reason this one does.
+
+**Why `cpuLimitationShareThreshold` defaults to `null`.** `CpuPerformanceDetector` already reports CPU limitation as its own `cpulimitation` issue, and the useful thing to do with the two is correlate them — `encoder-bottleneck` and `cpulimitation` firing together is evidence the encoder is CPU-bound. That inference is only worth something while `encoder-bottleneck` is derived *without* reading the same signal; wire the CPU share in here too and the correlation becomes tautological. Set a number (`0.3` is a reasonable one) if you would rather have the extra sensitivity than the independent evidence.
+
+**Use the result:** reduce encode load — drop the top simulcast layer, lower resolution or frame rate, disable background effects. The payload carries `encoderImplementation`, `cpuLimitationShare` and the fps pair for the report.
+
+```typescript
+monitor.on('encoder-bottleneck', () => sender.dropTopSimulcastLayer());
+```
 
 #### CaptureFailureDetector
 
@@ -1217,7 +1236,16 @@ score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
 -   Dropped frames (`dropped-video-frames`, normalized 0–1): activation 10%, saturation 20% of frames dropped instead of rendered
 -   Frame corruptions (`video-frame-corruptions`, normalized 0–1): per-interval corruption probability, activation 0.05, saturation 0.5
 -   Frozen picture (`frozen-video`, from the freeze state the detector derives): -2.0
--   Pixelation (`pixelated-video`, normalized 0–1): ramps from 0 at the codec's activation QP to 1.0 at its saturation QP (`VIDEO_QP_THRESHOLDS`), from the mean quantizer of the frames actually decoded (`avgQpPerFrame`, derived from the inbound `qpSum`).
+-   Pixelation (`pixelated-video`, normalized 0–1): ramps from 0 at the codec's activation QP to 1.0 at its saturation QP (`VIDEO_QP_THRESHOLDS`), from the mean quantizer of the frames actually decoded (`avgQpPerFrame`, derived from the inbound `qpSum`). **Scaled by display magnification** where the presented resolution is known, so the ceiling is 2.0 rather than 1.0 — see below.
+
+    **Judged at the size the picture is shown.** QP says how coarsely the frame was coded, not how large those coded blocks end up on screen — and the same QP is punishing at full screen and nearly invisible in a grid thumbnail. Declare how big the picture is presented and the penalty is scaled by the linear ratio to the decoded resolution, clamped to 0.5–2.0 (`PIXELATION_MAGNIFICATION_MIN`/`MAX`):
+
+    ```typescript
+    monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, height: 720 } });  // device pixels
+    monitor.setInboundTrackContext(trackId, { videoTag });  // or hand over the element — re-measured every tick
+    ```
+
+    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it, as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. **No presented resolution, no adjustment** — the quantizer is judged alone, and nothing is substituted for the missing number.
 
     QP is the encoder stating how coarsely it had to quantize, so it measures the blockiness and detail loss the viewer is looking at. Bitrate cannot: the same 500 kbps is generous for a static talking head and starvation for a fast pan, and nothing observable separates those two from bits alone. **Where the browser does not report `qpSum` for the codec in use, the reason is simply absent** — no judgement is better than one inferred from bitrate.
 
@@ -1226,8 +1254,8 @@ score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
     **Motion class.** The same quantizer is not equally visible on all content: fast movement masks compression artifacts, while a slide or a still face shows every blocked edge. `VIDEO_QP_THRESHOLDS` is therefore indexed `[codec][motionType]` — note the bands run the *opposite* way to bitrate, since high-motion content needs more bits to reach a given QP yet tolerates a higher one once there. Nothing in the stats reveals motion, so the application declares it; undeclared, screen share is judged as `lowmotion` (blocked text is a hard failure) and everything else as `standard`:
 
     ```typescript
-    monitor.setTrackMotionType(trackId, 'highmotion');           // by id, works before the track exists
-    monitor.getInboundTrackMonitor(track.id)?.setMotionType('lowmotion');
+    monitor.setInboundTrackContext(trackId, { motionType: 'highmotion' });   // by id, works before the track exists
+    monitor.getInboundTrackMonitor(track.id)?.setContext({ motionType: 'lowmotion' });
     ```
 
     ```typescript
@@ -1241,7 +1269,7 @@ score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
 Whether an inbound video track is a screen share is decided by `InboundTrackMonitor.contentType` — same mechanism as the outbound side (see below), except a received track exposes no `displaySurface` to auto-detect from, so the application declares it:
 
 ```typescript
-monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
+monitor.getInboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
 ```
 
 **Outbound Audio Track Score:**
@@ -1260,14 +1288,17 @@ monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
 Decided by `OutboundTrackMonitor.contentType`, **never** by `track.contentHint` (applications set `'detail'`/`'text'` on camera tracks too, so the hint is not a reliable screen-share signal). The flag is auto-detected only from `track.getSettings().displaySurface` — present exclusively on display capture — and otherwise declared by the application:
 
 ```typescript
-monitor.getOutboundTrackMonitor(track.id)?.setContentType('screenshare');
+monitor.getOutboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
 ```
 
-Both forms require the track's monitor to already exist, which only happens on the first stats tick after the track appears on a peer connection. When the application knows the content type earlier — signaling announces a guest's upcoming screen-share track before any media arrives — declare it by track id on the monitor itself; it is applied immediately if the monitor exists, and otherwise kept pending and picked up the moment the track manifests on any peer connection:
+`getInbound/OutboundTrackMonitor(id)?.setContext(...)` requires the track's monitor to already exist, which only happens on the first stats tick after the track appears on a peer connection. When the application knows earlier — signaling announces a guest's upcoming screen-share track before any media arrives — declare it by track id on the client monitor instead; it is applied immediately if the monitor exists, and otherwise held pending and picked up the moment the track manifests on any peer connection:
 
 ```typescript
-monitor.setTrackContentType(trackId, 'screenshare');
+monitor.setOutboundTrackContext(trackId, { contentType: 'screenshare' });
+monitor.setInboundTrackContext(trackId, { contentType: 'screenshare', motionType: 'lowmotion' });
 ```
+
+Both **merge**: fields omitted from the argument keep whatever was declared before, in the pending state as well as on a live monitor, so a content type declared from signaling survives a later call that only attaches the video element. Passing a field as an explicit `undefined` means "not declared here" rather than "reset"; assign the monitor's field directly to clear it.
 
 For screen-share tracks, sharpness is the quality: fps and bitrate volatility are meaningless on mostly-static content (VBR drops to ~zero between changes), so deviation/volatility penalties are skipped entirely. Instead:
 
@@ -1790,9 +1821,9 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
 | `keyframe-storm` | Sustained PLI rate above `pliRateAlertOn` | Rate falls below `pliRateAlertOff` | `'keyframe-storm'` | `KeyframeStormIssuePayload` |
 | `video-recovery-failed` | PLIs sent, picture frozen, `keyFramesDecoded` not advancing for `recoveryFailedThresholdInMs` | A keyframe arrives or the freeze ends | `'video-recovery-failed'` | `VideoRecoveryFailedIssuePayload` |
-| `capture-bottleneck` | `minStarvingTimeInMs` of time inside `windowInMs` where the capture device delivered under `fpsRatioThreshold` of the configured frame rate | The window drains of starving time | `'capture-bottleneck'` | `CaptureBottleneckIssuePayload` |
-| `decoder-bottleneck` | `minStarvingTimeInMs` of time inside `windowInMs` where the decoder decoded under `fpsRatioThreshold` of the frames that arrived | The window drains of starving time | `'decoder-bottleneck'` | `DecoderBottleneckIssuePayload` |
-| `encoder-bottleneck` | A healthy source outran the encoder, or the encoder was CPU-limited | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
+| `capture-bottleneck` | the capture device averaged under `captureFpsRatioThreshold` of the configured frame rate over `durationInMs` | the next average comes back at or above it | `'capture-bottleneck'` | `CaptureBottleneckIssuePayload` |
+| `decoder-bottleneck` | the decoder averaged under `decodeFpsRatioThreshold` of the frames that arrived over `durationInMs` | the next average comes back at or above it | `'decoder-bottleneck'` | `DecoderBottleneckIssuePayload` |
+| `encoder-bottleneck` | A delivering source outran the encoder for `durationInMs` continuously | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
 | `capture-track-ended` | The outbound track's device reached `ended` | — (terminal) | `'capture-track-ended'` | `CaptureTrackEndedIssuePayload` |
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
 | `stuck-decoder` | RTP bytes flowing, nothing decoding, PLIs firing, for `thresholdInMs` | Frames decode again | `'stuck-decoder'` | `StuckDecoderIssuePayload` |

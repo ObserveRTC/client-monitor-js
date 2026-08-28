@@ -34,7 +34,7 @@ export type CalculatedScore = {
 /**
  * How much motion the content carries, which changes how visible a given
  * quantizer is. Nothing in the stats reveals it, so the application declares it
- * via `InboundTrackMonitor.setMotionType()` or `ClientMonitor.setTrackMotionType()`;
+ * via `InboundTrackMonitor.setContext()` or `ClientMonitor.setInboundTrackContext()`;
  * undeclared, screen share is treated as `lowmotion` and everything else as
  * `standard`.
  */

@@ -26,12 +26,11 @@ import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { StatsGapDetector } from './detectors/StatsGapDetector';
-import { OutboundTrackContentType, OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
-import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
+import { OutboundTrackContext, OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
+import { InboundTrackContext, InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
 import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
 import { ScoreCalculator } from "./scores/ScoreCalculator";
-import { VideoMotionType } from "./scores/CalculatedScore";
 import * as mediasoup from 'mediasoup-client';
 import { inferSourceType } from './sources/inferSourceType';
 import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider';
@@ -39,7 +38,6 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 const MODULE_NAME = 'ClientMonitor';
 
 export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
-
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
@@ -81,20 +79,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      */
     public activeTab = true;
 
-    /**
-     * Content types declared via `setTrackContentType` for tracks whose
-     * monitors do not exist yet, keyed by track id. Consumed (via
-     * `takePendingTrackContentType`) by the peer connection that first
-     * creates the track's monitor.
-     */
-    private readonly _pendingTrackContentTypes = new Map<string, OutboundTrackContentType>();
+    private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
+    private readonly _pendingOutboundTrackContexts = new Map<string, OutboundTrackContext>();
 
-    /**
-     * Motion types declared via `setTrackMotionType` for inbound tracks whose
-     * monitors do not exist yet, keyed by track id. Consumed by the peer
-     * connection that first creates the track's monitor.
-     */
-    private readonly _pendingTrackMotionTypes = new Map<string, VideoMotionType>();
 
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
@@ -218,20 +205,20 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 recoveryFailedMinPliCount: 2,
             }),
             outboundFrameSupplyDetector: detectorDefault(monitorConfig.outboundFrameSupplyDetector, {
-                fpsRatioThreshold: 0.8,
-                minProducedFps: 5,
-                windowInMs: 120_000,
-                minStarvingTimeInMs: 30_000,
+                durationInMs: 15_000,
+                captureFpsRatioThreshold: 0.9,
+            }),
+            encoderPerformanceDetector: detectorDefault(monitorConfig.encoderPerformanceDetector, {
                 encodeFpsRatioThreshold: 0.7,
                 encodeTimeBudgetRatio: 0.8,
-                cpuLimitationShareThreshold: 0.3,
+                // null: CpuPerformanceDetector owns the CPU signal — see the detector
+                cpuLimitationShareThreshold: null,
                 minConsecutiveTicks: 2,
             }),
             inboundFrameSupplyDetector: detectorDefault(monitorConfig.inboundFrameSupplyDetector, {
-                fpsRatioThreshold: 0.8,
-                minProducedFps: 5,
-                windowInMs: 120_000,
-                minStarvingTimeInMs: 30_000,
+                durationInMs: 15_000,
+                decodeFpsRatioThreshold: 0.9,
+                minReceivedFps: 5,
             }),
             simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
                 createEvent: true,
@@ -966,88 +953,93 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     /**
-     * Declares what content a track carries, by track id — whether or not the
-     * track's monitor exists yet.
+     * Declares what the application knows about an **inbound** track and the
+     * stats never reveal — its content type, its motion class, how it is
+     * presented — by track id, whether or not the track's monitor exists yet.
      *
-     * `getInboundTrackMonitor(id)?.setContentType(...)` only works once the
-     * track has been observed on a peer connection and its monitor was created
-     * from stats. But the application often knows the content type *earlier*:
-     * signaling announces that a guest's upcoming track is a screen share
-     * before a single packet has arrived, so at that moment there is no
-     * monitor to call `setContentType` on, and the declaration would be lost.
+     * `getInboundTrackMonitor(id)?.setContext(...)` only works once the track
+     * has been observed on a peer connection and its monitor was created from
+     * stats. But the application usually knows earlier: signaling announces
+     * that a guest's upcoming track is a screen share before a single packet
+     * has arrived, and at that moment there is no monitor to call, so the
+     * declaration would be lost.
      *
-     * This method closes that gap. If the track's monitor already exists
-     * (inbound or outbound, on any peer connection), the content type is
-     * applied immediately. Otherwise it is remembered as a pending
-     * declaration, and whichever peer connection first manifests the track
-     * picks it up when it creates the track's monitor. One pending entry per
-     * track id (the newest declaration wins), consumed when the monitor is
-     * created — no timeout, no cleanup needed: an entry for a track that never
-     * shows up is a single map entry for the lifetime of the monitor.
+     * This method closes that gap. If the monitor already exists the context
+     * is applied immediately; otherwise it is held as a pending declaration
+     * that whichever peer connection first manifests the track consumes at
+     * track-monitor creation. No timeout, no cleanup: an entry for a track
+     * that never shows up is one map entry for the monitor's lifetime.
      *
-     * ```ts
-     * // signaling told us track "abc-123" will be a screen share,
-     * // possibly before the track exists on any peer connection:
-     * monitor.setTrackContentType('abc-123', 'screenshare');
-     * ```
-     */
-    public setTrackContentType(trackId: string, contentType: OutboundTrackContentType): void {
-        const trackMonitor = this.getTrackMonitor(trackId);
-
-        if (trackMonitor) return trackMonitor.setContentType(contentType);
-
-        this._pendingTrackContentTypes.set(trackId, contentType);
-    }
-
-    public takePendingTrackContentType(trackId: string): OutboundTrackContentType | undefined {
-        const contentType = this._pendingTrackContentTypes.get(trackId);
-
-        if (contentType !== undefined) this._pendingTrackContentTypes.delete(trackId);
-
-        return contentType;
-    }
-
-    /**
-     * Declares how much motion an inbound track's content carries, by track id -
-     * whether or not the track's monitor exists yet.
-     *
-     * Motion decides how visible a given quantizer is, and so where the
-     * `pixelated-video` thresholds sit: fast movement masks compression
-     * artifacts, while a slide or a still face shows every blocked edge. Nothing
-     * in the stats reveals this, so only the application can say. Left
-     * undeclared, screen share is judged as `lowmotion` and everything else as
-     * `standard`.
-     *
-     * Like `setTrackContentType`, this applies immediately when the track's
-     * monitor already exists and is otherwise remembered as a pending
-     * declaration that whichever peer connection first manifests the track picks
-     * up - so it can be called as soon as signaling reveals what the track will
-     * carry, before any media has arrived.
+     * **Merges, in both states.** Fields omitted from `context` keep whatever
+     * was declared before — including across the pending boundary, so a
+     * content type declared from signaling survives a later call that only
+     * attaches the video element.
      *
      * ```ts
-     * monitor.setTrackMotionType(trackId, 'highmotion');
+     * // from signaling, before the track exists on any peer connection:
+     * monitor.setInboundTrackContext('abc-123', { contentType: 'screenshare' });
+     * // once it is mounted — contentType is still 'screenshare':
+     * monitor.setInboundTrackContext('abc-123', { videoTag });
      * ```
      */
-    public setTrackMotionType(trackId: string, motionType: VideoMotionType): void {
+    public setInboundTrackContext(trackId: string, context: InboundTrackContext): void {
         const trackMonitor = this.getInboundTrackMonitor(trackId);
 
-        if (trackMonitor) return trackMonitor.setMotionType(motionType);
+        if (trackMonitor) return trackMonitor.setContext(context);
 
-        this._pendingTrackMotionTypes.set(trackId, motionType);
+        this._pendingInboundTrackContexts.set(trackId, {
+            ...this._pendingInboundTrackContexts.get(trackId),
+            ...context,
+        });
     }
 
     /**
-     * Hands over - and forgets - a motion type declared via
-     * {@link setTrackMotionType} before the track's monitor existed. Called by
-     * the peer connection monitor at track-monitor creation; not intended for
-     * applications.
+     * Declares what the application knows about an **outbound** track — today
+     * its content type, for the case where no `displaySurface` was available
+     * to auto-detect a screen share. Same timing and merge behaviour as
+     * {@link setInboundTrackContext}.
+     *
+     * ```ts
+     * monitor.setOutboundTrackContext(trackId, { contentType: 'screenshare' });
+     * ```
      */
-    public takePendingTrackMotionType(trackId: string): VideoMotionType | undefined {
-        const motionType = this._pendingTrackMotionTypes.get(trackId);
+    public setOutboundTrackContext(trackId: string, context: OutboundTrackContext): void {
+        const trackMonitor = this.getOutboundTrackMonitor(trackId);
 
-        if (motionType !== undefined) this._pendingTrackMotionTypes.delete(trackId);
+        if (trackMonitor) return trackMonitor.setContext(context);
 
-        return motionType;
+        this._pendingOutboundTrackContexts.set(trackId, {
+            ...this._pendingOutboundTrackContexts.get(trackId),
+            ...context,
+        });
+    }
+
+    /**
+     * Hands over — and forgets — an inbound track context declared via
+     * {@link setInboundTrackContext} before the track's monitor existed.
+     * Called by the peer connection monitor at track-monitor creation; not
+     * intended for applications.
+     */
+    public takePendingInboundTrackContext(trackId: string): InboundTrackContext | undefined {
+        const context = this._pendingInboundTrackContexts.get(trackId);
+
+        if (context !== undefined) this._pendingInboundTrackContexts.delete(trackId);
+
+        return context;
+    }
+
+    /**
+     * Hands over — and forgets — an outbound track context declared via
+     * {@link setOutboundTrackContext} before the track's monitor existed.
+     * Called by the peer connection monitor at track-monitor creation; not
+     * intended for applications.
+     */
+    public takePendingOutboundTrackContext(trackId: string): OutboundTrackContext | undefined {
+        const context = this._pendingOutboundTrackContexts.get(trackId);
+
+        if (context !== undefined) this._pendingOutboundTrackContexts.delete(trackId);
+
+        return context;
     }
 
     public setCollectingPeriod(collectingPeriodInMs: number): void {

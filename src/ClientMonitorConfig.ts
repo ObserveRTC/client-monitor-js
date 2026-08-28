@@ -1,4 +1,7 @@
 import { Logger } from "./utils/logger";
+import type { OutboundFrameSupplyDetectorConfig } from "./detectors/OutboundFrameSupplyDetector";
+import type { EncoderPerformanceDetectorConfig } from "./detectors/EncoderPerformanceDetector";
+import type { InboundFrameSupplyDetectorConfig } from "./detectors/InboundFrameSupplyDetector";
 
 export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
@@ -361,85 +364,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * it with the defaults below.
      */
     /**
-     * Configuration for `FrameSupplyDetector` on **outbound** video tracks. Two
-     * questions off one reading of the capture source's frame rate: is the
-     * capture device delivering what the track was configured to capture at
-     * (`capture-bottleneck`, over a rolling window), and — given that it is —
-     * is the encoder keeping up with it (`encoder-bottleneck`, over consecutive
-     * ticks)?
+     * Thresholds for `OutboundFrameSupplyDetector` — the capture device. The
+     * type lives with the detector; the defaults are in `ClientMonitor`, with
+     * every other detector's.
      */
-    outboundFrameSupplyDetector: {
-        /**
-         * Fraction of the track's configured frame rate the capture device must
-         * fall below for an interval to count as starving.
-         */
-        fpsRatioThreshold: number;
-
-        /**
-         * Absolute floor, in frames per second. Stands in for the ratio when the
-         * browser reports no configured frame rate, and is also the bar the
-         * source must clear before the encoder is judged at all — below it, the
-         * problem is capture, not encoding.
-         */
-        minProducedFps: number;
-
-        /** Width of the rolling window starving time is summed over. */
-        windowInMs: number;
-
-        /**
-         * Starving *time* inside that window required to raise
-         * `capture-bottleneck`: each interval contributes the duration it
-         * measured. A duration rather than a tick count so the same
-         * configuration means the same thing at every collecting period, and a
-         * window rather than a consecutive run because a failing capture device
-         * interleaves healthy intervals with starving ones.
-         */
-        minStarvingTimeInMs: number;
-
-        /** Fraction of the source frame rate the encoder must fall below to count as behind. */
-        encodeFpsRatioThreshold: number;
-
-        /** Fraction of the per-frame budget encoding may consume before counting as too slow. */
-        encodeTimeBudgetRatio: number;
-
-        /** Share of the interval spent CPU-limited above which the encoder counts as bottlenecked. */
-        cpuLimitationShareThreshold: number;
-
-        /**
-         * Consecutive collections the *encoder* condition must hold before
-         * raising. Consecutive, unlike the capture side, because an encoder
-         * falling behind does so continuously while the load lasts.
-         */
-        minConsecutiveTicks: number;
-    } | null;
+    outboundFrameSupplyDetector: OutboundFrameSupplyDetectorConfig | null;
 
     /**
-     * Configuration for `FrameSupplyDetector` on **inbound** video tracks: the
-     * decoder decoding fewer frames than actually arrived, counted over a
-     * rolling window. Raises `decoder-bottleneck`.
-     *
-     * This is about frames the client *was* handed and failed to decode. Frames
-     * that never arrived are the network's story, told elsewhere.
+     * Thresholds for `EncoderPerformanceDetector` — the encoder behind that
+     * capture device. The type lives with the detector; the defaults are in
+     * `ClientMonitor`, with every other detector's.
      */
-    inboundFrameSupplyDetector: {
-        /**
-         * Fraction of the arriving frame rate the decoder must fall below for an
-         * interval to count as starving.
-         */
-        fpsRatioThreshold: number;
+    encoderPerformanceDetector: EncoderPerformanceDetectorConfig | null;
 
-        /**
-         * Arriving frames per second below which the stream is too thin to judge
-         * a decoder on.
-         */
-        minProducedFps: number;
-
-        /** Width of the rolling window starving time is summed over. */
-        windowInMs: number;
-
-        /** Starving *time* inside that window required to raise — see above. */
-        minStarvingTimeInMs: number;
-    } | null;
+    /**
+     * Thresholds for `InboundFrameSupplyDetector` — the decoder. The type lives
+     * with the detector; the defaults are in `ClientMonitor`, with every other
+     * detector's.
+     */
+    inboundFrameSupplyDetector: InboundFrameSupplyDetectorConfig | null;
 
     /**
      * Configuration for reporting changes in the set of simulcast layers

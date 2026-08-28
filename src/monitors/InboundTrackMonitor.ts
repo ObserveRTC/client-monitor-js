@@ -14,8 +14,25 @@ import { InboundFrameSupplyDetector } from "../detectors/InboundFrameSupplyDetec
 import { StuckDecoderDetector } from "../detectors/StuckDecoderDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
+import type { TrackContentType } from "./TrackMonitor";
 
-export type InboundTrackContentType = 'camera' | 'screenshare';
+/**
+ * What the application knows about an inbound track and the stats never
+ * reveal. Every field is optional and independently declarable; see
+ * {@link InboundTrackMonitor.setContext} for the merge semantics, and
+ * `ClientMonitor.setInboundTrackContext()` to declare it by track id before
+ * the monitor exists.
+ */
+export type InboundTrackContext = {
+	/** See {@link InboundTrackMonitor.contentType}. */
+	contentType?: TrackContentType;
+	/** See {@link InboundTrackMonitor.motionType}. */
+	motionType?: VideoMotionType;
+	/** See {@link InboundTrackMonitor.presentedResolution}. */
+	presentedResolution?: { width: number, height: number };
+	/** See {@link InboundTrackMonitor.videoTag}. */
+	videoTag?: HTMLVideoElement;
+}
 
 export class InboundTrackMonitor {
 	public readonly direction = 'inbound';
@@ -64,10 +81,10 @@ export class InboundTrackMonitor {
 	 * explicitly — typically right after the track monitor appears:
 	 *
 	 * ```ts
-	 * monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
 	 * ```
 	 */
-	public contentType?: InboundTrackContentType;
+	public contentType?: TrackContentType;
 
 	/**
 	 * How much motion this track's content carries, which decides how visible a
@@ -80,13 +97,43 @@ export class InboundTrackMonitor {
 	 * knows:
 	 *
 	 * ```ts
-	 * monitor.getInboundTrackMonitor(track.id)?.setMotionType('highmotion');
+	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ motionType: 'highmotion' });
 	 * ```
 	 *
 	 * Left undeclared, screen share is judged as `lowmotion` - unreadable text
 	 * is a hard failure - and everything else as `standard`.
 	 */
 	public motionType?: VideoMotionType;
+
+	/**
+	 * The size at which this track is actually presented to the user, in CSS
+	 * pixels, when the application knows it. Declared, never measured: the
+	 * stats report the *decoded* resolution, which says nothing about how big
+	 * the picture is on screen — a 1080p stream in a thumbnail is not the same
+	 * experience as the same stream full-bleed.
+	 *
+	 * Read by the inbound video score: together with the decoded resolution it
+	 * gives the magnification the decoded picture undergoes on its way to the
+	 * viewer's eye, which scales the `pixelated-video` penalty. Declare it in
+	 * **device pixels**, not CSS pixels. When {@link videoTag} is set this is
+	 * derived from the element each tick and an explicitly declared value is
+	 * overwritten.
+	 */
+	public presentedResolution?: { width: number, height: number };
+
+	/**
+	 * The `<video>` element this track is rendered into, when the application
+	 * has one to offer. Held as a live reference rather than a snapshot, so
+	 * `videoWidth`/`videoHeight` and the element's layout size can be read at
+	 * judgement time.
+	 *
+	 * Handing one over is how {@link presentedResolution} keeps itself current
+	 * without the application re-declaring it on every resize. Note the monitor
+	 * does not own the element's lifetime — clear it (`setContext` cannot;
+	 * assign `videoTag = undefined`) if the element is torn down while the
+	 * track lives on.
+	 */
+	public videoTag?: HTMLVideoElement;
 
 
 	public calculatedScore: CalculatedScore = {
@@ -188,25 +235,30 @@ export class InboundTrackMonitor {
 	}
 
 	/**
-	 * Explicitly declares what content this track carries. Call it when the
-	 * application knows the received track is a screen share — inbound tracks
-	 * cannot be auto-detected, so this is the primary way to mark one:
+	 * Declares what the application knows about this track and the stats do
+	 * not reveal — content type, motion class, how it is presented.
+	 *
+	 * **Merges.** Only the fields present in `context` are written; anything
+	 * omitted keeps its current value, so the pieces can be declared as they
+	 * become known without a later call erasing an earlier one. An explicit
+	 * `undefined` is treated as "not declared here", not as a reset — assign
+	 * the field directly to clear it.
 	 *
 	 * ```ts
-	 * monitor.getInboundTrackMonitor(track.id)?.setContentType('screenshare');
+	 * // signaling said it is a screen share:
+	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
+	 * // later, once the element is mounted — content type survives:
+	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ videoTag });
 	 * ```
+	 *
+	 * `ClientMonitor.setInboundTrackContext()` does the same by track id and
+	 * works before this monitor exists.
 	 */
-	public setContentType(contentType: InboundTrackContentType): void {
-		this.contentType = contentType;
-	}
-
-	/**
-	 * Declares how much motion this track's content carries. See
-	 * {@link motionType}; `ClientMonitor.setTrackMotionType()` does the same by
-	 * track id and works before the track's monitor exists.
-	 */
-	public setMotionType(motionType: VideoMotionType): void {
-		this.motionType = motionType;
+	public setContext(context: InboundTrackContext): void {
+		if (context.contentType !== undefined) this.contentType = context.contentType;
+		if (context.motionType !== undefined) this.motionType = context.motionType;
+		if (context.presentedResolution !== undefined) this.presentedResolution = context.presentedResolution;
+		if (context.videoTag !== undefined) this.videoTag = context.videoTag;
 	}
 
 	public getPeerConnection() {
@@ -230,7 +282,78 @@ export class InboundTrackMonitor {
 	}
 
 	public update() {
+		this._refreshPresentedResolution();
+
 		this.detectors.update();
+	}
+
+	/**
+	 * Derives {@link presentedResolution} from {@link videoTag}, in device
+	 * pixels, once per tick.
+	 *
+	 * Three things this deliberately does NOT do:
+	 *
+	 * - **It does not read `videoWidth`/`videoHeight`.** Those are the
+	 *   *intrinsic* size of the decoded frame — the same number the stats
+	 *   already report as `frameWidth`/`frameHeight` — so measuring with them
+	 *   would make every magnification exactly 1 and the whole comparison a
+	 *   no-op. The displayed size is the element's layout box.
+	 * - **It does not use the layout box as-is.** `object-fit: contain` (the
+	 *   default) letterboxes the frame inside the box, so a 16:9 frame in a
+	 *   square box paints 16:9, not a square. The intrinsic aspect ratio is
+	 *   fitted into the box to get the pixels actually painted. An application
+	 *   using `object-fit: cover` (which crops instead) should declare
+	 *   `presentedResolution` itself rather than hand over the element.
+	 * - **It does not cache.** The element is re-read every tick: viewers go
+	 *   full-screen, panels resize, layouts reflow, and a resolution measured
+	 *   once at track creation is wrong for the rest of the call.
+	 *
+	 * A non-positive box (`display: none`, detached, not yet laid out) leaves
+	 * the previous value alone rather than clearing it — the score falls back
+	 * to judging the quantizer unscaled, which is what it did before any of
+	 * this existed.
+	 */
+	private _refreshPresentedResolution(): void {
+		const videoTag = this.videoTag;
+
+		if (!videoTag) return;
+
+		try {
+			const boxWidth = videoTag.clientWidth;
+			const boxHeight = videoTag.clientHeight;
+
+			if (boxWidth <= 0 || boxHeight <= 0) return;
+
+			const intrinsicWidth = videoTag.videoWidth;
+			const intrinsicHeight = videoTag.videoHeight;
+
+			// CSS pixels are not screen pixels: a 640px-wide element on a 2x
+			// display paints 1280 of them, and that is the magnification the
+			// eye is subject to.
+			const devicePixelRatio = typeof window !== 'undefined' && 0 < (window.devicePixelRatio ?? 0)
+				? window.devicePixelRatio
+				: 1;
+
+			let paintedWidth = boxWidth;
+			let paintedHeight = boxHeight;
+
+			if (0 < intrinsicWidth && 0 < intrinsicHeight) {
+				const fit = Math.min(boxWidth / intrinsicWidth, boxHeight / intrinsicHeight);
+
+				paintedWidth = intrinsicWidth * fit;
+				paintedHeight = intrinsicHeight * fit;
+			}
+
+			const width = Math.round(paintedWidth * devicePixelRatio);
+			const height = Math.round(paintedHeight * devicePixelRatio);
+
+			if (width <= 0 || height <= 0) return;
+			if (this.presentedResolution?.width === width && this.presentedResolution?.height === height) return;
+
+			this.presentedResolution = { width, height };
+		} catch (err) {
+			this.getPeerConnection().parent.logger.warn(`Failed to read the presented resolution of track ${this.track.id}`, err);
+		}
 	}
 
 	public createSample(): InboundTrackSample {

@@ -19,10 +19,8 @@ import {
     KeyframeStormIssuePayload,
     VideoRecoveryFailedIssuePayload,
 } from "./detectors/FreezedVideoTrackDetector";
-import {
-    CaptureBottleneckIssuePayload,
-    EncoderBottleneckIssuePayload,
-} from "./detectors/OutboundFrameSupplyDetector";
+import { CaptureBottleneckIssuePayload } from "./detectors/OutboundFrameSupplyDetector";
+import { EncoderBottleneckIssuePayload } from "./detectors/EncoderPerformanceDetector";
 import { DecoderBottleneckIssuePayload } from "./detectors/InboundFrameSupplyDetector";
 import {
     CaptureTrackEndedIssuePayload,
@@ -44,32 +42,20 @@ export type FrameSupplyIssuePayload = {
 	trackId: string;
 	/**
 	 * Frames per second whatever supplies this track's frames actually
-	 * delivered: the capture device on an outbound track, the decoder on an
-	 * inbound one.
+	 * delivered, averaged over the window: the capture device on an outbound
+	 * track, the decoder on an inbound one.
 	 */
 	sourceFps?: number;
 	/**
-	 * What it should have delivered: `getSettings().frameRate` on an outbound
-	 * track, the rate frames actually arrived at on an inbound one.
+	 * What it should have delivered over the same window:
+	 * `getSettings().frameRate` on an outbound track, the rate frames actually
+	 * arrived at on an inbound one.
 	 */
 	expectedFps?: number;
 	sourceWidth?: number;
 	sourceHeight?: number;
-	/**
-	 * How much of the rolling window was spent starving — the summed duration of
-	 * the intervals that fell short, not a consecutive run and not a tick count.
-	 * A supply that is failing rather than merely busy interleaves healthy
-	 * intervals with starving ones, so a consecutive rule misses it by
-	 * construction; counting ticks instead would mean something different at
-	 * every collecting period.
-	 */
-	starvingTimeInMs: number;
-	/** Width of that window, in seconds. */
-	windowSeconds?: number;
-	/** Lowest frame rate inside the window — the depth of the dip. */
-	worstSourceFps?: number;
-	/** How long ago the oldest starving interval still in the window happened. */
-	msSinceFirstStarvingTick?: number;
+	/** How long `sourceFps` and `expectedFps` were averaged over. */
+	averagedOverInMs?: number;
 	/**
 	 * The track's own view of itself. On a camera degrading in place both read
 	 * healthy — `"live"` and `false` — while frames go missing, and that

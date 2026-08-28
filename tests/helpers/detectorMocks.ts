@@ -116,6 +116,10 @@ export class MockClientMonitor {
 		return [...this.activeIssues.values()];
 	}
 
+	public isIssueActive(key: string) {
+		return this.activeIssues.has(key);
+	}
+
 	/** The last issue raised with the given type, if any. */
 	public issueOfType(type: string) {
 		return this.raisedIssues.filter((issue) => issue.type === type).pop();

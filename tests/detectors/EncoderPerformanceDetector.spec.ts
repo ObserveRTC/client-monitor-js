@@ -1,12 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { OutboundFrameSupplyDetector } from "../../src/detectors/OutboundFrameSupplyDetector";
+import { EncoderPerformanceDetector } from "../../src/detectors/EncoderPerformanceDetector";
 import { MockClientMonitor, MockOutboundTrackMonitor } from "../helpers/detectorMocks";
 
+// The shipped defaults, except that the browser CPU-limitation signal is turned
+// on — it ships off, and one test below pins that.
 const CONFIG = {
-	fpsRatioThreshold: 0.9,
-	minProducedFps: 5,
-	windowInMs: 120_000,
-	minStarvingTimeInMs: 15_000,
 	encodeFpsRatioThreshold: 0.7,
 	encodeTimeBudgetRatio: 0.8,
 	cpuLimitationShareThreshold: 0.3,
@@ -17,14 +15,13 @@ function setup() {
 	const trackMonitor = new MockOutboundTrackMonitor('video');
 	const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-	clientMonitor.config.outboundFrameSupplyDetector = { ...CONFIG };
+	clientMonitor.config.encoderPerformanceDetector = { ...CONFIG };
+	clientMonitor.config.collectingPeriodInMs = 2000;
 	trackMonitor.track.setSettings({ frameRate: 30 });
 
-	const detector = new OutboundFrameSupplyDetector(trackMonitor as any);
-	// The first update only establishes the timestamp baseline — there is no
-	// interval to measure yet — so `n` judged intervals need `n + 1` updates.
+	const detector = new EncoderPerformanceDetector(trackMonitor as any);
 	const ticks = (count: number) => {
-		for (let i = 0; i <= count; ++i) detector.update();
+		for (let i = 0; i < count; ++i) detector.update();
 	};
 
 	return { detector, ticks, trackMonitor, clientMonitor };
@@ -54,7 +51,7 @@ function layer(options: {
 	};
 }
 
-describe('OutboundFrameSupplyDetector, encoder half', () => {
+describe('EncoderPerformanceDetector', () => {
 	it('stays silent when source and encoder are both healthy', () => {
 		const { ticks, trackMonitor, clientMonitor } = setup();
 
@@ -86,7 +83,7 @@ describe('OutboundFrameSupplyDetector, encoder half', () => {
 
 		trackMonitor.setMediaSource({ sourceFps: 3 });
 		trackMonitor.setOutboundRtps([layer({ fps: 3 })]);
-		ticks(3);
+		ticks(2);
 
 		// The capture half has its own opinion about a source at 3fps; this is
 		// only about the encoder not being blamed for it.
@@ -113,7 +110,7 @@ describe('OutboundFrameSupplyDetector, encoder half', () => {
 		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
 	});
 
-	it('requires the condition to persist', () => {
+	it('requires the condition to persist across collections', () => {
 		const { ticks, trackMonitor, clientMonitor } = setup();
 
 		trackMonitor.setMediaSource({ sourceFps: 30 });
@@ -132,7 +129,7 @@ describe('OutboundFrameSupplyDetector, encoder half', () => {
 		expect(clientMonitor.activeIssues.size).toBe(1);
 
 		trackMonitor.setOutboundRtps([layer({ fps: 30 })]);
-		ticks(1);
+		ticks(2);
 
 		expect(clientMonitor.activeIssues.size).toBe(0);
 	});
@@ -160,13 +157,66 @@ describe('OutboundFrameSupplyDetector, encoder half', () => {
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
+	it('ignores the browser CPU-limitation signal unless it is configured', () => {
+		// Off by default: `cpulimitation` is CpuPerformanceDetector's issue, and
+		// the two are only worth correlating while this one is derived without
+		// reading the same signal.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		clientMonitor.config.encoderPerformanceDetector = { ...CONFIG, cpuLimitationShareThreshold: null };
+		trackMonitor.setMediaSource({ sourceFps: 30 });
+		trackMonitor.setOutboundRtps([layer({ fps: 30, cpuShare: 0.9 })]);
+		ticks(2);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
+	});
+
+	it('says nothing while capture-bottleneck is active', () => {
+		// Chained and mutually exclusive: an encoder handed too few frames has
+		// nothing to answer for, so OutboundFrameSupplyDetector's issue is the
+		// whole answer. The chain is read from the issue, so raising it here is
+		// exactly what that detector does a tick earlier.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		clientMonitor.raiseIssue('capture-bottleneck-track-video-track-1', {
+			type: 'capture-bottleneck',
+			payload: {},
+		});
+
+		trackMonitor.setMediaSource({ sourceFps: 3 });
+		// encoding 1 of every 3 frames it is given would be "behind" on its own
+		trackMonitor.setOutboundRtps([layer({ fps: 1, encodeTimePerFrameInMs: 400 })]);
+		ticks(6);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
+	});
+
+	it('resumes judging once capture recovers', () => {
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		clientMonitor.raiseIssue('capture-bottleneck-track-video-track-1', {
+			type: 'capture-bottleneck',
+			payload: {},
+		});
+
+		trackMonitor.setMediaSource({ sourceFps: 30 });
+		trackMonitor.setOutboundRtps([layer({ fps: 10 })]);
+		ticks(4);
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
+
+		clientMonitor.resolveIssue('capture-bottleneck-track-video-track-1');
+		ticks(2);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
+	});
+
 	it('ignores audio tracks', () => {
 		const trackMonitor = new MockOutboundTrackMonitor('audio');
 		const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-		clientMonitor.config.outboundFrameSupplyDetector = { ...CONFIG };
+		clientMonitor.config.encoderPerformanceDetector = { ...CONFIG };
 
-		const detector = new OutboundFrameSupplyDetector(trackMonitor as any);
+		const detector = new EncoderPerformanceDetector(trackMonitor as any);
 
 		trackMonitor.setMediaSource({ sourceFps: 0 });
 		trackMonitor.setOutboundRtps([layer({ fps: 0 })]);

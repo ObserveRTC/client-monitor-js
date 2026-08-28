@@ -52,13 +52,13 @@ describe('OutboundTrackMonitor contentType', () => {
         expect(monitor.isScreenShare).toBe(true);
     });
 
-    it('is settable explicitly through setContentType', () => {
+    it('is settable explicitly through setContext', () => {
         const track = createMockTrack();
         const monitor = new OutboundTrackMonitor(track as any, createMockMediaSource() as any);
 
         expect(monitor.isScreenShare).toBe(false);
 
-        monitor.setContentType('screenshare');
+        monitor.setContext({ contentType: 'screenshare' });
 
         expect(monitor.contentType).toBe('screenshare');
         expect(monitor.isScreenShare).toBe(true);
@@ -103,13 +103,13 @@ describe('InboundTrackMonitor contentType', () => {
         expect(monitor.isScreenShare).toBe(true);
     });
 
-    it('is settable explicitly through setContentType', () => {
+    it('is settable explicitly through setContext', () => {
         const track = createMockTrack();
         const monitor = new InboundTrackMonitor(track as any, createMockInboundRtp() as any);
 
         expect(monitor.isScreenShare).toBe(false);
 
-        monitor.setContentType('screenshare');
+        monitor.setContext({ contentType: 'screenshare' });
 
         expect(monitor.contentType).toBe('screenshare');
         expect(monitor.isScreenShare).toBe(true);

@@ -10,10 +10,9 @@ const TICK_MS = 5000;
 const ARRIVING = 150;
 
 const CONFIG = {
-	fpsRatioThreshold: 0.9,
-	minProducedFps: 5,
-	windowInMs: 120_000,
-	minStarvingTimeInMs: 15_000,
+	durationInMs: 15_000,
+	decodeFpsRatioThreshold: 0.9,
+	minReceivedFps: 5,
 };
 
 type Issue = { type: string; payload: Record<string, unknown> };
@@ -104,26 +103,24 @@ describe('InboundFrameSupplyDetector', () => {
 	});
 
 	it('raises decoder-bottleneck on an intermittently stumbling decoder', () => {
-		// The interleaved shape again: a decoder that drops a chunk of frames on
-		// some ticks and recovers on others never accumulates a consecutive run.
+		// A decoder that drops a chunk of frames on some intervals and recovers
+		// on others looks fine tick by tick; the average over the window does
+		// not — 365 decoded of 450 arrived is 81% of what it was handed.
 		const h = createHarness();
 
-		for (let i = 0; i < 5; ++i) h.tick(ARRIVING);
+		h.tick(ARRIVING); // baseline
 		h.tick(120);
-		h.tick(ARRIVING);
-		h.tick(95);
 		h.tick(ARRIVING);
 		expect(h.issues()).toHaveLength(0);
 
-		h.tick(110);
+		h.tick(95);
 
 		const payload = h.issues()[0]!.payload;
 
 		expect(h.issues()).toHaveLength(1);
-		expect(payload.starvingTimeInMs).toBe(15_000);
 		expect(payload.expectedFps).toBe(30);
-		expect(payload.sourceFps).toBe(22);
-		expect(payload.worstSourceFps).toBe(19);
+		expect(payload.sourceFps as number).toBeCloseTo(24.33, 1);
+		expect(payload.averagedOverInMs).toBe(15_000);
 	});
 
 	it('does not judge a paused consumer', () => {
@@ -167,16 +164,14 @@ describe('InboundFrameSupplyDetector', () => {
 		expect(h.raised).toHaveLength(0);
 	});
 
-	it('resolves once the window holds no starving ticks', () => {
+	it('resolves once a window comes back healthy', () => {
 		const h = createHarness();
 
-		for (let i = 0; i < 5; ++i) h.tick(ARRIVING);
-		h.tick(120);
-		h.tick(95);
-		h.tick(110);
+		h.tick(ARRIVING); // baseline
+		for (let i = 0; i < 3; ++i) h.tick(110);
 		expect(h.issues()).toHaveLength(1);
 
-		for (let i = 0; i < 30; ++i) h.tick(ARRIVING);
+		for (let i = 0; i < 3; ++i) h.tick(ARRIVING);
 
 		expect(h.resolved).toContain('decoder-bottleneck-track-video-in-1');
 	});
