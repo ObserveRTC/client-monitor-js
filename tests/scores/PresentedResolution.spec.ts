@@ -83,21 +83,33 @@ describe('pixelation is charged by how big the picture is shown', () => {
 	it('charges a large picture harder than fairness would suggest', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		// 2x linear — speaker view
+		// 2x linear — speaker view. The band drops 0.6 of its width per octave
+		// (40-80 becomes 16-56), so QP 60 is past saturation, and the weight is 3.0.
 		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
 
-		// halfway up the band × 3.0
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.5, 5);
+		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
 	});
 
 	it('barely charges a thumbnail, where nobody can see the blocks', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		// 0.5x linear
+		// 0.5x linear. The band rises only 0.15 of its width per octave
+		// (40-80 becomes 46-86), so QP 60 is 0.35 up it, and the weight is 0.5.
 		monitor.setContext({ presentedResolution: { width: 320, height: 180 } });
 
-		// halfway up the band × 0.5
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.25, 5);
+		expect(pixelationPenalty(monitor)).toBeCloseTo(0.18, 5);
+	});
+
+	it('moves the bar much further up than down — magnifying is not the inverse of shrinking', () => {
+		const large = createMonitor(createInboundRtp());
+		const small = createMonitor(createInboundRtp());
+
+		large.setContext({ presentedResolution: { width: 1280, height: 720 } });   // +1 octave
+		small.setContext({ presentedResolution: { width: 320, height: 180 } });    // -1 octave
+
+		// one octave up drops the band 24 QP; one octave down raises it only 6
+		expect(pixelationPenalty(large)).toBeCloseTo(3.0, 5);
+		expect(pixelationPenalty(small)).toBeCloseTo(0.18, 5);
 	});
 
 	it('takes a saturated quantizer on a large picture to the full 3.0', () => {
@@ -109,26 +121,53 @@ describe('pixelation is charged by how big the picture is shown', () => {
 		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
 	});
 
-	it('has no upper clamp on magnification — bigger is simply large', () => {
-		// 320x180 decoded on a 4K screen is a linear factor of ~10.7
+	it('caps the same saturated quantizer at 0.5 in a thumbnail', () => {
+		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 120 }));
+
+		monitor.setContext({ presentedResolution: { width: 320, height: 180 } });
+
+		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
+	});
+
+	it('holds the moved band inside the codec scale, where H.264 has no headroom', () => {
+		// h264 highmotion ships as 38-48 in a 0-51 scale; 0.15 of a band of
+		// leniency wants saturation at 49.5, which fits, but the clamp is what
+		// stops a wider shift landing at a quantizer H.264 cannot emit
+		const monitor = createMonitor(createInboundRtp({
+			avgQpPerFrame: 47,
+			getCodec: () => ({ mimeType: 'video/H264' }),
+		}));
+
+		monitor.setContext({
+			motionType: 'highmotion',
+			presentedResolution: { width: 320, height: 180 },
+		});
+
+		// band 39.5 -> 49.5, QP 47 is 0.75 up it, weight 0.5
+		expect(pixelationPenalty(monitor)).toBeCloseTo(0.38, 5);
+	});
+
+	it('clamps a wild magnification rather than following the ratio', () => {
+		// 320x180 decoded on a 4K screen is a linear factor of ~10.7; the band
+		// shift sees 2.0, not 10.7, so activation never runs below zero
 		const monitor = createMonitor(createInboundRtp({ frameWidth: 320, frameHeight: 180 }));
 
 		monitor.setContext({ presentedResolution: { width: 3840, height: 2160 } });
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.5, 5);
+		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
 	});
 
-	it('applies the boundaries inclusively at large and exclusively at small', () => {
+	it('applies the weight boundaries inclusively at large and exclusively at small', () => {
 		const large = createMonitor(createInboundRtp());
 		const small = createMonitor(createInboundRtp());
 
-		// exactly 1.5x linear -> large
+		// exactly 1.5x linear -> the large weight (3.0), band 26-66
 		large.setContext({ presentedResolution: { width: 960, height: 540 } });
-		// exactly 0.75x linear -> still ordinary, not small
+		// exactly 0.75x linear -> still the ordinary weight (2.0), band 42.5-82.5
 		small.setContext({ presentedResolution: { width: 480, height: 270 } });
 
-		expect(pixelationPenalty(large)).toBeCloseTo(1.5, 5);
-		expect(pixelationPenalty(small)).toBeCloseTo(1.0, 5);
+		expect(pixelationPenalty(large)).toBeCloseTo(2.55, 2);
+		expect(pixelationPenalty(small)).toBeCloseTo(0.88, 2);
 	});
 
 	it('takes the ratio from the areas, so a differently proportioned box is not magnification', () => {
@@ -140,8 +179,9 @@ describe('pixelation is charged by how big the picture is shown', () => {
 		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
 	});
 
-	it('leaves a clean picture unpenalized however large it is shown', () => {
-		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 20 }));
+	it('leaves a genuinely clean picture unpenalized however large it is shown', () => {
+		// QP 15 is below even the fully lowered band (16 at 2x magnification)
+		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 15 }));
 
 		monitor.setContext({ presentedResolution: { width: 3840, height: 2160 } });
 
@@ -237,6 +277,6 @@ describe('presentedResolution derived from a video element', () => {
 		monitor.update();
 
 		expect(monitor.presentedResolution).toEqual({ width: 1280, height: 720 });
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.5, 5);
+		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
 	});
 });

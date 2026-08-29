@@ -103,6 +103,26 @@ export const VIDEO_QP_THRESHOLDS: Record<string, Record<VideoMotionType, VideoQp
 	},
 };
 
+/**
+ * The highest quantizer each codec's scale can express.
+ *
+ * The bands above are written for a picture shown at roughly the size it was
+ * decoded. When the presented resolution is known they are shifted to suit it,
+ * and a shift needs a wall to stop at: H.264's high-motion band already sits at
+ * 48 of 51, so a couple of points of leniency is all the scale has left.
+ * Without this a shifted saturation could land at a quantizer the codec cannot
+ * produce, which would make the penalty unreachable rather than lenient.
+ *
+ * A codec absent from this map gets no shift — its band is used as written.
+ */
+export const VIDEO_QP_MAX: Record<string, number | undefined> = {
+	vp8: 127,
+	vp9: 255,
+	h264: 51,
+	h265: 51,
+	av1: 255,
+};
+
 export function calculateLatencyMOS(
 	{ avgJitter, rttInMs, packetsLoss }:
 	{ avgJitter: number, rttInMs: number, packetsLoss: number },

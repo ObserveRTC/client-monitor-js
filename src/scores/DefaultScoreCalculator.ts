@@ -1,5 +1,6 @@
 import { ClientMonitor } from "../ClientMonitor";
-import { VIDEO_QP_THRESHOLDS } from "./CalculatedScore";
+import { VIDEO_QP_MAX, VIDEO_QP_THRESHOLDS } from "./CalculatedScore";
+import type { VideoQpThresholds } from "./CalculatedScore";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import type { InboundRtpMonitor } from "../monitors/InboundRtpMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
@@ -15,7 +16,6 @@ export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
 
 export type DefaultScoreCalculatorSubtractionReason =
 	'high-rtt' |
-	'very-high-rtt' |
 	/**
 	 * On the peer connection: average measured jitter across the streams is
 	 * high — a jittery path. On an inbound video track: the track's own jitter
@@ -113,9 +113,36 @@ export class DefaultScoreCalculator {
 	public static PIXELATION_MAX_PENALTY = 2.0;
 	public static PIXELATION_MAX_PENALTY_SMALL = 0.5;
 
-	/** Linear magnification, i.e. sqrt of the area ratio. */
+	/** Linear magnification, i.e. sqrt of the area ratio, at which the weight tiers switch. */
 	public static PIXELATION_LARGE_MAGNIFICATION = 1.5;
 	public static PIXELATION_SMALL_MAGNIFICATION = 0.75;
+
+	/**
+	 * Bounds on the magnification fed to the band shift. The raw ratio is
+	 * unbounded in both directions — 180p on a 4K screen is a factor of 10.7 —
+	 * and neither extreme should move the bar as far as it literally implies.
+	 */
+	public static PIXELATION_MAGNIFICATION_MIN = 0.5;
+	public static PIXELATION_MAGNIFICATION_MAX = 2.0;
+
+	/**
+	 * How far the QP band moves per doubling of display magnification, as a
+	 * fraction of the band's own width — and **deliberately asymmetric**.
+	 *
+	 * Magnifying and shrinking are not equal and opposite. Blowing a picture up
+	 * makes every coded block bigger on the retina and the bar for "acceptable"
+	 * has to come down hard; shrinking it into a thumbnail hides the blocks, but
+	 * only a little forgiveness is warranted, because a thumbnail bad enough to
+	 * notice is still bad. So the band drops `UP` of its width per octave of
+	 * magnification and rises only `DOWN` per octave of reduction.
+	 *
+	 * Expressed as a fraction of the band width rather than in QP points because
+	 * QP scales are not comparable between codecs — six points is a quantizer
+	 * doubling in H.264's 0-51 and almost nothing in AV1's 0-255 — while each
+	 * codec's own band already carries its scale.
+	 */
+	public static PIXELATION_QP_SHIFT_PER_OCTAVE_UP = 0.6;
+	public static PIXELATION_QP_SHIFT_PER_OCTAVE_DOWN = 0.15;
 
 	/** Audible concealment share at which the penalty saturates (~"severely concealed"). */
 	public static readonly AUDIO_CONCEALMENT_SATURATION = 0.1;
@@ -174,32 +201,46 @@ export class DefaultScoreCalculator {
 		let clientTotalWeight = 0;
 		this.currentReasons = {};
 
-		// The peer connection contributes as a *sibling* of its tracks, not as a
-		// multiplier over them. It used to scale the weighted track score by
-		// `pcScore / 5`, which charged every path problem twice: once inside the
-		// track scores and again as the factor. With the network penalties now
-		// living only on the peer connection (see below), one weighted average
-		// over peer connections and tracks counts each thing exactly once.
+		// The peer connection scales its tracks rather than sitting beside them:
+		// every track rides the path, so a degraded path degrades what the
+		// viewer got from each of them. The tracks average within the peer
+		// connection, that average is scaled by the path's own score normalized
+		// to 0..1, and the client score is the weighted average of those
+		// products — which keeps the useful property that a call can never
+		// score better than the connection carrying it.
 		for (const pcMonitor of clientMonitor.peerConnections) {
 			const pcScore = pcMonitor.calculatedStabilityScore;
 
 			if (pcScore.value === undefined) continue;
 
-			clientTotalScore += pcScore.value * pcScore.weight;
-			clientTotalWeight += pcScore.weight;
-
-			accumulateSubtractions(this.currentReasons, pcMonitor.scoreReasons ?? {});
+			let trackTotalScore = 0;
+			let trackTotalWeight = 0;
+			let noTrack = true;
 
 			for (const trackMonitor of pcMonitor.tracks) {
 				const trackScore = trackMonitor.calculatedScore;
 
 				if (trackScore.value === undefined) continue;
 
-				clientTotalScore += trackScore.value * trackScore.weight;
-				clientTotalWeight += trackScore.weight;
+				trackTotalScore += trackScore.value * trackScore.weight;
+				trackTotalWeight += trackScore.weight;
+				noTrack = false;
 
 				accumulateSubtractions(this.currentReasons, trackScore.reasons ?? {});
 			}
+
+			const weightedTrackScore = noTrack
+				? DefaultScoreCalculator.MAX_SCORE
+				: trackTotalScore / Math.max(trackTotalWeight, 1);
+			const normalizedPcScore = Math.max(
+				DefaultScoreCalculator.MIN_SCORE,
+				pcScore.value,
+			) / DefaultScoreCalculator.MAX_SCORE;
+
+			clientTotalScore += weightedTrackScore * normalizedPcScore * pcScore.weight;
+			clientTotalWeight += pcScore.weight;
+
+			accumulateSubtractions(this.currentReasons, pcMonitor.scoreReasons ?? {});
 		}
 
 		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
@@ -287,7 +328,7 @@ export class DefaultScoreCalculator {
 		// path are different problems with different fixes, and the reasons
 		// should say which one this is.
 		if (300 < rttInMs) {
-			subtractions["very-high-rtt"] = 2.0;
+			subtractions["high-rtt"] = 2.0;
 		} else if (150 < rttInMs) {
 			subtractions["high-rtt"] = 1.0;
 		}
@@ -449,15 +490,13 @@ export class DefaultScoreCalculator {
 		const qpThresholds = codec ? VIDEO_QP_THRESHOLDS[codec]?.[motionType] : undefined;
 
 		if (avgQpPerFrame !== undefined && qpThresholds) {
-			const qpPenalty = this._normalizedPenalty(
-				avgQpPerFrame,
-				qpThresholds.activation,
-				qpThresholds.saturation,
-			);
+			const magnification = this._displayMagnification(trackMonitor, inboundRtp);
+			const band = this._qpBandFor(qpThresholds, codec, magnification);
+			const qpPenalty = this._normalizedPenalty(avgQpPerFrame, band.activation, band.saturation);
 
 			if (0 < qpPenalty) {
 				subtractions['pixelated-video'] = this._getRoundedScore(
-					qpPenalty * this._pixelationWeight(trackMonitor, inboundRtp)
+					qpPenalty * this._pixelationWeight(magnification)
 				);
 			}
 		}
@@ -779,22 +818,74 @@ export class DefaultScoreCalculator {
 	 * Degenerates to a binary 0/1 step when a caller configures
 	 * `saturation <= activation`.
 	 */
-	/** From the areas, so a box whose proportions differ from the frame's is not magnification on width alone. */
-	private _pixelationWeight(
+	/**
+	 * The linear factor by which the decoded picture is scaled to reach the
+	 * viewer, clamped. Taken from the **areas**, so a presented box whose
+	 * proportions differ from the frame's does not read as magnification on
+	 * width alone. `undefined` when either side of the ratio is missing.
+	 */
+	private _displayMagnification(
 		trackMonitor: InboundTrackMonitor,
 		inboundRtp: InboundRtpMonitor,
-	): number {
+	): number | undefined {
 		const presented = trackMonitor.presentedResolution;
 		const decodedWidth = inboundRtp.frameWidth;
 		const decodedHeight = inboundRtp.frameHeight;
 
-		if (!presented || !decodedWidth || !decodedHeight) return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
-		if (presented.width <= 0 || presented.height <= 0) return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
+		if (!presented || !decodedWidth || !decodedHeight) return undefined;
+		if (presented.width <= 0 || presented.height <= 0) return undefined;
 
-		const magnification = Math.sqrt(
-			(presented.width * presented.height) / (decodedWidth * decodedHeight)
+		return Math.min(
+			DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MAX,
+			Math.max(
+				DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MIN,
+				Math.sqrt((presented.width * presented.height) / (decodedWidth * decodedHeight)),
+			),
 		);
+	}
 
+	/**
+	 * The band to judge this track's quantizer against, moved to suit the size
+	 * the picture is shown at:
+	 *
+	 * ```
+	 * shift = (saturation - activation) * SHIFT_PER_OCTAVE * log2(magnification)
+	 * band  = { activation - shift, saturation - shift }
+	 * ```
+	 *
+	 * `log2` because magnification is a ratio, and a different `SHIFT_PER_OCTAVE`
+	 * in each direction because magnifying and shrinking are not equally
+	 * consequential. The result is held inside the codec's own scale, since a
+	 * saturation past the highest quantizer a codec can emit would make the
+	 * penalty unreachable rather than lenient. No magnification, or no known
+	 * range for the codec, returns the band unmoved.
+	 */
+	private _qpBandFor(
+		qpThresholds: VideoQpThresholds,
+		codec: string | undefined,
+		magnification: number | undefined,
+	): VideoQpThresholds {
+		const maxQp = codec ? VIDEO_QP_MAX[codec] : undefined;
+
+		if (magnification === undefined || !maxQp) return qpThresholds;
+
+		const octaves = Math.log2(magnification);
+
+		if (octaves === 0) return qpThresholds;
+
+		const fraction = 0 < octaves
+			? DefaultScoreCalculator.PIXELATION_QP_SHIFT_PER_OCTAVE_UP
+			: DefaultScoreCalculator.PIXELATION_QP_SHIFT_PER_OCTAVE_DOWN;
+		const shift = (qpThresholds.saturation - qpThresholds.activation) * fraction * octaves;
+		const activation = Math.min(Math.max(1, qpThresholds.activation - shift), maxQp - 1);
+		const saturation = Math.min(Math.max(activation + 1, qpThresholds.saturation - shift), maxQp);
+
+		return { activation, saturation };
+	}
+
+	/** What a saturated quantizer is worth at the size the picture is shown. */
+	private _pixelationWeight(magnification: number | undefined): number {
+		if (magnification === undefined) return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
 		if (DefaultScoreCalculator.PIXELATION_LARGE_MAGNIFICATION <= magnification) {
 			return DefaultScoreCalculator.PIXELATION_MAX_PENALTY_LARGE;
 		}

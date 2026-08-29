@@ -1178,10 +1178,10 @@ Where PC_Score = Track_Score_Avg × PC_Stability_Score
 
 Based on Round Trip Time (RTT), jitter and packet loss. RTT and jitter are penalized **separately** — a long path and a jittery path are different problems with different fixes, and the score reasons say which one it is:
 
-**RTT Penalties (`high-rtt` / `very-high-rtt`):**
+**RTT Penalties (`high-rtt`)** — one reason key, two magnitudes, like jitter and loss:
 
--   High RTT (150-300ms): -1.0 point
--   Very High RTT (>300ms): -2.0 points
+-   150-300ms average RTT: -1.0 point
+-   \>300ms average RTT: -2.0 points
 
 **Jitter Penalties (`high-jitter`)** — measured jitter averaged over the streams that reported one:
 

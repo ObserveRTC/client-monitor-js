@@ -81,19 +81,24 @@ connection says whether the network explains it.
 
 - A track score never subtracts `high-packetloss` or `high-jitter`. If you are
   looking for those on a track sample, look at its peer connection entry.
-- The peer connection score is **not** a multiplier over its tracks. It used to
-  be, which meant a path problem was charged once inside each track score and
-  again as the factor over all of them — the same packets, counted twice.
+- A track is not charged twice for the same packets. The peer connection score
+  still scales its tracks (see below) — what changed is that the loss and jitter
+  penalties no longer *also* sit on the track, so the path is charged once.
 
 ## Score hierarchy
 
-Scores compose as one weighted average over peer connections **and** tracks,
-which are siblings rather than nested:
+The peer connection **scales** its tracks rather than sitting beside them. Every
+track rides the path, so a degraded path degrades what the viewer actually got
+from each of them:
 
 ```
-Client Score = Σ(PC_Score × PC_Weight) + Σ(Track_Score × Track_Weight)
-               ───────────────────────────────────────────────────────
-                       Σ(PC_Weight) + Σ(Track_Weight)
+                    Σ(Track_Score × Track_Weight)        max(0, PC_Score)
+PC_Contribution  =  ─────────────────────────────   ×   ─────────────────
+                        Σ(Track_Weight)                         5
+
+                    Σ(PC_Contribution × PC_Weight)
+Client Score     =  ──────────────────────────────
+                           Σ(PC_Weight)
 ```
 
 | contributor | weight |
@@ -102,32 +107,29 @@ Client Score = Σ(PC_Score × PC_Weight) + Σ(Track_Score × Track_Weight)
 | audio track | 1 |
 | video track | 2 |
 
-1. **Every track** computes its own score from what the user perceived on it.
+1. **Every track** computes its own score from what the user perceived on it —
+   freezes, pixelation, concealment, frame delivery. Never loss or jitter.
 2. **Every peer connection** computes a *stability score* from path-level
-   signals — RTT, jitter and packet loss — and contributes it directly.
-3. **The client score** is the weighted average of all of them together, so
-   each contribution is counted exactly once.
+   signals — RTT, jitter and packet loss.
+3. **The client score** averages each peer connection's scaled track average,
+   weighted by the peer connection.
 
-A track that is disabled or muted, or that has no RTP stream yet, has an
-`undefined` score and is excluded. A peer connection without tracks simply
-contributes its own stability score.
+The multiplication is deliberate and gives the client score a property the
+additive alternative does not: **a call can never score better than the
+connection carrying it.** A peer connection at 0 takes its tracks to 0 no matter
+how healthy their own metrics look, which is the honest answer — media that
+cannot traverse the path was not delivered, whatever the decoder thought.
 
-### Only streams carrying media measure the path
+A peer connection with no scoreable tracks contributes its own score alone (the
+track average defaults to the maximum). A peer connection whose stability score
+cannot be computed is skipped entirely, along with its tracks.
 
-The peer connection averages jitter and loss across its streams, and skips any
-stream that shows no sign of carrying media in the interval — under
-`MIN_PATH_SAMPLE_BITRATE` (8 kbps) **and** under `MIN_PATH_SAMPLE_PACKETS` (25
-packets) **and** delivering no frames.
+**Known asymmetry.** `Σ(PC_Weight)` is the only denominator, so track weights
+normalize *within* a peer connection and never reach the client level. A send
+peer connection with one outbound track therefore counts as much as a receive
+peer connection with twenty inbound ones. Weighting each contribution by
+`PC_Weight + Σ(Track_Weight)` would fix it without changing the multiplication.
 
-This is not a micro-optimization. An SFU's bandwidth-probation stream —
-mediasoup sends one on `mid: "probator"` — exists to be discarded, so its loss
-ratio and jitter are not measurements of anything. Observed in a real session at
-~2 kbps with ~50% "loss" and ~490 ms "jitter", beside real streams running at
-0.00% loss and 2 ms jitter. Averaged in with an equal vote it produced
-`high-jitter: 2` **and** `high-packetloss: 2` on 99% of samples and pinned a
-healthy connection at the minimum score for the whole call. Excluding it moved
-that connection's mean score from **1.08 to 4.92**, and the client's from
-**2.93 to 4.86**.
 
 ## How penalties work
 
@@ -136,7 +138,29 @@ Every subtraction is recorded under a **reason key** (the exported
 `DefaultScoreCalculatorSubtractionReason` union), so the resulting score
 always explains itself: `{ "frozen-video": 2.0, "pixelated-video": 0.4 }`.
 
-There are three penalty shapes:
+There are three penalty shapes.
+
+### No baseline, no judgement
+
+Before any of them: **a penalty is only ever computed from stats the browser
+actually reported.** Nothing is assumed, defaulted or approximated from a
+neighbouring signal.
+
+Concretely, no penalty in this calculator uses `?? 0` on the value it is judging.
+A missing input is not zero — zero is a measurement, and a very consequential one
+(zero loss, zero frames, zero quantizer all mean something specific). Where an
+input is absent the calculation is skipped and the reason key **does not appear**.
+
+That makes the reason keys readable in both directions:
+
+- **key absent** — either nothing was wrong, or it could not be measured.
+- **key present with a value** — it was measured, and this is what it cost.
+
+The two are never conflated by a fabricated default, which is what lets a server
+distinguish a healthy track from an unmeasurable one. Where the same distinction
+matters for a *refinement* rather than the measurement itself — the display size
+that tunes `pixelated-video`, for instance — the refinement is skipped and the
+base measurement still stands, rather than the whole reason disappearing.
 
 ### Stepped penalties
 
@@ -196,7 +220,7 @@ jittery path are different problems with different fixes.
 | Reason | Condition | Penalty |
 | --- | --- | --- |
 | `high-rtt` | average RTT 150 – 300 ms | −1.0 |
-| `very-high-rtt` | average RTT > 300 ms | −2.0 |
+| `high-rtt` | average RTT > 300 ms | −2.0 |
 | `high-jitter` | average jitter 30 – 100 ms | −1.0 |
 | `high-jitter` | average jitter > 100 ms | −2.0 |
 | `high-packetloss` | avg delta loss fraction 1 – 5% | −1.0 |
@@ -247,48 +271,178 @@ application can declare it with `setInboundTrackContext(id, { motionType })`. Wh
 reports no `qpSum` for the codec in use, **the reason is absent entirely**
 rather than modelled from bitrate.
 
-### A large pixelated video is charged harder, deliberately
+### `pixelated-video` in full
+
+Pixelation is the one video reason that measures what the picture *looks like*
+rather than what the network did to it. It is worth walking through end to end,
+because three separate inputs decide the number and each one can be absent.
+
+#### 1. The measurement: what the encoder had to throw away
+
+The quantization parameter is the encoder stating how coarsely it quantized a
+frame — how much detail it discarded to fit the bits it was given. High QP is
+visible as blocking, banding and mush. It is the only signal in `getStats()`
+that describes the decoded picture itself.
+
+`InboundRtpMonitor` derives it per interval:
+
+```
+deltaQpSum        = qpSum − qpSum(previous)
+deltaFramesDecoded = framesDecoded − framesDecoded(previous)
+avgQpPerFrame     = deltaQpSum / deltaFramesDecoded
+```
+
+**It is `undefined` unless both deltas exist and at least one frame decoded.**
+Nothing is carried forward from the previous interval: a stale average would
+describe media that is no longer on screen. Not every browser reports `qpSum`,
+and none report it for every codec.
+
+Bitrate is deliberately *not* used as a substitute. The same 500 kbps is
+generous for a static talking head and starvation for a fast pan, and nothing
+observable separates the two from bits alone. The reason this replaced
+`low-bitrate-per-pixel` is that the old metric was wrong twice over: its floor
+ignored resolution (required bitrate scales as roughly `pixels^0.75`, so one
+floor cannot fit 180p and 1080p), and dividing by *measured* fps meant a track
+halving its frame rate doubled its bits-per-pixel and shed the penalty — the
+metric rewarded dropping frames.
+
+#### 2. The band: what counts as too coarse, for this codec and this content
+
+A QP value means nothing on its own. `VIDEO_QP_THRESHOLDS[codec][motionType]`
+gives the pair it is judged against:
+
+- **activation** — below this the picture is fine and nothing is subtracted.
+- **saturation** — at or above this it is as bad as this reason gets.
+
+Indexed by codec first because the scales are **not** comparable and must never
+be normalized into a shared 0–1 range: H.264 runs 0–51, VP8 0–127, VP9 and AV1
+0–255. Equal fractions of those ranges are not equal quality.
+
+Then by motion class, because the same quantizer is not equally visible on all
+content: movement masks compression artifacts, while a slide or a still face
+shows every blocked edge. Note the bands run the **opposite** way to bitrate —
+high-motion content needs more bits to reach a given QP, yet tolerates a higher
+one once there.
+
+| codec | scale | lowmotion | standard | highmotion |
+| --- | --- | --- | --- | --- |
+| vp8 | 0–127 | 32 → 64 | 40 → 80 | 50 → 100 |
+| vp9 | 0–255 | 64 → 128 | 80 → 160 | 100 → 200 |
+| h264 | 0–51 | 26 → 34 | 33 → 42 | 38 → 48 |
+| h265 | 0–51 | 26 → 34 | 33 → 42 | 38 → 48 |
+| av1 | 0–255 | 80 → 144 | 100 → 180 | 125 → 225 |
+
+Motion class is application-declared (`setInboundTrackContext(id, { motionType })`).
+Undeclared, screen share is judged as `lowmotion` — unreadable text is a hard
+failure — and everything else as `standard`.
+
+**An unrecognised codec yields no band, and therefore no judgement.**
+
+#### 3. The size: where the band sits, and what saturation is worth
 
 Blockiness is an artifact of a given angular size. The same quantizer is
 punishing blown up to full screen and nearly invisible in a grid thumbnail,
-because what the eye resolves is the coded block's size on screen, not its size
-in the decoded frame. So the *weight* of a saturated quantizer depends on how
-big the picture is shown — and not symmetrically. A big pixelated video is the
-thing the viewer is actually looking at and complaining about, so it is charged
-harder than fairness would suggest:
+because what the eye resolves is the coded block's size *on screen*, not its size
+in the decoded frame. So when the application has said how big the picture is
+presented, two things change — and **deliberately not symmetrically**. A large
+pixelated video is what the viewer is actually complaining about; a pixelated
+thumbnail is a curiosity.
 
 ```
-magnification = sqrt((presentedW * presentedH) / (decodedW * decodedH))
-
-magnification >= 1.5   ->  weight 3.0   (PIXELATION_MAX_PENALTY_LARGE)
-        0.75 .. 1.5    ->  weight 2.0   (PIXELATION_MAX_PENALTY)
-magnification <  0.75  ->  weight 0.5   (PIXELATION_MAX_PENALTY_SMALL)
-
-pixelated-video = normalizedPenalty(avgQpPerFrame, activation, saturation) * weight
+magnification = sqrt((presentedW × presentedH) / (decodedW × decodedH))
+                clamped to [0.5, 2.0]
 ```
 
-For vp8 at standard motion, whose band is 40 → 80, a QP of 60 sits exactly
-halfway up the ramp — so the same stream, decoded once, costs:
+Taken from the **areas**, so a presented box whose proportions differ from the
+frame's does not read as magnification on width alone. Clamped because the raw
+ratio is unbounded — 180p on a 4K screen is a factor of 10.7 — and neither
+extreme should move the bar as far as it literally implies.
 
-| presented (device px) | magnification | weight | QP 60 costs |
-| --- | --- | --- | --- |
-| thumbnail, 160×90 CSS @2x | 0.50 | 0.5 | **0.25** |
-| grid tile, 320×180 CSS @2x | 1.00 | 2.0 | 1.00 |
-| speaker view, 1280×720 CSS @2x | 2.00 | 3.0 | **1.50** |
+**The band moves**, by a fraction of its own width per doubling of magnification:
 
-And at saturation (QP ≥ 80) those become 0.5, 2.0 and **3.0** — a large picture
-gone to blocks is the worst thing that can happen to a video track short of it
-stopping, and it should not be possible to score that call well.
+```
+shift = (saturation − activation) × SHIFT_PER_OCTAVE × log2(magnification)
+band  = { activation − shift, saturation − shift }
 
-Three things to know:
+SHIFT_PER_OCTAVE = 0.6   when magnified   (PIXELATION_QP_SHIFT_PER_OCTAVE_UP)
+                   0.15  when shrunk      (PIXELATION_QP_SHIFT_PER_OCTAVE_DOWN)
+```
 
-- **The ratio comes from the areas**, so a presented box whose proportions
-  differ from the frame's does not read as magnification on width alone.
-- **There is no clamp.** A 180p stream on a 4K screen is a magnification of 10.7
-  and simply counts as large; the tiers are flat, so nothing runs away.
-- **No presented resolution, no adjustment.** Undeclared presented size, or no
-  decoded resolution in the stats, means the ordinary 2.0 — nothing is
-  substituted for a missing number.
+`log2` because magnification is a ratio; the two different fractions are the
+asymmetry. One octave up drops the bar by 0.6 of the band's width, one octave
+down raises it by only 0.15 — blowing a picture up makes every block bigger on
+the retina and the bar has to come down hard, while shrinking hides the blocks
+but a thumbnail bad enough to notice is still bad.
+
+The shift is expressed as a fraction of the band width rather than in QP points
+because QP points are not comparable between codecs — six points is a quantizer
+doubling in H.264's 0–51 and almost nothing in AV1's 0–255 — while each codec's
+own band already carries its scale. The moved band is then held inside
+`VIDEO_QP_MAX[codec]`, since a saturation past the highest quantizer a codec can
+emit would make the penalty *unreachable* rather than lenient: H.264's
+high-motion band already sits at 48 of 51.
+
+**And the weight changes** — what a fully saturated quantizer is worth:
+
+| magnification | weight | constant |
+| --- | --- | --- |
+| ≥ 1.5 | **3.0** | `PIXELATION_MAX_PENALTY_LARGE` |
+| 0.75 – 1.5 | 2.0 | `PIXELATION_MAX_PENALTY` |
+| < 0.75 | **0.5** | `PIXELATION_MAX_PENALTY_SMALL` |
+
+The two mechanisms do different jobs: the band decides *when* pixelation starts
+costing anything, the weight decides *how much* it can cost at worst. `3.0` is
+half again what `frozen-video` costs — a large picture gone to blocks is the
+worst thing that can happen to a video track short of it stopping, and it should
+not be possible to score that call well. `pixelated-video` is the only reason
+whose range exceeds 2.0.
+
+#### 4. The result
+
+```
+pixelated-video = normalizedPenalty(avgQpPerFrame, band) × weight
+```
+
+For vp8 at standard motion — shipped band 40 → 80 — the same stream, decoded
+once, shown three ways:
+
+| presented | mag | band | weight | QP 45 | QP 60 | QP 75 | QP 90 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| thumbnail, 160×90 CSS @2x | 0.50 | 46 → 86 | 0.5 | 0 | **0.18** | 0.36 | 0.50 |
+| grid tile, 320×180 CSS @2x | 1.00 | 40 → 80 | 2.0 | 0.25 | 1.00 | 1.75 | 2.00 |
+| 1.5× | 1.50 | 26 → 66 | 3.0 | 1.43 | 2.55 | 3.00 | 3.00 |
+| speaker view, 1280×720 CSS @2x | 2.00 | 16 → 56 | 3.0 | 2.17 | **3.00** | 3.00 | 3.00 |
+
+The QP-60 column is the point: identical encoded picture, **0.18** in a
+thumbnail and **3.00** in speaker view — a factor of seventeen.
+
+#### 5. Nothing is assumed
+
+**Every input is either measured or absent, and an absent input never becomes a
+default.** This is the rule the whole scoring path follows, and pixelation is
+where it matters most, because three separate things can be missing:
+
+| missing | consequence |
+| --- | --- |
+| `qpSum`, or no frame decoded this interval | **no reason at all** — the picture is not judged |
+| the codec is not in `VIDEO_QP_THRESHOLDS` | **no reason at all** — there is no scale to judge against |
+| `presentedResolution` not declared | the band is used as shipped, weight `2.0` |
+| the stats report no `frameWidth`/`frameHeight` | the band is used as shipped, weight `2.0` |
+| the codec is not in `VIDEO_QP_MAX` | the band is used as shipped (the weight still applies) |
+
+Note the difference between the first two rows and the rest. Without a
+quantizer, or without a scale to read it on, there is nothing to say and the
+reason is **absent from the sample entirely** — not zero, not estimated from
+bitrate. Without a presented size there is still a real measurement; only the
+size-dependent refinement is skipped, and the track is judged exactly as it was
+before that refinement existed.
+
+A reason key that is absent means "not measured". A reason key present with a
+value means "measured, and this is what it cost". The two are never conflated,
+so a server can tell a healthy track from an unmeasurable one — which it could
+not do if a missing input silently produced a zero.
+
+#### Declaring the presented size
 
 Declare it in **device pixels**, either directly or by handing over the element:
 
@@ -371,8 +525,7 @@ Every key of the `DefaultScoreCalculatorSubtractionReason` union:
 
 | Reason key | Entity | Media | Max | What it tells you |
 | --- | --- | --- | --- | --- |
-| `high-rtt` | peer connection | — | 1.0 | The path is long: average RTT above 150 ms. Expect delayed conversation turn-taking. |
-| `very-high-rtt` | peer connection | — | 2.0 | Average RTT above 300 ms — interactive conversation suffers badly. |
+| `high-rtt` | peer connection | — | 2.0 | The path is long: average RTT above 150 ms delays conversation turn-taking, above 300 ms it suffers badly. |
 | `high-jitter` | peer connection | — | 2.0 | Packet arrival timing is unstable across the streams (average measured jitter above 30 ms / 100 ms). |
 | `high-packetloss` | peer connection | — | 5.0 | Packets are being lost on the path right now (per-interval loss fraction averaged across streams). |
 | `low-fps` | inbound track | video | 1.0 | Sustained low frame rate (EWMA < 10 fps) while frames are flowing — motion is visibly choppy. Not applied to screen share. |
