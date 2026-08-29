@@ -17,107 +17,69 @@ import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
 import type { TrackContentType } from "./TrackMonitor";
 
 /**
- * What the application knows about an inbound track and the stats never
- * reveal. Every field is optional and independently declarable; see
- * {@link InboundTrackMonitor.setContext} for the merge semantics, and
- * `ClientMonitor.setInboundTrackContext()` to declare it by track id before
- * the monitor exists.
+ * What the application knows about an inbound track and the stats never reveal.
+ *
+ * Every field is optional and independently declarable: the pieces usually
+ * become known at different moments — the content type from signaling before a
+ * packet arrives, the video element only once it is mounted — and
+ * `setContext()` merges rather than replaces, so a later partial call never
+ * erases an earlier one. `ClientMonitor.setInboundTrackContext()` accepts the
+ * same object by track id and works before the monitor exists at all.
  */
 export type InboundTrackContext = {
-	/** See {@link InboundTrackMonitor.contentType}. */
 	contentType?: TrackContentType;
-	/** See {@link InboundTrackMonitor.motionType}. */
 	motionType?: VideoMotionType;
-	/** See {@link InboundTrackMonitor.presentedResolution}. */
 	presentedResolution?: { width: number, height: number };
-	/** See {@link InboundTrackMonitor.videoTag}. */
 	videoTag?: HTMLVideoElement;
 }
 
 export class InboundTrackMonitor {
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
-	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
 	public dtxMode = false;
 
-	/**
-	 * True while THIS receiving leg is deliberately paused — the local
-	 * mediasoup consumer got `pause()`d (kept in sync by
-	 * `MediasoupTransportBinding`). Distinct from
-	 * {@link remoteOutboundTrackPaused}: a paused consumer only means this leg
-	 * opted out of the flow — the producer may well keep sending to everyone
-	 * else. While true, detectors that read the missing bytes as a failure
-	 * (dry-inbound-track, stuck decoder, audio concealment, jitter-buffer
-	 * stress) stand down instead of raising false issues.
-	 */
+	/** This receiving leg is paused; the producer may still feed everyone else. */
 	public paused = false;
 
-	/**
-	 * True while the SENDING side is deliberately silent — the remote producer
-	 * got paused, so nobody receives anything on this track. mediasoup-client
-	 * has no local signal for this (the pause travels over the application's
-	 * own signaling), so the application sets it when that notification
-	 * arrives:
-	 *
-	 * ```ts
-	 * monitor.getInboundTrackMonitor(track.id)!.remoteOutboundTrackPaused = true;
-	 * ```
-	 *
-	 * The same detectors that respect {@link paused} respect this flag too.
-	 */
+	/** The remote producer paused: nobody receives this track. Application-set. */
 	public remoteOutboundTrackPaused = false;
 
 	/**
-	 * What kind of content this track carries. Only meaningful for video
-	 * tracks — audio tracks leave it `undefined`, and an undefined video track
-	 * is scored as camera content. Screen-share tracks are scored differently
-	 * from camera tracks — no frame-rate expectations, since mostly-static
-	 * content legitimately runs at very low and bursty frame rates — so
-	 * getting this right matters for the track score.
+	 * What kind of content this track carries. Only meaningful for video tracks
+	 * — audio leaves it `undefined`, and an undefined video track is scored as
+	 * camera content. Screen shares are scored differently, with no frame-rate
+	 * expectations, since mostly-static content legitimately runs at very low
+	 * and bursty rates.
 	 *
-	 * Unlike the outbound side, a remote track exposes no `displaySurface`
-	 * to auto-detect from (the construction-time check below almost never
-	 * fires for received tracks), so the application usually declares it
-	 * explicitly — typically right after the track monitor appears:
-	 *
-	 * ```ts
-	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
-	 * ```
+	 * Unlike the outbound side there is nothing to auto-detect from: a received
+	 * track exposes no `displaySurface`, so the application declares it.
 	 */
 	public contentType?: TrackContentType;
 
 	/**
 	 * How much motion this track's content carries, which decides how visible a
-	 * given quantizer is and therefore where the `pixelated-video` thresholds
-	 * sit. Fast movement masks compression artifacts, so high-motion content
-	 * tolerates a coarser quantizer; a slide or a still face shows every blocked
-	 * edge and is judged more strictly.
+	 * given quantizer is and therefore which `pixelated-video` band applies.
+	 * Movement masks compression artifacts, so high-motion content tolerates a
+	 * coarser quantizer; a slide or a still face shows every blocked edge and is
+	 * judged more strictly.
 	 *
-	 * Nothing in the stats reveals it, so the application declares it when it
-	 * knows:
-	 *
-	 * ```ts
-	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ motionType: 'highmotion' });
-	 * ```
-	 *
-	 * Left undeclared, screen share is judged as `lowmotion` - unreadable text
-	 * is a hard failure - and everything else as `standard`.
+	 * Nothing in the stats reveals it. Left undeclared, screen share is judged
+	 * as `lowmotion` — unreadable text is a hard failure — and everything else
+	 * as `standard`.
 	 */
 	public motionType?: VideoMotionType;
 
 	/**
-	 * The size at which this track is actually presented to the user, in CSS
-	 * pixels, when the application knows it. Declared, never measured: the
-	 * stats report the *decoded* resolution, which says nothing about how big
-	 * the picture is on screen — a 1080p stream in a thumbnail is not the same
-	 * experience as the same stream full-bleed.
+	 * How big the picture actually is on the viewer's screen, in **device
+	 * pixels**. The stats only report the *decoded* resolution, which says
+	 * nothing about how large the picture is presented — a 1080p stream in a
+	 * grid thumbnail is not the experience the same stream is full-bleed.
 	 *
-	 * Read by the inbound video score: together with the decoded resolution it
-	 * gives the magnification the decoded picture undergoes on its way to the
-	 * viewer's eye, which scales the `pixelated-video` penalty. Declare it in
-	 * **device pixels**, not CSS pixels. When {@link videoTag} is set this is
-	 * derived from the element each tick and an explicitly declared value is
-	 * overwritten.
+	 * Read by the inbound video score: the ratio to the decoded resolution
+	 * selects how much a coarse quantizer costs, since blockiness is an artifact
+	 * of a given angular size. Set {@link videoTag} instead of declaring this
+	 * directly and it is re-derived from the element every tick, overwriting
+	 * any declared value.
 	 */
 	public presentedResolution?: { width: number, height: number };
 
@@ -166,9 +128,6 @@ export class InboundTrackMonitor {
 	) {
 		this.attachments = attachments;
 
-		// Kept for symmetry with the outbound side: `displaySurface` exists
-		// exclusively on display capture, so when it is present the verdict is
-		// safe. Remote tracks practically never expose it — see `contentType`.
 		if (typeof track.getSettings === 'function' &&
 			(track.getSettings() as { displaySurface?: string }).displaySurface !== undefined) {
 			this.contentType = 'screenshare';
@@ -196,8 +155,6 @@ export class InboundTrackMonitor {
 			}
 			this.calculatedScore.weight = 1;
 		} else if (this.kind === 'video') {
-			// one detector owns freeze state and the repair loop; each config
-			// key gates its half inside
 			if (monitorConfig.videoFreezesDetector !== null || monitorConfig.videoRecoveryDetector !== null) {
 				this.detectors.add(new FreezedVideoTrackDetector(this));
 			}
@@ -229,7 +186,6 @@ export class InboundTrackMonitor {
 		return this._inboundRtp;
 	}
 
-	/** True when this track carries screen-share content. See `contentType`. */
 	public get isScreenShare() {
 		return this.contentType === 'screenshare';
 	}
@@ -288,30 +244,12 @@ export class InboundTrackMonitor {
 	}
 
 	/**
-	 * Derives {@link presentedResolution} from {@link videoTag}, in device
-	 * pixels, once per tick.
-	 *
-	 * Three things this deliberately does NOT do:
-	 *
-	 * - **It does not read `videoWidth`/`videoHeight`.** Those are the
-	 *   *intrinsic* size of the decoded frame — the same number the stats
-	 *   already report as `frameWidth`/`frameHeight` — so measuring with them
-	 *   would make every magnification exactly 1 and the whole comparison a
-	 *   no-op. The displayed size is the element's layout box.
-	 * - **It does not use the layout box as-is.** `object-fit: contain` (the
-	 *   default) letterboxes the frame inside the box, so a 16:9 frame in a
-	 *   square box paints 16:9, not a square. The intrinsic aspect ratio is
-	 *   fitted into the box to get the pixels actually painted. An application
-	 *   using `object-fit: cover` (which crops instead) should declare
-	 *   `presentedResolution` itself rather than hand over the element.
-	 * - **It does not cache.** The element is re-read every tick: viewers go
-	 *   full-screen, panels resize, layouts reflow, and a resolution measured
-	 *   once at track creation is wrong for the rest of the call.
-	 *
-	 * A non-positive box (`display: none`, detached, not yet laid out) leaves
-	 * the previous value alone rather than clearing it — the score falls back
-	 * to judging the quantizer unscaled, which is what it did before any of
-	 * this existed.
+	 * Measures the element's layout box, never `videoWidth`/`videoHeight` —
+	 * those are the *intrinsic* decoded size the stats already report, so
+	 * measuring with them would make every magnification exactly 1. The
+	 * intrinsic aspect ratio is fitted into the box as `object-fit: contain`
+	 * does; an application using `cover`, which crops, should declare
+	 * `presentedResolution` itself.
 	 */
 	private _refreshPresentedResolution(): void {
 		const videoTag = this.videoTag;
@@ -327,9 +265,6 @@ export class InboundTrackMonitor {
 			const intrinsicWidth = videoTag.videoWidth;
 			const intrinsicHeight = videoTag.videoHeight;
 
-			// CSS pixels are not screen pixels: a 640px-wide element on a 2x
-			// display paints 1280 of them, and that is the magnification the
-			// eye is subject to.
 			const devicePixelRatio = typeof window !== 'undefined' && 0 < (window.devicePixelRatio ?? 0)
 				? window.devicePixelRatio
 				: 1;

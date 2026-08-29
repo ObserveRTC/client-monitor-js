@@ -7,69 +7,53 @@ import type { FrameSupplyIssuePayload } from "../ClientMonitorIssues";
 export type DecoderBottleneckIssuePayload = FrameSupplyIssuePayload;
 
 export type InboundFrameSupplyDetectorConfig = {
-	/**
-	 * How long the decoder is averaged over before it is judged. A duration
-	 * rather than a tick count, so the same configuration means the same thing
-	 * at every collecting period.
-	 */
 	durationInMs: number;
-	/** Fraction of the arriving frames the decoder must turn into pictures. */
 	decodeFpsRatioThreshold: number;
-	/**
-	 * Arriving frames per second below which the stream is too thin to judge.
-	 *
-	 * This is not a substituted baseline — the baseline here is *measured*, it is
-	 * the arrival rate itself. This only refuses to compute a ratio over a
-	 * handful of frames, where one dropped frame swings it wildly.
-	 */
+	/** Not a substituted baseline — the baseline stays the measured arrival rate; this only refuses a ratio taken over a handful of frames. */
 	minReceivedFps: number;
 }
 
 /**
- * Inbound Frame Supply Detector
+ * The receive-side counterpart of `capture-bottleneck`: frames arrived and the decoder did not turn
+ * enough of them into pictures. The user sees video that judders or runs behind the audio while the
+ * network is delivering perfectly well.
  *
- * The receive-side counterpart of `capture-bottleneck`: frames arrived and the
- * decoder did not turn enough of them into pictures.
+ * The rule, in full: accumulate the frames that arrived and the frames that were decoded; once
+ * `durationInMs` of measured time has been collected, compare them — decoded below
+ * `decodeFpsRatioThreshold` of arrived raises, at or above resolves — then start a fresh window. Two
+ * running totals and no history.
  *
- * **The rule, in full.** Add up the frames that arrived and the frames that were
- * decoded. Once `durationInMs` of time has been collected, compare them: decoded
- * below `decodeFpsRatioThreshold` of arrived, raise; at or above, resolve. Then start
- * a new window. Two running totals, no history.
+ * Averaging over a duration, rather than thresholding each tick, is what catches a decoder that
+ * *stumbles* instead of one uniformly overloaded: it drops frames on some intervals and recovers on
+ * others, so a per-tick test sees mostly healthy ticks. The average also weights how far short it
+ * fell, not merely how often. That choice is the axis this detector shares with
+ * `OutboundFrameSupplyDetector` and that separates both from `DecoderPerformanceDetector` and
+ * `EncoderPerformanceDetector`, which count consecutive ticks instead: a duration is a persistence
+ * bar, a tick count is a confidence floor. The other axis is what is being asked. This one is about
+ * frames going missing; `DecoderPerformanceDetector` is about what decoding *cost*.
  *
- * Averaging is what catches a decoder that *stumbles* rather than one uniformly
- * overloaded — it drops frames on some intervals and recovers on others, so a
- * per-tick threshold sees mostly healthy ticks. It also weights how far the
- * decoder fell short, not merely how often.
+ * The bar is the measured arrival rate, never the sender's intent. Frames that never arrived are the
+ * network's story — `FreezedVideoTrackDetector` and the peer connection's loss reasons tell it — so
+ * a stream throttled to 5fps that decodes cleanly is silent here. What it refuses to judge, because
+ * a low decode rate there is legitimate: a backgrounded tab, a paused consumer, a paused remote
+ * sender, a track that is not live/unmuted/enabled, and a stream thinner than `minReceivedFps`. The
+ * window also restarts after a collection gap.
  *
- * **The bar is the arrival rate, never the sender's.** Frames that never arrived
- * are the network's story — `FreezedVideoTrackDetector` and the peer
- * connection's loss reasons tell it — so a stream throttled to 5fps that decodes
- * cleanly is silent. This is also what separates it from
- * `DecoderPerformanceDetector`, which asks whether decoding *cost* too much:
- * that one is about the price of decoding, this one about frames going missing.
- *
- * **What it refuses to judge**, because a low decode rate there is legitimate: a
- * backgrounded tab, a paused consumer, a paused remote sender, a track that is
- * not live and unmuted, and a stream thinner than `minReceivedFps`. The window
- * restarts after a collection gap.
- *
- * **Issues created:** `decoder-bottleneck`.
+ * Issue raised: `decoder-bottleneck`. Monitor event: `decoder-bottleneck`.
+ * Config: `inboundFrameSupplyDetector`.
  */
 export class InboundFrameSupplyDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'decoder-bottleneck';
 
 	public readonly name = 'inbound-frame-supply-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
 	private readonly _issueKey: string;
 
-	// The whole state: what arrived, what was decoded, over how long.
 	private _receivedInWindow = 0;
 	private _decodedInWindow = 0;
 	private _windowSeconds = 0;
-	/** Previous inbound-rtp timestamp, to measure each interval and spot gaps. */
 	private _lastTimestamp?: number;
 
 	private _on = false;
@@ -109,13 +93,11 @@ export class InboundFrameSupplyDetector implements Detector {
 
 		this._lastTimestamp = timestamp;
 
-		// Nothing to difference against yet; this tick is the baseline.
 		if (previousTimestamp === undefined) return;
 
 		const elapsedInMs = timestamp - previousTimestamp;
 
 		if (elapsedInMs <= 0) return;
-		// The ticks themselves stopped, which says nothing about the decoder.
 		if (maxTickGapInMs(this.peerConnection.parent.config.collectingPeriodInMs) < elapsedInMs) {
 			return this._reset('collection gap');
 		}
@@ -131,6 +113,8 @@ export class InboundFrameSupplyDetector implements Detector {
 
 		if (this._windowSeconds * 1000 < this.config.durationInMs) return;
 
+		// Averaged over the window rather than thresholded per tick: a decoder degrading in bursts recovers on
+		// enough individual ticks to look healthy, and the average also weights how far short it fell, not just how often.
 		const receivedFps = this._receivedInWindow / this._windowSeconds;
 		const decodedFps = this._decodedInWindow / this._windowSeconds;
 
@@ -138,7 +122,6 @@ export class InboundFrameSupplyDetector implements Detector {
 		this._decodedInWindow = 0;
 		this._windowSeconds = 0;
 
-		// Too thin a stream to judge a decoder on: a trickle says nothing.
 		if (receivedFps < this.config.minReceivedFps) return this._clear('stream too thin to judge');
 		if (receivedFps * this.config.decodeFpsRatioThreshold <= decodedFps) return this._clear('decoder keeping up again');
 		if (this._on) return;

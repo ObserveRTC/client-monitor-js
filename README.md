@@ -306,8 +306,7 @@ const monitor = new ClientMonitor({
     stuckDecoderDetector: {
         thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier x RTT)
         rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
-        minStuckTicks: 2,      // never judge on fewer observations than this
-        minBitrate: 10000,     // bps below which this is a dry track, not a wedge
+            minBitrate: 10000,     // bps below which this is a dry track, not a wedge
         minPliCount: 2,
     },
     // Frame supply: is whatever produces this track's frames delivering what it
@@ -511,7 +510,7 @@ In case shrinking down the sample size is something your application wants, the 
 
 Reports how the audio actually *sounded*. Opus + NetEQ conceal a lot of loss inaudibly, and audio also degrades without dramatic loss — so the **audible** concealment share (silent concealment subtracted) is both more sensitive and more specific than packet loss. Judged over a sliding window, since concealment is bursty.
 
-**Use the result:** show a "poor audio from X" indicator on the affected participant's tile; the `burstiness` field tells you whether to describe it as choppiness (`bursty`) or dropouts (`continuous`). Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
+**Use the result:** show a "poor audio from X" indicator on the affected participant's tile. Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
 
 ```javascript
 audioConcealmentDetector: {
@@ -523,7 +522,7 @@ audioConcealmentDetector: {
 ```
 
 ```typescript
-monitor.on('audio-concealment', ({ trackMonitor, concealmentRate, concealmentEventRate }) => {
+monitor.on('audio-concealment', ({ trackMonitor, concealmentRate }) => {
     // the user is HEARING this — mark the participant's tile
     ui.setAudioQualityWarning(trackMonitor.track.id, { rate: concealmentRate });
 });
@@ -688,7 +687,6 @@ Catches the per-consumer decode wedge: RTP bytes keep arriving while nothing dec
 stuckDecoderDetector: {
     thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier × RTT)
     rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
-    minStuckTicks: 2,      // never judge on fewer observations
     minBitrate: 10000,     // bps below which this is a dry track, not a wedge
     minPliCount: 2,        // the browser must be asking for repair
 }
@@ -1236,16 +1234,30 @@ score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
 -   Dropped frames (`dropped-video-frames`, normalized 0–1): activation 10%, saturation 20% of frames dropped instead of rendered
 -   Frame corruptions (`video-frame-corruptions`, normalized 0–1): per-interval corruption probability, activation 0.05, saturation 0.5
 -   Frozen picture (`frozen-video`, from the freeze state the detector derives): -2.0
--   Pixelation (`pixelated-video`, normalized 0–1): ramps from 0 at the codec's activation QP to 1.0 at its saturation QP (`VIDEO_QP_THRESHOLDS`), from the mean quantizer of the frames actually decoded (`avgQpPerFrame`, derived from the inbound `qpSum`). **Scaled by display magnification** where the presented resolution is known, so the ceiling is 2.0 rather than 1.0 — see below.
+-   Pixelation (`pixelated-video`): ramps 0→1 from the codec's activation QP to its saturation QP (`VIDEO_QP_THRESHOLDS`), from the mean quantizer of the frames actually decoded (`avgQpPerFrame`, from the inbound `qpSum`) — then multiplied by a weight chosen by **how big the picture is shown**, so the reason ranges 0–3.0.
 
-    **Judged at the size the picture is shown.** QP says how coarsely the frame was coded, not how large those coded blocks end up on screen — and the same QP is punishing at full screen and nearly invisible in a grid thumbnail. Declare how big the picture is presented and the penalty is scaled by the linear ratio to the decoded resolution, clamped to 0.5–2.0 (`PIXELATION_MAGNIFICATION_MIN`/`MAX`):
+    **A large pixelated video is charged harder, deliberately.** The same QP is punishing at full screen and nearly invisible in a grid thumbnail, because what the eye resolves is the coded block's size on screen. So the weight is not symmetric — the big video is the one the viewer is complaining about:
+
+    ```
+    magnification = sqrt((presentedW * presentedH) / (decodedW * decodedH))
+    >= 1.5 -> weight 3.0   |   0.75..1.5 -> weight 2.0   |   < 0.75 -> weight 0.5
+    ```
+
+    For vp8 standard motion (band 40 → 80), the same stream at QP 60 costs **0.25** in a thumbnail, **1.0** in a grid tile and **1.5** in speaker view; at saturation, **3.0**. No clamp is needed — the tiers are flat. **No presented resolution, no adjustment** (the ordinary 2.0 applies).
 
     ```typescript
     monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, height: 720 } });  // device pixels
     monitor.setInboundTrackContext(trackId, { videoTag });  // or hand over the element — re-measured every tick
     ```
 
-    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it, as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. **No presented resolution, no adjustment** — the quantizer is judged alone, and nothing is substituted for the missing number.
+    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. [Full table](docs/SCORE_CALCULATIONS.md#a-large-pixelated-video-is-charged-harder-deliberately).
+
+    ```typescript
+    monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, height: 720 } });  // device pixels
+    monitor.setInboundTrackContext(trackId, { videoTag });  // or hand over the element — re-measured every tick
+    ```
+
+    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it, as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. **No presented resolution, no shift** — the shipped band is used as written, and nothing is substituted for the missing number.
 
     QP is the encoder stating how coarsely it had to quantize, so it measures the blockiness and detail loss the viewer is looking at. Bitrate cannot: the same 500 kbps is generous for a static talking head and starvation for a fast pan, and nothing observable separates those two from bits alone. **Where the browser does not report `qpSum` for the codec in use, the reason is simply absent** — no judgement is better than one inferred from bitrate.
 

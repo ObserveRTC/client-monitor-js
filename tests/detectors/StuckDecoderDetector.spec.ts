@@ -5,7 +5,6 @@ import { MockClientMonitor, MockInboundTrackMonitor } from "../helpers/detectorM
 const CONFIG = {
 	thresholdInMs: 4000,
 	rttMultiplier: 15,
-	minStuckTicks: 3,
 	minBitrate: 10000,
 	minPliCount: 2,
 };
@@ -106,28 +105,6 @@ describe('StuckDecoderDetector', () => {
 		jest.useRealTimers();
 	});
 
-	// The verdict never rests on fewer observations than minStuckTicks,
-	// regardless of how much wall-clock time a tick spans.
-	it('requires the minimum number of stuck ticks', () => {
-		const { detector, clientMonitor, rtp } = setup();
-
-		jest.useFakeTimers();
-		jest.setSystemTime(0);
-
-		wedge(rtp);
-		detector.update();
-
-		jest.setSystemTime(10000);
-		detector.update();
-		// 10s stuck, but only 2 observations
-		expect(clientMonitor.getIssues()).toHaveLength(0);
-
-		jest.setSystemTime(12000);
-		detector.update();
-		expect(clientMonitor.issueOfType('stuck-decoder')).toBeDefined();
-
-		jest.useRealTimers();
-	});
 
 	// The defining property of the wedge: the network IS delivering. Without
 	// bytes this is a dry/starved track and belongs to DryInboundTrackDetector.

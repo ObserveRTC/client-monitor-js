@@ -1,115 +1,66 @@
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
+/** A snapshot of the connection at the moment the diagnosis was made. */
 export type NoAvailableIceCandidateIssuePayload = {
 	peerConnectionId: string;
-	/** The connection state when the issue was raised. */
 	connectionState?: string;
-	/** The state the connection was in before it fell over. */
+	/** The last state seen before the connection fell to `disconnected`/`failed`. */
 	previousConnectionState?: string;
-	/** The ICE gathering state at the time the issue was raised. */
 	iceGatheringState?: string;
 	/** Always 0 when raised — the whole point — kept for the record. */
 	localIceCandidateCount: number;
 	/** How long the connection had been trying when the issue was raised. */
 	sinceMs: number;
-	/** Filled in when the issue is resolved. */
+	/** How long the issue stayed active; filled in on resolution. */
 	durationInMs?: number;
 };
 
 const ISSUE_TYPE = 'no-available-ice-candidate';
 
 /**
- * No Available ICE Candidate Detector
+ * Watches a peer connection that has never connected and reports the case where ICE
+ * gathering produced zero local candidates — the client had no usable network to
+ * connect *with*: no interface up, airplane mode, a VPN that just tore down every
+ * route, or a network locked down so tightly the sockets cannot bind.
  *
- * Detects the case where a peer connection cannot even *begin* to connect
- * because the client has no usable network: ICE gathering produced **zero
- * local candidates** while the connection state falls over.
+ * Every other ICE issue — `ice-disconnected`, `ice-connection-failed` and the rest —
+ * describes a path that existed and stopped working; this one says no path was ever
+ * possible. A healthy establishment gathers at least one host candidate within
+ * milliseconds, since any interface that is up yields one even with no internet, so
+ * an empty candidate list is not a slow start but an absent network. `getStats()`
+ * keeps working throughout; it simply returns no `local-candidate` entries.
  *
- * **The signature.** A healthy establishment gathers at least one host
- * candidate within milliseconds — even without internet, any up interface
- * yields one. When the connection state jumps from `new`/`connecting`
- * straight to `disconnected` or `failed` and not a single local candidate
- * was ever gathered, there was nothing to connect *with*: no interface, no
- * route, airplane mode, a VPN that just tore down every route, or a network
- * so locked down the sockets cannot even bind. This is a different diagnosis
- * from every other ICE issue — `ice-disconnected`, `ice-connection-failed`
- * and friends all describe a path that existed and stopped working; this one
- * says no path was ever possible.
+ * Falling to `disconnected`/`failed` with zero candidates raises immediately — the
+ * browser has given its verdict and the empty list explains it. Sitting in
+ * `new`/`connecting` raises only after `thresholdInMs`, covering the variant where
+ * gathering silently never produces anything and the state machine never moves.
  *
- * **Detection logic, per stats tick:**
+ * It never fires on a connection that once reached `connected`: once a path existed,
+ * a later candidate-free stretch belongs to some other ICE failure. It stands down
+ * as soon as any local candidate appears, and the threshold is what keeps it off an
+ * un-negotiated peer connection, which has zero candidates too. It cannot separate
+ * "no network" from "every candidate type forbidden by policy", and does not try —
+ * operationally both mean this client cannot do WebRTC here.
  *
- * 1. If any local ICE candidate exists, the diagnosis is off the table:
- *    resolve any active issue and stand down.
- * 2. With zero local candidates and a connection that has never been
- *    `connected`:
- *    - `disconnected` / `failed` raises immediately — the browser already
- *      gave its verdict, and combined with the empty candidate list the
- *      explanation is unambiguous.
- *    - `new` / `connecting` raises only after `thresholdInMs`, covering the
- *      variant where gathering silently never produces anything and the
- *      state machine just sits there.
- * 3. The issue resolves when a local candidate finally appears or the
- *    connection reaches `connected` (e.g. the network came back and an ICE
- *    restart succeeded).
- *
- * **What it reads.** `PeerConnectionMonitor.connectionState` (fed by the
- * RTCPeerConnection / mediasoup-transport bindings),
- * `PeerConnectionMonitor.iceGatheringState` (ditto) and the local ICE
- * candidates from stats. Note that with no network, `getStats()` itself
- * still works — it just returns no `local-candidate` entries.
- *
- * **Known limitations:**
- * - A peer connection created but never negotiated (no
- *   `setLocalDescription`) also has zero candidates; the never-`connected` +
- *   threshold guard keeps the detector from judging it until the state
- *   machine actually moves or enough time passes. Applications that keep
- *   idle, un-negotiated peer connections around for a long time should
- *   disable this detector for those or accept the sustained-variant issue.
- * - The detector cannot distinguish "no network" from "every candidate type
- *   forbidden by policy" (mDNS off + host candidates blocked + no STUN/TURN
- *   reachable). Operationally both mean the same thing: this client cannot
- *   do WebRTC on this network.
- *
- * **Issues created:** `no-available-ice-candidate`.
- * **Events emitted:** `no-available-ice-candidate` (monitor event).
- *
- * @example
- * ```typescript
- * const config = {
- *   noAvailableIceCandidateDetector: {
- *     thresholdInMs: 6000,
- *   }
- * };
- *
- * monitor.on('issue', (issue) => {
- *   if (issue.type === 'no-available-ice-candidate') {
- *     // No point recommending an ICE restart — tell the user to check
- *     // their connection instead.
- *   }
- * });
- * ```
+ * Issue raised: `no-available-ice-candidate`, resolved when a candidate appears, the
+ * connection connects, or the peer connection closes.
+ * Monitor event: `no-available-ice-candidate`.
+ * Config: `noAvailableIceCandidateDetector`.
  */
 export class NoAvailableIceCandidateDetector implements Detector {
 	public static readonly ISSUE_TYPE = ISSUE_TYPE;
 
-	/** Unique identifier for this detector type */
 	public readonly name = 'no-available-ice-candidate-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
 	private readonly _issueKey: string;
 
-	/** When this detector first observed the peer connection. */
-	private _firstSeenAt?: number;
-	/** The connection state observed on the previous tick. */
 	private _previousConnectionState?: string;
-	/** The last state seen *before* the connection fell to disconnected/failed. */
 	private _stateBeforeFailure?: string;
-	/** True once the connection has ever reached `connected`. */
+	private _firstSeenAt?: number;
 	private _everConnected = false;
-	/** Set when the issue has been raised; timestamp of the raise. */
 	private _raisedAt?: number;
 
 	public constructor(
@@ -118,7 +69,6 @@ export class NoAvailableIceCandidateDetector implements Detector {
 		this._issueKey = `${ISSUE_TYPE}-pc-${peerConnection.peerConnectionId}`;
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.noAvailableIceCandidateDetector!;
 	}
@@ -158,15 +108,10 @@ export class NoAvailableIceCandidateDetector implements Detector {
 			return;
 		}
 
-		// A connection that once worked and lost its network mid-call is the
-		// ICE connectivity detectors' story (disconnected/failed/restart); this
-		// detector only owns the "never had a network to begin with" case.
 		if (this._everConnected) return;
 
 		const failing = connectionState === 'disconnected' || connectionState === 'failed';
-		const stuck = !failing && this.config.thresholdInMs <= now - this._firstSeenAt;
-
-		if (!failing && !stuck) return;
+		if (!failing && now - this._firstSeenAt < this.config.thresholdInMs) return;
 		if (this._raisedAt !== undefined) return;
 
 		this._raisedAt = now;

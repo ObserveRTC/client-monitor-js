@@ -4,16 +4,14 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
 /**
- * What the detector observed that makes a firewall the best explanation.
+ * What was observed that makes a firewall the best available explanation.
  *
- * - `media-not-leaving-transport`: outbound RTP is producing bytes, but the
- *   ICE transport's own send counter barely moves — packets are produced by
- *   the RTP senders and never make it onto the wire (host firewall, blocked
+ * - `media-not-leaving-transport`: the RTP senders are producing bytes, but the ICE transport's
+ *   own send counter barely moves — packets never make it onto the wire (host firewall, blocked
  *   socket, or the OS dropping on send).
- * - `no-return-traffic`: media leaves at full rate and STUN keeps answering,
- *   but nothing except STUN ever comes back — not even RTCP receiver
- *   reports. A middlebox is passing the small, well-known STUN packets and
- *   eating everything else (classic DPI / UDP-throttling firewall).
+ * - `no-return-traffic`: media leaves at full rate and STUN keeps answering, but nothing except
+ *   STUN ever comes back, not even RTCP receiver reports. A middlebox is passing the small,
+ *   well-known STUN packets and eating everything else (classic DPI / UDP-throttling firewall).
  */
 export type BlockedTransportEvidence = 'media-not-leaving-transport' | 'no-return-traffic';
 
@@ -24,15 +22,15 @@ export type BlockedTransportIssuePayload = {
 	evidence: BlockedTransportEvidence;
 	/** `direct`, `turn-udp`, `turn-tcp`, `turn-tls` or `turn-unknown`. */
 	pathKind?: IcePathKind;
-	/** How long the discrepancy had persisted when the issue was raised. */
+	/** How long the discrepancy had already persisted when the issue was raised. */
 	blockedForMs: number;
-	/** Combined bitrate of the outbound RTP streams on this transport (bps). */
+	/** Combined bitrate of the outbound RTP streams attributed to this transport, in bps. */
 	outboundMediaBitrate: number;
-	/** What the ICE transport reports actually going out on the wire (bps). */
+	/** What the ICE transport reports actually going out on the wire, in bps. */
 	transportSendingBitrate?: number;
-	/** What the ICE transport reports coming back — STUN included (bps). */
+	/** What the ICE transport reports coming back — STUN included — in bps. */
 	transportReceivingBitrate?: number;
-	/** STUN responses received on the selected pair in the last interval. */
+	/** STUN responses received on the selected pair during the last interval. */
 	stunResponsesReceivedDelta?: number;
 	/** Latest STUN round trip on the selected pair, in seconds. */
 	currentRoundTripTime?: number;
@@ -41,90 +39,43 @@ export type BlockedTransportIssuePayload = {
 };
 
 type TransportState = {
-	/** Last time a STUN binding/consent response arrived on the selected pair. */
 	lastStunResponseAt?: number;
-	/** When the STUN-ok-but-media-blocked discrepancy was first observed. */
 	discrepancySince?: number;
-	/** The evidence observed when the discrepancy started. */
 	evidence?: BlockedTransportEvidence;
-	/** Set when the issue has been raised; timestamp of the raise. */
 	raisedAt?: number;
 };
 
 const ISSUE_TYPE = 'blocked-transport';
 
 /**
- * Blocked Transport Detector
+ * Detects the signature of a firewall — or any policy middlebox — that lets ICE and STUN through
+ * while blocking the media itself: the candidate pair is `succeeded`, consent checks keep
+ * passing, `iceConnectionState` reads `connected`, and the call carries nothing.
  *
- * Detects the signature of a firewall (or any policy middlebox) that lets
- * ICE/STUN through but blocks the media itself. This is the failure mode
- * where every connectivity signal looks healthy — the candidate pair is
- * `succeeded`, consent checks keep passing, `iceConnectionState` is
- * `connected` — yet the call carries nothing.
+ * No other detector can see this. STUN consent responses count into the candidate pair's
+ * `bytesReceived`, so the pair never looks dry and `IceConnectivityDetector`'s inbound-stall
+ * check never fires; the dry-track detectors watch producer-side `outbound-rtp` counters, which
+ * keep advancing because the encoder is doing its job perfectly well. The gap between "STUN says
+ * the path is alive" and "no media traverses it" is precisely the firewall signature.
  *
- * **Why the existing detectors miss it.** STUN consent responses count into
- * the candidate pair's `bytesReceived`, so the pair never looks "dry" and
- * `IceConnectivityDetector`'s inbound-stall check (which requires
- * `deltaBytesReceived === 0`) never fires. The dry-track detectors see the
- * producer-side `outbound-rtp` counters advancing, so they stay silent too.
- * The gap between "STUN says the path is alive" and "no media traverses it"
- * belongs to no existing detector — it is exactly the firewall signature.
+ * Three things must hold together each tick on a transport's selected pair. STUN must be alive
+ * (`responsesReceived` advanced within `stunFreshnessInMs`), or this is ordinary connectivity
+ * loss and the ICE detectors own it. The application must be producing (`minMediaBitrateBps` of
+ * outbound RTP attributed to the transport), or a quiet transport is indistinguishable from an
+ * idle one. And the media must not be traversing: the transport's send counter moving at under
+ * `maxSendShare` of what the senders produce, or under `maxReturnBitrateBps` coming back, not
+ * even RTCP. All three holding for `thresholdInMs` raises the issue; any leg breaking resolves it.
  *
- * **What it requires, every tick, on the selected pair of a transport:**
+ * The judgement is one-sided by construction: only on the sending side does the client hold both
+ * halves of the proof, producing the bytes and reading the transport counters. A block in the
+ * receive direction surfaces on the remote peer's own detector, or here as a dry inbound track.
  *
- * 1. *STUN is demonstrably alive.* `responsesReceived` advanced within
- *    `stunFreshnessInMs`. Without this the situation is an ordinary
- *    connectivity loss and the ICE detectors own it.
- * 2. *The application is demonstrably producing.* The outbound RTP streams
- *    on this transport are generating at least `minMediaBitrateBps`
- *    combined. Without this a quiet transport is indistinguishable from a
- *    paused or idle one.
- * 3. *The media is demonstrably not traversing.* Either of:
- *    - the transport's send counter moves at less than `maxSendShare` of
- *      what the RTP senders produce (`media-not-leaving-transport`), or
- *    - the transport receives less than `maxReturnBitrateBps` — i.e.
- *      nothing beyond STUN, not even RTCP, is coming back
- *      (`no-return-traffic`).
- *
- * When all three hold for `thresholdInMs`, a `blocked-transport`
- * issue is raised. It resolves as soon as any leg of the evidence breaks:
- * media starts flowing, production stops, or STUN dies (at which point the
- * ICE connectivity detectors take over).
- *
- * **Scope.** The detector judges the *sending* side, because only there does
- * the client hold both halves of the proof (it produces the bytes and it
- * sees the transport counters). A firewall blocking only the receive
- * direction shows up on the remote peer's sending-side detector, or as a
- * dry inbound track here.
- *
- * **Issues created:** `blocked-transport`.
- * **Events emitted:** `blocked-transport` (monitor event).
- *
- * @example
- * ```typescript
- * const config = {
- *   blockedTransportDetector: {
- *     thresholdInMs: 5000,
- *     minMediaBitrateBps: 10_000,
- *     maxReturnBitrateBps: 2_000,
- *     maxSendShare: 0.1,
- *     stunFreshnessInMs: 10_000,
- *   }
- * };
- *
- * monitor.on('issue', (issue) => {
- *   if (issue.type === 'blocked-transport') {
- *     console.warn('firewall suspected', issue.payload);
- *   }
- * });
- * ```
+ * Raises `blocked-transport`. Emits `blocked-transport`. Config: `blockedTransportDetector`.
  */
 export class BlockedTransportDetector implements Detector {
 	public static readonly ISSUE_TYPE = ISSUE_TYPE;
 
-	/** Unique identifier for this detector type */
 	public readonly name = 'blocked-transport-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
@@ -135,7 +86,6 @@ export class BlockedTransportDetector implements Detector {
 	) {
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.blockedTransportDetector!;
 	}
@@ -151,7 +101,6 @@ export class BlockedTransportDetector implements Detector {
 			this._checkTransport(transport);
 		}
 
-		// Transports renegotiated away must not leave a dangling issue behind.
 		for (const id of [ ...this._states.keys() ]) {
 			if (seenIds.has(id)) continue;
 
@@ -166,10 +115,6 @@ export class BlockedTransportDetector implements Detector {
 		const pair = transport.getSelectedCandidatePair();
 		const iceState = transport.iceState;
 
-		// The claim is "the path is up and STUN-verified, yet media does not
-		// traverse it" — without a succeeded selected pair on a connected
-		// transport there is no such claim to make, and the ICE detectors own
-		// whatever is going on instead.
 		if ((iceState !== 'connected' && iceState !== 'completed') || !pair || pair.state !== 'succeeded') {
 			this._clearDiscrepancy(transport.id, state, 'ice connection is no longer verified');
 			return;
@@ -183,8 +128,7 @@ export class BlockedTransportDetector implements Detector {
 			&& now - state.lastStunResponseAt <= this.config.stunFreshnessInMs;
 
 		if (!stunFresh) {
-			// No recent proof the path answers: this is ordinary connectivity
-			// trouble, not the firewall signature.
+			// no recent proof the path answers: ordinary connectivity trouble, which the ICE detectors own
 			this._clearDiscrepancy(transport.id, state, 'stun is no longer confirming the path');
 			return;
 		}
@@ -257,12 +201,7 @@ export class BlockedTransportDetector implements Detector {
 		);
 	}
 
-	/**
-	 * Combined bitrate of the outbound RTP streams that ride on this
-	 * transport. When no outbound RTP carries a `transportId` (some browsers
-	 * omit it), every stream of the peer connection is attributed to the
-	 * transport — with BUNDLE (always the case for mediasoup) that is exact.
-	 */
+	/** When no outbound RTP carries a `transportId` (some browsers omit it), every stream is attributed to the transport — exact under BUNDLE. */
 	private _outboundMediaBitrateOf(transport: IceTransportMonitor): number {
 		const outboundRtps = this.peerConnection.outboundRtps;
 		const attributed = outboundRtps.filter((outboundRtp) => outboundRtp.transportId === transport.id);

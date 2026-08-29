@@ -14,15 +14,10 @@ import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
 import type { TrackContentType } from "./TrackMonitor";
 
 /**
- * What the application knows about an outbound track and the stats never
- * reveal. Narrower than its inbound counterpart on purpose: motion class and
- * presentation describe how a track is *watched*, which the sender does not
- * know. See {@link OutboundTrackMonitor.setContext} for the merge semantics,
- * and `ClientMonitor.setOutboundTrackContext()` to declare it by track id
- * before the monitor exists.
+ * Narrower than its inbound counterpart on purpose: motion class and
+ * presentation describe how a track is *watched*, which the sender cannot know.
  */
 export type OutboundTrackContext = {
-	/** See {@link OutboundTrackMonitor.contentType}. */
 	contentType?: TrackContentType;
 }
 
@@ -149,21 +144,7 @@ export class OutboundTrackMonitor {
 		return this.contentType === 'screenshare';
 	}
 
-	/**
-	 * Declares what the application knows about this track and the stats do
-	 * not reveal. Today that is the content type, for the case where no
-	 * `displaySurface` was available to auto-detect a screen share.
-	 *
-	 * **Merges.** Only the fields present in `context` are written; an
-	 * explicit `undefined` is treated as "not declared here", not as a reset.
-	 *
-	 * ```ts
-	 * monitor.getOutboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
-	 * ```
-	 *
-	 * `ClientMonitor.setOutboundTrackContext()` does the same by track id and
-	 * works before this monitor exists.
-	 */
+	/** **Merges** — an explicit `undefined` means "not declared here", not a reset. */
 	public setContext(context: OutboundTrackContext): void {
 		if (context.contentType !== undefined) this.contentType = context.contentType;
 	}

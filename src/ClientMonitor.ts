@@ -153,6 +153,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
             syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
                 minSynthesizedSamplesDuration: 0,
+                createEvent: true,
             }),
             congestionDetector: detectorDefault(monitorConfig.congestionDetector, {
                 sensitivity: 'medium',
@@ -237,7 +238,6 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
                 thresholdInMs: 4000,
                 rttMultiplier: 15,
-                minStuckTicks: 2,
                 minBitrate: 10000,
                 minPliCount: 2,
             }),
@@ -954,33 +954,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     /**
      * Declares what the application knows about an **inbound** track and the
-     * stats never reveal — its content type, its motion class, how it is
-     * presented — by track id, whether or not the track's monitor exists yet.
+     * stats never reveal, by track id — whether or not the track's monitor
+     * exists yet. Signaling usually knows a guest's track is a screen share
+     * before a single packet arrives, and at that moment there is nothing to
+     * call `setContext` on.
      *
-     * `getInboundTrackMonitor(id)?.setContext(...)` only works once the track
-     * has been observed on a peer connection and its monitor was created from
-     * stats. But the application usually knows earlier: signaling announces
-     * that a guest's upcoming track is a screen share before a single packet
-     * has arrived, and at that moment there is no monitor to call, so the
-     * declaration would be lost.
-     *
-     * This method closes that gap. If the monitor already exists the context
-     * is applied immediately; otherwise it is held as a pending declaration
-     * that whichever peer connection first manifests the track consumes at
-     * track-monitor creation. No timeout, no cleanup: an entry for a track
-     * that never shows up is one map entry for the monitor's lifetime.
-     *
-     * **Merges, in both states.** Fields omitted from `context` keep whatever
-     * was declared before — including across the pending boundary, so a
+     * A declaration made early is held pending and consumed by whichever peer
+     * connection first manifests the track. **Merges in both states**, so a
      * content type declared from signaling survives a later call that only
      * attaches the video element.
-     *
-     * ```ts
-     * // from signaling, before the track exists on any peer connection:
-     * monitor.setInboundTrackContext('abc-123', { contentType: 'screenshare' });
-     * // once it is mounted — contentType is still 'screenshare':
-     * monitor.setInboundTrackContext('abc-123', { videoTag });
-     * ```
      */
     public setInboundTrackContext(trackId: string, context: InboundTrackContext): void {
         const trackMonitor = this.getInboundTrackMonitor(trackId);
@@ -993,16 +975,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    /**
-     * Declares what the application knows about an **outbound** track — today
-     * its content type, for the case where no `displaySurface` was available
-     * to auto-detect a screen share. Same timing and merge behaviour as
-     * {@link setInboundTrackContext}.
-     *
-     * ```ts
-     * monitor.setOutboundTrackContext(trackId, { contentType: 'screenshare' });
-     * ```
-     */
+    /** Same timing and merge behaviour as {@link setInboundTrackContext}. */
     public setOutboundTrackContext(trackId: string, context: OutboundTrackContext): void {
         const trackMonitor = this.getOutboundTrackMonitor(trackId);
 
@@ -1014,12 +987,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         });
     }
 
-    /**
-     * Hands over — and forgets — an inbound track context declared via
-     * {@link setInboundTrackContext} before the track's monitor existed.
-     * Called by the peer connection monitor at track-monitor creation; not
-     * intended for applications.
-     */
+    /** Called by the peer connection monitor at track-monitor creation; not for applications. */
     public takePendingInboundTrackContext(trackId: string): InboundTrackContext | undefined {
         const context = this._pendingInboundTrackContexts.get(trackId);
 
@@ -1028,12 +996,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return context;
     }
 
-    /**
-     * Hands over — and forgets — an outbound track context declared via
-     * {@link setOutboundTrackContext} before the track's monitor existed.
-     * Called by the peer connection monitor at track-monitor creation; not
-     * intended for applications.
-     */
+    /** Called by the peer connection monitor at track-monitor creation; not for applications. */
     public takePendingOutboundTrackContext(trackId: string): OutboundTrackContext | undefined {
         const context = this._pendingOutboundTrackContexts.get(trackId);
 

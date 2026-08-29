@@ -62,23 +62,13 @@ export type VideoQpThresholds = {
  * VP8 runs 0-127 and VP9 0-255, and equal fractions of those ranges are not
  * equal quality.
  *
- * Then by motion class, because the same quantizer is not equally visible on
- * all content. Fast movement masks compression artifacts - the eye cannot fixate
- * long enough to resolve blocking - so high-motion content tolerates a coarser
- * quantizer before anyone notices, while on a slide or a still face there is
- * time to see every blocked edge. Note this runs the *opposite* way to bitrate:
+ * Then by motion class, because movement masks compression artifacts while a
+ * slide shows every blocked edge. Note this runs the *opposite* way to bitrate:
  * high-motion content needs more bits to reach a given QP, yet tolerates a
  * higher QP once there.
  *
- * Written out rather than derived from a base pair and a motion multiplier: the
- * values are constant for the life of a track (a codec does not change under an
- * established inbound track), so there is nothing to recompute per tick, each
- * number is directly tunable, and none can silently land outside its codec's
- * range - H.264's high-motion band in particular has to be held under 51.
- *
- * These are literature starting points, not measurements of any particular
- * deployment - calibrate them against your own corpus before trusting the
- * absolute values. Mutable on purpose.
+ * Literature starting points, not measurements of any deployment. Mutable on
+ * purpose.
  */
 export const VIDEO_QP_THRESHOLDS: Record<string, Record<VideoMotionType, VideoQpThresholds> | undefined> = {
 	/** libvpx quantizer index, 0-127. */

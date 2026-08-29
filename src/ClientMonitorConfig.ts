@@ -478,12 +478,6 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
         rttMultiplier: number;
 
         /**
-         * Consecutive stuck collections required, so the verdict never rests
-         * on fewer observations than this regardless of the collecting period.
-         */
-        minStuckTicks: number;
-
-        /**
          * Receive bitrate (bps) above which the stream counts as "still being
          * delivered" — separates the wedge from a dry/starved track. A rate,
          * not a per-tick byte count, so it means the same thing at every

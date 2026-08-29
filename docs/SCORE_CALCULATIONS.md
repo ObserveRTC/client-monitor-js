@@ -237,7 +237,7 @@ Three **issue-gated, normalized** penalties
 | `dropped-video-frames` | normalized 0–1 | 0.1 → 0.2 dropped fraction | `framesDropped / (framesDropped + framesRendered)`. |
 | `video-frame-corruptions` | normalized 0–1 | 0.05 → 0.5 probability | Per-interval average corruption probability (`deltaCorruptionProbability`). |
 | `frozen-video` | step −2.0 | track currently frozen | From the freeze state `FreezedVideoTrackDetector` derives; a frozen picture dominates every other quality aspect. |
-| `pixelated-video` | normalized 0–1, scaled ×0.5–×2.0 | codec activation QP → saturation QP | Average quantization parameter per decoded frame (`qpSum / framesDecoded`), the encoder stating how coarsely it had to quantize. Blur and blockiness long before anything freezes. Scaled by display magnification when the presented resolution is known — see below — so the ceiling is 2.0, not 1.0. |
+| `pixelated-video` | normalized 0–1 × **0.5 / 2.0 / 3.0** | codec activation QP → saturation QP | Average quantization parameter per decoded frame (`qpSum / framesDecoded`), the encoder stating how coarsely it had to quantize. Blur and blockiness long before anything freezes. The multiplier is chosen by how big the picture is presented — see below. This is the only reason whose range exceeds 2.0. |
 
 QP scales are codec-specific and not comparable across codecs (H.264 runs
 0–51, VP8 0–127, VP9/AV1 0–255), so the activation and saturation points come
@@ -247,35 +247,48 @@ application can declare it with `setInboundTrackContext(id, { motionType })`. Wh
 reports no `qpSum` for the codec in use, **the reason is absent entirely**
 rather than modelled from bitrate.
 
-### Magnification: the quantizer is judged at the size the picture is shown
+### A large pixelated video is charged harder, deliberately
 
-QP says how coarsely the frame was coded. It does not say how large those coded
-blocks end up on the viewer's screen, and that is the other half of whether they
-are visible — the same QP is punishing blown up to full screen and nearly
-invisible in a grid thumbnail. Judging the picture at display size rather than
-decode size is what reference metrics do (VMAF scales to the display before
-scoring); this is the crude version.
-
-When the application has declared `presentedResolution` on the inbound track and
-the stats report a decoded `frameWidth`/`frameHeight`, the penalty is multiplied
-by the **linear** ratio between them:
+Blockiness is an artifact of a given angular size. The same quantizer is
+punishing blown up to full screen and nearly invisible in a grid thumbnail,
+because what the eye resolves is the coded block's size on screen, not its size
+in the decoded frame. So the *weight* of a saturated quantizer depends on how
+big the picture is shown — and not symmetrically. A big pixelated video is the
+thing the viewer is actually looking at and complaining about, so it is charged
+harder than fairness would suggest:
 
 ```
-magnification = sqrt((presentedWidth * presentedHeight) / (decodedWidth * decodedHeight))
-pixelated-video = normalizedPenalty(avgQpPerFrame, activation, saturation) * clamp(magnification, 0.5, 2.0)
+magnification = sqrt((presentedW * presentedH) / (decodedW * decodedH))
+
+magnification >= 1.5   ->  weight 3.0   (PIXELATION_MAX_PENALTY_LARGE)
+        0.75 .. 1.5    ->  weight 2.0   (PIXELATION_MAX_PENALTY)
+magnification <  0.75  ->  weight 0.5   (PIXELATION_MAX_PENALTY_SMALL)
+
+pixelated-video = normalizedPenalty(avgQpPerFrame, activation, saturation) * weight
 ```
 
-The ratio comes from the areas rather than one axis, so a presented box whose
-proportions differ from the frame's does not read as magnification on width
-alone. It is clamped because it is unbounded in both directions — 180p on a 4K
-screen is a factor of ~10.7, 1080p in a 96px avatar is ~0.07 — and neither
-extreme is worth the score swing. `PIXELATION_MAGNIFICATION_MIN` and
-`PIXELATION_MAGNIFICATION_MAX` are mutable statics on `DefaultScoreCalculator`;
-setting both to `1.0` disables the adjustment.
+For vp8 at standard motion, whose band is 40 → 80, a QP of 60 sits exactly
+halfway up the ramp — so the same stream, decoded once, costs:
 
-**No presented resolution, no adjustment.** Where the application has not
-declared one, or the stats carry no decoded resolution, the quantizer is judged
-alone exactly as before — nothing is substituted for the missing number.
+| presented (device px) | magnification | weight | QP 60 costs |
+| --- | --- | --- | --- |
+| thumbnail, 160×90 CSS @2x | 0.50 | 0.5 | **0.25** |
+| grid tile, 320×180 CSS @2x | 1.00 | 2.0 | 1.00 |
+| speaker view, 1280×720 CSS @2x | 2.00 | 3.0 | **1.50** |
+
+And at saturation (QP ≥ 80) those become 0.5, 2.0 and **3.0** — a large picture
+gone to blocks is the worst thing that can happen to a video track short of it
+stopping, and it should not be possible to score that call well.
+
+Three things to know:
+
+- **The ratio comes from the areas**, so a presented box whose proportions
+  differ from the frame's does not read as magnification on width alone.
+- **There is no clamp.** A 180p stream on a 4K screen is a magnification of 10.7
+  and simply counts as large; the tiers are flat, so nothing runs away.
+- **No presented resolution, no adjustment.** Undeclared presented size, or no
+  decoded resolution in the stats, means the ordinary 2.0 — nothing is
+  substituted for a missing number.
 
 Declare it in **device pixels**, either directly or by handing over the element:
 
@@ -284,11 +297,11 @@ monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, he
 monitor.setInboundTrackContext(trackId, { videoTag });   // re-measured every tick
 ```
 
-Two things to know about the `videoTag` route. It measures the element's
-**layout box** (`clientWidth`/`clientHeight` × `devicePixelRatio`), never
+Two things about the `videoTag` route. It measures the element's **layout box**
+(`clientWidth`/`clientHeight` × `devicePixelRatio`), never
 `videoWidth`/`videoHeight` — those are the *intrinsic* decoded size, the same
 number the stats already report, so measuring with them would make every
-magnification exactly 1. And it fits the frame's aspect ratio into that box, as
+magnification exactly 1. And it fits the frame's aspect ratio into that box as
 `object-fit: contain` does; an application using `object-fit: cover`, which crops
 instead, should declare `presentedResolution` itself.
 

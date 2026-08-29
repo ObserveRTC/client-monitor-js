@@ -3,35 +3,38 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
+/** `upgrade`/`downgrade` by pixel count; `reshape` when the pixel count holds but the aspect ratio does not. */
 export type VideoResolutionChangeDirection = 'upgrade' | 'downgrade' | 'reshape';
 
 /**
- * Video Resolution Change Detector
- *
- * Resolution changes are an **observation, not a fault** — which is why this
- * emits events and never raises an issue. The adaptation ladder moving is the
- * system working; it only becomes evidence of a problem when correlated with
+ * Reports when the frame size of a video track changes, on either direction of the
+ * connection. A resolution change is an observation, not a fault — the adaptation
+ * ladder moving is the system working — which is why this emits events and never
+ * raises an issue; it becomes evidence of a problem only in correlation with
  * something else, and that correlation belongs downstream.
  *
- * What makes the event worth carrying is the context attached to it. On the
- * send side, `qualityLimitationReason` at the moment of the change is what
- * separates "the encoder dropped resolution because of bandwidth or CPU" from
- * "the application changed its constraints" — from the resolution alone the two
- * are identical, and confusing them sends an investigation in exactly the wrong
- * direction. On the receive side the change usually means the SFU switched which
- * simulcast layer it forwards.
+ * What makes the event worth carrying is the context attached to it. On the send
+ * side, `qualityLimitationReason` at the moment of the change is what separates "the
+ * encoder dropped resolution because of bandwidth or CPU" from "the application
+ * changed its constraints" — from the resolution alone the two are identical, and
+ * confusing them sends an investigation in exactly the wrong direction. On the
+ * receive side a change usually means the SFU switched which simulcast layer it
+ * forwards. Direction is classified by pixel count as `upgrade` or `downgrade`, or
+ * `reshape` when the pixel count is unchanged but the aspect ratio is not — an
+ * orientation change on mobile, typically.
  *
- * Direction is classified as `upgrade` / `downgrade` by pixel count, or
- * `reshape` when the pixel count is unchanged but the aspect ratio is not (an
- * orientation change on mobile, typically).
+ * On an outbound simulcast track only the highest layer is followed, since the track
+ * carries several resolutions at once. A zero or absent frame size is a stream that
+ * has not produced a frame yet rather than a downgrade, and the first size seen is
+ * the baseline, not a change.
  *
- * **Events emitted:**
- * - `video-resolution-changed` (monitor event)
- * - `VIDEO_RESOLUTION_CHANGED` (client event, when `createEvent` is set)
+ * Raises no issue.
+ * Monitor event: `video-resolution-changed`; client event `VIDEO_RESOLUTION_CHANGED`
+ * when `createEvent` is left on.
+ * Config: `videoResolutionChangeDetector`.
  */
 export class VideoResolutionChangeDetector implements Detector {
 	public readonly name = 'video-resolution-change-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 
 	private _width?: number;
@@ -55,7 +58,6 @@ export class VideoResolutionChangeDetector implements Detector {
 
 		const rtp = this.trackMonitor.direction === 'inbound'
 			? this.trackMonitor.getInboundRtp()
-			// with simulcast the track has several resolutions; the highest layer is the one that matters
 			: this.trackMonitor.getHighestLayer();
 
 		if (!rtp) return;
@@ -64,7 +66,6 @@ export class VideoResolutionChangeDetector implements Detector {
 		const height = rtp.frameHeight;
 
 		if (width === undefined || height === undefined) return;
-		// zero resolution is a stream with no frame yet, not a downgrade
 		if (width < 1 || height < 1) return;
 
 		const previousWidth = this._width;
@@ -73,7 +74,6 @@ export class VideoResolutionChangeDetector implements Detector {
 		this._width = width;
 		this._height = height;
 
-		// first resolution seen is the baseline, not a change
 		if (previousWidth === undefined || previousHeight === undefined) return;
 		if (previousWidth === width && previousHeight === height) return;
 

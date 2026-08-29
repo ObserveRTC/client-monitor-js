@@ -3,16 +3,20 @@ import { OutboundFrameSupplyDetector } from "./OutboundFrameSupplyDetector";
 import type { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import type { ClientIssuePayload } from "../ClientMonitorEvents";
 
+/**
+ * `sourceFps` is what the capture source handed the encoder over the interval and `encodedFps` what
+ * the highest active layer managed of it — the pair the verdict is made on, never a configured rate.
+ * `cpuLimitationShare` is the share of the interval (`0..1`) the browser reported itself CPU-limited,
+ * carried for correlation even when it is not part of the trigger, and `consecutiveTicks` is how
+ * many collections in a row agreed before raising.
+ */
 export type EncoderBottleneckIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
-	/** Frames per second the capture source handed the encoder this interval. */
 	sourceFps?: number;
-	/** Frames per second the encoder managed on the highest active layer. */
 	encodedFps?: number;
 	encodeTimePerFrameInMs?: number;
 	qualityLimitationReason?: string;
-	/** Share of the interval the encoder spent CPU-limited, in `0..1`. */
 	cpuLimitationShare?: number;
 	encoderImplementation?: string;
 	powerEfficientEncoder?: boolean;
@@ -21,72 +25,49 @@ export type EncoderBottleneckIssuePayload = {
 }
 
 export type EncoderPerformanceDetectorConfig = {
-	/** Fraction of the source frame rate the encoder must fall below to count as behind. */
 	encodeFpsRatioThreshold: number;
-	/** Fraction of the per-frame budget encoding may consume before counting as too slow. */
 	encodeTimeBudgetRatio: number;
-	/**
-	 * Share of the interval the browser reported itself CPU-limited, above which
-	 * the encoder counts as bottlenecked — or **`null` to ignore that signal
-	 * entirely**, which is the default.
-	 *
-	 * Off by default because `CpuPerformanceDetector` already reports CPU
-	 * limitation as `cpulimitation`, and the useful thing to do with the two is
-	 * to correlate them: `encoder-bottleneck` and `cpulimitation` firing
-	 * together is evidence the encoder is CPU-bound. That inference is only
-	 * worth anything while `encoder-bottleneck` is derived independently — read
-	 * the CPU share here too and the correlation becomes tautological.
-	 */
+	/** `null` by default: `CpuPerformanceDetector` already reports `cpulimitation`, so folding it in here would make the two correlate tautologically. */
 	cpuLimitationShareThreshold: number | null;
-	/**
-	 * Consecutive collections the condition must hold before raising.
-	 *
-	 * A tick count rather than a duration, deliberately, and for the opposite
-	 * reason to `OutboundFrameSupplyDetector`'s `durationInMs`: this number is a
-	 * *confidence* floor, not a persistence bar. Every signal below is a
-	 * per-interval ratio that a single stats read can get wrong, so what is
-	 * wanted is two independent reads agreeing — which is two samples, whatever
-	 * the collecting period happens to be. `DecoderPerformanceDetector`, the
-	 * receive-side mirror of this detector, uses ticks for the same reason.
-	 */
+	/** A tick count, not a duration: a confidence floor (two stats reads agreeing on a per-interval ratio), not a persistence bar. */
 	minConsecutiveTicks: number;
 }
 
 /**
- * Encoder Performance Detector
+ * Given a capture source that is delivering, is the encoder keeping up with it? The send-side mirror
+ * of `DecoderPerformanceDetector`, and one quadrant of the four video detectors that split pipeline
+ * trouble along two axes: frames going *missing*, averaged over a duration
+ * (`OutboundFrameSupplyDetector`, `InboundFrameSupplyDetector`), versus a stage that cannot *keep
+ * up*, judged over consecutive ticks (this one and `DecoderPerformanceDetector`). The units are not
+ * interchangeable: a duration is a persistence bar, while a tick count is a confidence floor —
+ * every signal here is a per-interval ratio a single stats read can fabricate, so what is wanted is
+ * two independent reads agreeing, whatever the collecting period happens to be.
  *
- * Given a capture source that is delivering, is the encoder keeping up with it?
- * The send-side mirror of `DecoderPerformanceDetector`.
+ * Any one of three signals raises: the highest active layer encodes below `encodeFpsRatioThreshold`
+ * of what the source delivered; encoding one frame costs more than `encodeTimeBudgetRatio` of the
+ * per-frame budget (`1000 / sourceFps`); or the browser reported itself CPU-limited for more than
+ * `cpuLimitationShareThreshold` of the interval — the last only when that threshold is configured,
+ * which by default it is not, so that `encoder-bottleneck` and `cpulimitation` stay independently
+ * derived and correlating them still means something.
  *
- * Any one of three signals is enough:
- * - the highest active layer encodes below `encodeFpsRatioThreshold` of what the
- *   source delivered,
- * - encoding one frame costs more than `encodeTimeBudgetRatio` of the per-frame
- *   budget (`1000 / sourceFps`), or
- * - the browser reported itself CPU-limited for more than
- *   `cpuLimitationShareThreshold` of the interval — **only if configured**, see
- *   that field.
+ * Everything is judged against what the source actually delivered, never the configured capture
+ * rate: an encoder handed 3fps and emitting 3fps is doing its job perfectly, and comparing that to a
+ * configured 30 would call it a catastrophic failure. Whether the source itself is short is
+ * `OutboundFrameSupplyDetector`'s question, and the two are mutually exclusive — while its
+ * `capture-bottleneck` stands, this detector stands down, because an encoder handed too few frames
+ * has nothing to answer for. The chain runs through `ClientMonitor.isIssueActive()` rather than a
+ * shared field, and lands same-tick because `OutboundTrackMonitor` registers the capture detector
+ * first and `Detectors.update()` preserves registration order. It also declines to judge a
+ * backgrounded tab, a paused track, a track that is not live/unmuted/enabled, a track with no active
+ * layer, and a source delivering nothing at all.
  *
- * **Everything is measured against what the source actually delivered**, never
- * against what the track was configured to capture at. An encoder handed 3fps
- * and emitting 3fps is doing its job perfectly; comparing it to a configured 30
- * would call that a catastrophic failure. Whether the source itself is short is
- * `OutboundFrameSupplyDetector`'s question, and while its `capture-bottleneck`
- * stands this detector says nothing — the frames were never there to encode.
- *
- * **Chained through the issue, not through a shared field.** The capture check
- * raises `capture-bottleneck`, and this reads
- * `ClientMonitor.isIssueActive(...)`. `OutboundTrackMonitor` registers the
- * capture detector first and `Detectors.update()` preserves that order, so the
- * verdict is same-tick.
- *
- * **Issues created:** `encoder-bottleneck`.
+ * Issue raised: `encoder-bottleneck`. Monitor event: `encoder-bottleneck`.
+ * Config: `encoderPerformanceDetector`.
  */
 export class EncoderPerformanceDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'encoder-bottleneck';
 
 	public readonly name = 'encoder-performance-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
@@ -122,18 +103,20 @@ export class EncoderPerformanceDetector implements Detector {
 		if (!this.peerConnection.parent.activeTab) return this._clear('tab in background');
 		if (this.trackMonitor.paused) return this._clear('track paused');
 		if (track.readyState !== 'live' || track.muted || !track.enabled) return this._clear('track not sending');
-		// The source is short; the frames were never there to encode.
+		// Chained through `OutboundFrameSupplyDetector`'s issue rather than a shared field; it lands
+		// same-tick because `OutboundTrackMonitor` registers that detector first and `Detectors.update()` keeps the order.
 		if (this.peerConnection.parent.isIssueActive(this._captureIssueKey)) {
 			return this._clear('capture is short; not an encoder problem');
 		}
 
 		const highestLayer = this.trackMonitor.getHighestLayer();
 
-		if (!highestLayer || highestLayer.active === false) return;
+		if (!highestLayer || highestLayer.active === false) return this._clear('no active layer');
 
+		// `sourceFps` is derived from the frame counter, never `mediaSource.framesPerSecond`: the browser's
+		// own figure is smoothed and hides exactly the stutter this compares against.
 		const sourceFps = this.trackMonitor.getMediaSource()?.sourceFps;
 
-		// Nothing to compare against, and a zero divisor for the time budget.
 		if (sourceFps === undefined || sourceFps <= 0) return this._clear('source delivering nothing');
 
 		const encodedFps = highestLayer.framesPerSecond;

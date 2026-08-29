@@ -22,61 +22,51 @@ export type OutboundFrameSupplyDetectorConfig = {
 }
 
 /**
- * Outbound Frame Supply Detector
+ * Asks one question of an outbound video track: is the capture device delivering the
+ * frames the track was configured to capture? A camera degrading in place — a driver
+ * struggling, another application contending for it, thermal throttling — reports
+ * itself `live` and unmuted throughout while the far end's picture turns stuttery.
+ * This is the capture half only; the encoder behind the device belongs to
+ * `EncoderPerformanceDetector`, the decoder to `InboundFrameSupplyDetector`.
  *
- * Is the capture device delivering the frames the track was configured to
- * capture? The send-side mirror of `InboundFrameSupplyDetector`, which asks the
- * same of the decoder.
+ * Frames delivered and the time they had to arrive in are accumulated until
+ * `durationInMs` of measured time has accrued, then the average is compared against
+ * `getSettings().frameRate`: below `captureFpsRatioThreshold` of it raises, at or
+ * above resolves, and the totals start over. A camera that is failing rather than
+ * merely busy produces starving intervals interleaved with healthy ones — 150 frames
+ * per 5s tick, then 132, then 150, then 97 — so tick by tick most of it looks fine and
+ * per-tick thresholding never reaches it, while the average reads well under the
+ * configured rate and raises with the camera still delivering. Averaging also weights
+ * how far the source fell short rather than only how often. The rate is always the
+ * frame counter differenced against measured elapsed time, never
+ * `mediaSource.framesPerSecond`, which smooths this exact stutter away.
  *
- * **The rule, in full.** Add up the frames the source delivered and the time it
- * had to deliver them. Once `durationInMs` has accumulated, compare the average
- * against `getSettings().frameRate`: below `captureFpsRatioThreshold` of it,
- * raise; at or above, resolve. Then start again. Two running totals, no history.
+ * Without `getSettings().frameRate` there is no judgement: nothing is substituted for
+ * a missing baseline, because there would be nothing to fall short *of*. Screen shares
+ * are refused, their frame rate being content-driven — a still document legitimately
+ * delivers nothing, and an application capturing a moving surface can opt in with
+ * `setOutboundTrackContext(id, { contentType: 'camera' })` — as are a backgrounded tab
+ * and a paused, muted, disabled or ended sender. A restarted frame counter, a
+ * collection gap or a capture-settings change restarts the totals rather than counting
+ * against the device.
  *
- * **Why average rather than threshold each tick.** A camera that is failing
- * rather than merely busy dips and recovers: 150 frames per 5s tick becomes 132,
- * back to 150, then 97. Tick by tick most of it looks fine; the 15s average
- * reads 26.3fps against a configured 30 and raises while the camera is still
- * delivering. Averaging also weights *how far* the source fell short rather than
- * merely how often.
- *
- * **The rate is always the counter, never `mediaSource.framesPerSecond`.**
- * `sourceFps` is the frame counter differenced against *measured* elapsed time.
- * The browser's own figure is coarse and smooths this exact stutter away — it
- * can read `30` across an interval that actually delivered 132 frames in five
- * seconds. When `sourceFps` is undefined the counter restarted, and a restart is
- * not a measurement.
- *
- * **Without `getSettings().frameRate` there is no judgement.** Nothing is
- * substituted for a missing baseline: if the browser does not say what the track
- * was asked to capture at, there is nothing for the measured rate to fall short
- * *of*.
- *
- * **What it refuses to judge**, because a low frame rate there is legitimate: a
- * backgrounded tab, a paused or stopped sender, and screen shares, whose frame
- * rate is content-driven — a still document delivers nothing. Applications
- * capturing a moving surface that should be watched can say so with
- * `setOutboundTrackContext(id, { contentType: 'camera' })`. The totals also restart after a settings
- * change or a collection gap.
- *
- * **Issues created:** `capture-bottleneck`.
+ * Issue raised: `capture-bottleneck`, resolved when the average recovers or the
+ * detector stands down.
+ * Monitor event: `capture-bottleneck`.
+ * Config: `outboundFrameSupplyDetector`.
  */
 export class OutboundFrameSupplyDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'capture-bottleneck';
 
 	public readonly name = 'outbound-frame-supply-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
 	private readonly _issueKey: string;
 
-	// The whole state: frames delivered so far, and the time they came over.
 	private _framesInWindow = 0;
 	private _windowSeconds = 0;
-	/** Previous media-source timestamp, to measure each interval and spot gaps. */
 	private _lastTimestamp?: number;
-	/** `frameRate|width|height`, to spot a deliberate change mid-window. */
 	private _settingsSignature?: string;
 
 	private _on = false;
@@ -105,8 +95,6 @@ export class OutboundFrameSupplyDetector implements Detector {
 		if (!this.peerConnection.parent.activeTab) return this._reset('tab in background');
 		if (this.trackMonitor.paused) return this._reset('track paused');
 		if (track.readyState !== 'live' || track.muted || !track.enabled) return this._reset('track not sending');
-		// Content-driven frame rate: nothing here can tell a still document apart
-		// from a failing camera.
 		if (this.trackMonitor.isScreenShare) return this._reset('screen share');
 
 		const mediaSource = this.trackMonitor.getMediaSource();
@@ -118,23 +106,21 @@ export class OutboundFrameSupplyDetector implements Detector {
 
 		this._lastTimestamp = timestamp;
 
-		// Nothing to difference against yet; this tick is the baseline.
 		if (previousTimestamp === undefined) return;
 
 		const elapsedInMs = timestamp - previousTimestamp;
 
 		if (elapsedInMs <= 0) return;
-		// The ticks themselves stopped, which says nothing about the device.
+		// Derived from `collectingPeriodInMs` rather than configured separately, so the bar follows whatever collection rate the application chose.
 		if (maxTickGapInMs(this.peerConnection.parent.config.collectingPeriodInMs) < elapsedInMs) {
 			return this._reset('collection gap');
 		}
 
+		// The frame counter, never `mediaSource.framesPerSecond`, which is coarse enough to smooth the stutter being looked for away.
 		const sourceFps = mediaSource?.sourceFps;
 
 		if (sourceFps === undefined) return this._reset('frame counter restarted');
 
-		// A deliberate resolution or frame-rate change restarts the totals: the
-		// new settings are not the old ones falling short.
 		const settings = this._trackSettings();
 		const signature = `${settings?.frameRate ?? ''}|${settings?.width ?? ''}|${settings?.height ?? ''}`;
 		const changed = this._settingsSignature !== undefined && this._settingsSignature !== signature;
@@ -145,6 +131,8 @@ export class OutboundFrameSupplyDetector implements Detector {
 
 		const elapsedInSec = elapsedInMs / 1000;
 
+		// Two running totals: frames accumulated over the elapsed time actually measured between ticks.
+		// The average is judged once `durationInMs` of time has accrued, not once N ticks have passed.
 		this._framesInWindow += sourceFps * elapsedInSec;
 		this._windowSeconds += elapsedInSec;
 
@@ -156,8 +144,6 @@ export class OutboundFrameSupplyDetector implements Detector {
 		this._framesInWindow = 0;
 		this._windowSeconds = 0;
 
-		// No configured frame rate means no bar to fall short of, and nothing is
-		// assumed in its place: without the baseline there is no detection.
 		if (expectedFps === undefined || expectedFps <= 0) return this._clear('no configured frame rate');
 		if (expectedFps * this.config.captureFpsRatioThreshold <= averageFps) return this._clear('capture recovered');
 		if (this._on) return;

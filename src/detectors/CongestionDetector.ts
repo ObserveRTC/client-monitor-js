@@ -4,123 +4,77 @@ import { ClientMonitorEvents } from "../ClientMonitorEvents";
 
 export type CongestionIssuePayload = {
 	peerConnectionId: string;
+	/** Bandwidth estimate at the moment congestion was declared, in bps. */
 	availableIncomingBitrate: number;
+	/** Bandwidth estimate at the moment congestion was declared, in bps. */
 	availableOutgoingBitrate: number;
+	/** Peak estimate observed during the healthy stretch immediately before this episode. */
 	maxAvailableIncomingBitrate: number;
+	/** Peak estimate observed during the healthy stretch immediately before this episode. */
 	maxAvailableOutgoingBitrate: number;
+	/** Peak bitrate actually received during that same healthy stretch. */
 	maxReceivingBitrate: number;
+	/** Peak bitrate actually sent during that same healthy stretch. */
 	maxSendingBitrate: number;
+	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 }
 
 export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
 
 /**
- * Network Congestion Detector
- * 
- * Detects network congestion conditions by analyzing bandwidth limitations, RTT variations,
- * and packet loss patterns. The detector uses configurable sensitivity levels to balance
- * between early detection and false positives.
- * 
- * **Detection Logic:**
- * - Monitors `qualityLimitationReason` on outbound RTP streams for bandwidth limitations
- * - Analyzes RTT variations (difference between current and EWMA RTT values)
- * - Considers packet loss rates in conjunction with bandwidth limitations
- * - Uses sensitivity-based thresholds to determine congestion state
- * 
- * **Sensitivity Levels:**
- * - `high`: Triggers on any bandwidth limitation (most sensitive, may have false positives)
- * - `medium`: Requires bandwidth limitation + significant RTT increase (balanced approach)
- * - `low`: Requires bandwidth limitation + packet loss > 5% (least sensitive, high confidence)
- * 
- * **Configuration Options:**
- * - `disabled`: Boolean to enable/disable the detector
- * - `sensitivity`: Detection sensitivity level ('low', 'medium', 'high')
- * 
- * **Events Emitted:**
- * - `congestion`: Emitted when network congestion is first detected
- * 
- * **Issues Created:**
- * - Type: `congestion`
- * - Payload: Includes current and historical bandwidth/bitrate metrics
- * 
- * @example
- * ```typescript
- * // Configuration
- * const config = {
- *   congestionDetector: {
- *     disabled: false,
- *     sensitivity: 'medium'  // 'low', 'medium', 'high'
- *   }
- * };
- * 
- * // Listen for congestion events
- * monitor.on('congestion', ({ peerConnectionMonitor, availableIncomingBitrate }) => {
- *   console.log('Congestion detected on PC:', peerConnectionMonitor.peerConnectionId);
- *   console.log('Available bandwidth:', availableIncomingBitrate, 'bps');
- * });
- * ```
+ * Watches a peer connection for the point at which the network stops being able to carry what
+ * the encoder wants to produce — the cause behind collapsing resolution, stuttering video and
+ * the "you're breaking up" complaint.
+ *
+ * The anchor signal is the browser's own verdict rather than any bitrate threshold this library
+ * could invent: `qualityLimitationReason === 'bandwidth'` on an outbound stream means the
+ * encoder is already being throttled by the bandwidth estimator, which sees far more than the
+ * stats API exposes. That verdict is eager, so `sensitivity` decides how much corroboration is
+ * demanded. `high` takes it at its word. `medium` additionally wants the round trip to be
+ * moving — the current average diverging from its EWMA by more than a third of that EWMA,
+ * clamped to a 50-150ms band — which is queue build-up rather than a link that is merely narrow.
+ * `low` instead wants outbound loss above 5%, and deliberately applies no round-trip guard:
+ * requiring both made a bandwidth-limited connection losing a twentieth of its packets read as
+ * perfectly healthy until the first RTCP report happened to arrive.
+ *
+ * Both round-trip figures are drawn with the same source preference, RTCP first and ICE/STUN as
+ * the fallback, so their difference can never compare two different round trips against each
+ * other. Whenever the connection is *not* congested the detector keeps running maxima of the
+ * available and actual bitrates; those travel with the issue as the "before" picture and are
+ * then reset, so each episode is measured against the headroom that immediately preceded it
+ * rather than against the whole call.
+ *
+ * Raises `congestion`. Emits `congestion`. Config: `congestionDetector`.
  */
 export class CongestionDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'congestion';
-	/** Unique identifier for this detector type */
 	public readonly name = 'congestion-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 	
-	/** Maximum available incoming bitrate observed during non-congested periods */
 	private _maxAvailableIncomingBitrate = 0;
 
-	/** Maximum receiving bitrate observed during non-congested periods */
 	private _maxReceivingBitrate = 0;
 
-	/** Maximum available outgoing bitrate observed during non-congested periods */
 	private _maxAvailableOutgoingBitrate = 0;
 
-	/** Maximum sending bitrate observed during non-congested periods */
 	private _maxSendingBitrate = 0;
 
 	private readonly issueKey: string;
 
-	/** Timestamp when the current congestion episode started. */
 	private _startedCongestionAt?: number;
 
-	/**
-	 * Creates a new CongestionDetector instance
-	 * @param peerConnection - The peer connection monitor to analyze for congestion
-	 */
 	public constructor(
 		public readonly peerConnection: PeerConnectionMonitor
 	) {
 		this.issueKey = `${CongestionDetector.ISSUE_TYPE}-pc-${peerConnection.peerConnectionId}`;
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.congestionDetector!;
 	}
 
-	/**
-	 * Updates the detector state and checks for network congestion
-	 * 
-	 * This method analyzes various network quality indicators to determine if the
-	 * peer connection is experiencing congestion. The detection logic varies based
-	 * on the configured sensitivity level.
-	 * 
-	 * **Processing Steps:**
-	 * 1. Checks for bandwidth-limited outbound RTP streams
-	 * 2. Calculates RTT variation from EWMA baseline
-	 * 3. Applies sensitivity-specific logic to determine congestion state
-	 * 4. Updates historical maximums during non-congested periods
-	 * 5. Emits events and creates issues when congestion is detected
-	 * 6. Resets historical maximums after congestion detection for next cycle
-	 * 
-	 * **Sensitivity Logic:**
-	 * - **High**: Any bandwidth limitation triggers congestion
-	 * - **Medium**: Bandwidth limitation + RTT increase > 33% of current EWMA RTT (min 50ms, max 150ms)
-	 * - **Low**: Bandwidth limitation + outbound packet loss > 5%
-	 */
 	public update() {
 
 		if (this.disabled) return;
@@ -128,7 +82,6 @@ export class CongestionDetector implements Detector {
 
 		for (const outboundRtp of this.peerConnection.outboundRtps) {
 			hasBwLimitedOutboundRtp ||= outboundRtp.qualityLimitationReason === 'bandwidth';
-			// isCongested ||= outboundRtp.stats.qualityLimitationReason === 'bandwidth';
 		}
 
 		// avgRttInSec/ewmaRttInSec prefer the RTCP round trip and fall back to
@@ -155,8 +108,10 @@ export class CongestionDetector implements Detector {
 				break;
 			}
 			case 'low': {
-				if (!this.peerConnection.ewmaRttInSec || !this.peerConnection.outboundFractionLost) break;
-				
+				// No RTT guard here (unlike `medium`): requiring one made a bandwidth-limited
+				// connection losing >5% silently not congested before the first RTCP report.
+				if (this.peerConnection.outboundFractionLost === undefined) break;
+
 				isCongested = hasBwLimitedOutboundRtp && this.peerConnection.outboundFractionLost > 0.05;
 				break;
 			}
@@ -179,7 +134,6 @@ export class CongestionDetector implements Detector {
 			return;
 		}
 
-		// congestion is detected
 		this.peerConnection.congested = true;
 		this.peerConnection.parent.emit('congestion', {
 			clientMonitor: this.peerConnection.parent,

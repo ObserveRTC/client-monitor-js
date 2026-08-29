@@ -1,16 +1,15 @@
 import { Detector } from "./Detector";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 
+/** One ongoing audible-concealment episode on a single inbound audio track. */
 export type AudioConcealmentIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
-	/** Audible concealment share over the evaluation window, in `0..1`. */
+	/** Audible concealed samples over total samples received across the window, in `0..1`. */
 	concealmentRate: number;
-	/** Concealment events per second over the evaluation window. */
-	concealmentEventRate: number;
-	/** How the concealment was distributed: many short gaps or few long ones. */
-	burstiness: 'bursty' | 'continuous' | 'unknown';
+	/** Length of the sliding window the rate was measured over. */
 	windowInMs: number;
+	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 }
 
@@ -18,53 +17,43 @@ type WindowEntry = {
 	timestamp: number;
 	audibleConcealedSamples: number;
 	totalSamplesReceived: number;
-	concealmentEvents: number;
 };
 
 /**
- * Audio Concealment Detector
+ * Watches how inbound audio actually *sounded*, which packet loss does not tell you. Opus and
+ * NetEQ conceal a great deal of loss inaudibly, and conversely audio falls apart without
+ * dramatic loss when the jitter buffer misbehaves, so concealment is both the more sensitive
+ * and the more specific signal behind a "they were breaking up" complaint.
  *
- * Reports how the audio actually *sounded*, which packet loss does not.
- * Opus + NetEQ conceal a great deal of loss inaudibly, and conversely audio
- * degrades without dramatic loss when the jitter buffer misbehaves — so
- * concealment is both the more sensitive and the more specific signal.
+ * Raw concealment would be the worse signal, though: `concealedSamples` also climbs through
+ * ordinary silence, when NetEQ has nothing to play out and nobody could hear the difference.
+ * Only the audible part counts here, with `silentConcealedSamples` subtracted out before the
+ * rate is formed, and that subtraction is what keeps every quiet moment of every call from
+ * reading as a fault.
  *
- * **Detection logic:**
- * - Accumulates audible concealment over a sliding window rather than judging a
- *   single stats tick, because concealment is bursty by nature and a per-tick
- *   threshold would flap.
- * - Raises `audio-concealment` when the windowed rate crosses `onThreshold`,
- *   resolves under `offThreshold` (hysteresis).
+ * Concealment arrives in bursts, so a per-tick threshold would flap. Audible and total samples
+ * are accumulated over a sliding `windowInMs` and the ratio is judged across the whole window,
+ * with separate on and off thresholds so a recovering stream does not oscillate.
  *
- * **Why "audible":** `concealedSamples` also rises during ordinary silence, so
- * `InboundRtpMonitor` subtracts `silentConcealedSamples` before this detector
- * ever sees the number. Without that subtraction this would flag every quiet
- * moment in every call — a worse signal than packet loss rather than a better
- * one.
+ * It declines to judge in three situations. While this leg's consumer is paused, or the remote
+ * producer is paused, nothing is being sent and concealment means nothing — the window is
+ * discarded outright so the pause cannot leak into the next measurement. While the browser
+ * omits the concealed or silent-concealed counters, there is no audible share to compute. And
+ * until `minSamplesInWindow` samples have accumulated there is too little audio to draw a rate
+ * from at all.
  *
- * **False-positive guards:** the detector stays silent while the remote track is
- * paused (nothing is being sent, so nothing can be concealed meaningfully) and
- * while too few samples arrived in the window to judge.
- *
- * **Issues created:**
- * - Type: `audio-concealment`
+ * Raises `audio-concealment`. Emits `audio-concealment`. Config: `audioConcealmentDetector`.
  */
 export class AudioConcealmentDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'audio-concealment';
 	public readonly name = 'audio-concealment-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
-	/** Hard cap protecting against pathologically fast update rates. */
-	private static readonly MAX_WINDOW_ENTRIES = 128;
-
 	private readonly issueKey: string;
 	private readonly _window: WindowEntry[] = [];
-	// running sums over _window, maintained on push/evict
 	private _sumAudible = 0;
 	private _sumTotal = 0;
-	private _sumEvents = 0;
 	private _alertOn = false;
 	private _startedAt?: number;
 
@@ -89,8 +78,6 @@ export class AudioConcealmentDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 
-		// a paused consumer or a paused remote track would otherwise look like
-		// total concealment failure
 		if (this.trackMonitor.paused) {
 			this._resetWindow();
 
@@ -106,34 +93,34 @@ export class AudioConcealmentDetector implements Detector {
 
 		if (deltaTotal === undefined) return;
 
+		if (inboundRtp.deltaConcealedSamples === undefined) return;
+		if (inboundRtp.deltaSilentConcealedSamples === undefined) return;
+
+		// concealedSamples rises during ordinary silence too, so the silent part is subtracted out
 		const audible = Math.max(
 			0,
-			(inboundRtp.deltaConcealedSamples ?? 0) - (inboundRtp.deltaSilentConcealedSamples ?? 0),
+			inboundRtp.deltaConcealedSamples - inboundRtp.deltaSilentConcealedSamples,
 		);
 
 		const now = Date.now();
-		const events = inboundRtp.deltaConcealmentEvents ?? 0;
 
 		this._window.push({
 			timestamp: now,
 			audibleConcealedSamples: audible,
 			totalSamplesReceived: deltaTotal,
-			concealmentEvents: events,
 		});
 		this._sumAudible += audible;
 		this._sumTotal += deltaTotal;
-		this._sumEvents += events;
 
 		const windowInMs = this.config.windowInMs;
 
 		for (
 			let oldest = this._window[0];
-			oldest && (oldest.timestamp < now - windowInMs || AudioConcealmentDetector.MAX_WINDOW_ENTRIES < this._window.length);
+			oldest && oldest.timestamp < now - windowInMs;
 			oldest = this._window[0]
 		) {
 			this._sumAudible -= oldest.audibleConcealedSamples;
 			this._sumTotal -= oldest.totalSamplesReceived;
-			this._sumEvents -= oldest.concealmentEvents;
 			this._window.shift();
 		}
 
@@ -143,8 +130,6 @@ export class AudioConcealmentDetector implements Detector {
 		if (this._sumTotal < this.config.minSamplesInWindow) return;
 
 		const concealmentRate = this._sumAudible / this._sumTotal;
-		const elapsedInSec = Math.max(1, now - oldestEntry.timestamp) / 1000;
-		const concealmentEventRate = this._sumEvents / elapsedInSec;
 
 		if (this._alertOn) {
 			if (concealmentRate < this.config.offThreshold) {
@@ -165,7 +150,6 @@ export class AudioConcealmentDetector implements Detector {
 			clientMonitor,
 			trackMonitor: this.trackMonitor,
 			concealmentRate,
-			concealmentEventRate,
 		});
 
 		clientMonitor.raiseIssue<AudioConcealmentIssuePayload>(this.issueKey, {
@@ -175,8 +159,6 @@ export class AudioConcealmentDetector implements Detector {
 				peerConnectionId: this.peerConnection.peerConnectionId,
 				trackId: this.trackMonitor.track.id,
 				concealmentRate,
-				concealmentEventRate,
-				burstiness: this._classifyBurstiness(this._sumAudible, this._sumEvents),
 				windowInMs,
 			},
 		});
@@ -186,17 +168,6 @@ export class AudioConcealmentDetector implements Detector {
 		this._window.length = 0;
 		this._sumAudible = 0;
 		this._sumTotal = 0;
-		this._sumEvents = 0;
-	}
-
-	private _classifyBurstiness(concealedSamples: number, events: number): 'bursty' | 'continuous' | 'unknown' {
-		if (events < 1) return 'unknown';
-
-		const samplesPerEvent = concealedSamples / events;
-
-		// At 48 kHz, 4800 samples is 100 ms — beyond that a single event is a
-		// perceptible dropout rather than a click.
-		return samplesPerEvent < 4800 ? 'bursty' : 'continuous';
 	}
 
 	private _clear(comment: string) {

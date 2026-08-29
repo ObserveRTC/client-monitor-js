@@ -108,25 +108,14 @@ export class DefaultScoreCalculator {
 	public static BITRATE_VOLATILITY_ACTIVATION = 0.1;
 	public static BITRATE_VOLATILITY_SATURATION = 0.2;
 
-	/**
-	 * Bounds on the display magnification that scales `pixelated-video`.
-	 *
-	 * The magnification is the linear ratio between the picture as painted for
-	 * the viewer and the picture as decoded — 2.0 means every coded block is
-	 * twice as wide on screen as the codec drew it. Blockiness is an artifact
-	 * of a given angular size, so the same quantizer is roughly twice as
-	 * visible magnified 2x and roughly half as visible shrunk into a thumbnail.
-	 * Judging the picture at the size it is displayed rather than the size it
-	 * was decoded is standard practice in reference metrics (VMAF scales to the
-	 * display before scoring); the clamps here are the crude version of it.
-	 *
-	 * They exist because the ratio is unbounded in both directions — a 180p
-	 * stream on a 4K screen is a magnification of 6, a 1080p stream in a 96px
-	 * avatar is 0.09 — and neither extreme is worth the score swing it would
-	 * produce. `1.0` in both would disable the adjustment entirely.
-	 */
-	public static PIXELATION_MAGNIFICATION_MIN = 0.5;
-	public static PIXELATION_MAGNIFICATION_MAX = 2.0;
+	/** Deliberately asymmetric: a large pixelated video is what the viewer complains about. */
+	public static PIXELATION_MAX_PENALTY_LARGE = 3.0;
+	public static PIXELATION_MAX_PENALTY = 2.0;
+	public static PIXELATION_MAX_PENALTY_SMALL = 0.5;
+
+	/** Linear magnification, i.e. sqrt of the area ratio. */
+	public static PIXELATION_LARGE_MAGNIFICATION = 1.5;
+	public static PIXELATION_SMALL_MAGNIFICATION = 0.75;
 
 	/** Audible concealment share at which the penalty saturates (~"severely concealed"). */
 	public static readonly AUDIO_CONCEALMENT_SATURATION = 0.1;
@@ -452,28 +441,14 @@ export class DefaultScoreCalculator {
 			subtractions['low-fps'] = 1.0;
 		}
 
-		// Pixelation, judged from the quantizer of the frames this viewer actually
-		// decoded. QP is the encoder stating how coarsely it had to quantize, so
-		// it measures the blockiness and loss of detail the user is looking at —
-		// unlike bitrate, which cannot separate "starved" from "this content
-		// needed few bits".
-		//
-		// Not every browser reports `qpSum` for every codec. Where it is missing
-		// the reason is simply absent: no judgement is better than one inferred
-		// from bitrate.
 		const avgQpPerFrame = inboundRtp.avgQpPerFrame;
 		const codecMimeType = inboundRtp.getCodec()?.mimeType;
 		const codec = codecMimeType?.split('/')[1]?.toLowerCase();
-		// Motion decides how visible a given quantizer is: movement masks
-		// artifacts, static content shows every one. The application declares it;
-		// undeclared screen share is judged strictly, since blocked text is a
-		// hard failure.
+		// undeclared screen share is judged strictly: blocked text is a hard failure
 		const motionType = trackMonitor.motionType ?? (isScreenShare ? 'lowmotion' : 'standard');
 		const qpThresholds = codec ? VIDEO_QP_THRESHOLDS[codec]?.[motionType] : undefined;
 
 		if (avgQpPerFrame !== undefined && qpThresholds) {
-			// QP scales differ per codec and are not comparable as fractions of
-			// their ranges, so each codec brings its own pair of thresholds.
 			const qpPenalty = this._normalizedPenalty(
 				avgQpPerFrame,
 				qpThresholds.activation,
@@ -481,19 +456,9 @@ export class DefaultScoreCalculator {
 			);
 
 			if (0 < qpPenalty) {
-				// The quantizer says how coarsely the frame was coded. It does
-				// not say how large those coded blocks end up on the viewer's
-				// screen, and that is half of whether they are visible: the
-				// same QP is punishing blown up to full screen and nearly
-				// invisible in a grid thumbnail. Where the application has told
-				// us how big the picture is presented, scale the penalty by the
-				// magnification; where it has not, judge the quantizer alone,
-				// exactly as before.
-				const magnification = this._displayMagnification(trackMonitor, inboundRtp);
-
-				subtractions['pixelated-video'] = magnification === undefined
-					? qpPenalty
-					: this._getRoundedScore(qpPenalty * magnification);
+				subtractions['pixelated-video'] = this._getRoundedScore(
+					qpPenalty * this._pixelationWeight(trackMonitor, inboundRtp)
+				);
 			}
 		}
 
@@ -814,40 +779,30 @@ export class DefaultScoreCalculator {
 	 * Degenerates to a binary 0/1 step when a caller configures
 	 * `saturation <= activation`.
 	 */
-	/**
-	 * The linear factor by which the decoded picture is scaled to reach the
-	 * viewer, clamped to
-	 * [{@link DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MIN},
-	 * {@link DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MAX}].
-	 *
-	 * `undefined` when either side of the comparison is missing — no presented
-	 * resolution declared, or no decoded resolution in the stats. Nothing is
-	 * substituted for it: without both numbers there is no ratio, and the
-	 * caller judges the quantizer unscaled rather than inventing a baseline.
-	 *
-	 * Taken from the **areas** rather than one axis, so a presented box whose
-	 * proportions differ from the frame's does not read as magnification on
-	 * width alone.
-	 */
-	private _displayMagnification(
+	/** From the areas, so a box whose proportions differ from the frame's is not magnification on width alone. */
+	private _pixelationWeight(
 		trackMonitor: InboundTrackMonitor,
 		inboundRtp: InboundRtpMonitor,
-	): number | undefined {
+	): number {
 		const presented = trackMonitor.presentedResolution;
 		const decodedWidth = inboundRtp.frameWidth;
 		const decodedHeight = inboundRtp.frameHeight;
 
-		if (!presented || !decodedWidth || !decodedHeight) return undefined;
-		if (presented.width <= 0 || presented.height <= 0) return undefined;
+		if (!presented || !decodedWidth || !decodedHeight) return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
+		if (presented.width <= 0 || presented.height <= 0) return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
 
 		const magnification = Math.sqrt(
 			(presented.width * presented.height) / (decodedWidth * decodedHeight)
 		);
 
-		return Math.min(
-			DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MAX,
-			Math.max(DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MIN, magnification),
-		);
+		if (DefaultScoreCalculator.PIXELATION_LARGE_MAGNIFICATION <= magnification) {
+			return DefaultScoreCalculator.PIXELATION_MAX_PENALTY_LARGE;
+		}
+		if (magnification < DefaultScoreCalculator.PIXELATION_SMALL_MAGNIFICATION) {
+			return DefaultScoreCalculator.PIXELATION_MAX_PENALTY_SMALL;
+		}
+
+		return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
 	}
 
 	private _normalizedPenalty(value: number, activation: number, saturation: number): number {

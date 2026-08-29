@@ -52,7 +52,7 @@ against different thresholds to see where a detector would flip:
 
 ```typescript
 const run = await replayFixture('stuck-decoder', {
-    stuckDecoderDetector: { thresholdInMs: 30_000, rttMultiplier: 15, minStuckTicks: 2, minBitrate: 10_000 },
+    stuckDecoderDetector: { thresholdInMs: 30_000, rttMultiplier: 15, minBitrate: 10_000 },
 });
 ```
 

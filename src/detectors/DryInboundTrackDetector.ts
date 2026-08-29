@@ -3,129 +3,67 @@ import { Detector } from "./Detector";
 
 export type DryInboundTrackIssuePayload = {
 	trackId: string;
+	/** How long the track had already been dry when the issue was raised, in milliseconds. */
 	duration: number;
+	/** How long the episode lasted; filled in when the issue is resolved. */
 	durationInMs?: number;
 }
 
 /**
- * Dry Inbound Track Detector
- * 
- * Detects inbound tracks that have stopped receiving data (gone "dry") despite
- * the remote peer continuing to send. This can indicate network issues, codec
- * problems, or other transmission failures that prevent media from flowing.
- * 
- * **Detection Logic:**
- * - Monitors `bytesReceived` from inbound RTP statistics
- * - Tracks duration when bytesReceived remains at 0
- * - Ignores periods when this leg's consumer is paused (`trackMonitor.paused`)
- *   or the remote track/producer is paused (`remoteOutboundTrackPaused`) —
- *   silence is expected then
- * - Triggers alert after configured threshold duration
- * - Only triggers once per track until reset
- * 
- * **Configuration Options:**
- * - `disabled`: Boolean to enable/disable the detector
- * - `thresholdInMs`: Duration threshold in milliseconds before triggering (default: 5000ms)
- * 
- * **Events Emitted:**
- * - `dry-inbound-track`: Emitted when track is detected as dry
- * 
- * **Issues Created:**
- * - Type: `dry-inbound-track`
- * - Payload: `{ trackId, duration }`
- * 
- * @example
- * ```typescript
- * // Configuration
- * const config = {
- *   dryInboundTrackDetector: {
- *     disabled: false,
- *     thresholdInMs: 5000  // 5 seconds of no data
- *   }
- * };
- * 
- * // Listen for dry track events
- * monitor.on('dry-inbound-track', ({ trackMonitor }) => {
- *   console.log('Dry inbound track detected:', trackMonitor.track.id);
- * });
- * ```
+ * Watches one inbound track for the blunt case of media having stopped arriving: not degraded,
+ * not concealed, but zero bytes received tick after tick. This is "their video is frozen" and
+ * "I cannot hear them" at their most literal, and it catches the transmission failures that
+ * leave the quality detectors quiet precisely because nothing is left to measure.
+ *
+ * Silence is only a fault when it is unexplained, so the detector stands down on both kinds of
+ * deliberate silence and names which one it saw when it resolves: this leg's consumer being
+ * paused, a local opt-out, and the remote producer being paused, where nobody is sending at all.
+ * Either one discards the timer and resolves an already-raised issue, because the silence now
+ * has an explanation even though no bytes have flowed. A stall must last `thresholdInMs` before
+ * it is raised, and it is raised once per episode rather than once per tick.
+ *
+ * Raises `dry-inbound-track`. Emits `dry-inbound-track`. Config: `dryInboundTrackDetector`.
  */
 export class DryInboundTrackDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'dry-inbound-track';
-	/** Unique identifier for this detector type */
 	public readonly name = 'dry-inbound-track-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 	
 	private readonly issueKey: string;
 
-	/**
-	 * Creates a new DryInboundTrackDetector instance
-	 * @param trackMonitor - The inbound track monitor to analyze for data flow
-	 */
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
 	) {
 		this.issueKey = `${DryInboundTrackDetector.ISSUE_TYPE}-track-${trackMonitor.track.id}`;
 	}
 
-	/** Flag to prevent multiple events for the same dry period */
-	private _evented = false;
-
-	/** Timestamp when this dry episode was raised as an issue. */
 	private _startedDryAt?: number;
 
-	/** Gets the peer connection monitor that owns this track */
 	private get peerConnection() {
 		return this.trackMonitor.getPeerConnection();
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.dryInboundTrackDetector!;
 	}
 
-	/** Timestamp when the dry period started */
 	private _activatedAt?: number;
 
-	/**
-	 * Updates the detector state and checks for dry inbound track conditions
-	 * 
-	 * This method monitors the flow of inbound data and detects when a track
-	 * stops receiving bytes for an extended period, indicating a transmission issue.
-	 * 
-	 * **Processing Steps:**
-	 * 1. Skip if already evented or detector is disabled
-	 * 2. Check if track is receiving data (bytesReceived > 0)
-	 * 3. Reset timer if the consumer or the remote track is paused (expected
-	 *    behavior), resolving an already-raised dry issue
-	 * 4. Start timing if no data is flowing and track should be active
-	 * 5. Trigger alert if dry duration exceeds threshold
-	 * 6. Emit event and create issue when dry condition is detected
-	 */
 	public update() {
 		if (this.disabled) return;
-		// if (this.trackMonitor.getInboundRtp()?.bytesReceived !== 0) return;
-		// Silence is expected while this leg's consumer is paused (local opt-out)
-		// or while the remote producer is paused (nobody receives) — two distinct
-		// situations, and the detector stands down on either.
 		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
 			this._activatedAt = undefined;
-			if (this._evented) {
-				// The silence is now explained, so the dry episode is over even
-				// though no bytes flowed yet.
+			if (this._startedDryAt !== undefined) {
 				this._resolve(this.trackMonitor.paused ? 'consumer paused' : 'remote track paused');
-				this._evented = false;
 			}
 			return;
 		}
 
 		if (this.trackMonitor.getInboundRtp()?.deltaBytesReceived !== 0) {
 			this._activatedAt = undefined;
-			if (this._evented) {
+			if (this._startedDryAt !== undefined) {
 				this._resolve('dry inbound track recovered');
-				this._evented = false;
 			}
 			return;
 		}
@@ -139,12 +77,7 @@ export class DryInboundTrackDetector implements Detector {
 
 		if (duration < this.config.thresholdInMs) return;
 
-		// Only emit the detector-level event and raise the issue ONCE per dry
-		// episode. Subsequent ticks while the dry condition persists keep the
-		// existing issue in the active store (dedupe by key in raiseIssue) but
-		// no longer notify listeners — they'll see the lifecycle close via the
-		// `'issue-resolved'` event when the track recovers.
-		if (this._evented) return;
+		if (this._startedDryAt !== undefined) return;
 
 		clientMonitor.emit('dry-inbound-track', {
 			trackMonitor: this.trackMonitor,
@@ -155,11 +88,10 @@ export class DryInboundTrackDetector implements Detector {
 			trackId: this.trackMonitor.track.id,
 			duration,
 		});
-		this._evented = true;
 	}
 
 	private _raise(payload: DryInboundTrackIssuePayload) {
-		this._startedDryAt = this._startedDryAt ?? Date.now();
+		this._startedDryAt = Date.now();
 
 		this.peerConnection.parent.raiseIssue<DryInboundTrackIssuePayload>(this.issueKey, {
 				includeInSample: this.includeIssueInSample,

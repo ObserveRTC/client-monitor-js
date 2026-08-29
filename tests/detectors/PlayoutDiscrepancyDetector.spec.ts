@@ -198,14 +198,30 @@ describe('PlayoutDiscrepancyDetector', () => {
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
-        it('should return early if missing ewmaFps', () => {
+        it('still detects when ewmaFps is missing — it is payload, not evidence', () => {
             mockTrackMonitor.setInboundRtp({
                 deltaFramesReceived: 20,
                 deltaFramesRendered: 5
             });
 
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            expect(mockClientMonitor.getIssues()[0]?.payload?.ewmaFps).toBeUndefined();
+        });
+
+        it('detects the maximal case, where nothing rendered at all', () => {
+            // `deltaFramesRendered: 0` is everything arriving and nothing
+            // reaching the screen — a truthiness guard used to skip it
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 30,
+                deltaFramesRendered: 0,
+                ewmaFps: 30
+            });
+
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
     });
 

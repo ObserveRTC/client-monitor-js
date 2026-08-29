@@ -19,18 +19,18 @@ const noDetectorsConfig = {
 const silentLogger = { trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 /**
- * vp8 / standard motion: activation 40, saturation 80. A QP of 60 sits exactly
- * halfway, so the unscaled penalty is 0.5 — a value that can be halved and
- * doubled without hitting either end of the ramp, which is what makes the
- * magnification visible in the assertions below.
+ * vp8 / standard motion ships as activation 40, saturation 80. A QP of 60 sits
+ * exactly halfway, so the ramp gives 0.5 and the whole subtraction is half of
+ * whatever weight the presented size selects — which makes the weight visible
+ * in every assertion below.
  */
-const QP_HALFWAY = 60;
+const DECODED = { width: 640, height: 360 };
 
 function createInboundRtp(overrides: Record<string, unknown> = {}) {
 	return {
-		avgQpPerFrame: QP_HALFWAY,
-		frameWidth: 640,
-		frameHeight: 360,
+		avgQpPerFrame: 60,
+		frameWidth: DECODED.width,
+		frameHeight: DECODED.height,
 		framesPerSecond: 30,
 		ewmaFps: 30,
 		lastNFramesPerSec: [],
@@ -43,8 +43,8 @@ function createInboundRtp(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function createTrack() {
-	return {
+function createMonitor(inboundRtp: unknown) {
+	const track = {
 		id: 'track-1',
 		kind: 'video',
 		enabled: true,
@@ -52,10 +52,8 @@ function createTrack() {
 		readyState: 'live',
 		getSettings: () => ({}),
 	};
-}
 
-function createMonitor(inboundRtp: unknown) {
-	return new InboundTrackMonitor(createTrack() as any, inboundRtp as any);
+	return new InboundTrackMonitor(track as any, inboundRtp as any);
 }
 
 function pixelationPenalty(monitor: InboundTrackMonitor): number | undefined {
@@ -66,69 +64,83 @@ function pixelationPenalty(monitor: InboundTrackMonitor): number | undefined {
 	return (monitor.calculatedScore.reasons as any)?.['pixelated-video'];
 }
 
-describe('pixelated-video scaled by display magnification', () => {
-	it('judges the quantizer unscaled when no presented resolution was declared', () => {
+describe('pixelation is charged by how big the picture is shown', () => {
+	it('uses the ordinary weight when no presented resolution was declared', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
+		// halfway up the band × 2.0
+		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
 	});
 
-	it('is unchanged when the picture is presented at the size it was decoded', () => {
+	it('uses the ordinary weight at roughly the decoded size', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		monitor.setContext({ presentedResolution: { width: 640, height: 360 } });
-
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
-	});
-
-	it('doubles the penalty for a picture magnified 2x on screen', () => {
-		const monitor = createMonitor(createInboundRtp());
-
-		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
+		monitor.setContext({ presentedResolution: { ...DECODED } });
 
 		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
 	});
 
-	it('halves the penalty for a picture shrunk into a thumbnail', () => {
+	it('charges a large picture harder than fairness would suggest', () => {
 		const monitor = createMonitor(createInboundRtp());
 
+		// 2x linear — speaker view
+		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
+
+		// halfway up the band × 3.0
+		expect(pixelationPenalty(monitor)).toBeCloseTo(1.5, 5);
+	});
+
+	it('barely charges a thumbnail, where nobody can see the blocks', () => {
+		const monitor = createMonitor(createInboundRtp());
+
+		// 0.5x linear
 		monitor.setContext({ presentedResolution: { width: 320, height: 180 } });
 
+		// halfway up the band × 0.5
 		expect(pixelationPenalty(monitor)).toBeCloseTo(0.25, 5);
 	});
 
-	it('clamps a wild magnification rather than letting the ratio run away', () => {
-		// 180p decoded on a 4K screen is a linear factor of ~10.7
+	it('takes a saturated quantizer on a large picture to the full 3.0', () => {
+		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 90 }));
+
+		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
+
+		// a large video gone to blocks is worse than a frozen one
+		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
+	});
+
+	it('has no upper clamp on magnification — bigger is simply large', () => {
+		// 320x180 decoded on a 4K screen is a linear factor of ~10.7
 		const monitor = createMonitor(createInboundRtp({ frameWidth: 320, frameHeight: 180 }));
 
 		monitor.setContext({ presentedResolution: { width: 3840, height: 2160 } });
 
-		// clamped to PIXELATION_MAGNIFICATION_MAX (2.0), not 10.7
+		expect(pixelationPenalty(monitor)).toBeCloseTo(1.5, 5);
+	});
+
+	it('applies the boundaries inclusively at large and exclusively at small', () => {
+		const large = createMonitor(createInboundRtp());
+		const small = createMonitor(createInboundRtp());
+
+		// exactly 1.5x linear -> large
+		large.setContext({ presentedResolution: { width: 960, height: 540 } });
+		// exactly 0.75x linear -> still ordinary, not small
+		small.setContext({ presentedResolution: { width: 480, height: 270 } });
+
+		expect(pixelationPenalty(large)).toBeCloseTo(1.5, 5);
+		expect(pixelationPenalty(small)).toBeCloseTo(1.0, 5);
+	});
+
+	it('takes the ratio from the areas, so a differently proportioned box is not magnification', () => {
+		const monitor = createMonitor(createInboundRtp());
+
+		// 480x480 has the same area as 640x360 — a letterboxed square box
+		monitor.setContext({ presentedResolution: { width: 480, height: 480 } });
+
 		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
 	});
 
-	it('clamps a wild reduction the same way', () => {
-		// 1080p decoded into a 96px avatar is a linear factor of ~0.07
-		const monitor = createMonitor(createInboundRtp({ frameWidth: 1920, frameHeight: 1080 }));
-
-		monitor.setContext({ presentedResolution: { width: 96, height: 54 } });
-
-		// clamped to PIXELATION_MAGNIFICATION_MIN (0.5), not 0.07
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.25, 5);
-	});
-
-	it('takes the ratio from the areas, so a differently proportioned box does not read as magnification', () => {
-		// same area as 640x360, letterboxed into a squarer box
-		const monitor = createMonitor(createInboundRtp());
-
-		monitor.setContext({ presentedResolution: { width: 480, height: 480 } });
-
-		// sqrt((480*480)/(640*360)) = 1.0 exactly
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
-	});
-
-	it('leaves a clean picture unpenalized however far it is magnified', () => {
-		// QP below the activation point: no blockiness to magnify
+	it('leaves a clean picture unpenalized however large it is shown', () => {
 		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 20 }));
 
 		monitor.setContext({ presentedResolution: { width: 3840, height: 2160 } });
@@ -136,20 +148,20 @@ describe('pixelated-video scaled by display magnification', () => {
 		expect(pixelationPenalty(monitor)).toBeUndefined();
 	});
 
-	it('judges unscaled when the stats report no decoded resolution', () => {
+	it('uses the ordinary weight when the stats report no decoded resolution', () => {
 		const monitor = createMonitor(createInboundRtp({ frameWidth: undefined, frameHeight: undefined }));
 
 		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
+		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
 	});
 
-	it('judges unscaled when the declared presented resolution is degenerate', () => {
+	it('uses the ordinary weight when the declared presented resolution is degenerate', () => {
 		const monitor = createMonitor(createInboundRtp());
 
 		monitor.setContext({ presentedResolution: { width: 0, height: 0 } });
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
+		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
 	});
 });
 
@@ -215,5 +227,16 @@ describe('presentedResolution derived from a video element', () => {
 		monitor.update();
 
 		expect(monitor.presentedResolution).toEqual({ width: 640, height: 360 });
+	});
+
+	it('feeds the measured element straight into the weight', () => {
+		const monitor = createMonitor(createInboundRtp());
+
+		// element twice the decoded size in each direction
+		monitor.setContext({ videoTag: createVideoTag({ clientWidth: 1280, clientHeight: 720 }) });
+		monitor.update();
+
+		expect(monitor.presentedResolution).toEqual({ width: 1280, height: 720 });
+		expect(pixelationPenalty(monitor)).toBeCloseTo(1.5, 5);
 	});
 });

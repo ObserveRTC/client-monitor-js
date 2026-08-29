@@ -213,7 +213,6 @@ export type AudioConcealmentEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 	/** Audible concealment share over the evaluation window, in `0..1`. */
 	concealmentRate: number,
-	concealmentEventRate: number,
 }
 
 export type AudioJitterBufferStressEventPayload = ClientMonitorBaseEvent & {

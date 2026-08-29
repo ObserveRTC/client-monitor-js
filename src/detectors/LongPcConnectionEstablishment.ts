@@ -3,47 +3,30 @@ import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 
 /**
- * Detects when peer connection establishment takes longer than expected.
- * 
- * This detector monitors the duration of peer connection establishment and triggers
- * an alert when the connection remains in 'connecting' state for longer than the
- * configured threshold. It uses a one-time event emission pattern to avoid
- * duplicate alerts for the same connection attempt.
- * 
- * **Configuration Options:**
- * - `disabled`: Whether the detector is disabled (default: false)
- * - `thresholdInMs`: Maximum allowed duration for connection establishment in milliseconds
- * 
- * **Events Emitted:**
- * - `too-long-pc-connection-establishment`: Emitted when connection establishment exceeds threshold
- * 
- * **Usage Example:**
- * ```typescript
- * const detector = new LongPcConnectionEstablishmentDetector(peerConnectionMonitor);
- * 
- * clientMonitor.on('too-long-pc-connection-establishment', (event) => {
- *   console.log(`Connection establishment took too long: ${event.peerConnectionMonitor.peerConnectionId}`);
- * });
- * ```
- * 
- * **Behavior:**
- * - Only monitors connections in 'connecting' state
- * - Resets event flag when connection transitions to 'connected'
- * - Uses one-time emission per connection attempt to prevent spam
- * - Requires `connectingStartedAt` timestamp to calculate duration
+ * Watches how long a peer connection sits in `connecting` and reports when setup outlasts
+ * `thresholdInMs` — the user-visible failure being a call that never starts, as opposed to one that
+ * starts and then degrades. It is scoped to `connectionState` rather than ICE state on purpose,
+ * because that state also covers the DTLS handshake: a connection can stall while every ICE
+ * transport already reports `connected`.
+ *
+ * Setup latency is the whole of its remit; runtime ICE health belongs to `IceConnectivityDetector`,
+ * which separately recommends an ICE restart for a connection that never establishes. Firing is
+ * one-shot per attempt and rearms on *any* exit from `connecting`, not just a successful one — a
+ * connection that failed and is retrying is more interesting than the first attempt, so resetting
+ * only on `connected` would silence every attempt after the first failure.
+ *
+ * Monitor event: `too-long-pc-connection-establishment`. Client event:
+ * `LONG_PC_CONNECTION_ESTABLISHMENT`, when `createEvent`. Config:
+ * `longPcConnectionEstablishmentDetector`.
  */
 export class LongPcConnectionEstablishmentDetector implements Detector{
 	public readonly name = 'long-pc-connection-establishment-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	
 	private get config() {
 		return this.peerConnection.parent.config.longPcConnectionEstablishmentDetector!;
 	}
 
-	/**
-	 * Flag to ensure one-time event emission per connection attempt
-	 */
 	private _evented = false;
 
 	public constructor(
@@ -55,10 +38,7 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 	public update(): void {
 		if (this.disabled) return;
 		if (this.peerConnection.connectionState !== 'connecting') {
-			// Rearm on *any* exit from `connecting`, not just a successful one.
-			// A connection that failed and is retrying is more interesting than
-			// the first attempt, so resetting only on `connected` would silence
-			// every establishment after the first failure.
+			// Rearms on *any* exit from `connecting`: resetting only on `connected` would silence every attempt after the first failure.
 			this._evented = false;
 
 			return;

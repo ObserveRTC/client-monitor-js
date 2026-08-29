@@ -445,11 +445,11 @@ describe('DefaultScoreCalculator', () => {
         });
 
         it('ramps the penalty between the codec activation and saturation QP', () => {
-            const track = qpTrack({ avgQpPerFrame: 60 }); // (60-40)/(80-40) = 0.5
+            const track = qpTrack({ avgQpPerFrame: 60 }); // (60-40)/(80-40) = 0.5, of 2.0
 
             ticks(track, 1);
 
-            expect(qpReason(track)).toBe(0.5);
+            expect(qpReason(track)).toBe(1.0);
         });
 
         it('saturates the penalty for a coarsely quantized picture', () => {
@@ -457,7 +457,8 @@ describe('DefaultScoreCalculator', () => {
 
             ticks(track, 1);
 
-            expect(qpReason(track)).toBe(1.0);
+            // a picture gone to blocks costs the same as a frozen one
+            expect(qpReason(track)).toBe(2.0);
         });
 
         it('uses each codec its own QP scale rather than a shared range', () => {
@@ -469,8 +470,8 @@ describe('DefaultScoreCalculator', () => {
             ticks(h264, 1);
             ticks(vp8, 1);
 
-            expect(qpReason(h264)).toBe(1.0);
-            expect(qpReason(vp8)).toBeLessThan(0.5);
+            expect(qpReason(h264)).toBe(2.0);
+            expect(qpReason(vp8)).toBeLessThan(1.0);
         });
 
         it('makes no judgement for a codec it has no QP scale for', () => {
@@ -557,7 +558,7 @@ describe('DefaultScoreCalculator', () => {
 
                 ticks(track, 1);
 
-                expect(qpReason(track)).toBe(1.0);
+                expect(qpReason(track)).toBe(2.0);
             } finally {
                 VIDEO_QP_THRESHOLDS.vp8 = original;
             }

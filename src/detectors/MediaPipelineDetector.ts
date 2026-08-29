@@ -2,44 +2,37 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
 /**
- * The pipeline stage boundary this detector found broken.
+ * The pipeline stage boundary found broken.
  *
- * - `rtp-sender` (send side, encoder → RTP sender): frames encode but no
- *   packet leaves the RTP sender — a wedged sender/pacer, observed in the
- *   wild after `replaceTrack` races and simulcast reconfigurations.
- * - `transport-demux` (receive side, transport → RTP receiver): the ICE
- *   transport keeps receiving at a rate no RTCP/STUN traffic explains, yet
- *   no inbound RTP stream accounts for any of it — traffic arrives that
- *   never demuxes (SSRC mismatch after renegotiation, a consumer created
- *   against a dead producer).
+ * - `rtp-sender` (send side, encoder to RTP sender): frames encode but no packet leaves — a wedged
+ *   sender or pacer, seen in the wild after `replaceTrack` races and simulcast reconfigurations.
+ * - `transport-demux` (receive side, transport to RTP receiver): the ICE transport keeps receiving
+ *   at a rate no RTCP or STUN traffic explains, yet no inbound RTP accounts for any of it — traffic
+ *   arrives that never demuxes, after an SSRC mismatch on renegotiation or a consumer created
+ *   against a dead producer.
  */
 export type MediaPipelineStage = 'rtp-sender' | 'transport-demux';
 
+/**
+ * `upstreamDelta` is the progress the stage before the boundary made in the interval the issue was
+ * raised on, `downstreamDelta` the progress the stage after it did not make — the flat counter that
+ * is the whole finding. `ssrc` and `trackId` are set for `rtp-sender`, `transportId` and
+ * `transportReceivingBitrate` for `transport-demux`, and `stalledForMs` is how long the boundary had
+ * been broken at raise time.
+ */
 export type MediaPipelineStalledIssuePayload = {
 	peerConnectionId: string;
 	direction: 'send' | 'receive';
-	/** The first broken stage boundary. */
 	stage: MediaPipelineStage;
-	/** Set for the `rtp-sender` stage. */
 	ssrc?: number;
 	trackId?: string;
-	/** Set for the `transport-demux` stage. */
 	transportId?: string;
-	/** Upstream progress observed in the interval the issue was raised on. */
 	upstreamDelta?: number;
-	/** Downstream progress observed in the same interval (the flat counter). */
 	downstreamDelta?: number;
-	/** Transport receive rate at raise time (bps), for the demux stage. */
 	transportReceivingBitrate?: number;
-	/**
-	 * Comma-separated types of the specialist issues active on this peer
-	 * connection when the verdict was made — the cross-reference from the
-	 * stage verdict to the detailed evidence.
-	 */
+	/** Comma-separated types of the specialist issues active at raise time. */
 	suspectedIssueTypes: string;
-	/** How long the boundary had been broken when the issue was raised. */
 	stalledForMs: number;
-	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 };
 
@@ -51,67 +44,41 @@ type BoundaryState = {
 const ISSUE_TYPE = 'media-pipeline-stalled';
 
 /**
- * Media Pipeline Detector
+ * Media moves through a fixed chain — capture, encoder, RTP sender, transport, wire, mirrored on the
+ * receiving side — and every stage carries a monotonic counter that proves it is making progress.
+ * That makes a disruption *locatable* rather than merely detectable: the break is the FIRST stage
+ * boundary at which the upstream counter advances and the downstream one stays flat. A symptom
+ * detector says media stopped; this says where it stopped, which is the difference between "the call
+ * broke" and a stage name to hand a support engineer.
  *
- * Media moves through a fixed chain of components (capture → encoder → RTP
- * sender → transport → wire, mirrored on the receiving side), every stage has
- * a monotonic counter that proves it is making progress, and a disruption is
- * locatable as the first stage boundary at which the upstream counter
- * advances and the downstream one does not.
+ * Most boundaries already have a specialist owner (`OutboundFrameSupplyDetector`,
+ * `BlockedTransportDetector`, `StuckDecoderDetector`, `DecoderPerformanceDetector`,
+ * `PlayoutDiscrepancyDetector`), so this detector raises only for the two nothing else covers.
+ * `rtp-sender`: `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` on the same outbound RTP —
+ * an encoded frame always packetizes, so a sustained violation is a wedged sender, and the innocent
+ * explanations (adaptation, congestion) would have stopped the *encoder* instead. `transport-demux`:
+ * an ICE transport receiving at `minTransportReceiveBitrateBps` or more — the floor that rules out
+ * RTCP and STUN explaining the arriving bytes — while every inbound RTP of that transport is flat.
  *
- * Most boundaries are already owned by specialist detectors
- * (`OutboundFrameSupplyDetector`, `BlockedTransportDetector`,
- * `StuckDecoderDetector`, `DecoderPerformanceDetector`,
- * `PlayoutDiscrepancyDetector`), so this detector raises only for the two
- * boundaries nothing else covers:
+ * What it refuses to judge: a closed peer connection; an outbound RTP whose track is missing, muted
+ * or not live, or whose layer is inactive, since a deliberately silenced sender is not a wedged one;
+ * and a transport with no inbound RTP at all, because without a consumer there is no demux
+ * expectation to violate. Both verdicts must also persist for `thresholdInMs`, and boundaries that
+ * disappear resolve rather than linger. The payload carries `suspectedIssueTypes`, the specialist
+ * issues active on this peer connection at raise time, so one entry both localizes the stage and
+ * links the detailed evidence.
  *
- * 1. **`rtp-sender`** (send): `deltaFramesEncoded > 0` while
- *    `deltaPacketsSent === 0` on the same outbound RTP — an encoded frame
- *    always packetizes, so a sustained violation is a wedged sender/pacer.
- *    Evaluated per SSRC on live, unmuted tracks with the layer active.
- * 2. **`transport-demux`** (receive): the ICE transport receives at
- *    `minTransportReceiveBitrateBps` or more — well above what RTCP + STUN
- *    can explain — while every inbound RTP of that transport is flat.
- *    Requires at least one inbound RTP monitor to exist, since without
- *    consumers there is no demux expectation to violate.
- *
- * Both verdicts must persist for `thresholdInMs` before the
- * `media-pipeline-stalled` issue is raised. The payload names the broken
- * `stage` and carries `suspectedIssueTypes` — the specialist issues active on
- * this peer connection at raise time — so the server receives one entry that
- * both localizes the stage and links the detailed evidence.
- *
- * **Issues created:** `media-pipeline-stalled`.
- * **Events emitted:** `media-pipeline-stalled` (monitor event).
- *
- * @example
- * ```typescript
- * const config = {
- *   mediaPipelineDetector: {
- *     thresholdInMs: 4000,
- *     minTransportReceiveBitrateBps: 20_000,
- *   }
- * };
- *
- * monitor.on('issue', (issue) => {
- *   if (issue.type === 'media-pipeline-stalled') {
- *     console.warn('pipeline broke at', issue.payload.stage, issue.payload);
- *   }
- * });
- * ```
+ * Issue raised: `media-pipeline-stalled`. Monitor event: `media-pipeline-stalled`.
+ * Config: `mediaPipelineDetector`.
  */
 export class MediaPipelineDetector implements Detector {
 	public static readonly ISSUE_TYPE = ISSUE_TYPE;
 
-	/** Unique identifier for this detector type */
 	public readonly name = 'media-pipeline-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 	public includeIssueInSample = true;
 
-	/** Per-SSRC state for the `rtp-sender` boundary. */
 	private readonly _senderStates = new Map<number, BoundaryState>();
-	/** Per-transport state for the `transport-demux` boundary. */
 	private readonly _demuxStates = new Map<string, BoundaryState>();
 
 	public constructor(
@@ -119,7 +86,6 @@ export class MediaPipelineDetector implements Detector {
 	) {
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.mediaPipelineDetector!;
 	}
@@ -132,11 +98,6 @@ export class MediaPipelineDetector implements Detector {
 		this._checkTransportDemuxBoundary();
 	}
 
-	/**
-	 * Send side, encoder → RTP sender: an encoded frame always packetizes, so
-	 * frames encoding while no packet leaves is a wedge — not adaptation, not
-	 * congestion (both of those stop the *encoder*, not the sender).
-	 */
 	private _checkRtpSenderBoundary() {
 		const now = Date.now();
 		const seenSsrcs = new Set<number>();
@@ -147,11 +108,11 @@ export class MediaPipelineDetector implements Detector {
 			const state = this._getState(this._senderStates, outboundRtp.ssrc);
 			const track = outboundRtp.getTrack()?.track;
 
-			// A muted or dead source legitimately silences the whole send
-			// chain; an explicitly deactivated layer sends nothing by design.
 			const guarded = !track || track.muted || track.readyState !== 'live' || outboundRtp.active === false;
 			const upstreamDelta = outboundRtp.deltaFramesEncoded;
 			const downstreamDelta = outboundRtp.deltaPacketsSent;
+			// An encoded frame always packetizes, so a sustained violation is a wedged sender/pacer;
+			// adaptation and congestion would stop the *encoder* instead, which is what `guarded` filters out.
 			const broken = !guarded
 				&& upstreamDelta !== undefined && 0 < upstreamDelta
 				&& downstreamDelta !== undefined && downstreamDelta === 0;
@@ -191,11 +152,6 @@ export class MediaPipelineDetector implements Detector {
 		}
 	}
 
-	/**
-	 * Receive side, transport → RTP receiver: traffic arrives at a rate only
-	 * media explains, yet no inbound RTP accounts for any of it — the pipe is
-	 * alive, the demux is not.
-	 */
 	private _checkTransportDemuxBoundary() {
 		const now = Date.now();
 		const seenTransports = new Set<string>();
@@ -215,8 +171,8 @@ export class MediaPipelineDetector implements Detector {
 				demuxedDelta = (demuxedDelta ?? 0) + inboundRtp.deltaBytesReceived;
 			}
 
-			// Without consumers there is no demux expectation to violate, and
-			// without byte counters there is nothing to judge.
+			// The bitrate floor is what rules out RTCP and STUN traffic explaining the arriving bytes; without at
+			// least one inbound RTP there is no demux expectation to violate at all.
 			const broken = 0 < inboundRtps.length
 				&& demuxedDelta === 0
 				&& receivingBitrate !== undefined
@@ -256,10 +212,6 @@ export class MediaPipelineDetector implements Detector {
 		}
 	}
 
-	/**
-	 * Types of the specialist issues currently active on this peer connection
-	 * or its tracks — the link from the stage verdict to the detailed evidence.
-	 */
 	private _activeIssueTypes(): string {
 		const clientMonitor = this.peerConnection.parent;
 		const types = new Set<string>();
