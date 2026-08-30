@@ -346,7 +346,7 @@ describe('CpuPerformanceDetector', () => {
         });
     });
 
-    describe('frame-arrival burst guard (bursty frames regression, LIV-1595)', () => {
+    describe('frame-arrival burst guard (bursty frames regression)', () => {
         beforeEach(() => {
             monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = {
                 alertOn: 0.7,

@@ -20,7 +20,7 @@ export type CpuPerformanceIssuePayload = {
  * whose fps legitimately swings 15 to 1 when content goes static — received and decoded frames
  * fall together there. Its own failure mode is a bursty *arrival*: a layer switch, a keyframe
  * recovery or a post-stall flush dumps frames into one interval and the decoder trails the spike
- * for a single tick on an idle machine (LIV-1595). So a smoothed per-ssrc arrival rate is kept
+ * for a single tick on an idle machine. So a smoothed per-ssrc arrival rate is kept
  * and ticks exceeding `frameArrivalBurstFactor` times it are skipped — a starved decoder still
  * alerts, its ratio staying low across ticks with ordinary arrival rates.
  *
@@ -113,7 +113,7 @@ export class CpuPerformanceDetector {
 					if (avgReceivedFrames === undefined) continue;
 
 					// An arrival burst (layer switch, keyframe recovery, post-stall flush) outpaces the decoder
-					// for a single tick without the CPU being the problem (LIV-1595, on an otherwise idle M4 Pro).
+					// for a single tick without the CPU being the problem, observed on an otherwise idle machine.
 					if (receivedFrames > avgReceivedFrames * frameArrivalBurstFactor) continue;
 				}
 
