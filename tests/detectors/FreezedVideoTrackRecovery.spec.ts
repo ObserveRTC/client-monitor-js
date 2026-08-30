@@ -14,7 +14,7 @@ function setup(options: { freezes?: boolean, recovery?: boolean } = {}) {
 	const trackMonitor = new MockInboundTrackMonitor('video');
 	const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-	if (options.freezes !== false) clientMonitor.config.videoFreezesDetector = {};
+	if (options.freezes !== false) clientMonitor.config.videoFreezesDetector = { minConsecutiveTicks: 2 };
 	if (options.recovery !== false) clientMonitor.config.videoRecoveryDetector = { ...RECOVERY_CONFIG };
 
 	const detector = new FreezedVideoTrackDetector(trackMonitor as any);
@@ -33,6 +33,7 @@ function setup(options: { freezes?: boolean, recovery?: boolean } = {}) {
 
 	trackMonitor.setInboundRtp(rtp);
 
+
 	return { detector, trackMonitor, clientMonitor, rtp };
 }
 
@@ -45,10 +46,11 @@ describe('FreezedVideoTrackDetector (merged freeze + recovery)', () => {
 			rtp.deltaFramesRendered = 0;
 			detector.update();
 			expect(rtp.isFreezed).toBe(true);
-			expect(clientMonitor.activeIssues.size).toBe(1);
+			// the state is derived immediately, the issue waits for a second look
+			expect(clientMonitor.activeIssues.size).toBe(0);
 
 			// freezeCount does not advance, but nothing rendered either —
-			// the freeze is still ongoing
+			// the freeze is still ongoing, and now confirmed
 			detector.update();
 			expect(rtp.isFreezed).toBe(true);
 			expect(clientMonitor.activeIssues.size).toBe(1);
@@ -58,6 +60,80 @@ describe('FreezedVideoTrackDetector (merged freeze + recovery)', () => {
 			expect(rtp.isFreezed).toBe(false);
 			expect(clientMonitor.activeIssues.size).toBe(0);
 			expect(clientMonitor.resolvedIssues[0]?.payload.durationInMs).toBeDefined();
+		});
+
+		it('says nothing about a single-tick hiccup', () => {
+			const { detector, clientMonitor, rtp } = setup();
+
+			// freezeCount advances once and rendering resumes immediately — the
+			// sub-second gap `freezeCount` increments on routinely
+			rtp.freezeCount = 1;
+			rtp.deltaFramesRendered = 0;
+			detector.update();
+
+			rtp.deltaFramesRendered = 30;
+			detector.update();
+
+			expect(rtp.isFreezed).toBe(false);
+			expect(clientMonitor.activeIssues.size).toBe(0);
+			expect(clientMonitor.raisedIssues).toHaveLength(0);
+		});
+
+		it('reports a freeze that keeps incrementing across ticks', () => {
+			const { detector, clientMonitor, rtp } = setup();
+
+			rtp.freezeCount = 1;
+			rtp.deltaFramesRendered = 5;
+			detector.update();
+			expect(clientMonitor.activeIssues.size).toBe(0);
+
+			// a second freeze in the next interval: two hiccups inside two
+			// collections is the case the tick rule exists to catch
+			rtp.freezeCount = 2;
+			detector.update();
+
+			expect(clientMonitor.activeIssues.size).toBe(1);
+			const raised = clientMonitor.raisedIssues[0];
+
+			expect(raised?.type).toBe('freezed-video-track');
+			expect(raised?.payload.frozenTicks).toBe(2);
+		});
+
+		it('measures the frozen span from the stats clock, not the collecting period', () => {
+			const { detector, clientMonitor, rtp } = setup();
+
+			// a late collection: the stats timestamps are 7s apart, not the
+			// nominal 2s the monitor was configured to poll at
+			rtp.freezeCount = 1;
+			rtp.deltaFramesRendered = 0;
+			rtp.deltaTime = 2000;
+			rtp.deltaTotalFreezesDuration = 1.8;
+			detector.update();
+
+			rtp.deltaTime = 7000;
+			rtp.deltaTotalFreezesDuration = 6.5;
+			detector.update();
+
+			const raised = clientMonitor.raisedIssues[0];
+
+			expect(raised?.payload.observedSpanInMs).toBe(9000);
+			expect(raised?.payload.freezeTimeInMs).toBe(8300);
+		});
+
+		it('reports no freeze time where the browser reports no totalFreezesDuration', () => {
+			const { detector, clientMonitor, rtp } = setup();
+
+			rtp.freezeCount = 1;
+			rtp.deltaFramesRendered = 0;
+			rtp.deltaTime = 2000;
+			detector.update();
+			rtp.freezeCount = 2;
+			detector.update();
+
+			const raised = clientMonitor.raisedIssues[0];
+
+			expect(raised?.payload.observedSpanInMs).toBe(4000);
+			expect(raised?.payload.freezeTimeInMs).toBeUndefined();
 		});
 
 		it('derives freeze state even when the freeze issue is disabled', () => {

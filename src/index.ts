@@ -6,15 +6,19 @@ export { IceCandidatePairMonitor } from "./monitors/IceCandidatePairMonitor";
 export { IceTransportMonitor } from "./monitors/IceTransportMonitor";
 export { InboundRtpMonitor } from "./monitors/InboundRtpMonitor";
 export { InboundTrackMonitor } from "./monitors/InboundTrackMonitor";
+export type { InboundTrackContext } from "./monitors/InboundTrackMonitor";
+export { VIDEO_QP_THRESHOLDS, VIDEO_QP_MAX } from "./scores/CalculatedScore";
+export type { VideoMotionType, VideoQpThresholds } from "./scores/CalculatedScore";
 export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
 export { OutboundTrackMonitor } from "./monitors/OutboundTrackMonitor";
+export type { OutboundTrackContext } from "./monitors/OutboundTrackMonitor";
 export { PeerConnectionMonitor } from "./monitors/PeerConnectionMonitor";
 export { PeerConnectionTransportMonitor } from "./monitors/PeerConnectionTransportMonitor";
 export { RemoteInboundRtpMonitor } from "./monitors/RemoteInboundRtpMonitor";
 export { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
-export type { TrackMonitor }  from "./monitors/TrackMonitor";
+export type { TrackMonitor, TrackContentType }  from "./monitors/TrackMonitor";
 export {
     ClientMonitor,
 } from "./ClientMonitor";
@@ -61,6 +65,9 @@ export type {
     VideoResolutionChangedEventPayload,
     StatsCollectionGapEventPayload,
     StuckDecoderEventPayload,
+    BlockedTransportEventPayload,
+    NoAvailableIceCandidateEventPayload,
+    MediaPipelineStalledEventPayload,
     ScoreEventPayload,
     ClientMonitorEvents,
 
@@ -100,6 +107,7 @@ export type {
     ClientMonitorIssue,
     ClientMonitorResolvedIssue,
     ClientMonitorIssueType,
+    FrameSupplyIssuePayload,
 } from './ClientMonitorIssues';
 export type { AudioDesyncIssuePayload } from './detectors/AudioDesyncDetector';
 export type { CongestionIssuePayload } from './detectors/CongestionDetector';
@@ -118,11 +126,12 @@ export type {
     KeyframeStormIssuePayload,
     VideoRecoveryFailedIssuePayload,
 } from './detectors/FreezedVideoTrackDetector';
-export { SourceEncoderBottleneckDetector } from './detectors/SourceEncoderBottleneckDetector';
-export type {
-    CaptureBottleneckIssuePayload,
-    EncoderBottleneckIssuePayload,
-} from './detectors/SourceEncoderBottleneckDetector';
+export { OutboundFrameSupplyDetector } from './detectors/OutboundFrameSupplyDetector';
+export type { CaptureBottleneckIssuePayload } from './detectors/OutboundFrameSupplyDetector';
+export { EncoderPerformanceDetector } from './detectors/EncoderPerformanceDetector';
+export type { EncoderBottleneckIssuePayload } from './detectors/EncoderPerformanceDetector';
+export { InboundFrameSupplyDetector } from './detectors/InboundFrameSupplyDetector';
+export type { DecoderBottleneckIssuePayload } from './detectors/InboundFrameSupplyDetector';
 export { SimulcastLayerDetector } from './detectors/SimulcastLayerDetector';
 export type { SimulcastLayerState } from './detectors/SimulcastLayerDetector';
 export { CaptureFailureDetector } from './detectors/CaptureFailureDetector';
@@ -137,6 +146,18 @@ export { StatsGapDetector } from './detectors/StatsGapDetector';
 export { StuckDecoderDetector } from './detectors/StuckDecoderDetector';
 export type { StuckDecoderIssuePayload, StuckDecoderVariant } from './detectors/StuckDecoderDetector';
 export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
+export { BlockedTransportDetector } from './detectors/BlockedTransportDetector';
+export type {
+    BlockedTransportEvidence,
+    BlockedTransportIssuePayload,
+} from './detectors/BlockedTransportDetector';
+export { NoAvailableIceCandidateDetector } from './detectors/NoAvailableIceCandidateDetector';
+export type { NoAvailableIceCandidateIssuePayload } from './detectors/NoAvailableIceCandidateDetector';
+export { MediaPipelineDetector } from './detectors/MediaPipelineDetector';
+export type {
+    MediaPipelineStage,
+    MediaPipelineStalledIssuePayload,
+} from './detectors/MediaPipelineDetector';
 export type {
     IceRestartOutcome,
     IceRestartClientEventPayload,
@@ -158,6 +179,7 @@ export type { IceRelayProtocol, IceAddressFamily } from './monitors/IceCandidate
 export type {
     ScoreCalculator
 } from './scores/ScoreCalculator';
+export { sampledScoreReasons } from './scores/utils';
 
 export type {
     DefaultScoreCalculator,

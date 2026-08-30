@@ -4,36 +4,45 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 import { Detector } from "./Detector";
 
+/**
+ * `disconnectedForMs` is how long the transport had already been `disconnected` when the issue was
+ * raised — the threshold, not the episode; `durationInMs` is the episode, filled in on resolve.
+ * `iceGeneration` counts the ICE restarts observed on this transport so far, so an issue can be tied
+ * to the generation it belongs to.
+ */
 export type IceDisconnectedIssuePayload = {
 	peerConnectionId: string;
 	transportId: string;
 	iceState?: string;
 	dtlsState?: string;
 	selectedCandidatePairId?: string;
-	/** How long the transport had been disconnected when the issue was raised. */
 	disconnectedForMs: number;
 	iceGeneration: number;
 	durationInMs?: number;
 };
 
+/** `disconnectedForMs` is set only when the transport had been disconnected before it failed. */
 export type IceConnectionFailedIssuePayload = {
 	peerConnectionId: string;
 	transportId: string;
 	dtlsState?: string;
 	selectedCandidatePairId?: string;
-	/** Set when the transport had been disconnected before it failed. */
 	disconnectedForMs?: number;
 	iceGeneration: number;
 	durationInMs?: number;
 };
 
+/**
+ * `direction` is `'inbound'` only, deliberately — see the detector's stall check for why the
+ * outbound-silent case is not reportable. `outboundBytesDelta` is the traffic we were still sending
+ * while `inboundBytesDelta` stayed at zero, which is what makes the expectation defensible.
+ */
 export type IceTransportStalledIssuePayload = {
 	peerConnectionId: string;
 	transportId: string;
 	iceState?: string;
 	candidatePairState?: string;
 	selectedCandidatePairId?: string;
-	/** Only `'inbound'` today — see the detector docs for why. */
 	direction: 'inbound';
 	stalledForMs: number;
 	outboundBytesDelta?: number;
@@ -44,22 +53,23 @@ export type IceTransportStalledIssuePayload = {
 	durationInMs?: number;
 };
 
+/**
+ * `pathKey` identifies the path whose selection keeps moving, `switches` is how many switches were
+ * counted inside `windowInMs`, and `kind` is how the path was classified at raise time.
+ */
 export type UnstableIcePathIssuePayload = {
 	peerConnectionId: string;
-	/** The ICE transport (or candidate pair) whose path keeps changing. */
 	pathKey: string;
 	transportId?: string;
-	/** Number of path switches counted inside the observation window. */
 	switches: number;
 	windowInMs: number;
-	/** The path kind at the time the issue was raised. */
 	kind: IcePathKind;
 	durationInMs?: number;
 };
 
 /**
- * Why an ICE restart is warranted. Every reason describes a condition the
- * browser will not recover from on its own within the configured window.
+ * Why an ICE restart is warranted. Every reason describes a condition the browser will not recover
+ * from on its own within the configured window.
  */
 export type IceRestartRecommendationReason =
 	/** ICE gave up on this generation; only a restart can revive it. */
@@ -69,24 +79,26 @@ export type IceRestartRecommendationReason =
 	/** ICE still reports connected, but the selected path stopped delivering. */
 	| 'transport-stalled'
 	/**
-	 * The peer connection never finished establishing. Tracked at peer-connection
-	 * level, because `connectionState` covers the DTLS handshake too — a
-	 * connection can sit in `connecting` with every ICE transport reporting
-	 * `connected` — and because an attempt that never gets anywhere may have no
-	 * transport in a reportable state at all.
+	 * The peer connection never finished establishing. Tracked at peer-connection level, because
+	 * `connectionState` covers the DTLS handshake too — a connection can sit in `connecting` with
+	 * every ICE transport reporting `connected` — and because an attempt that never gets anywhere may
+	 * have no transport in a reportable state at all.
 	 */
 	| 'never-established';
 
+/**
+ * `transportId` is absent for a `never-established` recommendation, which is per peer connection
+ * rather than per transport. `conditionDurationInMs` is how long the triggering condition had
+ * persisted when the recommendation went out, `iceGeneration` how many restarts have already been
+ * observed, and `recommendationCount` how many times a restart has been recommended for this
+ * transport — a rising count with a flat generation means the application is not acting on them.
+ */
 export type IceRestartRecommendedEventPayload = {
 	peerConnectionId: string;
-	/** Absent for a `never-established` recommendation, which is not per transport. */
 	transportId?: string;
 	reason: IceRestartRecommendationReason;
-	/** How long the triggering condition had persisted when we recommended. */
 	conditionDurationInMs: number;
-	/** ICE generations observed so far — how many restarts already happened. */
 	iceGeneration: number;
-	/** How many times a restart has been recommended for this transport. */
 	recommendationCount: number;
 	iceState?: string;
 	dtlsState?: string;
@@ -95,13 +107,17 @@ export type IceRestartRecommendedEventPayload = {
 
 export type IceRestartOutcome = 'detected' | 'recovered' | 'failed';
 
+/**
+ * `outcome` is the restart's fate: `detected` when a new generation was observed, then `recovered`
+ * or `failed` once that generation resolved. `evidence` names how the generation was inferred, which
+ * matters because the inference is stats-based rather than reported by the browser.
+ */
 export type IceRestartClientEventPayload = {
 	peerConnectionId: string;
 	transportId: string;
 	iceGeneration: number;
 	outcome: IceRestartOutcome;
 	iceState?: string;
-	/** How the new ICE generation was inferred. */
 	evidence: 'ice-username-fragment-changed';
 	timestamp: number;
 };
@@ -116,7 +132,6 @@ type TransportState = {
 
 	failedRaisedAt?: number;
 
-	/** True once inbound traffic has been observed on this transport. */
 	sawInboundTraffic: boolean;
 
 	restartRecommendedAt?: number;
@@ -131,79 +146,43 @@ const STALLED_ISSUE_TYPE = 'ice-transport-stalled';
 const UNSTABLE_PATH_ISSUE_TYPE = 'unstable-ice-path';
 
 /**
- * ICE Connectivity Detector
+ * Runtime ICE and transport health for a peer connection: the difference between a call that drops,
+ * one that goes silent while every state still reads healthy, and one that keeps hopping between
+ * paths. Setup latency is explicitly out of scope — `LongPcConnectionEstablishmentDetector` owns
+ * that. All state is kept per ICE transport, because a peer connection without BUNDLE has several
+ * and they fail independently.
  *
- * Runtime ICE/transport health for a peer connection. Setup latency is **not**
- * in scope — `LongPcConnectionEstablishmentDetector` owns that.
+ * Five distinct findings live here, and they are one detector because they share the transport state
+ * machine and the ICE generation counter that dates every one of them. *Persistent disconnection*:
+ * `disconnected` starts a timer and only raises `ice-disconnected` once it has held for
+ * `disconnectedThresholdInMs`, so the transient blips that ICE self-heals from never produce an
+ * issue. *Failure*: `failed` raises `ice-connection-failed` immediately, since unlike `disconnected`
+ * it is terminal for that generation. *Inbound stall*: the interesting one, because every state
+ * still reads connected — see `_checkInboundStall` for why our own outbound traffic is what makes
+ * the expectation defensible, and why "no traffic in either direction" is deliberately not
+ * reportable. *Restart detection and recommendation*: a changed ICE local username fragment means a
+ * new generation, reported as an event rather than an issue because confidence is limited; and when
+ * a condition outlasts `iceRestartRecommendationThresholdInMs` the detector *recommends* a restart
+ * and never performs one. *Unstable path*: too many path switches inside a window.
  *
- * All state is kept per ICE transport, because a peer connection without
- * BUNDLE has several, and they fail independently.
+ * Order within a tick is load-bearing and the code says so where it matters: this tick's ICE state
+ * describes the generation the tick started in, restart detection has to run before the
+ * recommendation, and the recommendation must know a restart is already in flight.
  *
- * **What it detects:**
+ * What it will not judge: a closed peer connection; a transport that has gone away, whose issues are
+ * resolved rather than left standing; a stall on a path that never delivered inbound traffic or is
+ * not currently sending; and a `connected` to `checking` transition on its own, which is not treated
+ * as a restart. Known limits: `iceLocalUsernameFragment` is not exposed by every browser — on
+ * Firefox the transport report is reconstructed by `FirefoxStatsAdapter` and carries none, so
+ * restart inference falls back to the selected local candidate's `usernameFragment` and is silently
+ * unavailable when neither is present. High-confidence restart detection needs the application to
+ * instrument `restartIce()`; stats alone cannot separate an application-triggered restart from a
+ * browser-initiated one.
  *
- * 1. *Persistent disconnection.* A `disconnected` ICE transport starts a timer
- *    and only raises `ice-disconnected` once the state has persisted for
- *    `disconnectedThresholdInMs`. Transient blips — which are normal and
- *    self-healing — never produce an issue. Recovery resolves the issue with
- *    the episode duration, following the same lifecycle as the dry-track
- *    detectors.
- *
- * 2. *ICE failure.* `failed` raises `ice-connection-failed` immediately, since
- *    unlike `disconnected` it is terminal for that generation. If a later ICE
- *    restart brings the transport back, the issue is resolved.
- *
- * 3. *Inbound transport stall.* Deliberately narrow: only raised when this
- *    endpoint is still **sending** on a succeeded pair of a connected
- *    transport while receiving nothing, and only after inbound traffic had
- *    previously been observed. Our own outbound traffic is what makes the
- *    expectation defensible — a live ICE path returns at least STUN consent
- *    traffic, so a sending-but-not-receiving path is anomalous regardless of
- *    what the application intends to send. "No traffic in either direction" is
- *    *not* reported: at peer-connection level it cannot be distinguished from a
- *    legitimately idle or paused connection.
- *
- * 4. *ICE restart (inferred).* A change of the ICE local username fragment
- *    means a new ICE generation. This is reported as a client event with an
- *    incrementing generation counter, never as an issue, because confidence is
- *    limited (see below). A `connected → checking` transition alone is *not*
- *    treated as a restart.
- *
- * **Relationship to other detectors.** `IceTupleChangeDetector` remains the
- * low-level primitive reporting that the selected tuple set changed, and
- * `SelectedIcePath` classifies what kind of path change it was and emits
- * `ice-path-changed`. This detector does not re-report those changes; it only
- * owns the *issue* raised when a path keeps switching.
- *
- * **Known limitations:**
- * - `iceLocalUsernameFragment` is not exposed by every browser. On Firefox the
- *   transport report is reconstructed by `FirefoxStatsAdapter` and
- *   carries no username fragment, so restart inference falls back to the
- *   selected local candidate's `usernameFragment` and is silently unavailable
- *   when neither is present.
- * - High-confidence restart detection needs the application to instrument
- *   `restartIce()`; inference from stats alone cannot distinguish an
- *   application-triggered restart from a browser-initiated one.
- *
- * **Issues created:** `ice-disconnected`, `ice-connection-failed`,
- * `ice-transport-stalled`.
- *
- * **Events emitted:** `ice-restart` (monitor event) and `ICE_RESTART` (client
- * event, when `createEvent`).
- *
- * @example
- * ```typescript
- * const config = {
- *   iceConnectivityDetector: {
- *     disconnectedThresholdInMs: 5000,
- *     transportStallThresholdInMs: 5000,
- *     createEvent: true,
- *   }
- * };
- *
- * monitor.on('issue', (issue) => {
- *   if (issue.type === 'ice-disconnected') console.warn('ICE down', issue.payload);
- * });
- * ```
+ * Issues raised: `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`,
+ * `unstable-ice-path`. Monitor events: `ice-restart`, `ice-restart-recommended`. Client events:
+ * `ICE_RESTART` and `ICE_RESTART_RECOMMENDED`, when `createEvent`. Config:
+ * `iceConnectivityDetector`.
  */
 export class IceConnectivityDetector implements Detector {
 	public static readonly DISCONNECTED_ISSUE_TYPE = DISCONNECTED_ISSUE_TYPE;
@@ -211,16 +190,13 @@ export class IceConnectivityDetector implements Detector {
 	public static readonly STALLED_ISSUE_TYPE = STALLED_ISSUE_TYPE;
 	public static readonly UNSTABLE_PATH_ISSUE_TYPE = UNSTABLE_PATH_ISSUE_TYPE;
 
-	/** Unique identifier for this detector type */
 	public readonly name = 'ice-connectivity-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly _states = new Map<string, TransportState>();
-	/** Path keys with an active `unstable-ice-path` issue, and when it was raised. */
 	private readonly _unstablePaths = new Map<string, number>();
 
-	/** Peer-connection-level recommendation state for the never-established case. */
 	private _establishmentRecommendedAt?: number;
 	private _establishmentRecommendations = 0;
 
@@ -229,7 +205,6 @@ export class IceConnectivityDetector implements Detector {
 	) {
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.iceConnectivityDetector!;
 	}
@@ -246,16 +221,11 @@ export class IceConnectivityDetector implements Detector {
 
 			const state = this._getState(transport);
 
-			// Order matters: the ICE state of *this* tick still describes the
-			// generation we were in when the tick started, so it is evaluated
-			// first. Restart detection runs last, so a restart is never reported
-			// as detected and resolved within the same tick — its outcome is
-			// decided by the state observed on a later tick.
+			// Order is load-bearing: this tick's ICE state still describes the generation the tick started in, so it
+			// goes first; restart detection then runs before the recommendation, which must know about a restart already in flight.
 			this._checkIceState(transport, state);
 			this._checkInboundStall(transport, state);
 			this._checkIceRestart(transport, state);
-			// Last: so a restart the application already performed is known
-			// before we decide whether to ask for one.
 			recommendedThisTick = this._checkRestartRecommendation(transport, state) || recommendedThisTick;
 		}
 
@@ -265,17 +235,16 @@ export class IceConnectivityDetector implements Detector {
 		for (const id of [ ...this._states.keys() ]) {
 			if (seenIds.has(id)) continue;
 
-			// The transport is gone (renegotiated away or peer connection
-			// closing). Clear anything it still owns so no issue outlives it.
 			this._resolveAll(id, 'ice transport is gone');
 			this._states.delete(id);
 		}
 	}
 
 	/**
-	 * A selected path that keeps changing is a connectivity problem even when
-	 * every individual path works. The switches themselves are counted by
-	 * `SelectedIcePath`; this only applies the window and owns the issue.
+	 * Raises `unstable-ice-path` when a selected path switched at least `pathSwitchThreshold` times
+	 * inside `pathSwitchWindowInMs` — a path that keeps moving is a different failure from one that is
+	 * down, and the switching itself is what the user hears. Resolved when the rate falls back below
+	 * the threshold, or when the path disappears.
 	 */
 	private _checkPathStability() {
 		const { pathSwitchWindowInMs, pathSwitchThreshold } = this.config;
@@ -303,6 +272,7 @@ export class IceConnectivityDetector implements Detector {
 			this.peerConnection.parent.raiseIssue<UnstableIcePathIssuePayload>(
 				this._issueKey(UNSTABLE_PATH_ISSUE_TYPE, path.key),
 				{
+				includeInSample: this.includeIssueInSample,
 					type: UNSTABLE_PATH_ISSUE_TYPE,
 					payload: {
 						peerConnectionId: this.peerConnection.peerConnectionId,
@@ -342,9 +312,10 @@ export class IceConnectivityDetector implements Detector {
 	}
 
 	/**
-	 * A new ICE local username fragment means the browser is running a new ICE
-	 * generation. Falls back to the selected local candidate's fragment for
-	 * browsers that do not expose it on the transport report.
+	 * Infers an ICE restart from a changed local username fragment, which means a new ICE generation.
+	 * Reported as the `ice-restart` event with outcome `detected`, never as an issue, because the
+	 * inference is stats-based. The new generation invalidates everything observed under the old one,
+	 * so the disconnect, failure and stall issues are resolved and their timers cleared.
 	 */
 	private _checkIceRestart(transport: IceTransportMonitor, state: TransportState) {
 		const usernameFragment = this._usernameFragmentOf(transport);
@@ -360,11 +331,6 @@ export class IceConnectivityDetector implements Detector {
 		state.iceGeneration += 1;
 		state.restartPending = true;
 
-		// A restart starts a fresh ICE generation, so nothing observed about the
-		// previous one still applies. Close its issues and clear the
-		// bookkeeping, otherwise the new generation is judged against stale
-		// state — a re-failure would look like the old, already-reported one and
-		// would never resolve `restartPending`, silencing every later finding.
 		if (state.disconnectRaisedAt !== undefined) {
 			this._resolveIssue(DISCONNECTED_ISSUE_TYPE, transport.id, state.disconnectRaisedAt, 'ice restarted');
 		}
@@ -380,7 +346,6 @@ export class IceConnectivityDetector implements Detector {
 		state.failedRaisedAt = undefined;
 		state.stallRaisedAt = undefined;
 		state.inboundStalledSince = undefined;
-		// The new generation has not proven inbound traffic yet.
 		state.sawInboundTraffic = false;
 
 		this._notifyRestart(transport, state, 'detected');
@@ -391,6 +356,12 @@ export class IceConnectivityDetector implements Detector {
 			?? transport.getSelectedCandidatePair()?.getLocalCandidate()?.usernameFragment;
 	}
 
+	/**
+	 * Owns the two state-driven issues. `failed` raises `ice-connection-failed` at once, since it is
+	 * terminal for the generation, and supersedes any stall issue. `disconnected` raises
+	 * `ice-disconnected` only after it has persisted for `disconnectedThresholdInMs`, so self-healing
+	 * blips stay quiet. `connected` / `completed` resolves both and settles any restart still pending.
+	 */
 	private _checkIceState(transport: IceTransportMonitor, state: TransportState) {
 		const iceState = transport.iceState;
 
@@ -410,6 +381,7 @@ export class IceConnectivityDetector implements Detector {
 				this.peerConnection.parent.raiseIssue<IceConnectionFailedIssuePayload>(
 					this._issueKey(FAILED_ISSUE_TYPE, transport.id),
 					{
+				includeInSample: this.includeIssueInSample,
 						type: FAILED_ISSUE_TYPE,
 						payload: {
 							peerConnectionId: this.peerConnection.peerConnectionId,
@@ -421,7 +393,6 @@ export class IceConnectivityDetector implements Detector {
 					}
 				);
 
-				// A failed transport carries no useful traffic expectation.
 				this._resolveIssue(STALLED_ISSUE_TYPE, transport.id, state.stallRaisedAt, 'ice connection failed');
 				state.stallRaisedAt = undefined;
 				state.inboundStalledSince = undefined;
@@ -442,6 +413,7 @@ export class IceConnectivityDetector implements Detector {
 				this.peerConnection.parent.raiseIssue<IceDisconnectedIssuePayload>(
 					this._issueKey(DISCONNECTED_ISSUE_TYPE, transport.id),
 					{
+				includeInSample: this.includeIssueInSample,
 						type: DISCONNECTED_ISSUE_TYPE,
 						payload: {
 							peerConnectionId: this.peerConnection.peerConnectionId,
@@ -477,17 +449,18 @@ export class IceConnectivityDetector implements Detector {
 				return;
 			}
 			default:
-				// 'new' / 'checking' / 'closed' / undefined: establishment and
-				// teardown are not this detector's concern. A transition back to
-				// `checking` is intentionally NOT treated as a restart on its own.
+				// 'new' / 'checking' / 'closed': a return to `checking` is deliberately not treated as a restart on its own.
 				state.disconnectedSince = undefined;
 				return;
 		}
 	}
 
 	/**
-	 * See the class docs: this only fires for the sending-but-not-receiving
-	 * case, on a transport that has previously received traffic.
+	 * Raises `ice-transport-stalled` when a connected transport on a succeeded pair is still sending
+	 * but has received nothing for `transportStallThresholdInMs`, and only once inbound traffic had
+	 * previously been seen. Deliberately narrow: a live ICE path returns at least STUN consent, so
+	 * sending-without-receiving is anomalous whatever the application intends to send, whereas silence
+	 * in both directions cannot be told from a legitimately idle connection.
 	 */
 	private _checkInboundStall(transport: IceTransportMonitor, state: TransportState) {
 		const iceState = transport.iceState;
@@ -514,8 +487,8 @@ export class IceConnectivityDetector implements Detector {
 			return;
 		}
 
-		// Without prior inbound traffic there is no evidence traffic is expected,
-		// and without outbound traffic we cannot tell a stall from an idle path.
+		// Our own outbound traffic is what makes the expectation defensible (a live path returns at least STUN
+		// consent); without it, or without prior inbound, a stall cannot be told from a legitimately idle path.
 		if (!state.sawInboundTraffic || outboundBytesDelta <= 0) {
 			state.inboundStalledSince = undefined;
 			return;
@@ -535,6 +508,7 @@ export class IceConnectivityDetector implements Detector {
 		this.peerConnection.parent.raiseIssue<IceTransportStalledIssuePayload>(
 			this._issueKey(STALLED_ISSUE_TYPE, transport.id),
 			{
+				includeInSample: this.includeIssueInSample,
 				type: STALLED_ISSUE_TYPE,
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,
@@ -555,21 +529,17 @@ export class IceConnectivityDetector implements Detector {
 	}
 
 	/**
-	 * Decide whether an ICE restart is warranted and say so — without doing it.
+	 * Emits `ice-restart-recommended` for a transport stuck in `failed`, or `disconnected` or stalled
+	 * for longer than `iceRestartRecommendationThresholdInMs`, rate-limited by
+	 * `iceRestartRecommendationCooldownInMs` and suppressed while a restart is already pending.
 	 *
-	 * Performing the restart is the application's call: only it knows whether a
-	 * renegotiation is safe right now, whether signalling is up, and whether it
-	 * would rather tear the call down. The library's job is to name the moment
-	 * with enough evidence to act on, then get out of the way.
-	 *
-	 * Listen for `'ice-restart-recommended'` and call `pc.restartIce()` (or your
-	 * SFU's equivalent) if your application is in a position to.
+	 * Recommends, never performs: only the application knows whether renegotiation is safe right now.
+	 * Listen for `'ice-restart-recommended'` and call `pc.restartIce()` (or the SFU equivalent).
 	 */
 	private _checkRestartRecommendation(transport: IceTransportMonitor, state: TransportState): boolean {
 		const now = Date.now();
 		const { iceRestartRecommendationThresholdInMs, iceRestartRecommendationCooldownInMs } = this.config;
 
-		// A restart we already spotted is in flight — let it play out.
 		if (state.restartPending) return false;
 
 		let reason: IceRestartRecommendationReason | undefined;
@@ -587,12 +557,10 @@ export class IceConnectivityDetector implements Detector {
 		}
 
 		if (reason === undefined) {
-			// Healthy again: the next incident may recommend immediately.
 			state.restartRecommendedAt = undefined;
 			return false;
 		}
 
-		// Don't nag: one recommendation per cooldown while the condition lasts.
 		if (state.restartRecommendedAt !== undefined && now - state.restartRecommendedAt < iceRestartRecommendationCooldownInMs) {
 			return false;
 		}
@@ -616,17 +584,17 @@ export class IceConnectivityDetector implements Detector {
 	}
 
 	/**
-	 * The peer connection is still trying to establish and has been for too
-	 * long. `LongPcConnectionEstablishmentDetector` reports that setup is slow;
-	 * this decides that it is not going to happen on its own and a restart (or a
-	 * rejoin) is warranted — the escalation the two thresholds describe together.
+	 * The peer-connection-level `never-established` recommendation, for a connection that has sat in
+	 * `connecting` past the same threshold. Kept separate from the per-transport path because
+	 * `connectionState` also covers DTLS and because a failing attempt may have no transport in a
+	 * reportable state; it stands down if any transport already recommended this tick or has a restart
+	 * pending.
 	 */
 	private _checkEstablishmentRecommendation(alreadyRecommended: boolean) {
 		const { connectionState, connectingStartedAt } = this.peerConnection;
 		const now = Date.now();
 
 		if (connectionState !== 'connecting' || connectingStartedAt === undefined) {
-			// Either established or given up on: rearm for the next attempt.
 			this._establishmentRecommendedAt = undefined;
 			return;
 		}
@@ -634,8 +602,6 @@ export class IceConnectivityDetector implements Detector {
 		const conditionDurationInMs = now - connectingStartedAt;
 
 		if (conditionDurationInMs < this.config.iceRestartRecommendationThresholdInMs) return;
-		// A transport already asked this tick, and a restart the application
-		// started is still in flight on any transport — don't pile on.
 		if (alreadyRecommended) return;
 		for (const state of this._states.values()) {
 			if (state.restartPending) return;
@@ -729,7 +695,7 @@ export class IceConnectivityDetector implements Detector {
 		clientMonitor.resolveIssue(key, {
 			comment,
 			payload: {
-				...(issue.payload as Record<string, unknown>),
+				...issue.payload,
 				durationInMs: raisedAt !== undefined ? Date.now() - raisedAt : undefined,
 			},
 			resolvedAt: Date.now(),

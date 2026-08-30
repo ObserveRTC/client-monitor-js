@@ -12,101 +12,116 @@ export type CalculatedScore = {
 // every call collects the scores and calculates its own score based on the client scores, and stores it in the score property similar to track, but
 // but calls only recalculate it after a configured amount of time passed from the last recalculation, and it does not trigger automatically
 
-/*
-Recommended bpp Ranges for Good Quality
+/**
+ * Quantizer thresholds per codec, in that codec's own QP index units.
+ *
+ * QP is the encoder saying how coarsely it had to quantize: low QP means it
+ * reproduced the picture faithfully, high QP means it threw detail away and the
+ * result is blocky or smeared. It is the one direct measure of encoded picture
+ * quality, which is why the score uses it in preference to inferring quality
+ * from bitrate - the same bitrate is generous for a static talking head and
+ * starvation for a fast pan, and only QP tells the two apart.
+ *
+ * The scales are NOT comparable between codecs and must not be normalized into
+ * a shared 0..1 range: H.264 runs 0-51 while VP8 runs 0-127 and VP9 0-255, and
+ * equal fractions of those ranges are not equal quality. Each codec therefore
+ * carries its own pair.
+ *
+ * These defaults are literature starting points, not measurements of any
+ * particular deployment - calibrate them against your own corpus before
+ * trusting the absolute values. Mutable on purpose.
+ */
+/**
+ * How much motion the content carries, which changes how visible a given
+ * quantizer is. Nothing in the stats reveals it, so the application declares it
+ * via `InboundTrackMonitor.setContext()` or `ClientMonitor.setInboundTrackContext()`;
+ * undeclared, screen share is treated as `lowmotion` and everything else as
+ * `standard`.
+ */
+export type VideoMotionType = 'lowmotion' | 'standard' | 'highmotion';
 
-| Content Type       | H.264 (AVC) bpp Range | H.265 (HEVC) bpp Range | VP8 bpp Range | VP9 bpp Range |
-|--------------------|-----------------------|-----------------------|---------------|---------------|
-| Low Motion         | 0.1 - 0.2             | 0.05 - 0.15           | 0.1 - 0.2     | 0.05 - 0.15   |
-| Standard Motion    | 0.15 - 0.25           | 0.1 - 0.2             | 0.15 - 0.25   | 0.1 - 0.2     |
-| High Motion        | 0.25 - 0.4            | 0.15 - 0.3            | 0.25 - 0.4    | 0.15 - 0.3    |
+export type VideoQpThresholds = {
+	/** Below this quantizer nothing is penalized. */
+	activation: number;
+	/** At or above this quantizer the penalty is full. */
+	saturation: number;
+};
 
-
-// might be put into a detector
-*/
-export const BPP_RANGES = {
-	'lowmotion': {
-		'h264': { low: 0.1, high: 0.2 },
-		'h265': { low: 0.05, high: 0.15 },
-		'vp8': { low: 0.1, high: 0.2 },
-		'vp9': { low: 0.05, high: 0.15 },
+/**
+ * Quantizer bands per codec and motion class, in each codec's own QP units.
+ *
+ * QP is the encoder saying how coarsely it had to quantize: low QP means it
+ * reproduced the picture faithfully, high QP means it threw detail away and the
+ * result is blocky or smeared. It is the one direct measure of encoded picture
+ * quality, which is why the score uses it in preference to inferring quality
+ * from bitrate - the same bitrate is generous for a static talking head and
+ * starvation for a fast pan, and only QP tells the two apart.
+ *
+ * Indexed by codec first because the scales are NOT comparable between codecs
+ * and must never be normalized into a shared 0..1 range: H.264 runs 0-51 while
+ * VP8 runs 0-127 and VP9 0-255, and equal fractions of those ranges are not
+ * equal quality.
+ *
+ * Then by motion class, because movement masks compression artifacts while a
+ * slide shows every blocked edge. Note this runs the *opposite* way to bitrate:
+ * high-motion content needs more bits to reach a given QP, yet tolerates a
+ * higher QP once there.
+ *
+ * Literature starting points, not measurements of any deployment. Mutable on
+ * purpose.
+ */
+export const VIDEO_QP_THRESHOLDS: Record<string, Record<VideoMotionType, VideoQpThresholds> | undefined> = {
+	/** libvpx quantizer index, 0-127. */
+	vp8: {
+		lowmotion: { activation: 32, saturation: 64 },
+		standard: { activation: 40, saturation: 80 },
+		highmotion: { activation: 50, saturation: 100 },
 	},
-	'standard': {
-		'h264': { low: 0.15, high: 0.25 },
-		'h265': { low: 0.1, high: 0.2 },
-		'vp8': { low: 0.15, high: 0.25 },
-		'vp9': { low: 0.1, high: 0.2 },
+	/** libvpx quantizer index, 0-255. */
+	vp9: {
+		lowmotion: { activation: 64, saturation: 128 },
+		standard: { activation: 80, saturation: 160 },
+		highmotion: { activation: 100, saturation: 200 },
 	},
-	'highmotion': {
-		'h264': { low: 0.25, high: 0.4 },
-		'h265': { low: 0.15, high: 0.3 },
-		'vp8': { low: 0.25, high: 0.4 },
-		'vp9': { low: 0.15, high: 0.3 },
+	/** H.264 QP, 0-51 - the high-motion band is capped to stay inside it. */
+	h264: {
+		lowmotion: { activation: 26, saturation: 34 },
+		standard: { activation: 33, saturation: 42 },
+		highmotion: { activation: 38, saturation: 48 },
+	},
+	/** HEVC QP, 0-51. */
+	h265: {
+		lowmotion: { activation: 26, saturation: 34 },
+		standard: { activation: 33, saturation: 42 },
+		highmotion: { activation: 38, saturation: 48 },
+	},
+	/** AV1 quantizer index, 0-255. */
+	av1: {
+		lowmotion: { activation: 80, saturation: 144 },
+		standard: { activation: 100, saturation: 180 },
+		highmotion: { activation: 125, saturation: 225 },
 	},
 };
 
-export type BaseVideScoreContext = {
-	frameHeight: number,
-	frameWidth: number,
-	bitrate: number,
-	framesPerSecond: number,
-	codec: string,
-	contentType: keyof typeof BPP_RANGES,
-}
-export const MAX_VIDEO_SCORE = 5.0;
-export const MIN_VIDEO_SCORE = 0.0;
-
-export function calculateBaseVideoScore(context: BaseVideScoreContext): [score: number, remarks: string] {
-	const { frameHeight, frameWidth, bitrate, framesPerSecond, codec, contentType } = context;
-
-	if (!frameHeight || !frameWidth || !bitrate || !framesPerSecond) {
-		return [
-			MIN_VIDEO_SCORE,
-			'Missing data for score calculation',
-		]
-	}
-
-	if (codec !== 'vp8' && codec !== 'vp9' && codec !== 'h264' && codec !== 'h265') {
-		return [
-			MIN_VIDEO_SCORE,
-			'Unsupported codec',
-		]
-	}
-
-	const bpp = bitrate / (frameHeight * frameWidth * framesPerSecond);
-
-	// Default to vp8 if codec is not provided
-	const bppRange = BPP_RANGES[contentType]?.[codec];
-
-	if (!bppRange) {
-		return [
-			MIN_VIDEO_SCORE,
-			'Unsupported content type or codec',
-		]
-	}
-
-	// Normalize score between 0 and 1 based on bpp range
-	if (bpp < bppRange.low) {
-		return [
-			Math.max(MIN_VIDEO_SCORE, bpp / bppRange.low), // Scale up to the lower threshold
-			`Bitrate per pixel is too low for ${contentType} content`,
-		];
-	} else if (bpp >= bppRange.high) {
-		return [
-			MAX_VIDEO_SCORE,
-			`Bitrate per pixel is excellent for ${contentType} content`,
-		];
-	} else {
-			// Logarithmic normalization
-			const normalized = Math.log(bpp - bppRange.low + 1) / Math.log(bppRange.high - bppRange.low + 1);
-			const scaledScore = MIN_VIDEO_SCORE + normalized * (MAX_VIDEO_SCORE - MIN_VIDEO_SCORE);
-
-			return [
-					scaledScore,
-					`Bitrate per pixel is within acceptable range for ${contentType} content`,
-			];
-	}
-}
+/**
+ * The highest quantizer each codec's scale can express.
+ *
+ * The bands above are written for a picture shown at roughly the size it was
+ * decoded. When the presented resolution is known they are shifted to suit it,
+ * and a shift needs a wall to stop at: H.264's high-motion band already sits at
+ * 48 of 51, so a couple of points of leniency is all the scale has left.
+ * Without this a shifted saturation could land at a quantizer the codec cannot
+ * produce, which would make the penalty unreachable rather than lenient.
+ *
+ * A codec absent from this map gets no shift — its band is used as written.
+ */
+export const VIDEO_QP_MAX: Record<string, number | undefined> = {
+	vp8: 127,
+	vp9: 255,
+	h264: 51,
+	h265: 51,
+	av1: 255,
+};
 
 export function calculateLatencyMOS(
 	{ avgJitter, rttInMs, packetsLoss }:

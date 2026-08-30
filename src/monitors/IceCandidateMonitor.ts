@@ -31,6 +31,14 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	tcpType?: string | undefined;
 
 	/**
+	 * Whether this candidate came from a `local-candidate` or a
+	 * `remote-candidate` stats entry. Set by the peer connection monitor when
+	 * the stats are accepted; not part of the shipped sample (the server can
+	 * derive it from the candidate pair references).
+	 */
+	public direction?: 'local' | 'remote';
+
+	/**
 	 * Additional data attached to this stats, will be shipped to the server
 	 */
 	attachments?: Record<string, unknown> | undefined;

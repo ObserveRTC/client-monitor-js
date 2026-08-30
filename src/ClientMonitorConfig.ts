@@ -1,4 +1,7 @@
 import { Logger } from "./utils/logger";
+import type { OutboundFrameSupplyDetectorConfig } from "./detectors/OutboundFrameSupplyDetector";
+import type { EncoderPerformanceDetectorConfig } from "./detectors/EncoderPerformanceDetector";
+import type { InboundFrameSupplyDetectorConfig } from "./detectors/InboundFrameSupplyDetector";
 
 export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
@@ -50,6 +53,20 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     integrateNavigatorMediaDevices: boolean | MediaDevices;
 
     /**
+     * If true, the monitor subscribes to `document.visibilitychange` and keeps
+     * `ClientMonitor.activeTab` up to date. A background tab is throttled by
+     * the browser (timers, rendering, sometimes decoding), so detectors that
+     * would read the throttling as a quality problem stand down while the tab
+     * is hidden, and a `TAB_VISIBILITY_CHANGED` client event marks each
+     * transition in the sample stream. When the watcher is disabled — or no
+     * `document` is available (SSR, tests, workers, react-native) —
+     * `activeTab` simply stays `true`.
+     *
+     * DEFAULT: true
+     */
+    watchTabVisibility: boolean;
+
+    /**
      * If true, the monitor generates a `CLIENT_JOINED` event when it is created.
      *
      * DEFAULT: true
@@ -68,7 +85,24 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Pass `null` to disable the detector entirely; pass `{}` (or omit) to
      * enable it with defaults.
      */
-    videoFreezesDetector: Record<string, never> | null;
+    videoFreezesDetector: {
+        /**
+         * Consecutive collection intervals the track has to stay frozen before
+         * an issue is raised.
+         *
+         * A confidence floor, not a persistence bar: the stats carry cumulative
+         * counters, so one interval can say a freeze happened but never how long
+         * it lasted, and `freezeCount` advances on any inter-frame gap past
+         * roughly `max(3 * average, average + 150ms)` — a sub-second hiccup
+         * nobody notices. A second consecutive observation is what separates
+         * that from a real freeze: either the counter advanced again, or nothing
+         * has rendered since.
+         *
+         * The freeze state is still derived on the first tick and still scored;
+         * only the issue waits.
+         */
+        minConsecutiveTicks: number;
+    } | null;
 
     /**
      * Configuration for detecting inbound track stalling during monitoring.
@@ -94,14 +128,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     playoutDiscrepancyDetector: {
         /**
-         * The low watermark for the skew of frames between the received and rendered
+         * Skew at which an open episode resolves, as a **fraction of the frames
+         * received in the interval**.
          */
-        lowSkewThreshold: number;
+        lowSkewRatio: number;
 
         /**
-         * The high watermark for the skew of frames between the received and rendered
+         * Skew at which an episode opens, as a fraction of the frames received
+         * in the interval. A raw frame count cannot work here: five frames of
+         * skew is 8% of a 2s interval at 30fps and 3% of a 5s one, so the same
+         * number means a different thing at every collecting period and every
+         * frame rate.
          */
-        highSkewThreshold: number;
+        highSkewRatio: number;
+
+        /**
+         * Frames the interval must carry before the ratio is computed at all —
+         * a skew of 2 out of 3 frames is noise, not a discrepancy.
+         */
+        minFramesReceived: number;
     } | null;
 
     syntheticSamplesDetector: {
@@ -182,11 +227,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * - `minReceivedFrames`: the minimum number of frames that must have
          *   been received in an interval before the ratio is evaluated, guarding
          *   against noise at low frame rates (e.g. 1 received, 0 decoded).
+         * - `frameArrivalBurstFactor`: burst guard against bursty frame
+         *   *arrival* being read as CPU limitation. The detector keeps a
+         *   smoothed (EWMA) frames-received-per-interval baseline per track;
+         *   an interval whose received count exceeds
+         *   `frameArrivalBurstFactor * baseline` is a burst — a simulcast
+         *   layer switch, keyframe recovery or post-stall queue flush
+         *   momentarily outpaces the decoder without the CPU being the
+         *   problem — and its ratio is skipped rather than judged. A track's
+         *   first interval (no baseline yet) is also skipped, since a fresh
+         *   consumer routinely starts with a keyframe burst. Sustained decoder
+         *   starvation still alerts because its low ratio persists across
+         *   ordinary-arrival intervals. Set to `undefined` to disable the
+         *   guard and judge every interval.
          */
         incomingDecodedFramesRatioThresholds: {
             alertOn: number;
             alertOff: number;
             minReceivedFrames: number;
+            frameArrivalBurstFactor?: number;
         };
 
         /**
@@ -320,33 +379,38 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Configuration for separating a slow capture source from a slow encoder on
      * outbound video tracks.
      */
-    sourceEncoderBottleneckDetector: {
-        /**
-         * Fraction of the track's configured frame rate the capture source must
-         * fall below to count as starving, when `getSettings().frameRate` is
-         * available.
-         */
-        captureFpsRatioThreshold: number;
+    /**
+     * Watches the local capture device for degradation, from the media source's
+     * monotonic frame counter rather than the browser's coarse
+     * `framesPerSecond`. Raises `capture-strain` while the device is still
+     * usable and `capture-stall` when it has stopped delivering.
+     *
+     * **Opt-in.** Unlike the other detectors this one defaults to `null` (not
+     * created) rather than to its defaults: its thresholds are calibrated
+     * against a very small sample, so it should be switched on for observation
+     * and its issues watched before anything acts on them. Pass `{}` to enable
+     * it with the defaults below.
+     */
+    /**
+     * Thresholds for `OutboundFrameSupplyDetector` — the capture device. The
+     * type lives with the detector; the defaults are in `ClientMonitor`, with
+     * every other detector's.
+     */
+    outboundFrameSupplyDetector: OutboundFrameSupplyDetectorConfig | null;
 
-        /**
-         * Absolute floor (frames per second) used when the browser does not
-         * report a configured frame rate, and as the "source is healthy" bar
-         * for the encoder check.
-         */
-        minSourceFps: number;
+    /**
+     * Thresholds for `EncoderPerformanceDetector` — the encoder behind that
+     * capture device. The type lives with the detector; the defaults are in
+     * `ClientMonitor`, with every other detector's.
+     */
+    encoderPerformanceDetector: EncoderPerformanceDetectorConfig | null;
 
-        /** Fraction of the source frame rate the encoder must fall below to count as behind. */
-        encodeFpsRatioThreshold: number;
-
-        /** Fraction of the per-frame budget encoding may consume before counting as too slow. */
-        encodeTimeBudgetRatio: number;
-
-        /** Share of the interval spent CPU-limited above which the encoder counts as bottlenecked. */
-        cpuLimitationShareThreshold: number;
-
-        /** Consecutive collections a condition must hold before raising. */
-        minConsecutiveTicks: number;
-    } | null;
+    /**
+     * Thresholds for `InboundFrameSupplyDetector` — the decoder. The type lives
+     * with the detector; the defaults are in `ClientMonitor`, with every other
+     * detector's.
+     */
+    inboundFrameSupplyDetector: InboundFrameSupplyDetectorConfig | null;
 
     /**
      * Configuration for reporting changes in the set of simulcast layers
@@ -440,12 +504,6 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
          * takes longer; on a low-RTT path `thresholdInMs` dominates.
          */
         rttMultiplier: number;
-
-        /**
-         * Consecutive stuck collections required, so the verdict never rests
-         * on fewer observations than this regardless of the collecting period.
-         */
-        minStuckTicks: number;
 
         /**
          * Receive bitrate (bps) above which the stream counts as "still being
@@ -567,6 +625,70 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     } | null;
 
     /**
+     * Configuration for detecting a firewall (or policy middlebox) that lets
+     * STUN through but blocks the media: the candidate pair stays `succeeded`
+     * and consent checks keep passing, yet media produced by the outbound RTP
+     * streams never traverses the ICE transport.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    blockedTransportDetector: {
+        /**
+         * How long (in milliseconds) the STUN-ok-but-media-blocked
+         * discrepancy must persist before the issue is raised.
+         */
+        thresholdInMs: number;
+
+        /**
+         * Combined outbound RTP bitrate (bps) below which the transport is
+         * treated as legitimately quiet and never judged. This is the
+         * "producer is demonstrably producing" bar.
+         */
+        minMediaBitrateBps: number;
+
+        /**
+         * Transport receive bitrate (bps) at or below which the return path
+         * counts as carrying nothing but STUN — with media flowing, at least
+         * RTCP receiver reports must come back, and those alone exceed this.
+         */
+        maxReturnBitrateBps: number;
+
+        /**
+         * Fraction of the produced media bitrate the transport's own send
+         * counter must fall below to count as "media is not leaving the
+         * transport" (packets produced by the RTP senders but never making it
+         * onto the wire).
+         */
+        maxSendShare: number;
+
+        /**
+         * How recently (in milliseconds) a STUN binding/consent response must
+         * have arrived on the selected pair for the path to count as
+         * STUN-verified. Consent checks run roughly every 5 seconds, so this
+         * should comfortably exceed one consent interval.
+         */
+        stunFreshnessInMs: number;
+    } | null;
+
+    /**
+     * Configuration for detecting that the client has no usable network at
+     * all: ICE gathering produced zero local candidates while the peer
+     * connection falls to `disconnected`/`failed` (or never leaves
+     * `new`/`connecting`).
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    noAvailableIceCandidateDetector: {
+        /**
+         * How long (in milliseconds) a never-connected peer connection may
+         * sit with zero local candidates in `new`/`connecting` before the
+         * issue is raised. `disconnected`/`failed` with zero candidates
+         * raises immediately.
+         */
+        thresholdInMs: number;
+    } | null;
+
+    /**
      * Ships the full issue *lifecycle* to the server instead of only the fact
      * that issues started.
      *
@@ -607,6 +729,41 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     sendResolvedIssuesToServer?: boolean;
 
     /**
+     * Configuration for the media-pipeline stage classifier: raises
+     * `media-pipeline-stalled` on the two stage boundaries no specialist
+     * detector covers — frames encoding while no packet leaves the RTP sender
+     * (`rtp-sender`), and the ICE transport receiving at a media-level rate
+     * while no inbound RTP accounts for it (`transport-demux`).
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    mediaPipelineDetector: {
+        /**
+         * How long (in milliseconds) a broken stage boundary must persist
+         * before the issue is raised.
+         */
+        thresholdInMs: number;
+
+        /**
+         * Transport receive bitrate (bps) at or above which incoming traffic
+         * counts as media that must demux into some inbound RTP — set well
+         * above what RTCP + STUN alone can explain.
+         */
+        minTransportReceiveBitrateBps: number;
+    } | null;
+
+    /**
+     * Whether the encoded score reasons (the per-penalty breakdown the score
+     * calculator produces) are shipped with the samples on the peer connection
+     * and track entries. Set to `false` to drop them from the wire — the
+     * scores themselves are always shipped, and the realtime `'score'` event
+     * with its reasons is unaffected.
+     *
+     * DEFAULT: true (only an explicit `false` disables shipping)
+     */
+    sendScoreReasonsToServer?: boolean;
+
+    /**
      * Additional metadata to be included in the client monitor.
      *
      * OPTIONAL
@@ -614,7 +771,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     appData: AppData;
 };
 
-export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = Partial<AppliedClientMonitorConfig<AppData>> & {
+export type ClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> =
+    Partial<AppliedClientMonitorConfig<AppData>> & {
     logger?: Logger;
 };
 export type ClientMonitorSourceType = 'mediasoup-device' | 'RTCPeerConnection' | 'mediasoup-transport';

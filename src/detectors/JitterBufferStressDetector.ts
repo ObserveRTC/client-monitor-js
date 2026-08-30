@@ -1,46 +1,49 @@
 import { Detector } from "./Detector";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 
+/**
+ * `targetDelayInMs` is what NetEQ is currently aiming for; `actualDelayInMs` is what it really added
+ * per emitted sample; `timeStretchRate` is the share of samples (`0..1`) stretched or compressed to
+ * keep up. `consecutiveTicks` is how many collections in a row agreed before the issue was raised.
+ */
 export type JitterBufferStressIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
-	/** What NetEQ is currently aiming for, in milliseconds. */
 	targetDelayInMs: number;
-	/** What it actually added per emitted sample, in milliseconds. */
 	actualDelayInMs?: number;
-	/** Share of samples stretched or compressed to keep up, in `0..1`. */
 	timeStretchRate: number;
 	consecutiveTicks: number;
 	durationInMs?: number;
 }
 
 /**
- * Jitter Buffer Stress Detector
+ * Watches the audio jitter buffer of an inbound track and reports when it is fighting the network
+ * and losing — the user-visible failure being conversation that has gone latent and slightly warped,
+ * voices sped up or dragged out, rather than the dropouts `AudioConcealmentDetector` covers. The two
+ * are complements: concealment is what the buffer does when it has already run dry, this is the
+ * buffer straining before it gets there.
  *
- * The complement to `AudioConcealmentDetector`: it separates "network jitter
- * absorbed cleanly" from "the jitter buffer ballooned, adding latency and
- * stretching audio to cope".
+ * Both conditions are required, because either alone is benign. A high `jitterBufferTargetDelayInMs`
+ * on its own means NetEQ is *succeeding*: it has bought latency to hide jitter and the user hears
+ * nothing wrong. A raised `timeStretchRate` on its own is ordinary clock-drift correction between
+ * two devices whose sample clocks disagree. It is the two together — the buffer already deep and
+ * still having to warp audio to keep up — that the user actually hears, so a detector reading either
+ * signal alone would spend its time reporting a healthy buffer doing its job. Half the evidence is
+ * worse than none, so a tick missing either field is skipped rather than guessed at.
  *
- * **Why both conditions are required:** a high target delay on its own is not a
- * problem — it means NetEQ is *succeeding*, buying latency to hide jitter, and
- * the user hears nothing wrong. Time stretching on its own is ordinary clock
- * drift correction. It is the two together that mean the buffer is fighting the
- * network and losing, which is what the user actually hears.
+ * The condition must hold for `minConsecutiveTicks` collections before raising, so one noisy stats
+ * read cannot open an issue. Nothing is judged while the consumer or the remote sender is paused:
+ * both stand the detector down and reset the tick count, since a buffer with no inbound audio to
+ * hold has no meaningful target delay.
  *
- * **Detection logic:**
- * - `jitterBufferTargetDelayInMs` above `targetDelayThresholdInMs`, **and**
- * - `timeStretchRate` above `timeStretchThreshold`,
- * - sustained for `minConsecutiveTicks` collections, so one noisy tick cannot
- *   raise an issue.
- *
- * **Issues created:**
- * - Type: `audio-jitter-buffer-stress`
+ * Issue raised: `audio-jitter-buffer-stress`. Monitor event: `audio-jitter-buffer-stress`.
+ * Config: `jitterBufferStressDetector`.
  */
 export class JitterBufferStressDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'audio-jitter-buffer-stress';
 	public readonly name = 'jitter-buffer-stress-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 
 	private readonly issueKey: string;
 	private _consecutiveTicks = 0;
@@ -67,6 +70,11 @@ export class JitterBufferStressDetector implements Detector {
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
+		if (this.trackMonitor.paused) {
+			this._consecutiveTicks = 0;
+
+			return this._alertOn ? this._clear('consumer paused') : undefined;
+		}
 		if (this.trackMonitor.remoteOutboundTrackPaused) {
 			this._consecutiveTicks = 0;
 
@@ -76,7 +84,6 @@ export class JitterBufferStressDetector implements Detector {
 		const targetDelayInMs = inboundRtp.jitterBufferTargetDelayInMs;
 		const timeStretchRate = inboundRtp.timeStretchRate;
 
-		// half the evidence is worse than none
 		if (targetDelayInMs === undefined || timeStretchRate === undefined) return;
 
 		const stressed = this.config.targetDelayThresholdInMs < targetDelayInMs &&
@@ -110,6 +117,7 @@ export class JitterBufferStressDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<JitterBufferStressIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: JitterBufferStressDetector.ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,

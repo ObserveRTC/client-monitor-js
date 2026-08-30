@@ -2,19 +2,59 @@ import { Detectors } from "../detectors/Detectors";
 import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector";
 import { CaptureFailureDetector } from "../detectors/CaptureFailureDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
-import { SourceEncoderBottleneckDetector } from "../detectors/SourceEncoderBottleneckDetector";
+import { OutboundFrameSupplyDetector } from "../detectors/OutboundFrameSupplyDetector";
+import { EncoderPerformanceDetector } from "../detectors/EncoderPerformanceDetector";
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { OutboundTrackSample } from "../schema/ClientSample";
+import { sampledScoreReasons } from "../scores/utils";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { MediaSourceMonitor } from "./MediaSourceMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
+import type { TrackContentType } from "./TrackMonitor";
+
+/**
+ * Narrower than its inbound counterpart on purpose: motion class and
+ * presentation describe how a track is *watched*, which the sender cannot know.
+ */
+export type OutboundTrackContext = {
+	contentType?: TrackContentType;
+}
 
 export class OutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
-	// public contentType: 'lowmotion' | 'highmotion' | 'standard' = 'standard';
+
+	/**
+	 * True while the sender behind this track is deliberately paused — a
+	 * mediasoup producer that got `pause()`d (kept in sync by
+	 * `MediasoupTransportBinding`), or whatever the application sets it to on
+	 * plain RTCPeerConnection setups. While paused, the track legitimately
+	 * sends nothing, so detectors that read silence as a failure
+	 * (dry-outbound-track) stand down instead of raising a false issue.
+	 */
+	public paused = false;
+
+	/**
+	 * What kind of content this track carries. Only meaningful for video
+	 * tracks — audio tracks leave it `undefined`, and an undefined video track
+	 * is scored as camera content. Screen-share tracks are scored differently
+	 * from camera tracks — sharpness over motion, no frame-rate or
+	 * bitrate-volatility expectations — so getting this right matters for the
+	 * track score.
+	 *
+	 * Auto-detected at construction only from `track.getSettings().displaySurface`,
+	 * which exists exclusively on display capture. The content hint is deliberately
+	 * NOT used for inference — applications set `'detail'`/`'text'` on camera
+	 * tracks too, so the hint is not a reliable screen-share signal. When no
+	 * `displaySurface` is available, the application declares it explicitly:
+	 *
+	 * ```ts
+	 * monitor.getOutboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
+	 * ```
+	 */
+	public contentType?: TrackContentType;
 
 	public calculatedScore: CalculatedScore = {
 		weight: 0,
@@ -47,6 +87,11 @@ export class OutboundTrackMonitor {
 		this.attachments = attachments;
 		this.detectors = new Detectors();
 
+		if (typeof track.getSettings === 'function' &&
+			(track.getSettings() as { displaySurface?: string }).displaySurface !== undefined) {
+			this.contentType = 'screenshare';
+		}
+
 		const monitorConfig = this.getPeerConnection().parent.config;
 
 		if (monitorConfig.dryOutboundTrackDetector !== null) {
@@ -61,8 +106,14 @@ export class OutboundTrackMonitor {
 
 		if (this.kind === 'audio') this.calculatedScore.weight = 1;
 		else if (this.kind === 'video') {
-			if (monitorConfig.sourceEncoderBottleneckDetector !== null) {
-				this.detectors.add(new SourceEncoderBottleneckDetector(this));
+			// Order matters: EncoderPerformanceDetector reads whether
+			// `capture-bottleneck` is active, so the capture check has to have
+			// run this tick. `Detectors.update()` preserves registration order.
+			if (monitorConfig.outboundFrameSupplyDetector !== null) {
+				this.detectors.add(new OutboundFrameSupplyDetector(this));
+			}
+			if (monitorConfig.encoderPerformanceDetector !== null) {
+				this.detectors.add(new EncoderPerformanceDetector(this));
 			}
 			if (monitorConfig.simulcastLayerDetector !== null) {
 				this.detectors.add(new SimulcastLayerDetector(this));
@@ -86,6 +137,16 @@ export class OutboundTrackMonitor {
 
 	public get kind() {
 		return this.track.kind;
+	}
+
+	/** True when this track carries screen-share content. See `contentType`. */
+	public get isScreenShare() {
+		return this.contentType === 'screenshare';
+	}
+
+	/** **Merges** — an explicit `undefined` means "not declared here", not a reset. */
+	public setContext(context: OutboundTrackContext): void {
+		if (context.contentType !== undefined) this.contentType = context.contentType;
 	}
 
 	bitrate?: number;
@@ -140,20 +201,16 @@ export class OutboundTrackMonitor {
 	}
 
 	public createSample(): OutboundTrackSample {
-		let scoreReasons: string | undefined;
-		if (this.kind === 'audio') {
-			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundAudioScoreReasons?.(this.calculatedScore.reasons);
-		} else if (this.kind === 'video') {
-			scoreReasons = this.getPeerConnection()?.parent.scoreCalculator?.encodeOutboundVideoScoreReasons?.(this.calculatedScore.reasons);
-		}
-
 		return {
 			id: this.track.id,
 			kind: this.kind,
 			timestamp: Date.now(),
 			attachments: this.attachments,
 			score: this.score,
-			scoreReasons,
+			scoreReasons: sampledScoreReasons(
+				this.calculatedScore.reasons,
+				this.getPeerConnection()?.parent.config.sendScoreReasonsToServer,
+			),
 		};
 	}
 }

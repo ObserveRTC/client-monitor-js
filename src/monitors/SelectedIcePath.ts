@@ -414,8 +414,10 @@ export class SelectedIcePath extends EventEmitter<SelectedIcePathEvents> {
 			payload: {
 				peerConnectionId: this._peerConnection.peerConnectionId,
 				transition,
-				from,
-				to,
+				// schema 3.5.0 payloads are flat records of primitives: the
+				// path evidence objects travel as JSON documents
+				from: from === undefined ? undefined : JSON.stringify(from),
+				to: JSON.stringify(to),
 			},
 		});
 	}

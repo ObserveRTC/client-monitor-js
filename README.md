@@ -40,6 +40,26 @@ or
 yarn add @observertc/client-monitor-js
 ```
 
+### Release candidates
+
+Every push to `develop` publishes a release candidate as `X.Y.Z-rc.<N>`, where `N` increases with every build. Depend on the **`next` dist-tag** to track them:
+
+```jsonc
+// package.json
+"dependencies": {
+    "@observertc/client-monitor-js": "next"
+}
+```
+
+`next` always points at the newest RC across all version lines, so this dependency never has to be edited when the line bumps from `4.7.x` to `4.8.x`. Per-line tags (`develop-470-rc`, `develop-460-rc`, ...) are still maintained if you want to stay on one line.
+
+**Do not use a caret range to track RCs** — it cannot work, for two separate reasons rooted in how semver ranges treat prereleases:
+
+- `"^4.6.0"` resolves to the stable `4.6.0` and silently excludes every RC. A range with no prerelease in it never matches prerelease versions.
+- `"^4.7.1-rc.5"` does match RCs, but only of `4.7.1` — it will never see `4.8.1-rc.N`, so it stops updating the moment the line bumps.
+
+Historically RCs were published as `X.Y.Z-<git-sha>.0`. Semver compares prerelease identifiers as ASCII strings and git SHAs have no chronological order, so the "highest" RC of that scheme was effectively random — a caret range on one of them resolved to an arbitrary older build and never moved. Those versions are still published and untouched, but they are superseded: any `rc.N` sorts above all of them.
+
 ## Quick Start
 
 ```javascript
@@ -223,10 +243,11 @@ const monitor = new ClientMonitor({
 
     dryInboundTrackDetector: { thresholdInMs: 5000 },
     dryOutboundTrackDetector: { thresholdInMs: 5000 },
-    videoFreezesDetector: {},
+    videoFreezesDetector: { minConsecutiveTicks: 2 },
     playoutDiscrepancyDetector: {
-        lowSkewThreshold: 2,
-        highSkewThreshold: 5,
+        lowSkewRatio: 0.1,
+        highSkewRatio: 0.25,
+        minFramesReceived: 10,
     },
     syntheticSamplesDetector: {
         minSynthesizedSamplesDuration: 1000,
@@ -242,6 +263,20 @@ const monitor = new ClientMonitor({
         iceRestartRecommendationThresholdInMs: 10000, // before recommending a restart
         iceRestartRecommendationCooldownInMs: 15000,  // min gap between recommendations
         createEvent: true,
+    },
+    blockedTransportDetector: {
+        thresholdInMs: 5000,          // how long the STUN-ok-but-media-blocked discrepancy must persist
+        minMediaBitrateBps: 10000,    // "producer is demonstrably producing" bar
+        maxReturnBitrateBps: 2000,    // at or below this, the return path is STUN-only
+        maxSendShare: 0.1,            // transport send below this share of produced => not leaving
+        stunFreshnessInMs: 10000,     // how recent a STUN response must be to count as verified
+    },
+    noAvailableIceCandidateDetector: {
+        thresholdInMs: 6000,          // grace for `new`/`connecting` with zero local candidates
+    },
+    mediaPipelineDetector: {
+        thresholdInMs: 4000,               // how long a broken pipeline boundary must persist
+        minTransportReceiveBitrateBps: 20000, // above this, incoming transport traffic must demux
     },
 
     audioConcealmentDetector: {
@@ -272,21 +307,30 @@ const monitor = new ClientMonitor({
     stuckDecoderDetector: {
         thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier x RTT)
         rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
-        minStuckTicks: 2,      // never judge on fewer observations than this
-        minBitrate: 10000,     // bps below which this is a dry track, not a wedge
+            minBitrate: 10000,     // bps below which this is a dry track, not a wedge
         minPliCount: 2,
     },
-    sourceEncoderBottleneckDetector: {
-        captureFpsRatioThreshold: 0.5,
-        minSourceFps: 5,
-        encodeFpsRatioThreshold: 0.7,
-        encodeTimeBudgetRatio: 0.8,
-        cpuLimitationShareThreshold: 0.3,
-        minConsecutiveTicks: 2,
+    // Frame supply: is whatever produces this track's frames delivering what it
+    // should? Average over a duration, compare, judge. The config *types* live
+    // in the detector files; the defaults are here with every other detector's.
+    outboundFrameSupplyDetector: {
+        durationInMs: 15000,           // average the capture device over this long ...
+        captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
+    },
+    encoderPerformanceDetector: {
+        encodeFpsRatioThreshold: 0.7,  // encoder below 70% of source fps = behind
+        encodeTimeBudgetRatio: 0.8,    // encode time per frame vs the frame budget
+        cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
+        minConsecutiveTicks: 2,        // two reads agreeing, not a span of time
+    },
+    inboundFrameSupplyDetector: {
+        durationInMs: 15000,           // average the decoder over this long ...
+        decodeFpsRatioThreshold: 0.9,  // ... then require 90% of what arrived
+        minReceivedFps: 5,             // too thin a stream to judge a decoder on
     },
     captureFailureDetector: {
-        silenceThresholdInMs: 30000, // long on purpose: silence != a broken mic
-        silenceRmsThreshold: 0.001,
+        silenceThresholdInMs: 60000, // long on purpose: silence != a broken mic
+        silenceRmsThreshold: 0.0001,
         createEvent: true,
     },
 
@@ -400,12 +444,17 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`StuckDecoderDetector`](#stuckdecoderdetector) | inbound video | issue `stuck-decoder` | RTP flowing, nothing decoding — the wedge only recreating the consumer fixes |
 | [`PlayoutDiscrepancyDetector`](#playoutdiscrepancydetector) | inbound video | issue `inbound-video-playout-discrepancy` | Frames received but not rendered — a rendering pipeline backlog |
 | [`DryInboundTrackDetector` / `DryOutboundTrackDetector`](#dryinboundtrackdetector--dryoutboundtrackdetector) | tracks | issues `dry-inbound-track`, `dry-outbound-track` | A track that should be flowing but carries no bytes at all |
-| [`SourceEncoderBottleneckDetector`](#sourceencoderbottleneckdetector) | outbound video | issues `capture-bottleneck`, `encoder-bottleneck` | Whether the *camera* or the *encoder* is the reason you send fewer frames |
+| [`OutboundFrameSupplyDetector`](#outboundframesupplydetector) | outbound video | issue `capture-bottleneck` | The camera is not delivering the frames it was configured for — caught *while it degrades*, not once it has stopped |
+| [`EncoderPerformanceDetector`](#encoderperformancedetector) | outbound video | issue `encoder-bottleneck` | The camera is delivering and the encoder cannot keep up with it |
+| [`InboundFrameSupplyDetector`](#inboundframesupplydetector) | inbound video | issue `decoder-bottleneck` | Frames arrived and the decoder did not turn enough of them into pictures |
 | [`CaptureFailureDetector`](#capturefailuredetector) | outbound tracks | issues `capture-track-ended`, `silent-audio-source` | Vanished devices and microphones producing pure silence |
 | [`CongestionDetector`](#congestiondetector) | peer connection | issue `congestion` | Bandwidth-limited sending corroborated by RTT / loss |
 | [`CpuPerformanceDetector`](#cpuperformancedetector) | whole client | issue `cpulimitation` | The device running out of CPU for encode/decode |
 | [`LongPcConnectionEstablishmentDetector`](#longpcconnectionestablishmentdetector) | peer connection | event `too-long-pc-connection-establishment` | Connection setup taking suspiciously long |
 | [`IceConnectivityDetector`](#iceconnectivitydetector) | ICE transports | issues `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path`; events `ice-restart`, `ice-restart-recommended` | Runtime ICE health and *when* an ICE restart is warranted |
+| [`BlockedTransportDetector`](#blockedtransportdetector) | ICE transports | issue `blocked-transport` | STUN passes but media does not — the firewall / policy-middlebox signature |
+| [`NoAvailableIceCandidateDetector`](#noavailableicecandidatedetector) | peer connection | issue `no-available-ice-candidate` | Zero local ICE candidates while the connection falls over — no usable network at all |
+| [`MediaPipelineDetector`](#mediapipelinedetector) | peer connection | issue `media-pipeline-stalled` | The first broken stage of the media pipeline nothing else covers: encoded frames never leave the sender, or transport traffic never demuxes |
 | [`IceTupleChangeDetector`](#icetuplechangedetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
 | [`CodecChangeDetector`](#observation-detectors) | tracks | event `codec-changed` / `CODEC_CHANGED` | Which codec/profile is actually in use, and when it changed |
 | [`VideoResolutionChangeDetector`](#observation-detectors) | video tracks | event `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder, with the *reason* attached |
@@ -413,6 +462,46 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`StatsGapDetector`](#observation-detectors) | the monitor itself | event `stats-collection-gap` / `STATS_COLLECTION_GAP` | Backgrounded-tab gaps that would otherwise read as network spikes |
 
 The last four are **observations**: they emit events and never raise issues, because what they report is not a fault — it is the missing context in most investigations.
+
+### Which issues belong in the sample
+
+Every issue-raising detector exposes a runtime flag next to `disabled`:
+
+```ts
+/** like `disabled`, flippable at runtime */
+public includeIssueInSample = true;
+```
+
+When flipped to `false`, the detector keeps working locally — monitor events fire and the issue lifecycle (`activeIssues`, `'issue'` / `'issue-resolved'`) is maintained — but neither the raise entry nor the resolution entry is buffered into the `ClientSample`. (`raiseIssue` / `addIssue` accept the same thing directly via `includeInSample` for custom issues.)
+
+In case shrinking down the sample size is something your application wants, the table below is the useful thing to know: it says for every issue whether the server can **derive the same verdict from one component's stats that the sample already carries** (all the load-bearing counters are monotonic totals, so a server holding consecutive samples can recompute every delta). Issues that are derivable are the safe candidates for `includeIssueInSample = false`; issues that are not derivable join stats across components, depend on state that never reaches the sample (`MediaStreamTrack.muted`, `getSettings()`, connection-state transitions), or live in sub-sampling-period timing — switch those off and the information is gone.
+
+| Detector | Issue | Derivable from one component's sampled stats? | From what |
+| --- | --- | --- | --- |
+| `FreezedVideoTrackDetector` | `freezed-video-track` | **Yes** | `inbound-rtp` `freezeCount`, `totalFreezesDuration` |
+| `FreezedVideoTrackDetector` | `keyframe-storm` | **Yes** | `inbound-rtp` `pliCount`, `firCount`, `keyFramesDecoded` |
+| `FreezedVideoTrackDetector` | `video-recovery-failed` | No | tick-level sequencing of freeze + PLI + keyframe counters |
+| `AudioDesyncDetector` | `audio-desync` | **Yes** | `inbound-rtp` inserted/removed sample totals |
+| `AudioConcealmentDetector` | `audio-concealment` | **Yes** | `inbound-rtp` `concealedSamples`, `silentConcealedSamples` |
+| `JitterBufferStressDetector` | `audio-jitter-buffer-stress` | **Yes** (approx.) | `inbound-rtp` jitter-buffer totals; the consecutive-tick nuance is lost |
+| `SynthesizedSamplesDetector` | event only | **Yes** | `media-playout` synthesized-sample totals |
+| `PlayoutDiscrepancyDetector` | `inbound-video-playout-discrepancy` | **Yes** | `inbound-rtp` `framesReceived` vs `framesRendered` |
+| `DecoderPerformanceDetector` | `video-decoder-overloaded` | Partially | `inbound-rtp` decode/drop totals; frame-budget + quiet-loss guards are coarser at the sampling period |
+| `StuckDecoderDetector` | `stuck-decoder` | No | tick-level bytes-up/frames-flat/PLI-up fingerprint; drives consumer recreation |
+| `DryInboundTrackDetector` | `dry-inbound-track` | No | guards read `MediaStreamTrack.muted`/`readyState` + remote pause state — not in the sample |
+| `DryOutboundTrackDetector` | `dry-outbound-track` | No | same non-sampled track-state guards |
+| `CaptureFailureDetector` | `capture-track-ended` | No | `MediaStreamTrack` `ended` event — no stats representation |
+| `CaptureFailureDetector` | `silent-audio-source` | No | energy totals are sampled, but the live/enabled/unmuted guards are not |
+| `OutboundFrameSupplyDetector` | `capture-bottleneck` | No | the frame rate is a counter differenced against measured elapsed time, and the guards read `track.getSettings()`, pause state, screen-share content type and live track state — none of it reconstructable from a sample |
+| `EncoderPerformanceDetector` | `encoder-bottleneck` | No | joins the media source's frame rate with the highest active layer's encode time and CPU-limitation shares per collecting tick, and chains off whether `capture-bottleneck` is active |
+| `InboundFrameSupplyDetector` | `decoder-bottleneck` | No | differences `framesDecoded` against `framesReceived` per collecting tick, behind pause and live-track guards that are not sampled |
+| `CongestionDetector` | `congestion` | Mostly | `candidate-pair` available bitrates + `outbound-rtp` `qualityLimitationReason` — two components, but both sampled |
+| `CpuPerformanceDetector` | `cpulimitation` | No | joins send-side and receive-side evidence plus `durationOfCollectingStatsInMs`, which is not sampled |
+| `IceConnectivityDetector` | `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path` | No | state transitions and episode timing happen *between* samples |
+| `BlockedTransportDetector` | `blocked-transport` | No | joins candidate-pair STUN counters + transport bytes + outbound-rtp bitrate per collecting tick |
+| `NoAvailableIceCandidateDetector` | `no-available-ice-candidate` | No | connection-state jumps + gathering state; with no network the next sample may never leave the device |
+| `MediaPipelineDetector` | `media-pipeline-stalled` | No | cross-references outbound-rtp vs its own packet counters and transport bytes vs inbound-rtp bytes per collecting tick |
+
 
 ---
 
@@ -422,7 +511,7 @@ The last four are **observations**: they emit events and never raise issues, bec
 
 Reports how the audio actually *sounded*. Opus + NetEQ conceal a lot of loss inaudibly, and audio also degrades without dramatic loss — so the **audible** concealment share (silent concealment subtracted) is both more sensitive and more specific than packet loss. Judged over a sliding window, since concealment is bursty.
 
-**Use the result:** show a "poor audio from X" indicator on the affected participant's tile; the `burstiness` field tells you whether to describe it as choppiness (`bursty`) or dropouts (`continuous`). Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
+**Use the result:** show a "poor audio from X" indicator on the affected participant's tile. Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
 
 ```javascript
 audioConcealmentDetector: {
@@ -434,7 +523,7 @@ audioConcealmentDetector: {
 ```
 
 ```typescript
-monitor.on('audio-concealment', ({ trackMonitor, concealmentRate, concealmentEventRate }) => {
+monitor.on('audio-concealment', ({ trackMonitor, concealmentRate }) => {
     // the user is HEARING this — mark the participant's tile
     ui.setAudioQualityWarning(trackMonitor.track.id, { rate: concealmentRate });
 });
@@ -518,7 +607,7 @@ Owns the whole freeze/repair domain of an inbound video track. It derives the fr
 **Use the result:** on `freezed-video-track`, overlay a spinner/last-frame treatment on the tile. `video-recovery-failed` is your escalation signal — pair it with [`stuck-decoder`](#stuckdecoderdetector): if both fire, recreate the consumer; if only recovery fails (no bytes checked here), the producer or SFU forwarding needs the look.
 
 ```javascript
-videoFreezesDetector: {},          // freeze issue on/off ({} = defaults, null = off)
+videoFreezesDetector: { minConsecutiveTicks: 2 },  // consecutive frozen intervals before an issue (null = off)
 videoRecoveryDetector: {
     windowInMs: 30000,             // window for PLI/keyframe rates
     pliRateAlertOn: 0.5,           // real-world storms run ~0.5-0.7 PLI/s sustained
@@ -563,6 +652,32 @@ monitor.on('video-decoder-overloaded', ({ trackMonitor, decodeTimePerFrameInMs, 
 
 **Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
+#### InboundFrameSupplyDetector
+
+The receive-side counterpart of `capture-bottleneck`: frames arrived and the decoder did not turn enough of them into pictures. Raises `decoder-bottleneck`.
+
+**The rule, in full:** add up the frames that arrived and the frames that were decoded; once `durationInMs` has accumulated, compare them. Decoded below `decodeFpsRatioThreshold` of arrived → raise. At or above → resolve. Start a new window.
+
+```javascript
+inboundFrameSupplyDetector: {
+    durationInMs: 15000,        // average the decoder over this long ...
+    decodeFpsRatioThreshold: 0.9, // ... then require 90% of what arrived
+    minReceivedFps: 5,          // too thin a stream to judge a decoder on
+}
+```
+
+**The bar is the arrival rate, never the sender's.** Frames that never arrived are the network's story — `FreezedVideoTrackDetector` and the peer connection's loss reasons tell it — so a stream throttled to 5fps that decodes cleanly is silent. That is also what separates it from [`DecoderPerformanceDetector`](#decoderperformancedetector), which asks whether decoding *cost* too much over consecutive ticks: that one is about the price of decoding, this one about frames going missing. Both firing at once is the honest answer when both are true.
+
+**Use the result:** the client cannot decode what it was handed — drop to a lower simulcast layer, or ask the SFU for one.
+
+```typescript
+monitor.on('decoder-bottleneck', ({ trackMonitor, decodedFps, receivedFps }) => {
+    sfu.requestLowerLayer(trackMonitor.track.id, { decodedFps, receivedFps });
+});
+```
+
+**What it refuses to judge**, because a low decode rate there is legitimate: a backgrounded tab, a paused consumer, a paused remote sender, a track that is not live and unmuted, and a stream thinner than `minReceivedFps`. The window restarts after a collection gap.
+
 #### StuckDecoderDetector
 
 Catches the per-consumer decode wedge: RTP bytes keep arriving while nothing decodes and PLIs fire continuously — a corrupted/incomplete frame broke the decode chain and it never recovers on its own. The wait is adaptive (`max(thresholdInMs, rttMultiplier × RTT)` plus a minimum number of stuck ticks), and the `minBitrate` floor separates it from a merely starved track.
@@ -573,7 +688,6 @@ Catches the per-consumer decode wedge: RTP bytes keep arriving while nothing dec
 stuckDecoderDetector: {
     thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier × RTT)
     rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
-    minStuckTicks: 2,      // never judge on fewer observations
     minBitrate: 10000,     // bps below which this is a dry track, not a wedge
     minPliCount: 2,        // the browser must be asking for repair
 }
@@ -597,8 +711,9 @@ Detects a growing skew between frames *received* and frames *rendered* on an inb
 
 ```javascript
 playoutDiscrepancyDetector: {
-    lowSkewThreshold: 2,  // frames of skew at which the issue resolves
-    highSkewThreshold: 5, // frames of skew at which it raises
+    lowSkewRatio: 0.1,     // share of received frames at which the issue resolves
+    highSkewRatio: 0.25,   // share of received frames at which it raises
+    minFramesReceived: 10, // below this the interval carries too few frames to judge
 }
 ```
 
@@ -639,31 +754,67 @@ monitor.on('dry-inbound-track', async ({ trackMonitor }) => {
 
 ### Send side
 
-#### SourceEncoderBottleneckDetector
+#### OutboundFrameSupplyDetector
 
-Splits "we are sending fewer frames than we should" into its two causes, indistinguishable from RTP alone: `capture-bottleneck` (the camera/OS never produced the frames) and `encoder-bottleneck` (the source is healthy; the encoder fell behind).
+Is the capture device delivering the frames the track was configured to capture? The send-side mirror of [`InboundFrameSupplyDetector`](#inboundframesupplydetector), which asks the same of the decoder. Raises `capture-bottleneck`.
 
-**Use the result:** capture-bottleneck → the fix is at the device (suggest lowering capture constraints, closing other camera apps; lighting can throttle cameras). Encoder-bottleneck → reduce encode load: drop the top simulcast layer, lower resolution/framerate, disable background effects. The payload carries `encoderImplementation`, `cpuLimitationShare` and the fps pair for the report.
+**The rule, in full:** add up the frames the source delivered and the time it had to deliver them; once `durationInMs` has accumulated, compare the average against `getSettings().frameRate`. Below `captureFpsRatioThreshold` of it → raise. At or above → resolve. Start again. Two running totals, no history buffer.
 
 ```javascript
-sourceEncoderBottleneckDetector: {
-    captureFpsRatioThreshold: 0.5,   // source below 50% of configured fps = starving
-    minSourceFps: 5,                 // absolute floor when getSettings() has no frameRate
-    encodeFpsRatioThreshold: 0.7,    // encoder below 70% of source fps = behind
-    encodeTimeBudgetRatio: 0.8,      // encode time per frame vs the frame budget
-    cpuLimitationShareThreshold: 0.3, // share of interval explicitly CPU-limited
-    minConsecutiveTicks: 2,
+outboundFrameSupplyDetector: {
+    durationInMs: 15000,           // average the capture device over this long ...
+    captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
 }
 ```
+
+**Why average rather than threshold each tick.** A camera that is failing rather than merely busy dips and recovers: 150 frames per 5s tick becomes 132, back to 150, then 97. Tick by tick most of it looks fine. The average over 15s does not — 26.3fps against a configured 30 — so it raises while the camera is still delivering, about half a minute before this one stopped entirely. Averaging also weights *how far* the source fell short rather than merely how often.
+
+**Why a duration and not a tick count.** What matters here is that the device stayed short for a stretch of time that means something. A tick count would mean six seconds at a 2s collecting period and thirty at a 10s one. ([`EncoderPerformanceDetector`](#encoderperformancedetector) is the other way round, and says why.)
+
+**The rate is always the counter, never `mediaSource.framesPerSecond`.** `sourceFps` is the frame counter differenced against *measured* elapsed time. The browser's own figure is coarse and smooths this exact stutter away — it can read `30` across an interval that actually delivered 132 frames in five seconds. When `sourceFps` is undefined the counter restarted, and a restart is not a measurement.
+
+**No baseline, no judgement.** If the browser does not report `getSettings().frameRate`, nothing is substituted for it: there is no rate for the measurement to fall short *of*, so the check stays quiet.
+
+**What it refuses to judge**, because a low frame rate there is legitimate: a backgrounded tab (`ClientMonitor.activeTab === false`), a paused or stopped sender, and screen shares, whose frame rate is content-driven (a still document delivers nothing). If you capture a moving surface that should be watched, declare it with `monitor.setOutboundTrackContext(trackId, { contentType: 'camera' })`. The totals also restart after a settings change or a collection gap — that threshold is derived from `collectingPeriodInMs` rather than configured.
 
 ```typescript
 monitor.on('capture-bottleneck', ({ trackMonitor, sourceFps, expectedFps }) => {
     ui.hintCameraTrouble(trackMonitor.track.id, { sourceFps, expectedFps });
 });
-monitor.on('encoder-bottleneck', () => sender.dropTopSimulcastLayer());
 ```
 
+**Threshold caveat.** `0.9` over 15s came from two captured sessions — one failure, one control, one camera model. They catch that failure and stay silent on that control, and are otherwise unvalidated: treat `capture-bottleneck` as observation-grade until a corpus sets the numbers.
+
 **Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### EncoderPerformanceDetector
+
+Given a capture source that *is* delivering, is the encoder keeping up with it? The send-side mirror of [`DecoderPerformanceDetector`](#decoderperformancedetector). Raises `encoder-bottleneck`.
+
+Any one of three signals is enough: the highest active layer encodes below `encodeFpsRatioThreshold` of what the source delivered, encoding one frame costs more than `encodeTimeBudgetRatio` of the per-frame budget (`1000 / sourceFps`), or — only if you configure it — the browser reported itself CPU-limited for more than `cpuLimitationShareThreshold` of the interval.
+
+```javascript
+encoderPerformanceDetector: {
+    encodeFpsRatioThreshold: 0.7,      // encoder below 70% of source fps = behind
+    encodeTimeBudgetRatio: 0.8,        // encode time per frame vs the frame budget
+    cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
+    minConsecutiveTicks: 2,            // two reads agreeing, not a span of time
+}
+```
+
+**Everything is measured against what the source actually delivered**, never against what the track was configured to capture at. An encoder handed 3fps and emitting 3fps is doing its job perfectly; comparing it to a configured 30 would call that a catastrophic failure. Whether the source itself is short is the *other* detector's question — and while its `capture-bottleneck` is active, this one says nothing at all. The frames were never there to encode. The two issues are mutually exclusive by construction.
+
+That chain is read from the issue rather than shared through a field: this detector checks `ClientMonitor.isIssueActive('capture-bottleneck-track-<id>')`. `OutboundTrackMonitor` registers the capture detector first and `Detectors.update()` preserves registration order, so the verdict is same-tick.
+
+**Why `minConsecutiveTicks` here and a duration on the capture side.** They answer different questions. A tick count is a *confidence* floor — every signal above is a per-interval ratio that a single stats read can get wrong, so what is wanted is two independent reads agreeing, which is two samples whatever the collecting period happens to be. A duration is a *persistence* bar — the capture case, where the device has to stay short long enough to matter. `DecoderPerformanceDetector` and `JitterBufferStressDetector` use ticks for the same reason this one does.
+
+**Why `cpuLimitationShareThreshold` defaults to `null`.** `CpuPerformanceDetector` already reports CPU limitation as its own `cpulimitation` issue, and the useful thing to do with the two is correlate them — `encoder-bottleneck` and `cpulimitation` firing together is evidence the encoder is CPU-bound. That inference is only worth something while `encoder-bottleneck` is derived *without* reading the same signal; wire the CPU share in here too and the correlation becomes tautological. Set a number (`0.3` is a reasonable one) if you would rather have the extra sensitivity than the independent evidence.
+
+**Use the result:** reduce encode load — drop the top simulcast layer, lower resolution or frame rate, disable background effects. The payload carries `encoderImplementation`, `cpuLimitationShare` and the fps pair for the report.
+
+```typescript
+monitor.on('encoder-bottleneck', () => sender.dropTopSimulcastLayer());
+```
 
 #### CaptureFailureDetector
 
@@ -673,8 +824,8 @@ Watches the source end of outbound tracks: the device is gone (`capture-track-en
 
 ```javascript
 captureFailureDetector: {
-    silenceThresholdInMs: 30000, // long on purpose: silence ≠ broken until it persists
-    silenceRmsThreshold: 0.001,  // interval-integrated RMS, not the flickery audioLevel
+    silenceThresholdInMs: 60000, // long on purpose: silence ≠ broken until it persists
+    silenceRmsThreshold: 0.0001, // interval-integrated RMS, not the flickery audioLevel
     createEvent: true,           // also buffer CAPTURE_TRACK_ENDED / _MUTED into samples
 }
 ```
@@ -787,6 +938,69 @@ monitor.on('ice-restart', ({ outcome }) => metrics.count(`ice-restart.${outcome}
 
 **Sources:** [ICE restart: recovering connectivity (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice-restart/) · [RTCPeerConnection.restartIce (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/restartIce) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675)
 
+#### BlockedTransportDetector
+
+The firewall signature: a middlebox that lets ICE/STUN through but blocks the media itself. Every connectivity signal looks healthy — the candidate pair is `succeeded`, consent checks keep passing, `iceConnectionState` is `connected` — yet the call carries nothing. The existing detectors structurally miss this case: STUN consent responses count into the pair's `bytesReceived`, so the pair never looks dry and the inbound-stall check never fires, while the dry-track detectors see outbound-rtp counters advancing and stay silent.
+
+Raises `blocked-transport` (per ICE transport) when, sustained for `thresholdInMs`, all three hold: STUN demonstrably alive (`responsesReceived` advanced within `stunFreshnessInMs`), the application demonstrably producing (outbound RTP on the transport ≥ `minMediaBitrateBps`), and the media demonstrably not traversing. The payload's `evidence` field says which discrepancy was observed:
+
+| `evidence` | Meaning |
+|---|---|
+| `media-not-leaving-transport` | RTP senders produce bytes but the transport's own send counter barely moves — host firewall, blocked socket, dead route. |
+| `no-return-traffic` | Media leaves at full rate, STUN answers, but nothing except STUN comes back — not even RTCP. Classic DPI / UDP-throttling firewall. |
+
+The detector judges the *sending* side, where the client holds both halves of the proof. A firewall blocking only the receive direction shows up on the remote peer's sending side, or as a dry inbound track here.
+
+```javascript
+blockedTransportDetector: {
+    thresholdInMs: 5000,          // discrepancy persistence before raising
+    minMediaBitrateBps: 10000,    // below this the transport is legitimately quiet
+    maxReturnBitrateBps: 2000,    // at/below this the return path counts as STUN-only
+    maxSendShare: 0.1,            // transport send under this share of produced => blocked on send
+    stunFreshnessInMs: 10000,     // consent checks run ~5s; must comfortably exceed one interval
+}
+```
+
+**Use the result:** tell the user their network blocks media (a TURN/TLS fallback or a network change is the fix, an ICE restart on the same path is not), and correlate server-side: many `blocked-transport` clients on one corporate network is a firewall policy, not N user problems.
+
+**Sources:** [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675) · [RTCIceCandidatePairStats (W3C webrtc-stats)](https://www.w3.org/TR/webrtc-stats/#candidatepair-dict*) · [WebRTC and firewalls (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/firewall/)
+
+#### NoAvailableIceCandidateDetector
+
+The other end of the connectivity spectrum: the client cannot even *begin* to connect because ICE gathering produced **zero local candidates**. A healthy establishment gathers a host candidate within milliseconds — even without internet, any up interface yields one. Zero candidates while the connection state jumps from `new`/`connecting` straight to `disconnected`/`failed` means there was nothing to connect *with*: no interface, airplane mode, a VPN that tore down every route. This is a different diagnosis from every other ICE issue — those describe a path that existed and stopped working; this one says no path was ever possible.
+
+Raises `no-available-ice-candidate` (per peer connection) immediately on `disconnected`/`failed` with zero local candidates on a never-connected PC, and after `thresholdInMs` when the PC just sits in `new`/`connecting` with nothing gathered. Resolves when a local candidate appears or the connection reaches `connected`. Never fires on a connection that once connected — mid-call network loss belongs to `IceConnectivityDetector`.
+
+```javascript
+noAvailableIceCandidateDetector: {
+    thresholdInMs: 6000, // grace for `new`/`connecting` before the sustained variant raises
+}
+```
+
+**Use the result:** skip the ICE-restart dance entirely — recommend the user check their connection; on the server, treat the client as offline-at-join rather than call-quality-degraded.
+
+**Sources:** [RTCPeerConnection.connectionState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionState) · [RTCPeerConnection.iceGatheringState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/iceGatheringState) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445)
+
+#### MediaPipelineDetector
+
+The pipeline stage classifier: media moves through a fixed chain (capture → encoder → RTP sender → transport → wire, mirrored on receive), every stage has a monotonic counter proving progress, and a disruption is locatable as the *first* boundary where the upstream counter advances and the downstream one does not. Most boundaries are owned by specialist detectors; this one raises `media-pipeline-stalled` for the two nothing else covers:
+
+| `stage` | Direction | Meaning |
+|---|---|---|
+| `rtp-sender` | send | `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` — an encoded frame always packetizes, so a sustained violation is a wedged sender/pacer (seen after `replaceTrack` races and simulcast reconfigurations). Guarded by track live + unmuted + layer active. |
+| `transport-demux` | receive | The ICE transport receives ≥ `minTransportReceiveBitrateBps` — well above what RTCP + STUN can explain — while every inbound RTP of the transport stays flat: traffic arrives that never demuxes (SSRC mismatch after renegotiation, a consumer against a dead producer). Requires at least one inbound RTP to exist. |
+
+The payload carries `suspectedIssueTypes` — the specialist issues active on this peer connection at raise time — so one entry both localizes the stage and links the detailed evidence. Registered last among the peer-connection detectors for exactly that reason.
+
+```javascript
+mediaPipelineDetector: {
+    thresholdInMs: 4000,               // how long a broken boundary must persist
+    minTransportReceiveBitrateBps: 20000, // above this, incoming traffic must demux
+}
+```
+
+**Use the result:** `rtp-sender` → renegotiate or replace the sender (the encoder is fine, the pipe after it is wedged); `transport-demux` → recreate the consumers / re-signal SSRCs (the network is fine, the demux is not).
+
 #### IceTupleChangeDetector
 
 The low-level primitive under the path detectors: emits `'ice-tuple-changed'` whenever the set of selected `local:remote` network tuples changes. Always registered; `SelectedIcePath` classifies *what kind of* change it was, and only `IceConnectivityDetector` raises issues.
@@ -880,21 +1094,66 @@ monitor.detectors.remove(detector);
 
 See [Controlling which detectors run](#controlling-which-detectors-run) for the full set of registry helpers.
 
+---
+
+### Replaying a captured session
+
+Detector thresholds are only as good as the sessions they were checked against,
+so the library ships a replay harness: a captured session is fed back through a
+real `ClientMonitor` on a virtual clock, producing the same monitors, derived
+fields, issues, events and samples the live run produced — against current or
+experimental thresholds.
+
+The input is JSONL, one captured collection tick per line, described by the
+`ReplayEntry` type in `tests/helpers/StatsReplayer.ts`. Producing the lines is
+not this library's business: a server-side capture, an app-side listener on
+`'stats-collected'`, or a script synthesizing a scenario all work.
+
+**From the command line:**
+
+```bash
+npm run replay -- tests/fixtures/degrading-camera.jsonl
+npm run replay -- session.jsonl --only capture-bottleneck,encoder-bottleneck
+npm run replay -- session.jsonl --config '{"outboundFrameSupplyDetector":{ ... }}'
+cat session.jsonl | npm run replay -- - --pretty
+```
+
+Everything on stdout is NDJSON — one `{"record":"issue",...}` object per
+detector fire, carrying the issue's own timestamp plus the `tick` and
+`tickTimestamp` that locate it in the input, then a closing `summary` record
+with per-type counts. Progress and warnings go to stderr, so the output pipes
+straight into `jq`, a notebook, or a corpus runner sweeping thresholds across
+many sessions. Detectors that are opt-in in production are **enabled** by
+default under replay: the point of a replay is to see what they would have said.
+`--help` lists every flag.
+
+**From a spec** — drop the file in `tests/fixtures/` and use `replayFixture`:
+
+```typescript
+import { replayFixture } from './helpers/replayFixture';
+
+const run = await replayFixture('degrading-camera');
+
+expect(run.issueTypes.has('capture-bottleneck')).toBe(true);
+run.close();
+```
+
+Its second argument is config overrides, so the same capture can be replayed
+against different thresholds to find where a detector flips. For full control
+— multiple monitors, tick-by-tick assertions, real-time replay — use
+`StatsReplayer` directly; `tests/fixtures/README.md` has the details.
+
 ## Score Calculation
 
 The scoring system provides quantitative quality assessment ranging from 0.0 (worst) to 5.0 (best). The library includes a `DefaultScoreCalculator` implementation and allows custom score calculators via the `ScoreCalculator` interface.
+
+> **Full reference:** every reason key, threshold, ramp and formula is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md). This section is the overview.
 
 ### ScoreCalculator Interface
 
 ```typescript
 interface ScoreCalculator {
     update(): void;
-    encodeClientScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodePeerConnectionScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeInboundAudioScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeInboundVideoScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeOutboundAudioScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
-    encodeOutboundVideoScoreReasons?<T extends Record<string, number>>(reasons?: T): string;
 }
 ```
 
@@ -919,68 +1178,199 @@ Where PC_Score = Track_Score_Avg × PC_Stability_Score
 
 #### Peer Connection Stability Score
 
-Based on Round Trip Time (RTT) and packet loss:
+Based on Round Trip Time (RTT), jitter and packet loss. RTT and jitter are penalized **separately** — a long path and a jittery path are different problems with different fixes, and the score reasons say which one it is:
 
-**RTT Penalties:**
+**RTT Penalties (`high-rtt`)** — one reason key, two magnitudes, like jitter and loss:
 
--   High RTT (150-300ms): -1.0 point
--   Very High RTT (>300ms): -2.0 points
+-   150-300ms average RTT: -1.0 point
+-   \>300ms average RTT: -2.0 points
 
-**Packet Loss Penalties:**
+**Jitter Penalties (`high-jitter`)** — measured jitter averaged over the streams that reported one:
+
+-   30-100ms average jitter: -1.0 point
+-   \>100ms average jitter: -2.0 points
+
+**Packet Loss Penalties (`high-packetloss`)** — the per-interval `deltaFractionLost`, **averaged** across streams (a raw sum would read ten streams at 1% each as 10%):
 
 -   1-5% loss: -1.0 point
 -   5-20% loss: -2.0 points
 -   > 20% loss: -5.0 points
 
+**Loss and jitter are attributed here and nowhere else.** They are properties of the *path*, shared by every stream on the transport, so track scores do not subtract for them — see [Track Score Calculations](#track-score-calculations).
+
+**Only streams carrying media measure the path.** Both averages skip any stream that shows no evidence of carrying media in the interval: under `MIN_PATH_SAMPLE_BITRATE` (8 kbps) *and* under `MIN_PATH_SAMPLE_PACKETS` (25 packets) *and* delivering no frames. An SFU's bandwidth-probation stream — mediasoup sends one on `mid: "probator"` — is a handful of deliberately discardable packets with no frames, and its loss and jitter figures are not measurements of anything: observed at ~2 kbps with ~50% "loss" and ~490 ms "jitter" while the real streams beside it ran at 0% loss and 2 ms jitter. Averaged in with equal weight it used to pin the connection at the minimum score for an entire session.
+
+#### Normalized penalty ramps
+
+Most metric-driven penalties are **normalized to `0..1`**: nothing is subtracted while the metric stays at or below an *activation threshold*, then the penalty ramps up linearly and saturates at `1.0` at a *saturation point*:
+
+```
+penalty(value) = clamp((value − activation) / (saturation − activation), 0, 1)
+```
+
+The activation/saturation constants are `public static readonly` on `DefaultScoreCalculator`. Penalties that are effectively binary (a frozen picture, a CPU-limited encoder) stay stepped. The tables in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md) list every ramp.
+
 #### Track Score Calculations
+
+**Track scores measure what the user perceived, not what the network did.** Freezes, low and volatile fps, dropped frames, pixelation, concealment, time-stretch and jitter-buffer delay are all measurements of damage. Packet loss and jitter are *causes*, they are properties of the path rather than of any one track, and they are attributed once on the peer connection — so no track penalty subtracts for them. A server attributing a degradation joins a track's symptoms to its peer connection's path reasons, which arrive in the same sample.
 
 **Inbound Audio Track Score:**
 
--   Based on normalized bitrate and packet loss
--   Uses logarithmic bitrate normalization
--   Exponential decay for packet loss impact
+-   Based on normalized bitrate. **Packet loss is not subtracted here** — it belongs to the peer connection; what the loss *did* to the audio is measured directly as concealment and time-stretch below
+-   When the audio detectors run, their windowed, hysteresis-guarded verdicts **gate** additional penalties, and the current per-tick metric **scales** them as a normalized `0..1` ramp starting at the detector's own configured threshold:
+    -   `audio-concealment` issue active → scaled by `concealmentRate` (detector `onThreshold` → 0.10)
+    -   `audio-jitter-buffer-stress` issue active → `high-jitter-buffer-delay`, scaled by `jitterBufferTargetDelayInMs` (detector `targetDelayThresholdInMs` → 500 ms)
+    -   `audio-desync` issue active → `audio-time-stretch`, scaled by `timeStretchRate` (detector `fractionalCorrectionAlertOnThreshold` → 0.3)
+    -   A tick where the metric dipped back under the threshold contributes no penalty even while hysteresis keeps the issue open
+-   Without the detectors the score falls back to the pure loss decay
 
 ```javascript
 normalizedBitrate = log10(max(bitrate, MIN_AUDIO_BITRATE) / MIN_AUDIO_BITRATE) / NORMALIZATION_FACTOR;
-lossPenalty = exp(-packetLoss / 2);
-score = min(MAX_SCORE, 5 * normalizedBitrate * lossPenalty);
+score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
 ```
 
 **Inbound Video Track Score:**
 
--   FPS volatility penalties
--   Dropped frames penalties
--   Frame corruption penalties
+-   FPS volatility (`volatile-fps`, normalized 0–1): activation 0.1, saturation 0.2 — *skipped for screen share*
+-   Sustained low fps while frames are flowing (`low-fps`, ewma fps < 10): -1.0 — *skipped for screen share*
+-   Dropped frames (`dropped-video-frames`, normalized 0–1): activation 10%, saturation 20% of frames dropped instead of rendered
+-   Frame corruptions (`video-frame-corruptions`, normalized 0–1): per-interval corruption probability, activation 0.05, saturation 0.5
+-   Frozen picture (`frozen-video`, from the freeze state the detector derives): -2.0
+-   Pixelation (`pixelated-video`): ramps 0→1 from the codec's activation QP to its saturation QP (`VIDEO_QP_THRESHOLDS`), from the mean quantizer of the frames actually decoded (`avgQpPerFrame`, from the inbound `qpSum`) — then multiplied by a weight chosen by **how big the picture is shown**, so the reason ranges 0–3.0.
+
+    **A large pixelated video is charged harder, deliberately.** The same QP is punishing at full screen and nearly invisible in a grid thumbnail, because what the eye resolves is the coded block's size on screen. So the weight is not symmetric — the big video is the one the viewer is complaining about:
+
+    ```
+    magnification = sqrt((presentedW * presentedH) / (decodedW * decodedH))
+    >= 1.5 -> weight 3.0   |   0.75..1.5 -> weight 2.0   |   < 0.75 -> weight 0.5
+    ```
+
+    For vp8 standard motion (band 40 → 80), the same stream at QP 60 costs **0.25** in a thumbnail, **1.0** in a grid tile and **1.5** in speaker view; at saturation, **3.0**. No clamp is needed — the tiers are flat. **No presented resolution, no adjustment** (the ordinary 2.0 applies).
+
+    ```typescript
+    monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, height: 720 } });  // device pixels
+    monitor.setInboundTrackContext(trackId, { videoTag });  // or hand over the element — re-measured every tick
+    ```
+
+    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. [Full table](docs/SCORE_CALCULATIONS.md#a-large-pixelated-video-is-charged-harder-deliberately).
+
+    ```typescript
+    monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, height: 720 } });  // device pixels
+    monitor.setInboundTrackContext(trackId, { videoTag });  // or hand over the element — re-measured every tick
+    ```
+
+    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it, as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. **No presented resolution, no shift** — the shipped band is used as written, and nothing is substituted for the missing number.
+
+    QP is the encoder stating how coarsely it had to quantize, so it measures the blockiness and detail loss the viewer is looking at. Bitrate cannot: the same 500 kbps is generous for a static talking head and starvation for a fast pan, and nothing observable separates those two from bits alone. **Where the browser does not report `qpSum` for the codec in use, the reason is simply absent** — no judgement is better than one inferred from bitrate.
+
+    QP scales are codec-specific and *not* comparable as fractions of their ranges — H.264 runs 0–51, VP8 0–127, VP9 0–255 — so each codec carries its own pair, and an unrecognised codec yields no judgement. The shipped values are literature starting points, not measurements of any deployment; calibrate against your own corpus:
+
+    **Motion class.** The same quantizer is not equally visible on all content: fast movement masks compression artifacts, while a slide or a still face shows every blocked edge. `VIDEO_QP_THRESHOLDS` is therefore indexed `[codec][motionType]` — note the bands run the *opposite* way to bitrate, since high-motion content needs more bits to reach a given QP yet tolerates a higher one once there. Nothing in the stats reveals motion, so the application declares it; undeclared, screen share is judged as `lowmotion` (blocked text is a hard failure) and everything else as `standard`:
+
+    ```typescript
+    monitor.setInboundTrackContext(trackId, { motionType: 'highmotion' });   // by id, works before the track exists
+    monitor.getInboundTrackMonitor(track.id)?.setContext({ motionType: 'lowmotion' });
+    ```
+
+    ```typescript
+    import { VIDEO_QP_THRESHOLDS } from '@observertc/client-monitor-js';
+
+    VIDEO_QP_THRESHOLDS.vp8!.standard = { activation: 45, saturation: 90 };
+    ```
+
+    Every penalty ramp on `DefaultScoreCalculator` is a mutable static and can be retuned the same way.
+
+Whether an inbound video track is a screen share is decided by `InboundTrackMonitor.contentType` — same mechanism as the outbound side (see below), except a received track exposes no `displaySurface` to auto-detect from, so the application declares it:
+
+```typescript
+monitor.getInboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
+```
 
 **Outbound Audio Track Score:**
 
 -   Similar to inbound, using sending bitrate
 -   Remote packet loss consideration
 
-**Outbound Video Track Score:**
+**Outbound Video Track Score (camera):**
 
--   Bitrate deviation from target penalties
--   CPU limitation penalties
--   Bitrate volatility penalties
--   If `track.contentHint === 'screen'`, bitrate deviation and volatility penalties are skipped to better fit screen-share traffic patterns
+-   Bitrate deviation from target (`high-deviation-from-target-bitrate`, normalized 0–1): activation 5%, saturation 15% under target, gated on the absolute shortfall also exceeding `max(20 kbps, 5% of target)`
+-   Quality-limitation penalties from the **interval duration shares** (the instantaneous `qualityLimitationReason` flickers): cpu share ≥30% → -2.0 (`cpu-limitation`), bandwidth share ≥50% → -1.0 (`bandwidth-limitation`, milder — BWE adaptation is the system working); instantaneous reason used as fallback when shares are unavailable
+-   Bitrate volatility (`high-volatile-bitrate`, normalized 0–1): activation 0.1, saturation 0.2
+
+**Outbound Video Track Score (screen share):**
+
+Decided by `OutboundTrackMonitor.contentType`, **never** by `track.contentHint` (applications set `'detail'`/`'text'` on camera tracks too, so the hint is not a reliable screen-share signal). The flag is auto-detected only from `track.getSettings().displaySurface` — present exclusively on display capture — and otherwise declared by the application:
+
+```typescript
+monitor.getOutboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
+```
+
+`getInbound/OutboundTrackMonitor(id)?.setContext(...)` requires the track's monitor to already exist, which only happens on the first stats tick after the track appears on a peer connection. When the application knows earlier — signaling announces a guest's upcoming screen-share track before any media arrives — declare it by track id on the client monitor instead; it is applied immediately if the monitor exists, and otherwise held pending and picked up the moment the track manifests on any peer connection:
+
+```typescript
+monitor.setOutboundTrackContext(trackId, { contentType: 'screenshare' });
+monitor.setInboundTrackContext(trackId, { contentType: 'screenshare', motionType: 'lowmotion' });
+```
+
+Both **merge**: fields omitted from the argument keep whatever was declared before, in the pending state as well as on a live monitor, so a content type declared from signaling survives a later call that only attaches the video element. Passing a field as an explicit `undefined` means "not declared here" rather than "reset"; assign the monitor's field directly to clear it.
+
+For screen-share tracks, sharpness is the quality: fps and bitrate volatility are meaningless on mostly-static content (VBR drops to ~zero between changes), so deviation/volatility penalties are skipped entirely. Instead:
+
+-   Quality-limitation duration share penalties (same as camera)
+-   Encoded resolution downscaled vs. the captured surface (`downscaled-screenshare`): encoded area < ½ of source area → -1.0, < ¼ → -2.0 — the point where shared text stops being readable
 
 ### Score Reasons
 
-Each score calculation includes detailed reasons for penalties:
+Every penalty the `DefaultScoreCalculator` applies is captured as a **reason**: a map from a reason key to the points it subtracted (`Record<string, number>`). The reasons are the explanation of the score — a `3.0` alone says something is wrong; `{ "frozen-video": 2.0 }` says *what*. They are produced by default, attributed to the entity that caused them, and readable in three places:
 
-```javascript
-monitor.on("score", (event) => {
-    console.log("Client Score:", event.clientScore);
-    console.log("Score Reasons:", event.scoreReasons);
-    // Example reasons:
+**1. The realtime `'score'` event** — carries the client-level aggregate of the current tick's reasons across every peer connection and track (as `currentReasons`):
+
+```typescript
+monitor.on("score", ({ clientScore, currentReasons }) => {
+    console.log("Client Score:", clientScore);
+    console.log("Score Reasons:", currentReasons);
+    // Example (normalized penalties carry fractional magnitudes):
     // {
-    //   "high-rtt": 1.0,
-    //   "high-packetloss": 2.0,
-    //   "cpu-limitation": 2.0,
-    //   "dropped-video-frames": 1.0
+    //   "high-rtt": 1.0,             // pc: raw RTT above 150ms
+    //   "high-jitter": 0.25,         // inbound video: jitter 40ms, ramp 20->100ms
+    //   "high-packetloss": 2.0,      // pc: avg delta fraction lost 5-20%
+    //   "cpu-limitation": 2.0,       // outbound video: cpu-limited >=30% of the interval
+    //   "bandwidth-limitation": 1.0, // outbound video: bandwidth-limited >=50%
+    //   "frozen-video": 2.0,         // inbound video: picture currently frozen
+    //   "audio-concealment": 0.5,    // inbound audio: issue active, rate midway to saturation
+    //   "downscaled-screenshare": 2.0, // screenshare sent below 1/4 of source area
+    //   "dropped-video-frames": 0.4  // inbound video: 14% frames dropped, ramp 10->20%
     // }
 });
 ```
+
+**2. On the monitors** — each entity holds only its *own* reasons, so a low track score is explained on the track, not on the peer connection:
+
+```typescript
+pcMonitor.scoreReasons;                              // rtt / jitter / packetloss only
+monitor.getInboundTrackMonitor(id)?.scoreReasons;    // e.g. frozen-video, audio-concealment
+monitor.getOutboundTrackMonitor(id)?.scoreReasons;   // e.g. cpu-limitation, downscaled-screenshare
+```
+
+`ClientMonitor.scoreReasons` follows the same rule: it holds the client's **own** reasons, and there are none today — the client score subtracts nothing directly, being a weighted aggregate of the peer-connection and track scores. So it stays undefined.
+
+The aggregated view lives on the `'score'` **event** instead, as `currentReasons` — every component's reasons summed by key. Score and reasons are kept separate on purpose: the event gives an application the whole picture to react to, while each monitor's `scoreReasons` stays scoped to what that entity itself caused.
+
+```typescript
+monitor.on('score', ({ clientScore, currentReasons }) => {
+    // currentReasons: { 'high-rtt': 1.0, 'pixelated-video': 0.27 } — the aggregate
+});
+
+monitor.scoreReasons;   // the client's OWN reasons — undefined today
+```
+
+**3. In the samples — every entity ships only its own reasons.** The peer-connection and track sample entries carry `scoreReasons` as a **record of reason key → subtracted points** (`Record<string, number>`), so a degraded score explains itself on the wire, magnitudes included. The field is omitted when there is nothing to explain.
+
+The **client sample entry carries no reasons**, because the client score subtracts nothing of its own. Shipping the aggregate there would put every reason on the wire a second time in the same sample, and would read as though the client itself were pixelating or losing packets when the cause was one inbound track. A server reconstructs the client-level view in post-analysis by re-aggregating the components of the same sample — the information is not lost, only sent once. If a client-level penalty is ever added it lands on `ClientMonitor.scoreReasons` like any other component's, and ships automatically.
+
+Set `sendScoreReasonsToServer: false` in the config to drop the reasons from the wire entirely — the scores themselves and the realtime event are unaffected.
+
+The full key set — with every threshold, ramp and what each reason means for the user experience — is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md); the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
 
 ### Custom Score Calculator
 
@@ -1252,65 +1642,75 @@ if (sample) {
 
 ### Sample Compression
 
-For efficient data transmission and storage, ObserveRTC provides dedicated compression packages for `ClientSample` objects:
+`ClientSample` objects compress well because consecutive samples are nearly identical — the same tracks, the same peer connections, counters that moved a little. Two codec packages exploit that by encoding **each sample as the delta from the previous one**; pick one by the wire format you want:
 
-**@observertc/samples-encoder** - Compresses ClientSample objects for transmission:
+| Package | Wire format | Use it when |
+| --- | --- | --- |
+| `@observertc/samples-protobuf-codec` | Protobuf binary | You want the smallest payload and already speak protobuf on the server. |
+| `@observertc/samples-json-codec` | JSON | You want zero dependencies (~2 KB gzipped) and a payload you can read in a log. |
+
+Both expose the same shape: a `ClientSampleEncoder`, a `ClientSampleDecoder`, and a `createClientSampleCodec()` factory that returns a matched pair.
+
+**Encoding on the client:**
 
 ```javascript
-import { SamplesEncoder } from "@observertc/samples-encoder";
+import { ClientSampleEncoder } from "@observertc/samples-protobuf-codec";
 
-const encoder = new SamplesEncoder();
-const sample = monitor.createSample();
+const encoder = new ClientSampleEncoder();
 
-// Encode the sample for efficient transmission
-const encodedSample = encoder.encode(sample);
+monitor.on("sample-created", ({ sample }) => {
+    const encoded = encoder.encode(sample);
 
-// Send compressed data over the network
-fetch("/api/samples", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/octet-stream",
-    },
-    body: encodedSample,
+    fetch("/api/samples", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: encoded,
+    });
 });
 ```
 
-**@observertc/samples-decoder** - Decompresses received ClientSample objects:
+**Decoding on the server:**
 
 ```javascript
-import { SamplesDecoder } from "@observertc/samples-decoder";
+import { ClientSampleDecoder } from "@observertc/samples-protobuf-codec";
 
-const decoder = new SamplesDecoder();
+// one decoder per client connection — see "Delta encoding is stateful" below
+const decoder = new ClientSampleDecoder();
 
-// Receive compressed sample data
-const compressedData = await response.arrayBuffer();
-
-// Decode back to ClientSample object
-const decodedSample = decoder.decode(compressedData);
-
-// Process the restored sample
-console.log("Decoded sample:", decodedSample);
+const sample = decoder.decode(new Uint8Array(await request.arrayBuffer()));
 ```
 
-**Benefits of Using Compression:**
+**Delta encoding is stateful, and that has three consequences:**
 
--   **Reduced Bandwidth**: Compressed samples require significantly less network bandwidth
--   **Faster Transmission**: Smaller payloads improve upload/download times
--   **Storage Efficiency**: Compressed samples consume less storage space
--   **Schema Consistency**: Ensures proper serialization/deserialization of all ClientSample fields
+1. **One encoder per client, one decoder per client.** Each holds the previous sample as its baseline. Sharing an encoder across clients, or decoding two clients' streams through one decoder, produces garbage rather than an error.
+2. **Samples must be decoded in the order they were encoded.** A dropped or reordered payload desynchronises the pair. Use `tryDecode()` where the transport can lose messages — it returns `undefined` instead of throwing, so you can drop the sample and wait for the next resync rather than tearing down the connection.
+3. **Call `reset()` on both sides when a client reconnects.** The encoder starts a fresh baseline; the decoder must be told to expect one.
+
+**Transport-specific helpers.** Where the payload has to survive a text channel, each codec carries its own:
+
+```javascript
+// protobuf: base64 for text transports, or the raw protobuf message
+encoder.encodeToBase64(sample);   decoder.decodeBase64(text);
+encoder.encodeToMessage(sample);  decoder.decodeFromMessage(message);
+
+// json: a plain JSON-serialisable delta
+encoder.encodeToJson(sample);     decoder.decodeJson(json);
+                                  decoder.tryDecodeJson(json);
+```
+
+**Errors** are `ProtobufCodecError` / `JsonCodecError`, each carrying a `code` and a `context` describing what failed — a schema mismatch and a desynchronised baseline report differently, which is what you want in a log.
+
+**Schema compatibility.** Both codecs export a `schemaVersion` describing the `ClientSample` shape they were built against. This monitor ships schema **3.6.0** (`ClientMonitor.samplingSchemaVersion`). Check the two agree before deploying — a codec built against an older schema silently drops fields the monitor now sends.
 
 **Installation:**
 
 ```bash
-# For encoding (client-side)
-npm install @observertc/samples-encoder
-
-# For decoding (server-side)
-npm install @observertc/samples-decoder
-
-# Both packages (if needed)
-npm install @observertc/samples-encoder @observertc/samples-decoder
+# choose one
+npm install @observertc/samples-protobuf-codec
+npm install @observertc/samples-json-codec
 ```
+
+Both packages ship CommonJS and ESM builds with type definitions.
 
 **Integration with ObserveRTC Stack:**
 These compression packages are part of the broader ObserveRTC ecosystem and are designed to work seamlessly with:
@@ -1384,7 +1784,7 @@ type ResolvedClientIssue<T = ClientIssuePayload> = RaisedClientIssue<T> & {
 
 Narrow between the two by checking for `'key' in issue` — that's the discriminant.
 
-> **Wire format**: `ClientSample.clientIssues[]` ships a stripped shape: `{ type, payload?: string (JSON-stringified), timestamp }`. The richer in-memory `id`-less, key-bearing object is a runtime concern; the server schema is unchanged.
+> **Wire format** (schema 3.5.0): `ClientSample.clientIssues[]` ships a stripped shape: `{ type, key?, payload?: Record<string, boolean | string | number>, timestamp }`. Payloads are flat records of primitives on the wire — never pre-serialised JSON strings — so nothing is stringified per issue or per event, and the server reads payload fields directly.
 
 ### Lifecycle: the events you can listen to
 
@@ -1435,7 +1835,7 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
 | `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
 | `freezed-video-track` | `freezeCount` increases | No new freezes for one tick | `'freezed-video-track'` | `FreezedVideoTrackIssuePayload` |
-| `inbound-video-playout-discrepancy` | `framesReceived - framesRendered > highSkewThreshold` | Skew drops below `lowSkewThreshold` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
+| `inbound-video-playout-discrepancy` | `(framesReceived - framesRendered) / framesReceived > highSkewRatio` | Ratio drops below `lowSkewRatio` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
 | `ice-disconnected` | An ICE transport stayed `disconnected` past `disconnectedThresholdInMs` | ICE reconnects, or the transport goes away | — | `IceDisconnectedIssuePayload` |
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
 | `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, but receiving nothing for `transportStallThresholdInMs` | Inbound traffic resumes | — | `IceTransportStalledIssuePayload` |
@@ -1445,8 +1845,9 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
 | `keyframe-storm` | Sustained PLI rate above `pliRateAlertOn` | Rate falls below `pliRateAlertOff` | `'keyframe-storm'` | `KeyframeStormIssuePayload` |
 | `video-recovery-failed` | PLIs sent, picture frozen, `keyFramesDecoded` not advancing for `recoveryFailedThresholdInMs` | A keyframe arrives or the freeze ends | `'video-recovery-failed'` | `VideoRecoveryFailedIssuePayload` |
-| `capture-bottleneck` | The capture source produced far fewer frames than configured | The source recovers | `'capture-bottleneck'` | `CaptureBottleneckIssuePayload` |
-| `encoder-bottleneck` | A healthy source outran the encoder, or the encoder was CPU-limited | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
+| `capture-bottleneck` | the capture device averaged under `captureFpsRatioThreshold` of the configured frame rate over `durationInMs` | the next average comes back at or above it | `'capture-bottleneck'` | `CaptureBottleneckIssuePayload` |
+| `decoder-bottleneck` | the decoder averaged under `decodeFpsRatioThreshold` of the frames that arrived over `durationInMs` | the next average comes back at or above it | `'decoder-bottleneck'` | `DecoderBottleneckIssuePayload` |
+| `encoder-bottleneck` | A delivering source outran the encoder for `durationInMs` continuously | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
 | `capture-track-ended` | The outbound track's device reached `ended` | — (terminal) | `'capture-track-ended'` | `CaptureTrackEndedIssuePayload` |
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
 | `stuck-decoder` | RTP bytes flowing, nothing decoding, PLIs firing, for `thresholdInMs` | Frames decode again | `'stuck-decoder'` | `StuckDecoderIssuePayload` |
@@ -1683,7 +2084,7 @@ new ClientMonitor({
 });
 ```
 
-Already running and want to flip a detector on/off without restarting the monitor? Every built-in detector exposes a `public disabled = false` field, and every layer's `detectors` registry exposes ergonomic helpers for finding and toggling them.
+Already running and want to flip a detector on/off without restarting the monitor? Every built-in detector exposes a `public disabled = false` field, and every layer's `detectors` registry exposes ergonomic helpers for finding and toggling them. Issue-raising detectors additionally expose `public includeIssueInSample = true` — flip it to `false` to keep a detector running locally (events, `activeIssues`) while excluding its issues from the samples shipped to the server; see [Which issues belong in the sample](#which-issues-belong-in-the-sample).
 
 `Detectors` (the registry attached as `monitor.detectors`, `peerConnectionMonitor.detectors`, `inboundTrackMonitor.detectors`, `outboundTrackMonitor.detectors`, `mediaPlayoutMonitor.detectors`) offers:
 
@@ -1739,7 +2140,7 @@ If you want a detector outright gone (not just silenced), call `detectors.remove
 
 ### Sample-channel behavior
 
-Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]`. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged.
+Every `addIssue` and every `raiseIssue` adds an entry to the next `ClientSample.clientIssues[]` — unless the issue was raised with `includeInSample: false` (what a detector's `includeIssueInSample = false` compiles down to), in which case neither the raise nor its resolution reaches the sample. **Re-raises do not add a new entry** — they emit `'issue-updated'` to live listeners but the sample buffer is unchanged.
 
 **The issue lifecycle reaches the sample too** (`sendResolvedIssuesToServer`, default `true`). The purpose: the server keeps an on-the-fly mirror of each client's currently *active* issues and can correlate across clients or act immediately (recreate a consumer, recommend a rejoin) instead of only ever learning that issues started. On the wire, both entries of a stateful issue carry the schema-level `key` — the identity the server opens and closes on:
 
@@ -1776,6 +2177,7 @@ monitor.on('keyframe-storm',                      (e) => { /* PLIs feeding the c
 monitor.on('video-recovery-failed',               (e) => { /* we asked for a keyframe; nothing came back */ });
 monitor.on('stuck-decoder',                       (e) => { /* RTP flowing, nothing decodes — recreate the consumer */ });
 monitor.on('capture-bottleneck',                  (e) => { /* the camera never produced the frames */ });
+monitor.on('decoder-bottleneck',                  (e) => { /* frames arrived; the decoder could not decode them */ });
 monitor.on('encoder-bottleneck',                  (e) => { /* the source did; the encoder could not keep up */ });
 monitor.on('capture-track-ended',                 (e) => { /* the device is gone */ });
 monitor.on('capture-track-muted',                 (e) => { /* the OS or another app took it */ });
@@ -2788,8 +3190,9 @@ class MonitoringDashboard {
     }
 
     setupEventListeners() {
-        this.monitor.on("score", ({ clientScore, scoreReasons }) => {
-            this.updateScoreDisplay(clientScore, scoreReasons);
+        this.monitor.on("score", ({ clientScore, currentReasons }) => {
+            // currentReasons is the AGGREGATE: every component's reasons summed
+            this.updateScoreDisplay(clientScore, currentReasons);
         });
 
         this.monitor.on("congestion", ({ availableIncomingBitrate, availableOutgoingBitrate }) => {
@@ -2980,7 +3383,7 @@ interface ClientMonitorEvents {
         durationOfCollectingStatsInMs: number;
         collectedStats: [string, RTCStats[]][];
     }) => void;
-    score: (data: { clientScore: number; scoreReasons?: Record<string, number> }) => void;
+    score: (data: { clientScore: number; currentReasons: Record<string, number> }) => void;
     issue: (issue: ClientIssue) => void;
     congestion: (data: CongestionEvent) => void;
     close: () => void;
@@ -3006,7 +3409,7 @@ interface ClientMonitorEvents {
 **A**:
 
 1. Increase sampling period
-2. Use sample compression (@observertc/samples-encoder)
+2. Use a delta codec (@observertc/samples-protobuf-codec or @observertc/samples-json-codec)
 3. Filter samples before sending
 4. Disable unnecessary detectors
 

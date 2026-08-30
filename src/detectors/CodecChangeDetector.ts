@@ -4,29 +4,22 @@ import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
 /**
- * Codec Change Detector
+ * Records which codec each track is actually using, and when that changes. An observation rather
+ * than a fault: the codec in use is the missing column in nearly every aggregate quality
+ * question — why the bad calls cluster on H264, whether AV1 is being negotiated anywhere at all,
+ * whether a hardware encoder quietly fell back to software mid-call — and none of it is
+ * answerable without a record of what was in use and when. The cost is negligible, since a codec
+ * changes once or twice in a call if it changes at all, unlike a per-tick metric.
  *
- * An observation, not a fault. It exists because the codec actually in use is
- * the missing column in nearly every aggregate quality question — "why do all
- * the bad calls use H264", "is AV1 actually being negotiated anywhere", "did the
- * hardware encoder fall back to software mid-call". None of that is answerable
- * without a record of what was in use and when.
+ * It compares `sdpFmtpLine` as well as `mimeType`, because a profile switch inside one mime type
+ * — an H264 profile-level-id change, say — is a real codec change with real consequences and
+ * would otherwise be invisible. The first codec seen is the baseline, not a change.
  *
- * The cost is negligible: a codec changes once or twice in a call, if at all, so
- * unlike a per-tick metric this is a handful of events per session.
- *
- * The implementation compares `mimeType` **and** `sdpFmtpLine`, because a
- * profile change within the same mime type (an H264 profile-level-id switch, for
- * example) is a real codec change with real consequences and would otherwise be
- * invisible.
- *
- * **Events emitted:**
- * - `codec-changed` (monitor event)
- * - `CODEC_CHANGED` (client event, when `createEvent` is set)
+ * Raises no issue. Emits `codec-changed`, plus the `CODEC_CHANGED` client event unless
+ * `createEvent` is false. Config: `codecChangeDetector`.
  */
 export class CodecChangeDetector implements Detector {
 	public readonly name = 'codec-change-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 
 	private _mimeType?: string;
@@ -60,8 +53,8 @@ export class CodecChangeDetector implements Detector {
 		this._mimeType = codec.mimeType;
 		this._fmtp = codec.sdpFmtpLine;
 
-		// first codec seen is the baseline, not a change
 		if (previousMimeType === undefined) return;
+		// sdpFmtpLine too: an H264 profile-level-id switch is a real codec change within the same mimeType
 		if (previousMimeType === codec.mimeType && previousFmtp === codec.sdpFmtpLine) return;
 
 		const clientMonitor = this.peerConnection.parent;

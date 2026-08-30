@@ -3,6 +3,7 @@ import { FreezedVideoTrackDetector } from "../../src/detectors/FreezedVideoTrack
 // Types for test mocks
 interface VideoFreezesConfig {
     disabled: boolean;
+    minConsecutiveTicks: number;
 }
 
 interface TestIssue {
@@ -18,14 +19,20 @@ interface EventHandler {
 
 interface InboundRtpStats {
     freezeCount?: number;
+    deltaTotalFreezesDuration?: number;
     isFreezed?: boolean;
     trackIdentifier?: string;
 }
 
 // Mock dependencies
 class MockClientMonitor {
+    public activeTab = true;
     public config = {
+        // These cases exercise the freeze state machine itself, so the
+        // confirmation delay is set to one tick; the shipped two-tick rule is
+        // pinned in FreezedVideoTrackRecovery.spec.ts.
         videoFreezesDetector: {
+            minConsecutiveTicks: 1,
             disabled: false,
         } as VideoFreezesConfig
     };
@@ -254,14 +261,23 @@ describe('FreezedVideoTrackDetector', () => {
             const inboundRtp1 = mockTrackMonitor.getInboundRtp();
             expect(inboundRtp1?.isFreezed).toBe(true); // New freeze detected
 
-            // Second update with freeze count of 3 (2 new freezes)
+            // Frames render again: the episode ends and the issue resolves
+            mockTrackMonitor.setInboundRtp({
+                freezeCount: 1,
+                deltaFramesRendered: 30,
+                isFreezed: true,
+                trackIdentifier: 'test-track'
+            });
+            detector.update();
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            // A fresh freeze raises a fresh issue
             const eventSpy = jest.fn();
             mockClientMonitor.on('freezed-video-track', eventSpy);
-            mockClientMonitor.clearIssues();
 
             mockTrackMonitor.setInboundRtp({
                 freezeCount: 3,
-                isFreezed: false, // Reset for test
+                isFreezed: false,
                 trackIdentifier: 'test-track'
             });
             detector.update();

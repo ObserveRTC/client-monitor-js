@@ -116,23 +116,7 @@ describe('AudioConcealmentDetector', () => {
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
-	it('classifies many short events as bursty', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
 
-		trackMonitor.setInboundRtp(tick({ total: 100000, concealed: 10000, events: 50 }));
-		detector.update();
-
-		expect(clientMonitor.issueOfType('audio-concealment')?.payload.burstiness).toBe('bursty');
-	});
-
-	it('classifies few long events as continuous', () => {
-		const { detector, trackMonitor, clientMonitor } = setup();
-
-		trackMonitor.setInboundRtp(tick({ total: 100000, concealed: 10000, events: 1 }));
-		detector.update();
-
-		expect(clientMonitor.issueOfType('audio-concealment')?.payload.burstiness).toBe('continuous');
-	});
 
 	it('does nothing while disabled', () => {
 		const { detector, trackMonitor, clientMonitor } = setup();

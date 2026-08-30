@@ -2,11 +2,13 @@ import { Detector } from "./Detector";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
+/** A snapshot of every encoding on the track, materialized only on a change. */
 export type SimulcastLayerState = {
 	/** The RID, when the application uses one. Falls back to the SSRC. */
 	rid: string;
 	ssrc: number;
 	encodingIndex?: number;
+	/** Not the encoding's `active` flag alone: the layer also has to have sent bytes in the interval. */
 	active: boolean;
 	bitrate?: number;
 	frameWidth?: number;
@@ -16,31 +18,32 @@ export type SimulcastLayerState = {
 }
 
 /**
- * Simulcast Layer Detector
+ * Reports when the set of simulcast layers an outbound video track is actually sending
+ * changes. This is an observation rather than a fault — layers are meant to come and go
+ * as bandwidth and CPU allow — but the change is otherwise completely invisible: an
+ * SFU-side "why is this participant blurry" investigation has no client-side record
+ * that the high layer stopped being produced at all.
  *
- * Reports when the set of simulcast layers actually being sent changes. This is
- * an observation, not a fault: layers are meant to come and go as bandwidth and
- * CPU allow. It is worth surfacing because today the change is completely
- * invisible — an SFU-side "why is this participant blurry" investigation
- * currently has no client-side record that the high layer stopped being
- * produced at all.
+ * A layer counts as active only when the encoding is not explicitly disabled *and* it
+ * actually sent bytes in the interval. `active: true` with no bytes is the common
+ * real-world shape of a layer the encoder has quietly given up on, so trusting the flag
+ * alone would hide exactly the transition worth reporting. Layers are named by `rid`
+ * where the application sets one and by SSRC otherwise; naming them meaningfully
+ * ("high"/"low") is the application's RID convention, not something this library can
+ * infer.
  *
- * A layer counts as active when the encoding is not explicitly disabled **and**
- * it actually sent bytes in the interval. `active: true` with no bytes is the
- * common real-world shape of a layer the encoder has quietly given up on, and
- * treating it as active would hide exactly the transition worth reporting.
+ * A track with fewer than two encodings is not simulcast and is left alone, and the
+ * first observation establishes a baseline rather than reporting a change. While the
+ * producer is paused the baseline is forgotten entirely, so resuming re-establishes it
+ * instead of reporting the pause and the resume as two layer changes.
  *
- * Layers are named by `rid` where the application sets one, falling back to the
- * SSRC. Naming them meaningfully ("high"/"low") is the application's RID
- * convention, not something this library can infer.
- *
- * **Events emitted:**
- * - `simulcast-layer-changed` (monitor event)
- * - `SIMULCAST_LAYER_CHANGED` (client event, when `createEvent` is set)
+ * Raises no issue.
+ * Monitor event: `simulcast-layer-changed`; client event `SIMULCAST_LAYER_CHANGED` when
+ * `createEvent` is left on.
+ * Config: `simulcastLayerDetector`.
  */
 export class SimulcastLayerDetector implements Detector {
 	public readonly name = 'simulcast-layer-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
 
 	private _previousActiveKeys?: string;
@@ -61,13 +64,16 @@ export class SimulcastLayerDetector implements Detector {
 		if (this.disabled) return;
 		if (this.trackMonitor.kind !== 'video') return;
 
+		if (this.trackMonitor.paused) {
+			this._previousActiveKeys = undefined;
+
+			return;
+		}
+
 		const outboundRtps = this.trackMonitor.getOutboundRtps();
 
-		// a single encoding is not simulcast
 		if (outboundRtps.length < 2) return;
 
-		// only the cheap comparison key on the steady-state tick; the full
-		// per-layer snapshot is materialized exclusively on a change
 		const activeRids: string[] = [];
 
 		for (const outboundRtp of outboundRtps) {
@@ -78,7 +84,6 @@ export class SimulcastLayerDetector implements Detector {
 
 		const activeKeys = activeRids.sort().join(',');
 
-		// first observation is the baseline, not a change
 		if (this._previousActiveKeys === undefined) {
 			this._previousActiveKeys = activeKeys;
 
@@ -119,9 +124,10 @@ export class SimulcastLayerDetector implements Detector {
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
 				trackId: this.trackMonitor.track.id,
-				activeLayerIds: activeKeys.length ? activeKeys.split(',') : [],
-				previousActiveLayerIds: from.length ? from.split(',') : [],
-				layers: layers as unknown as Record<string, unknown>[],
+				// Schema 3.5.0 payloads are flat records of primitives, hence the comma-separated ids and the stringified snapshot.
+				activeLayerIds: activeKeys,
+				previousActiveLayerIds: from,
+				layers: JSON.stringify(layers),
 			},
 		});
 	}

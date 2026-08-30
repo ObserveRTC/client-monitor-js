@@ -101,6 +101,14 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaCorruptionProbability?: number;
 	deltaFractionLost?: number;
 	deltaFramesDecoded?: number;
+	deltaQpSum?: number | undefined;
+	/**
+	 * Mean quantizer of the frames decoded in this interval — how coarsely the
+	 * picture the viewer actually saw was compressed. `undefined` when the
+	 * browser does not report `qpSum` for this codec, in which case no picture
+	 * quality judgement is made at all.
+	 */
+	avgQpPerFrame?: number | undefined;
 	deltaFramesReceived?: number;
 	deltaFramesRendered?: number;
 	deltaTime?: number;
@@ -128,6 +136,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	public deltaFramesDropped?: number;
 	public deltaKeyFramesDecoded?: number;
 	public deltaTotalDecodeTime?: number;
+	public deltaTotalFreezesDuration?: number;
 	public deltaPliCount?: number;
 	public deltaFirCount?: number;
 	public deltaNackCount?: number;
@@ -195,15 +204,21 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.receivingAudioSamples = this.deltaTotalSamplesReceived;
 		}
 		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
-			this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived) ?? 0;
-			this.bitrate = Math.max(0, this.deltaBytesReceived * 8 / (elapsedInSec));
+			this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived);
+			// a counter reset leaves the delta undefined; carrying the previous
+			// bitrate forward would describe traffic this interval did not see
+			this.bitrate = this.deltaBytesReceived === undefined
+				? undefined
+				: Math.max(0, this.deltaBytesReceived * 8 / elapsedInSec);
 		}
 		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
-			this.deltaPacketsLost = positiveDelta(stats.packetsLost, this.packetsLost) ?? 0;
+			this.deltaPacketsLost = positiveDelta(stats.packetsLost, this.packetsLost);
 		}
 		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
-			this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived) ?? 0;
-			this.packetRate = this.deltaPacketsReceived / elapsedInSec;
+			this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);
+			this.packetRate = this.deltaPacketsReceived === undefined
+				? undefined
+				: this.deltaPacketsReceived / elapsedInSec;
 		}
 
 		// ---- audio: concealment and jitter-buffer pressure ----
@@ -258,7 +273,18 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.deltaFramesRendered = positiveDelta(stats.framesRendered, this.framesRendered);
 		this.deltaFramesDropped = positiveDelta(stats.framesDropped, this.framesDropped);
 		this.deltaKeyFramesDecoded = positiveDelta(stats.keyFramesDecoded, this.keyFramesDecoded);
+		this.deltaQpSum = positiveDelta(stats.qpSum, this.qpSum);
+
+		if (this.deltaQpSum !== undefined && this.deltaFramesDecoded !== undefined && 0 < this.deltaFramesDecoded) {
+			this.avgQpPerFrame = this.deltaQpSum / this.deltaFramesDecoded;
+		} else {
+			// No frames decoded this interval, or the browser does not report
+			// qpSum: carrying the previous average forward would describe media
+			// that is no longer being shown.
+			this.avgQpPerFrame = undefined;
+		}
 		this.deltaTotalDecodeTime = positiveDelta(stats.totalDecodeTime, this.totalDecodeTime);
+		this.deltaTotalFreezesDuration = positiveDelta(stats.totalFreezesDuration, this.totalFreezesDuration);
 		this.deltaPliCount = positiveDelta(stats.pliCount, this.pliCount);
 		this.deltaFirCount = positiveDelta(stats.firCount, this.firCount);
 		this.deltaNackCount = positiveDelta(stats.nackCount, this.nackCount);

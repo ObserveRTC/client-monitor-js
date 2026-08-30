@@ -19,15 +19,54 @@ import {
     KeyframeStormIssuePayload,
     VideoRecoveryFailedIssuePayload,
 } from "./detectors/FreezedVideoTrackDetector";
-import {
-    CaptureBottleneckIssuePayload,
-    EncoderBottleneckIssuePayload,
-} from "./detectors/SourceEncoderBottleneckDetector";
+import { CaptureBottleneckIssuePayload } from "./detectors/OutboundFrameSupplyDetector";
+import { EncoderBottleneckIssuePayload } from "./detectors/EncoderPerformanceDetector";
+import { DecoderBottleneckIssuePayload } from "./detectors/InboundFrameSupplyDetector";
 import {
     CaptureTrackEndedIssuePayload,
     SilentAudioSourceIssuePayload,
 } from "./detectors/CaptureFailureDetector";
 import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
+import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
+import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
+
+/**
+ * The payload both frame-supply detectors raise. They ask the same question of
+ * different things — is whatever supplies this track's frames delivering what it
+ * should? — so `capture-bottleneck` and `decoder-bottleneck` report it the same
+ * way, and it is defined here rather than in either detector.
+ */
+export type FrameSupplyIssuePayload = {
+	peerConnectionId: string;
+	trackId: string;
+	/**
+	 * Frames per second whatever supplies this track's frames actually
+	 * delivered, averaged over the window: the capture device on an outbound
+	 * track, the decoder on an inbound one.
+	 */
+	sourceFps?: number;
+	/**
+	 * What it should have delivered over the same window:
+	 * `getSettings().frameRate` on an outbound track, the rate frames actually
+	 * arrived at on an inbound one.
+	 */
+	expectedFps?: number;
+	sourceWidth?: number;
+	sourceHeight?: number;
+	/** How long `sourceFps` and `expectedFps` were averaged over. */
+	averagedOverInMs?: number;
+	/**
+	 * The track's own view of itself. On a camera degrading in place both read
+	 * healthy — `"live"` and `false` — while frames go missing, and that
+	 * combination is the signature: an unplugged or muted device reports
+	 * `ended`/`muted` instead, so a reader seeing "live, unmuted, no frames"
+	 * knows the fault is upstream.
+	 */
+	trackReadyState?: string;
+	trackMuted?: boolean;
+	durationInMs?: number;
+}
 
 /**
  * Discriminated union of all issue payloads produced by the detectors that
@@ -72,10 +111,14 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
     | RaisedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
     | RaisedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | RaisedClientIssue<DecoderBottleneckIssuePayload>     & { type: 'decoder-bottleneck' }
     | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | RaisedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
     | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
-    | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
+    | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
+    | RaisedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
+    | RaisedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' }
+    | RaisedClientIssue<MediaPipelineStalledIssuePayload>       & { type: 'media-pipeline-stalled' };
 
 /**
  * Discriminated union of all resolved-issue payloads produced by the
@@ -102,10 +145,14 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<KeyframeStormIssuePayload>         & { type: 'keyframe-storm' }
     | ResolvedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
     | ResolvedClientIssue<CaptureBottleneckIssuePayload>     & { type: 'capture-bottleneck' }
+    | ResolvedClientIssue<DecoderBottleneckIssuePayload>     & { type: 'decoder-bottleneck' }
     | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | ResolvedClientIssue<CaptureTrackEndedIssuePayload>     & { type: 'capture-track-ended' }
     | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
-    | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' };
+    | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
+    | ResolvedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
+    | ResolvedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' }
+    | ResolvedClientIssue<MediaPipelineStalledIssuePayload>       & { type: 'media-pipeline-stalled' };
 
 /** Literal union of every issue type produced by the built-in detectors. */
 export type ClientMonitorIssueType = ClientMonitorIssue['type'];
@@ -136,10 +183,14 @@ export function isClientMonitorIssue(
         case 'keyframe-storm':
         case 'video-recovery-failed':
         case 'capture-bottleneck':
+        case 'decoder-bottleneck':
         case 'encoder-bottleneck':
         case 'capture-track-ended':
         case 'silent-audio-source':
         case 'stuck-decoder':
+        case 'blocked-transport':
+        case 'no-available-ice-candidate':
+        case 'media-pipeline-stalled':
             return true;
         default:
             return false;

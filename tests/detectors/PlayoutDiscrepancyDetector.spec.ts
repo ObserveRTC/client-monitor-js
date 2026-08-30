@@ -3,8 +3,9 @@ import { PlayoutDiscrepancyDetector } from "../../src/detectors/PlayoutDiscrepan
 // Types for test mocks
 interface PlayoutDiscrepancyConfig {
     disabled: boolean;
-    highSkewThreshold: number;
-    lowSkewThreshold: number;
+    highSkewRatio: number;
+    lowSkewRatio: number;
+    minFramesReceived: number;
 }
 
 interface TestIssue {
@@ -26,11 +27,13 @@ interface InboundRtpStats {
 
 // Mock dependencies
 class MockClientMonitor {
+    public activeTab = true;
     public config = {
         playoutDiscrepancyDetector: {
             disabled: false,
-            highSkewThreshold: 10,
-            lowSkewThreshold: 3
+            highSkewRatio: 0.25,
+            lowSkewRatio: 0.1,
+            minFramesReceived: 10
         } as PlayoutDiscrepancyConfig
     };
     
@@ -197,28 +200,44 @@ describe('PlayoutDiscrepancyDetector', () => {
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
-        it('should return early if missing ewmaFps', () => {
+        it('still detects when ewmaFps is missing — it is payload, not evidence', () => {
             mockTrackMonitor.setInboundRtp({
                 deltaFramesReceived: 20,
                 deltaFramesRendered: 5
             });
 
             detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            expect(mockClientMonitor.getIssues()[0]?.payload?.ewmaFps).toBeUndefined();
+        });
+
+        it('detects the maximal case, where nothing rendered at all', () => {
+            // `deltaFramesRendered: 0` is everything arriving and nothing
+            // reaching the screen — a truthiness guard used to skip it
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 30,
+                deltaFramesRendered: 0,
+                ewmaFps: 30
+            });
+
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
     });
 
     describe('update() - Detection logic', () => {
         beforeEach(() => {
             detector.disabled = false;
-            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 10;
-            mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewThreshold = 3;
+            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewRatio = 0.25;
+            mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewRatio = 0.1;
         });
 
         it('should not trigger when frame skew is below high threshold', () => {
             mockTrackMonitor.setInboundRtp({
-                deltaFramesReceived: 15,
-                deltaFramesRendered: 10, // Skew = 5, below threshold of 10
+                deltaFramesReceived: 20,
+                deltaFramesRendered: 17, // skew 3 of 20 = 15%, under the 25% bar
                 ewmaFps: 30
             });
 
@@ -275,8 +294,8 @@ describe('PlayoutDiscrepancyDetector', () => {
     describe('update() - Hysteresis behavior', () => {
         beforeEach(() => {
             detector.disabled = false;
-            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 10;
-            mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewThreshold = 3;
+            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewRatio = 0.25;
+            mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewRatio = 0.1;
         });
 
         it('should stay active when frame skew is between thresholds', () => {
@@ -316,8 +335,8 @@ describe('PlayoutDiscrepancyDetector', () => {
 
             // Now provide skew below low threshold
             mockTrackMonitor.setInboundRtp({
-                deltaFramesReceived: 12,
-                deltaFramesRendered: 10, // Skew = 2, below low threshold of 3
+                deltaFramesReceived: 20,
+                deltaFramesRendered: 19, // skew 1 of 20 = 5%, under the 10% bar
                 ewmaFps: 30
             });
             detector.update();
@@ -368,8 +387,8 @@ describe('PlayoutDiscrepancyDetector', () => {
             jest.advanceTimersByTime(3000);
 
             mockTrackMonitor.setInboundRtp({
-                deltaFramesReceived: 12,
-                deltaFramesRendered: 10, // Skew = 2, below low threshold
+                deltaFramesReceived: 20,
+                deltaFramesRendered: 19, // skew 1 of 20 = 5%, under the 10% bar
                 ewmaFps: 30
             });
             detector.update();
@@ -387,7 +406,7 @@ describe('PlayoutDiscrepancyDetector', () => {
     describe('update() - Issue creation', () => {
         beforeEach(() => {
             detector.disabled = false;
-            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 10;
+            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewRatio = 0.25;
         });
 
         it('should create issue with correct payload', () => {
@@ -435,13 +454,13 @@ describe('PlayoutDiscrepancyDetector', () => {
         });
 
         it('should handle custom thresholds', () => {
-            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewThreshold = 20;
-            mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewThreshold = 5;
+            mockClientMonitor.config.playoutDiscrepancyDetector.highSkewRatio = 0.7;
+            mockClientMonitor.config.playoutDiscrepancyDetector.lowSkewRatio = 0.2;
 
-            // Should not trigger at skew 15 (below new high threshold of 20)
+            // skew 15 of 25 = 60%, under the raised 70% bar
             mockTrackMonitor.setInboundRtp({
                 deltaFramesReceived: 25,
-                deltaFramesRendered: 10, // Skew = 15
+                deltaFramesRendered: 10,
                 ewmaFps: 30
             });
             detector.update();

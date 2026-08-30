@@ -8,6 +8,7 @@ interface IncomingDecodedFramesRatioThresholds {
     alertOn: number;
     alertOff: number;
     minReceivedFrames: number;
+    frameArrivalBurstFactor?: number;
 }
 
 interface DurationOfCollectingStatsThreshold {
@@ -37,6 +38,7 @@ interface MockOutboundRtp {
 
 interface MockInboundRtp {
     kind: 'audio' | 'video';
+    ssrc?: number;
     deltaFramesReceived?: number;
     deltaFramesDecoded?: number;
 }
@@ -57,6 +59,7 @@ class MockClientMonitor {
     };
 
     public cpuPerformanceAlertOn = false;
+    public activeTab = true;
     public durationOfCollectingStatsInMs = 0;
     public outboundRtps: MockOutboundRtp[] = [];
     public inboundRtps: MockInboundRtp[] = [];
@@ -121,6 +124,10 @@ function audioInbound(received: number, decoded: number): MockInboundRtp {
     return { kind: 'audio', deltaFramesReceived: received, deltaFramesDecoded: decoded };
 }
 
+function videoInboundWithSsrc(ssrc: number, received: number, decoded: number): MockInboundRtp {
+    return { kind: 'video', ssrc, deltaFramesReceived: received, deltaFramesDecoded: decoded };
+}
+
 describe('CpuPerformanceDetector', () => {
     let detector: CpuPerformanceDetector;
     let monitor: MockClientMonitor;
@@ -159,6 +166,47 @@ describe('CpuPerformanceDetector', () => {
             expect(monitor.cpuPerformanceAlertOn).toBe(false);
             expect(eventSpy).not.toHaveBeenCalled();
             expect(monitor.getIssues()).toHaveLength(0);
+        });
+    });
+
+    describe('background tab', () => {
+        it('does not alert while the tab is in the background, even with a clear CPU signal', () => {
+            const eventSpy = jest.fn();
+            monitor.on('cpulimitation', eventSpy);
+            monitor.activeTab = false;
+
+            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(eventSpy).not.toHaveBeenCalled();
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('resolves an active alert when the tab goes to the background', () => {
+            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(monitor.getIssues()).toHaveLength(1);
+
+            monitor.activeTab = false;
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('alerts again once the tab is active and the CPU signal persists', () => {
+            monitor.activeTab = false;
+            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+
+            monitor.activeTab = true;
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(monitor.getIssues()).toHaveLength(1);
         });
     });
 
@@ -292,6 +340,127 @@ describe('CpuPerformanceDetector', () => {
                 minReceivedFrames: undefined,
             };
             monitor.inboundRtps = [videoInbound(4, 1)]; // 0.25, would be skipped if min was 10
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+        });
+    });
+
+    describe('frame-arrival burst guard (bursty frames regression)', () => {
+        beforeEach(() => {
+            monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = {
+                alertOn: 0.7,
+                alertOff: 0.85,
+                minReceivedFrames: 10,
+                frameArrivalBurstFactor: 2.5,
+            };
+        });
+
+        it('skips the ratio on a track\'s first interval (no arrival baseline yet)', () => {
+            // A fresh consumer's first interval routinely carries a keyframe
+            // burst; 100/50 would alert if judged.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 50)];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('does not alert when a one-interval arrival burst outpaces the decoder', () => {
+            const eventSpy = jest.fn();
+            monitor.on('cpulimitation', eventSpy);
+
+            // Steady ~30 frames/interval baseline, decoder keeping up...
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
+            detector.update();
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
+            detector.update();
+
+            // ...then a layer-switch style flush: 100 frames arrive at once
+            // (100 > 2.5 * 30), the decoder trails for exactly this interval.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 45)];
+            detector.update();
+
+            // ...and the very next interval is ordinary again.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(eventSpy).not.toHaveBeenCalled();
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('still alerts on decoder starvation at an ordinary arrival rate', () => {
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
+            detector.update(); // establishes the baseline (first sight is skipped)
+
+            // Same arrival rate, decoder falling behind: 12/30 = 0.4 <= 0.7.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 12)];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(monitor.getIssues()).toHaveLength(1);
+        });
+
+        it('judges a sustained higher arrival rate again once the baseline adapts', () => {
+            // Baseline at 30 frames/interval.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
+            detector.update();
+
+            // First 100-frame interval is a burst (100 > 2.5 * 30) -> skipped,
+            // but it pulls the EWMA baseline up (30 -> 51).
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 40)];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+
+            // Second 100-frame interval is within 2.5 * 51 -> judged, and the
+            // decoder is genuinely starved (0.4 <= 0.7).
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 40)];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+        });
+
+        it('tracks arrival baselines per ssrc: a bursting track does not shadow a starved one', () => {
+            monitor.inboundRtps = [
+                videoInboundWithSsrc(1, 30, 30),
+                videoInboundWithSsrc(2, 30, 30),
+            ];
+            detector.update();
+
+            monitor.inboundRtps = [
+                videoInboundWithSsrc(1, 100, 50), // burst -> skipped
+                videoInboundWithSsrc(2, 30, 9),   // ordinary arrival, 0.3 <= 0.7 -> alert
+            ];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+        });
+
+        it('a burst interval does not keep an open alert alive by itself', () => {
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
+            detector.update();
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 12)];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+
+            // The next interval is a burst; its (low) ratio is skipped rather
+            // than judged, and with no other signal active the alert resolves.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 40)];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(monitor.getIssues()).toHaveLength(0);
+        });
+
+        it('judges every interval when frameArrivalBurstFactor is not configured', () => {
+            monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = {
+                alertOn: 0.7,
+                alertOff: 0.85,
+                minReceivedFrames: 10,
+            };
+
+            // Even a first-sight interval alerts without the guard.
+            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 50)];
             detector.update();
 
             expect(monitor.cpuPerformanceAlertOn).toBe(true);

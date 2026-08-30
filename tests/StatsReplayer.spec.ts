@@ -15,7 +15,7 @@ function createReplayMonitor() {
 	});
 }
 
-/** One recorded tick of a single-PC session with one inbound video track. */
+/** One captured tick of a single-PC session with one inbound video track. */
 function entry(timestamp: number, rtp: Record<string, unknown>): ReplayEntry {
 	return {
 		timestamp,
@@ -36,7 +36,7 @@ function entry(timestamp: number, rtp: Record<string, unknown>): ReplayEntry {
 }
 
 describe('StatsReplayer', () => {
-	it('rebuilds monitors and derived fields from recorded JSONL lines', async () => {
+	it('rebuilds monitors and derived fields from captured JSONL lines', async () => {
 		const monitor = createReplayMonitor();
 		const replayer = new StatsReplayer(monitor);
 
@@ -54,13 +54,13 @@ describe('StatsReplayer', () => {
 		// 250kB over 2s = 1 Mbps — the same derivation a live run produces
 		expect(inboundRtp?.bitrate).toBeCloseTo(1_000_000);
 		expect(inboundRtp?.deltaFramesDecoded).toBe(60);
-		// the recorded track became a real InboundTrackMonitor
+		// the captured track became a real InboundTrackMonitor
 		expect(pc?.mappedInboundTracks.has('track-1')).toBe(true);
 
 		monitor.close();
 	});
 
-	it('fires detectors on the recorded fingerprint, stamped with recorded time', async () => {
+	it('fires detectors on the captured fingerprint, stamped with captured time', async () => {
 		const monitor = createReplayMonitor();
 		const replayer = new StatsReplayer(monitor);
 		const raised: { type: string, at: number }[] = [];
@@ -80,7 +80,7 @@ describe('StatsReplayer', () => {
 		const stuck = raised.find((issue) => issue.type === 'stuck-decoder');
 
 		expect(stuck).toBeDefined();
-		// virtual time: the verdict is stamped with the RECORDED clock, even
+		// virtual time: the verdict is stamped with the CAPTURED clock, even
 		// though the replay itself took milliseconds
 		expect(stuck?.at).toBe(6000);
 

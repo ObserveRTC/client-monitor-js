@@ -1,28 +1,46 @@
 import { Detector } from "./Detector";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
+import type { InboundRtpMonitor } from "../monitors/InboundRtpMonitor";
+import { ClientIssuePayload } from "../ClientMonitorEvents";
 
 export type FreezedVideoTrackIssuePayload = {
 	trackId?: string;
+	/** Consecutive intervals the track was frozen when the issue was raised. */
+	frozenTicks?: number;
+	/**
+	 * Time those intervals actually spanned, from the stats timestamps rather
+	 * than the nominal collecting period — the window the freeze time below is
+	 * a share of.
+	 */
+	observedSpanInMs?: number;
+	/**
+	 * Freeze time accrued over that span. `undefined` where the browser reports
+	 * no `totalFreezesDuration`, which is the only way to know how much of the
+	 * span was frozen rather than merely that a freeze happened in it.
+	 */
+	freezeTimeInMs?: number;
 	durationInMs?: number;
 }
 
+/** `pliRate` is PLIs sent per second, averaged over `windowInMs` — the rolling window, not the episode. */
 export type KeyframeStormIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
-	/** PLIs sent per second, averaged over the evaluation window. */
 	pliRate: number;
-	firRate?: number;
-	keyFrameRate?: number;
 	windowInMs: number;
 	durationInMs?: number;
 }
 
+/**
+ * `pliCountSinceStalled` is how many keyframe requests went out since the current unrecovered
+ * stretch began, and `stalledForInMs` how long the picture has been frozen with `keyFramesDecoded`
+ * not advancing — the two together are the finding: repair was asked for repeatedly and nothing came
+ * back.
+ */
 export type VideoRecoveryFailedIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
-	/** PLIs sent since the recovery attempt started. */
 	pliCountSinceStalled: number;
-	/** How long the stream has been frozen with keyframes not advancing. */
 	stalledForInMs: number;
 	freezeCount?: number;
 	durationInMs?: number;
@@ -31,40 +49,51 @@ export type VideoRecoveryFailedIssuePayload = {
 type WindowEntry = {
 	timestamp: number;
 	pliCount: number;
-	firCount: number;
-	keyFramesDecoded: number;
 };
 
 /**
- * Frozen Video Track Detector
+ * Owns the freeze and repair domain of an inbound video track: it derives the track's freeze state
+ * and watches the repair loop around it — PLIs out, keyframes back in. One detector on purpose,
+ * because the repair verdicts are judgements *about* the freeze state, so splitting them apart would
+ * force one detector to consume another's side effect and to die silently when that one is disabled.
  *
- * Owns the freeze / repair domain of an inbound video track: it derives the
- * track's freeze state and watches the repair loop — PLI/FIR out, keyframes
- * back in. One detector on purpose: the repair verdicts are judgements *about*
- * the freeze state, so splitting them apart forces one detector to consume
- * another's side effect (and to silently die when that other one is disabled).
+ * Freeze state is always derived and published on `inboundRtp.isFreezed`. A freeze starts when
+ * `freezeCount` advances and persists until frames are rendered again: `freezeCount` counts freeze
+ * *starts*, so its delta alone would declare a persistent freeze over after one tick, which is why
+ * staying frozen additionally requires `deltaFramesRendered === 0`.
  *
- * **Freeze state** (always derived, kept on `inboundRtp.isFreezed`): a freeze
- * starts when `freezeCount` advances and persists until frames are rendered
- * again — `freezeCount` counts freeze *starts*, so the raw delta alone would
- * mark a persistent freeze as over after one tick.
+ * Three findings come out of it. `freezed-video-track` tracks the episode itself, resolved with its
+ * duration when rendering resumes. `keyframe-storm` reports a sustained PLI rate over a rolling
+ * window; it is worth its own issue because the loop is self-reinforcing — keyframes are several
+ * times the size of delta frames, so a burst of them worsens exactly the congestion that provoked
+ * the PLIs — and the rate is only trusted once half a window of history exists, while the resolve
+ * path deliberately has no such floor. `video-recovery-failed` is the valuable one for debugging an
+ * SFU: PLIs going out repeatedly, the picture still frozen, and `keyFramesDecoded` *not* advancing —
+ * the repair request left the client and nothing came back, which points at forwarding rather than
+ * at the first-hop network. Its clock only starts once a keyframe has actually been asked for, since
+ * a freeze with no PLI is a different problem.
  *
- * **Issues raised:**
- * - `freezed-video-track` (gated by the `videoFreezesDetector` config) —
- *   raised while the track is frozen, resolved with the episode duration when
- *   rendering resumes.
- * - `keyframe-storm` (gated by `videoRecoveryDetector`) — a sustained PLI
- *   rate. Self-reinforcing: keyframes are several times the size of delta
- *   frames, so a burst of them worsens exactly the congestion that provoked
- *   the PLIs.
- * - `video-recovery-failed` (gated by `videoRecoveryDetector`) — PLIs going
- *   out repeatedly, the picture still frozen, and `keyFramesDecoded` *not*
- *   advancing. The valuable one for debugging an SFU: the repair request left
- *   the client and nothing came back, which points at forwarding rather than
- *   at the first-hop network.
+ * The issue waits for `minConsecutiveTicks` intervals of freeze before it is raised. The counters
+ * are cumulative, so a single interval can say a freeze happened but never how long it lasted —
+ * and `freezeCount` advances on any inter-frame gap past roughly `max(3 * average, average +
+ * 150ms)`, which is a sub-second hiccup nobody notices. Surviving into a second observation is
+ * what separates that from a freeze worth reporting: either the counter advanced again, or
+ * nothing has rendered since. The freeze *state* is still derived on the first tick, so the score
+ * reflects it either way.
  *
- * **Events emitted:** `freezed-video-track`, `keyframe-storm`,
- * `video-recovery-failed`.
+ * The payload carries what the local rule cannot: the freeze time accrued and the span it accrued
+ * over, taken from the stats timestamps rather than the nominal collecting period, so a server can
+ * judge severity from the frozen share of a measured window.
+ *
+ * A backgrounded tab, a paused consumer and a paused remote sender all stand the detector down, and
+ * the stand-down swallows the monotonic counter rather than skipping the tick, so the quiet period
+ * is not replayed as freezes on the way back — a throttled tab does not render, and its freeze
+ * accounting is the browser's doing, not a media problem.
+ *
+ * Issues raised: `freezed-video-track` (gated by `videoFreezesDetector`), `keyframe-storm` and
+ * `video-recovery-failed` (both gated by `videoRecoveryDetector`). Monitor events:
+ * `freezed-video-track`, `keyframe-storm`, `video-recovery-failed`. Config: `videoFreezesDetector`
+ * and `videoRecoveryDetector`.
  */
 export class FreezedVideoTrackDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'freezed-video-track';
@@ -72,32 +101,26 @@ export class FreezedVideoTrackDetector implements Detector {
 	public static readonly RECOVERY_FAILED_ISSUE_TYPE = 'video-recovery-failed';
 
 	public readonly name = 'freezed-video-track-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
-
-	/** Hard cap protecting against pathologically fast update rates. */
-	private static readonly MAX_WINDOW_ENTRIES = 128;
+	public includeIssueInSample = true;
 
 	private readonly issueKey: string;
 	private readonly _stormIssueKey: string;
 	private readonly _recoveryIssueKey: string;
 
 	private _lastFreezeCount = 0;
+	private _frozenTicks = 0;
+	private _frozenSpanInMs = 0;
+	private _frozenFreezeTimeInMs?: number;
 	private _startedFreezeAt?: number;
 
 	private readonly _window: WindowEntry[] = [];
-	// running sums over _window, maintained on push/evict
 	private _sumPlis = 0;
-	private _sumFirs = 0;
-	private _sumKeyFrames = 0;
 
-	private _stormOn = false;
 	private _stormStartedAt?: number;
 
-	private _recoveryFailedOn = false;
 	private _recoveryFailedStartedAt?: number;
 
-	/** When the current "frozen and no keyframe" stretch began. */
 	private _stalledSince?: number;
 	private _pliCountSinceStalled = 0;
 
@@ -113,12 +136,37 @@ export class FreezedVideoTrackDetector implements Detector {
 		return this.trackMonitor.getPeerConnection();
 	}
 
+	/** Swallows the monotonic counter rather than skipping the tick, so the stand-down period is not replayed as freezes on the way back. */
+	private _standDown(inboundRtp: InboundRtpMonitor, comment: string): void {
+		this._lastFreezeCount = inboundRtp.freezeCount ?? 0;
+		this._frozenTicks = 0;
+		this._frozenSpanInMs = 0;
+		this._frozenFreezeTimeInMs = undefined;
+
+		if (!inboundRtp.isFreezed) return;
+
+		inboundRtp.isFreezed = false;
+		this._resolve(this.issueKey, comment, this._startedFreezeAt);
+		this._startedFreezeAt = undefined;
+	}
+
 	public update() {
 		if (this.disabled) return;
 
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		if (!inboundRtp) return;
+
+		if (!this.peerConnection.parent.activeTab) {
+			return this._standDown(inboundRtp, 'tab in background');
+		}
+
+		if (this.trackMonitor.paused) {
+			return this._standDown(inboundRtp, 'consumer paused');
+		}
+		if (this.trackMonitor.remoteOutboundTrackPaused) {
+			return this._standDown(inboundRtp, 'remote track paused');
+		}
 
 		const config = this.peerConnection.parent.config;
 		const wasFrozen = inboundRtp.isFreezed === true;
@@ -127,14 +175,39 @@ export class FreezedVideoTrackDetector implements Detector {
 
 		this._lastFreezeCount = freezeCount;
 
-		// frozen until frames render again — freezeCount counts freeze *starts*,
-		// so its delta alone would end a persistent freeze after one tick
+		// `freezeCount` counts freeze *starts*, so its delta alone would end a persistent freeze after one
+		// tick; staying frozen needs `deltaFramesRendered === 0` as well.
 		const frozen = 0 < newFreezes || (wasFrozen && inboundRtp.deltaFramesRendered === 0);
 
 		inboundRtp.isFreezed = frozen;
 
+		if (frozen) {
+			this._frozenTicks += 1;
+			// `deltaTime` is the stats timestamps differenced, not the nominal
+			// collecting period — a late collection would otherwise understate
+			// how long the track was actually frozen.
+			this._frozenSpanInMs += inboundRtp.deltaTime ?? 0;
+
+			if (inboundRtp.deltaTotalFreezesDuration !== undefined) {
+				this._frozenFreezeTimeInMs = (this._frozenFreezeTimeInMs ?? 0) + inboundRtp.deltaTotalFreezesDuration * 1000;
+			}
+		} else {
+			this._frozenTicks = 0;
+			this._frozenSpanInMs = 0;
+			this._frozenFreezeTimeInMs = undefined;
+		}
+
 		if (config.videoFreezesDetector) {
-			this._checkFreeze(wasFrozen, frozen, inboundRtp.trackIdentifier);
+			// The counters are cumulative, so one interval cannot say how long a
+			// freeze lasted — only that at least one happened. Surviving into a
+			// second consecutive observation can: either the counter advanced
+			// again, or nothing has rendered since. Both mean more than the
+			// single sub-second hiccup that `freezeCount` increments on
+			// routinely. `isFreezed` is set regardless, so the score still
+			// reflects the first tick.
+			const confirmed = config.videoFreezesDetector.minConsecutiveTicks <= this._frozenTicks;
+
+			this._checkFreeze(frozen, confirmed, inboundRtp.trackIdentifier);
 		}
 
 		const recoveryConfig = config.videoRecoveryDetector;
@@ -151,8 +224,13 @@ export class FreezedVideoTrackDetector implements Detector {
 		}
 	}
 
-	private _checkFreeze(wasFrozen: boolean, frozen: boolean, trackId?: string) {
-		if (!wasFrozen && frozen) {
+	private _checkFreeze(frozen: boolean, confirmed: boolean, trackId: string | undefined) {
+		// The issue's own edge, not the state's: `isFreezed` is set on the first
+		// frozen tick while the issue waits for confirmation, so reading the
+		// state here would miss the raise entirely.
+		const raised = this._startedFreezeAt !== undefined;
+
+		if (!raised && frozen && confirmed) {
 			const clientMonitor = this.peerConnection.parent;
 
 			clientMonitor.emit('freezed-video-track', {
@@ -163,10 +241,18 @@ export class FreezedVideoTrackDetector implements Detector {
 			this._startedFreezeAt = Date.now();
 
 			clientMonitor.raiseIssue<FreezedVideoTrackIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 				type: FreezedVideoTrackDetector.ISSUE_TYPE,
-				payload: { trackId },
+				payload: {
+					trackId,
+					frozenTicks: this._frozenTicks,
+					observedSpanInMs: Math.round(this._frozenSpanInMs),
+					freezeTimeInMs: this._frozenFreezeTimeInMs === undefined
+						? undefined
+						: Math.round(this._frozenFreezeTimeInMs),
+				},
 			});
-		} else if (wasFrozen && !frozen) {
+		} else if (raised && !frozen) {
 			this._resolve(this.issueKey, 'video freeze ended', this._startedFreezeAt);
 			this._startedFreezeAt = undefined;
 		}
@@ -178,22 +264,16 @@ export class FreezedVideoTrackDetector implements Detector {
 	) {
 		const now = Date.now();
 		const pliCount = inboundRtp.deltaPliCount ?? 0;
-		const firCount = inboundRtp.deltaFirCount ?? 0;
-		const keyFramesDecoded = inboundRtp.deltaKeyFramesDecoded ?? 0;
 
-		this._window.push({ timestamp: now, pliCount, firCount, keyFramesDecoded });
+		this._window.push({ timestamp: now, pliCount });
 		this._sumPlis += pliCount;
-		this._sumFirs += firCount;
-		this._sumKeyFrames += keyFramesDecoded;
 
 		for (
 			let oldest = this._window[0];
-			oldest && (oldest.timestamp < now - config.windowInMs || FreezedVideoTrackDetector.MAX_WINDOW_ENTRIES < this._window.length);
+			oldest && oldest.timestamp < now - config.windowInMs;
 			oldest = this._window[0]
 		) {
 			this._sumPlis -= oldest.pliCount;
-			this._sumFirs -= oldest.firCount;
-			this._sumKeyFrames -= oldest.keyFramesDecoded;
 			this._window.shift();
 		}
 
@@ -208,12 +288,14 @@ export class FreezedVideoTrackDetector implements Detector {
 
 		if (!oldestEntry) return;
 
-		const spanInSec = Math.max(1000, now - oldestEntry.timestamp) / 1000;
+		const spanInSec = (now - oldestEntry.timestamp) / 1000;
+
+		if (spanInSec <= 0) return;
+
 		const pliRate = this._sumPlis / spanInSec;
 
-		if (this._stormOn) {
+		if (this._stormStartedAt !== undefined) {
 			if (pliRate < config.pliRateAlertOff) {
-				this._stormOn = false;
 				this._resolve(this._stormIssueKey, 'keyframe storm subsided', this._stormStartedAt);
 				this._stormStartedAt = undefined;
 			}
@@ -222,10 +304,9 @@ export class FreezedVideoTrackDetector implements Detector {
 		}
 
 		if (pliRate <= config.pliRateAlertOn) return;
-		// not enough of the window has elapsed to trust the rate
+		// half a window of history before the rate is trusted; the resolve path deliberately has no such floor.
 		if (now - oldestEntry.timestamp < config.windowInMs / 2) return;
 
-		this._stormOn = true;
 		this._stormStartedAt = now;
 
 		const clientMonitor = this.peerConnection.parent;
@@ -237,13 +318,12 @@ export class FreezedVideoTrackDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<KeyframeStormIssuePayload>(this._stormIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: FreezedVideoTrackDetector.KEYFRAME_STORM_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
 				trackId: this.trackMonitor.track.id,
 				pliRate,
-				firRate: this._sumFirs / spanInSec,
-				keyFrameRate: this._sumKeyFrames / spanInSec,
 				windowInMs: config.windowInMs,
 			},
 		});
@@ -256,13 +336,11 @@ export class FreezedVideoTrackDetector implements Detector {
 		deltaKeyFrames: number,
 		freezeCount?: number,
 	) {
-		// a keyframe arrived, or the picture is moving again: the repair worked
 		if (!frozen || 0 < deltaKeyFrames) {
 			this._stalledSince = undefined;
 			this._pliCountSinceStalled = 0;
 
-			if (this._recoveryFailedOn) {
-				this._recoveryFailedOn = false;
+			if (this._recoveryFailedStartedAt !== undefined) {
 				this._resolve(this._recoveryIssueKey, 'video recovered', this._recoveryFailedStartedAt);
 				this._recoveryFailedStartedAt = undefined;
 			}
@@ -270,8 +348,7 @@ export class FreezedVideoTrackDetector implements Detector {
 			return;
 		}
 
-		// a freeze with no PLI sent is a different problem — only start the
-		// clock once we have actually asked for a keyframe
+		// The clock only starts once a keyframe has actually been asked for; a freeze with no PLI is a different problem.
 		if (deltaPli < 1 && this._stalledSince === undefined) return;
 
 		const now = Date.now();
@@ -279,14 +356,13 @@ export class FreezedVideoTrackDetector implements Detector {
 		this._stalledSince ??= now;
 		this._pliCountSinceStalled += deltaPli;
 
-		if (this._recoveryFailedOn) return;
+		if (this._recoveryFailedStartedAt !== undefined) return;
 
 		const stalledForInMs = now - this._stalledSince;
 
 		if (stalledForInMs < config.recoveryFailedThresholdInMs) return;
 		if (this._pliCountSinceStalled < config.recoveryFailedMinPliCount) return;
 
-		this._recoveryFailedOn = true;
 		this._recoveryFailedStartedAt = now;
 
 		const clientMonitor = this.peerConnection.parent;
@@ -299,6 +375,7 @@ export class FreezedVideoTrackDetector implements Detector {
 		});
 
 		clientMonitor.raiseIssue<VideoRecoveryFailedIssuePayload>(this._recoveryIssueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: FreezedVideoTrackDetector.RECOVERY_FAILED_ISSUE_TYPE,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
@@ -313,11 +390,11 @@ export class FreezedVideoTrackDetector implements Detector {
 	private _resolve(issueKey: string, comment: string, startedAt?: number) {
 		const clientMonitor = this.peerConnection.parent;
 		const issue = clientMonitor.activeIssues.get(issueKey);
-		let payload: Record<string, unknown> | undefined;
+		let payload: ClientIssuePayload | undefined;
 
 		if (issue) {
 			payload = {
-				...(issue.payload as Record<string, unknown>),
+				...issue.payload,
 				durationInMs: startedAt ? Date.now() - startedAt : undefined,
 			};
 		}

@@ -3,82 +3,46 @@ import { ClientEventTypes } from "../schema/ClientEventTypes";
 import { Detector } from "./Detector";
 
 /**
- * Synthesized Samples Detector
- * 
- * Detects when audio playout contains synthesized (artificially generated) samples.
- * Synthesized samples are typically inserted by the audio subsystem when there's
- * insufficient audio data due to network issues, jitter, or packet loss, helping
- * maintain continuous audio playback.
- * 
- * **Detection Logic:**
- * - Monitors `deltaSynthesizedSamplesDuration` from media playout statistics
- * - Triggers when synthesized sample duration exceeds configured minimum threshold
- * - Indicates potential audio quality degradation due to missing audio data
- * 
- * **Configuration Options:**
- * - `disabled`: Boolean to enable/disable the detector
- * - `minSynthesizedSamplesDuration`: Minimum duration threshold to trigger detection
- * 
- * **Events Emitted:**
- * - `synthesized-audio`: Emitted when synthesized samples exceed threshold
- * 
- * **Issues Created:**
- * - Type: `synthesized-audio`
- * - Payload: `{ deltaSynthesizedSamplesDuration }`
- * 
- * @example
- * ```typescript
- * // Configuration
- * const config = {
- *   syntheticSamplesDetector: {
- *     disabled: false,
- *     minSynthesizedSamplesDuration: 100 // milliseconds
- *   }
- * };
- * 
- * // Listen for synthesized audio events
- * monitor.on('synthesized-audio', ({ mediaPlayoutMonitor, deltaSynthesizedSamplesDuration }) => {
- *   console.log('Synthesized audio detected:', deltaSynthesizedSamplesDuration, 'ms');
- * });
- * ```
+ * Watches audio playout for synthesized samples — the concealment audio the browser
+ * generates when the jitter buffer has nothing real left to play. It is audio
+ * degradation as the listener actually experiences it: robotic, warbling or stretched
+ * speech, the audible consequence of loss, jitter or a stream arriving too late.
+ *
+ * The signal is worth watching precisely because nothing upstream reports it as a
+ * failure. Concealment is the audio stack succeeding at its job of keeping playback
+ * continuous, so packet-level statistics can look unremarkable while the listener
+ * hears something wrong; the synthesized duration is the only counter that measures
+ * what was substituted for the audio that never arrived.
+ *
+ * This detector raises no issue and keeps no episode state — no start, no end, no
+ * duration. Each tick is judged entirely on its own: if
+ * `deltaSynthesizedSamplesDuration` exceeds `minSynthesizedSamplesDuration` it
+ * reports, otherwise it stays quiet. With the shipped default of `0` that means it
+ * reports on every tick that synthesized anything at all, so a consumer that wants
+ * only materially degraded audio should raise the threshold or aggregate downstream.
+ *
+ * Raises no issue.
+ * Monitor event: `synthesized-audio`; client event `EXCESSIVE_SYNTHESIZED_AUDIO`
+ * when `createEvent` is left on.
+ * Config: `syntheticSamplesDetector`.
  */
 export class SynthesizedSamplesDetector implements Detector {
-    /** Unique identifier for this detector type */
     public readonly name = 'synthesized-samples-detector';
-    /** Runtime kill-switch. Flip to true to silence this detector without removing it. */
     public disabled = false;
-    
-    /**
-     * Creates a new SynthesizedSamplesDetector instance
-     * @param mediaPlayout - The media playout monitor to analyze for synthesized samples
-     */
+
     public constructor(
         public readonly mediaPlayout: MediaPlayoutMonitor,
     ) {
     }
 
-    /** Gets the peer connection monitor that owns this media playout */
     private get peerConnection() {
         return this.mediaPlayout.getPeerConnection();
     }
 
-    /** Gets the detector configuration from the client monitor */
     private get config() {
         return this.peerConnection.parent.config.syntheticSamplesDetector!;
     }
 
-    /**
-     * Updates the detector state and checks for synthesized audio samples
-     * 
-     * This method monitors the duration of synthesized samples in the audio playout
-     * and triggers detection when the duration exceeds the configured threshold.
-     * 
-     * **Processing Steps:**
-     * 1. Skip if detector is disabled
-     * 2. Check if synthesized samples duration exceeds minimum threshold
-     * 3. Emit event and create issue when threshold is exceeded
-     * 4. Provides insight into audio quality degradation
-     */
     public update() {
         if (this.disabled) return;
         if (this.mediaPlayout.deltaSynthesizedSamplesDuration <= this.config.minSynthesizedSamplesDuration) {
@@ -91,14 +55,13 @@ export class SynthesizedSamplesDetector implements Detector {
             clientMonitor: clientMonitor,
         });
 
-        if (this.config.createEvent) {
-            clientMonitor.addEvent({
-                type: ClientEventTypes.EXCESSIVE_SYNTHESIZED_AUDIO,
-                payload: {
-                    // trackId: this.mediaPlayout.
-                    deltaSynthesizedSamplesDuration: this.mediaPlayout.deltaSynthesizedSamplesDuration,
-                }
-            });
-        }
+        if (this.config.createEvent === false) return;
+
+        clientMonitor.addEvent({
+            type: ClientEventTypes.EXCESSIVE_SYNTHESIZED_AUDIO,
+            payload: {
+                deltaSynthesizedSamplesDuration: this.mediaPlayout.deltaSynthesizedSamplesDuration,
+            }
+        });
     }
 }

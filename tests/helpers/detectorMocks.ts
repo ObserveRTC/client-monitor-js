@@ -30,6 +30,7 @@ export type TestClientEvent = {
 
 export class MockClientMonitor {
 	public config: Record<string, any> = {};
+	public activeTab = true;
 	public readonly activeIssues = new Map<string, TestIssue>();
 	public readonly raisedIssues: TestIssue[] = [];
 	public readonly resolvedIssues: TestResolvedIssue[] = [];
@@ -115,6 +116,10 @@ export class MockClientMonitor {
 		return [...this.activeIssues.values()];
 	}
 
+	public isIssueActive(key: string) {
+		return this.activeIssues.has(key);
+	}
+
 	/** The last issue raised with the given type, if any. */
 	public issueOfType(type: string) {
 		return this.raisedIssues.filter((issue) => issue.type === type).pop();
@@ -169,6 +174,7 @@ export class MockMediaStreamTrack {
 
 export class MockInboundTrackMonitor {
 	public readonly direction = 'inbound';
+	public paused = false;
 	public remoteOutboundTrackPaused = false;
 	public track: MockMediaStreamTrack;
 
@@ -201,9 +207,12 @@ export class MockInboundTrackMonitor {
 export class MockOutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public track: MockMediaStreamTrack;
+	public isScreenShare = false;
+	public paused = false;
 
 	private _mediaSource: any = null;
 	private _outboundRtps: any[] = [];
+	private _mediaSourceTimestamp = 0;
 
 	public constructor(
 		kind: string,
@@ -221,6 +230,15 @@ export class MockOutboundTrackMonitor {
 	}
 
 	public getMediaSource() {
+		// Each read is a fresh collection tick. Detectors that measure the gap
+		// between collections need the stamp to move; specs that care about the
+		// exact value set `timestamp` themselves and this leaves it alone.
+		if (this._mediaSource && this._mediaSource.timestamp === undefined) {
+			this._mediaSourceTimestamp += 2000;
+
+			return { ...this._mediaSource, timestamp: this._mediaSourceTimestamp };
+		}
+
 		return this._mediaSource;
 	}
 

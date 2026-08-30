@@ -2,70 +2,30 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
 /**
- * ICE Tuple Change Detector
- * 
- * Detects changes in ICE candidate pairs (tuples) used for peer connection transport.
- * ICE tuples represent the network paths between local and remote endpoints, and changes
- * can indicate network topology changes, failover events, or connectivity issues.
- * 
- * **Detection Logic:**
- * - Monitors selected ICE candidate pairs from peer connection statistics
- * - Tracks unique tuples based on local/remote addresses, ports, and protocol
- * - Detects when tuples are added or removed from the active set
- * - Ignores initial tuple establishment (when set was empty)
- * 
- * **Tuple Format:**
- * - `localAddress:localPort:remoteAddress:remotePort:protocol`
- * - Example: `192.168.1.100:54321:203.0.113.1:3478:udp`
- * 
- * **Events Emitted:**
- * - `ice-tuple-changed`: Emitted when ICE candidate pairs change
- * 
- * **Use Cases:**
- * - Network path monitoring and diagnostics
- * - Detecting network failover events
- * - Identifying connectivity changes during calls
- * - Network topology analysis
- * 
- * @example
- * ```typescript
- * // Listen for ICE tuple changes
- * monitor.on('ice-tuple-changed', ({ peerConnectionMonitor, clientMonitor }) => {
- *   console.log('ICE candidate pairs changed for PC:', peerConnectionMonitor.peerConnectionId);
- *   console.log('Current tuples:', detector.tuples);
- * });
- * ```
+ * Reports that the set of selected ICE candidate pairs changed — the network path underneath the
+ * call moved, which is what a user experiences as the brief cut-out when Wi-Fi hands over to
+ * cellular, a VPN comes up, or a NAT rebinding forces a new pair. A tuple is
+ * `localAddress:localPort:remoteAddress:remotePort:protocol`, built by the candidate pair itself, so
+ * this detector and the connectivity detectors always agree on what the selected path is.
+ *
+ * It stays deliberately the low-level primitive: it reports only *that* the tuple set changed.
+ * `SelectedIcePath` classifies what kind of change it was and emits `ice-path-changed`, and
+ * `IceConnectivityDetector` owns the issue raised when a path keeps switching. Establishment itself
+ * is not a change: growing from an empty set is skipped, or every call would report a path move in
+ * its first seconds.
+ *
+ * Monitor event: `ice-tuple-changed`. No issue, no config block.
  */
 export class IceTupleChangeDetector implements Detector {
-		/** Unique identifier for this detector type */
 		public readonly name = 'ice-tuple-change-detector';
 		
-		/**
-		 * Creates a new IceTupleChangeDetector instance
-		 * @param pcMonitor - The peer connection monitor to analyze for ICE tuple changes
-		 */
 		public constructor(
 				public readonly pcMonitor: PeerConnectionMonitor,
 		) {
 		}
 
-		/** Set of currently active ICE tuples (network paths) */
 		public readonly tuples = new Set<string>();
 
-		/**
-		 * Updates the detector state and checks for ICE tuple changes
-		 * 
-		 * This method monitors the selected ICE candidate pairs and detects when
-		 * the set of active network paths changes.
-		 * 
-		 * **Processing Steps:**
-		 * 1. Skip if peer connection is closed
-		 * 2. Get current selected ICE candidate pairs
-		 * 3. Build current tuple set from candidate pairs
-		 * 4. Compare with previous tuple set to detect changes
-		 * 5. Update internal tuple set and emit events on changes
-		 * 6. Ignore initial establishment (when tuple set was empty)
-		 */
 		public update() {
 			if (this.pcMonitor.closed) return;
 			
@@ -73,11 +33,6 @@ export class IceTupleChangeDetector implements Detector {
 			let changed = false;
 			const curentTuples = new Set<string>();
 
-			// The tuple string is built by the candidate pair itself, so this
-			// detector and the connectivity detectors always agree on what the
-			// selected path is. This detector stays the low-level primitive: it
-			// reports *that* the tuple set changed. `SelectedIcePath`
-			// classifies *what kind of* change it was.
 			for (const pair of this.pcMonitor.selectedIceCandidatePairs) {
 				const tuple = pair.tuple;
 

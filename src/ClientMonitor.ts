@@ -13,10 +13,12 @@ import {
     ClientIssuePayload,
     ClientMetaData,
     ClientMonitorEvents,
+    ClientPayload,
     RaisedClientIssue,
     ResolvedClientIssue,
 } from './ClientMonitorEvents';
 import { PeerConnectionMonitor } from './monitors/PeerConnectionMonitor';
+import { sampledScoreReasons } from './scores/utils';
 import { ClientEventTypes } from './schema/ClientEventTypes';
 import { AppliedClientMonitorConfig, ClientMonitorConfig, ClientMonitorSourceType } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
@@ -24,8 +26,8 @@ import { PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { StatsGapDetector } from './detectors/StatsGapDetector';
-import { OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
-import { InboundTrackMonitor } from './monitors/InboundTrackMonitor';
+import { OutboundTrackContext, OutboundTrackMonitor } from './monitors/OutboundTrackMonitor';
+import { InboundTrackContext, InboundTrackMonitor } from './monitors/InboundTrackMonitor';
 import { TrackMonitor } from './monitors/TrackMonitor';
 import { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
 import { ScoreCalculator } from "./scores/ScoreCalculator";
@@ -35,8 +37,7 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const MODULE_NAME = 'ClientMonitor';
 
-export type ExtensionStatProvider = () => { type: string, payload?: Record<string, unknown>} | Promise<{ type: string, payload?: Record<string, unknown>}>;
-
+export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
@@ -63,6 +64,24 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public lastCollectingStatsAt = 0;
 
     public cpuPerformanceAlertOn = false;
+
+    /**
+     * Whether the browser tab running this monitor is currently visible.
+     *
+     * Kept up to date by the tab-visibility watcher (`config.watchTabVisibility`,
+     * on by default) from `document.visibilityState`. Defaults to `true`, and
+     * stays `true` when the watcher is disabled or no `document` exists (SSR,
+     * tests, workers) — so `false` always means the tab really is in the
+     * background. Browsers throttle background tabs (timers, rendering,
+     * sometimes decoding), so detectors whose signals the throttling corrupts
+     * (CPU limitation, decoder performance, stuck decoder, playout
+     * discrepancy, video freezes) stand down while this is `false`.
+     */
+    public activeTab = true;
+
+    private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
+    private readonly _pendingOutboundTrackContexts = new Map<string, OutboundTrackContext>();
+
 
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
@@ -115,10 +134,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             samplingPeriodInMs: monitorConfig.samplingPeriodInMs ?? 8000,
 
             integrateNavigatorMediaDevices: monitorConfig.integrateNavigatorMediaDevices ?? true,
+            watchTabVisibility: monitorConfig.watchTabVisibility ?? true,
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
 
-            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {}),
+            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {
+                minConsecutiveTicks: 2,
+            }),
             dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
                 thresholdInMs: 5000,
             }),
@@ -133,6 +155,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
             syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
                 minSynthesizedSamplesDuration: 0,
+                createEvent: true,
             }),
             congestionDetector: detectorDefault(monitorConfig.congestionDetector, {
                 sensitivity: 'medium',
@@ -142,6 +165,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                     alertOn: 0.7,
                     alertOff: 0.85,
                     minReceivedFrames: 10,
+                    // ~2.5x the smoothed arrival rate reads as a burst (layer
+                    // switch / keyframe recovery), not as CPU limitation.
+                    frameArrivalBurstFactor: 2.5,
                 },
                 durationOfCollectingStatsThreshold: {
                     lowWatermark: 5000,
@@ -181,20 +207,28 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 recoveryFailedThresholdInMs: 5000,
                 recoveryFailedMinPliCount: 2,
             }),
-            sourceEncoderBottleneckDetector: detectorDefault(monitorConfig.sourceEncoderBottleneckDetector, {
-                captureFpsRatioThreshold: 0.5,
-                minSourceFps: 5,
+            outboundFrameSupplyDetector: detectorDefault(monitorConfig.outboundFrameSupplyDetector, {
+                durationInMs: 15_000,
+                captureFpsRatioThreshold: 0.9,
+            }),
+            encoderPerformanceDetector: detectorDefault(monitorConfig.encoderPerformanceDetector, {
                 encodeFpsRatioThreshold: 0.7,
                 encodeTimeBudgetRatio: 0.8,
-                cpuLimitationShareThreshold: 0.3,
+                // null: CpuPerformanceDetector owns the CPU signal — see the detector
+                cpuLimitationShareThreshold: null,
                 minConsecutiveTicks: 2,
+            }),
+            inboundFrameSupplyDetector: detectorDefault(monitorConfig.inboundFrameSupplyDetector, {
+                durationInMs: 15_000,
+                decodeFpsRatioThreshold: 0.9,
+                minReceivedFps: 5,
             }),
             simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
                 createEvent: true,
             }),
             captureFailureDetector: detectorDefault(monitorConfig.captureFailureDetector, {
-                silenceThresholdInMs: 30000,
-                silenceRmsThreshold: 0.001,
+                silenceThresholdInMs: 60000,
+                silenceRmsThreshold: 0.0001,
                 createEvent: true,
             }),
             codecChangeDetector: detectorDefault(monitorConfig.codecChangeDetector, {
@@ -206,7 +240,6 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
                 thresholdInMs: 4000,
                 rttMultiplier: 15,
-                minStuckTicks: 2,
                 minBitrate: 10000,
                 minPliCount: 2,
             }),
@@ -216,12 +249,27 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 createEvent: true,
             }),
             playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
-                lowSkewThreshold: 2,
-                highSkewThreshold: 5,
+                lowSkewRatio: 0.1,
+                highSkewRatio: 0.25,
+                minFramesReceived: 10,
             }),
             longPcConnectionEstablishmentDetector: detectorDefault(monitorConfig.longPcConnectionEstablishmentDetector, {
                 thresholdInMs: 5000,
                 createEvent: true,
+            }),
+            blockedTransportDetector: detectorDefault(monitorConfig.blockedTransportDetector, {
+                thresholdInMs: 5000,
+                minMediaBitrateBps: 10000,
+                maxReturnBitrateBps: 2000,
+                maxSendShare: 0.1,
+                stunFreshnessInMs: 10000,
+            }),
+            noAvailableIceCandidateDetector: detectorDefault(monitorConfig.noAvailableIceCandidateDetector, {
+                thresholdInMs: 6000,
+            }),
+            mediaPipelineDetector: detectorDefault(monitorConfig.mediaPipelineDetector, {
+                thresholdInMs: 4000,
+                minTransportReceiveBitrateBps: 20000,
             }),
             iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
                 disconnectedThresholdInMs: 5000,
@@ -234,6 +282,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
+            sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             appData: monitorConfig.appData ?? {} as AppData,
         }
 
@@ -249,6 +298,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         }
         if (this.config.integrateNavigatorMediaDevices) {
             this._sources.watchNavigatorMediaDevices();
+        }
+        if (this.config.watchTabVisibility) {
+            this._sources.watchTabVisibility();
         }
         try {
             this._sources.fetchUserAgentData();
@@ -431,15 +483,28 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return this.mappedPeerConnections.get(peerConnectionId);
     }
 
-    public setScore<T extends Record<string, number>>(score: number, reasons?: T): void {
+    /**
+     * Sets the client score, keeping the two kinds of reason separate.
+     *
+     * `ownReasons` are the client's own subtractions and are what
+     * {@link scoreReasons} holds and the sample ships — there are none today.
+     * `aggregatedReasons` are every component's reasons summed by key and are
+     * emitted on the `'score'` event, so applications still react to the whole
+     * picture without that picture being duplicated onto the wire.
+     */
+    public setScore<T extends Record<string, number>>(
+        score: number,
+        ownReasons?: T,
+        aggregatedReasons?: Record<string, number>,
+    ): void {
         if (this.closed) return;
 
         this.score = score;
-        this.scoreReasons = reasons;
+        this.scoreReasons = ownReasons;
         this.emit('score', {
             clientMonitor: this,
             clientScore: score,
-            currentReasons: reasons ?? {},
+            currentReasons: aggregatedReasons ?? ownReasons ?? {},
         });
     }
 
@@ -457,7 +522,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
-            // scoreReasons: this.scoreCalculator.encodeClientScoreReasons?.(this.scoreReasons),
+            // The client's own reasons only. The aggregate lives on the 'score'
+            // event, never on the wire: every reason already ships on the
+            // component that caused it, and a server re-aggregates them.
+            scoreReasons: sampledScoreReasons(this.scoreReasons, this.config.sendScoreReasonsToServer),
         };
         this._clientEvents = [];
         this._clientMetaItems = [];
@@ -495,7 +563,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
 
-    public addClientJoinEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+    public addClientJoinEvent(event?: { payload?: ClientPayload, timestamp?: number }): void {
         if (this.closed) return;
 
         this.addEvent({
@@ -507,7 +575,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addClientLeftEvent(event?: { payload?: Record<string, unknown>, timestamp?: number }): void {
+    public addClientLeftEvent(event?: { payload?: ClientPayload, timestamp?: number }): void {
         if (this.closed) return;
 
         this.addEvent({
@@ -519,15 +587,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addEvent<Payload = Record<string, unknown>>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
+    public addEvent<Payload extends ClientPayload = ClientPayload>(event: PartialBy<ClientEvent, 'timestamp'> & { payload?: Payload }): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         const timestamp = event.timestamp ?? Date.now();
-        const payload = event.payload ? JSON.stringify(event.payload) : undefined;
+
+        // Schema 3.5.0 carries payloads as records — nothing to serialise.
         this._clientEvents.push({
             ...event,
-            payload,
+            payload: event.payload as ClientSampleClientEvent['payload'],
             timestamp,
         });
 
@@ -550,6 +619,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         type: string;
         payload?: T;
         timestamp?: number;
+        /**
+         * Whether to buffer this issue into the next ClientSample. Defaults
+         * to true. Pass false to keep the issue local-only (the 'issue'
+         * event still fires).
+         */
+        includeInSample?: boolean;
     }): AddedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
@@ -560,7 +635,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             timestamp,
         };
 
-        this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        if (input.includeInSample !== false) {
+            this._bufferIssueForSample(issue.type, issue.payload, timestamp);
+        }
         this.emit('issue', issue);
 
         return issue;
@@ -575,7 +652,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      *
      * Returns the resulting `RaisedClientIssue` (new or updated).
      */
-    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: { type: string, payload?: T, timestamp?: number }): RaisedClientIssue<T> | undefined {
+    public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: {
+        type: string,
+        payload?: T,
+        timestamp?: number,
+        /**
+         * Whether this issue (and its later resolution) is buffered into the
+         * ClientSample. Defaults to true. The built-in detectors pass their
+         * public `includeIssueInSample` field here, so sampling of any
+         * detector's issues can be switched off at runtime without touching
+         * the local issue lifecycle.
+         */
+        includeInSample?: boolean,
+    }): RaisedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
         const now = input.timestamp ?? Date.now();
@@ -585,6 +674,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             existing.type = input.type;
             existing.payload = input.payload;
             existing.updatedAt = now;
+            existing.includeInSample = input.includeInSample ?? existing.includeInSample;
 
             this.emit('issue-updated', existing);
             return existing;
@@ -596,6 +686,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             payload: input.payload,
             raisedAt: now,
             updatedAt: now,
+            includeInSample: input.includeInSample ?? true,
         };
 
         this.activeIssues.set(issue.key, issue);
@@ -604,12 +695,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         // the server can open its side of the issue under the same identity it
         // will later close on the `-resolved` entry. With it off, the wire
         // format is unchanged from previous releases.
-        this._bufferIssueForSample(
-            issue.type,
-            issue.payload,
-            now,
-            this.config.sendResolvedIssuesToServer ? issue.key : undefined,
-        );
+        if (issue.includeInSample !== false) {
+            this._bufferIssueForSample(
+                issue.type,
+                issue.payload,
+                now,
+                this.config.sendResolvedIssuesToServer ? issue.key : undefined,
+            );
+        }
         this.emit('issue', issue);
 
         return issue;
@@ -643,7 +736,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         };
         this.emit('issue-resolved', resolution);
 
-        if (this.config.sendResolvedIssuesToServer) {
+        if (this.config.sendResolvedIssuesToServer && issue.includeInSample !== false) {
             const extraPayload = typeof input.payload === 'object' && input.payload !== null ? input.payload : {};
             // The schema-level `key` identifies which open issue this entry
             // closes; `raisedAt` equals the raise entry's timestamp as a
@@ -689,7 +782,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this._clientIssues.push({
             type,
             key,
-            payload: payload === undefined ? undefined : JSON.stringify(payload),
+            payload: payload as ClientSampleClientIssue['payload'],
             timestamp,
         });
     }
@@ -702,7 +795,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         this._clientMetaItems.push({
             type: metaData.type,
-            payload: metaData.payload ? JSON.stringify(metaData.payload) : undefined,
+            payload: metaData.payload as ClientSampleClientMetaData['payload'],
             timestamp,
         });
 
@@ -713,14 +806,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addExtensionStats(stats: { type: string, payload?: Record<string, unknown>}): void {
+    public addExtensionStats(stats: { type: string, payload?: ClientPayload }): void {
         if (this.closed) return;
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
-        const payload = stats.payload ? JSON.stringify(stats.payload) : undefined;
+        // Schema 3.5.0 carries payloads as records — nothing to serialise.
         this._extensionStats.push({
             type: stats.type,
-            payload,
+            payload: stats.payload as ExtensionStat['payload'],
         });
 
         this.emit('extension-stats', {
@@ -860,6 +953,59 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return this.peerConnections.find(peerConnection =>
             peerConnection.mappedOutboundTracks.has(trackId)
         )?.mappedOutboundTracks.get(trackId);
+    }
+
+    /**
+     * Declares what the application knows about an **inbound** track and the
+     * stats never reveal, by track id — whether or not the track's monitor
+     * exists yet. Signaling usually knows a guest's track is a screen share
+     * before a single packet arrives, and at that moment there is nothing to
+     * call `setContext` on.
+     *
+     * A declaration made early is held pending and consumed by whichever peer
+     * connection first manifests the track. **Merges in both states**, so a
+     * content type declared from signaling survives a later call that only
+     * attaches the video element.
+     */
+    public setInboundTrackContext(trackId: string, context: InboundTrackContext): void {
+        const trackMonitor = this.getInboundTrackMonitor(trackId);
+
+        if (trackMonitor) return trackMonitor.setContext(context);
+
+        this._pendingInboundTrackContexts.set(trackId, {
+            ...this._pendingInboundTrackContexts.get(trackId),
+            ...context,
+        });
+    }
+
+    /** Same timing and merge behaviour as {@link setInboundTrackContext}. */
+    public setOutboundTrackContext(trackId: string, context: OutboundTrackContext): void {
+        const trackMonitor = this.getOutboundTrackMonitor(trackId);
+
+        if (trackMonitor) return trackMonitor.setContext(context);
+
+        this._pendingOutboundTrackContexts.set(trackId, {
+            ...this._pendingOutboundTrackContexts.get(trackId),
+            ...context,
+        });
+    }
+
+    /** Called by the peer connection monitor at track-monitor creation; not for applications. */
+    public takePendingInboundTrackContext(trackId: string): InboundTrackContext | undefined {
+        const context = this._pendingInboundTrackContexts.get(trackId);
+
+        if (context !== undefined) this._pendingInboundTrackContexts.delete(trackId);
+
+        return context;
+    }
+
+    /** Called by the peer connection monitor at track-monitor creation; not for applications. */
+    public takePendingOutboundTrackContext(trackId: string): OutboundTrackContext | undefined {
+        const context = this._pendingOutboundTrackContexts.get(trackId);
+
+        if (context !== undefined) this._pendingOutboundTrackContexts.delete(trackId);
+
+        return context;
     }
 
     public setCollectingPeriod(collectingPeriodInMs: number): void {

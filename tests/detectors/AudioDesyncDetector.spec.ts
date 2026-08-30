@@ -22,6 +22,8 @@ interface InboundRtpStats {
     kind?: string;
     insertedSamplesForDeceleration?: number | null | undefined;
     removedSamplesForAcceleration?: number | null | undefined;
+    deltaInsertedSamplesForDeceleration?: number | null | undefined;
+    deltaRemovedSamplesForAcceleration?: number | null | undefined;
     receivingAudioSamples?: number | null | undefined;
     desync?: boolean;
     trackIdentifier?: string;
@@ -124,12 +126,37 @@ class MockInboundTrackMonitor {
         return this.peerConnection;
     }
 
+    private _previousInserted = 0;
+    private _previousRemoved = 0;
+
     getInboundRtp() {
         return this.inboundRtp;
     }
 
+    /**
+     * Stands in for `InboundRtpMonitor`, which differences the cumulative
+     * NetEQ counters itself on every tick. The specs below set the cumulative
+     * values, exactly as the browser reports them, and this derives the deltas
+     * the detector actually reads — so the detector is not asked to keep a
+     * third copy of a subtraction the monitor already does.
+     */
     setInboundRtp(stats: InboundRtpStats | null) {
-        this.inboundRtp = stats;
+        if (stats === null) {
+            this.inboundRtp = null;
+
+            return;
+        }
+
+        const inserted = stats.insertedSamplesForDeceleration ?? 0;
+        const removed = stats.removedSamplesForAcceleration ?? 0;
+
+        this.inboundRtp = {
+            ...stats,
+            deltaInsertedSamplesForDeceleration: Math.max(0, inserted - this._previousInserted),
+            deltaRemovedSamplesForAcceleration: Math.max(0, removed - this._previousRemoved),
+        };
+        this._previousInserted = inserted;
+        this._previousRemoved = removed;
     }
 }
 
@@ -303,13 +330,14 @@ describe('AudioDesyncDetector', () => {
             detector.update();
             expect(mockTrackMonitor.getInboundRtp()?.desync).toBe(true);
 
-            // Now provide low correction rate (since _prevCorrectedSamples is never updated, 
-            // we use raw values not deltas): 30 corrected, 970 receiving = 3% < 5% off threshold
+            // Counters are cumulative, so a quiet tick is a small *increment*:
+            // 20 more inserted and 10 more removed = 30 corrected this tick,
+            // against 970 received -> 3% < the 5% off threshold
             mockTrackMonitor.setInboundRtp({
                 kind: 'audio',
-                insertedSamplesForDeceleration: 20,
-                removedSamplesForAcceleration: 10,
-                receivingAudioSamples: 970, // 30/1000 = 3% < 5%
+                insertedSamplesForDeceleration: 120,
+                removedSamplesForAcceleration: 60,
+                receivingAudioSamples: 970,
                 desync: true
             });
 
@@ -335,9 +363,9 @@ describe('AudioDesyncDetector', () => {
             // This should NOT clear desync since 7% > 5% off threshold
             mockTrackMonitor.setInboundRtp({
                 kind: 'audio',
-                insertedSamplesForDeceleration: 35,
-                removedSamplesForAcceleration: 35,
-                receivingAudioSamples: 930, // 70/1000 = 7%
+                insertedSamplesForDeceleration: 135,
+                removedSamplesForAcceleration: 85,
+                receivingAudioSamples: 930, // +35 +35 = 70/1000 = 7%
                 desync: true
             });
 
@@ -373,11 +401,11 @@ describe('AudioDesyncDetector', () => {
             // Advance time by 5 seconds
             jest.advanceTimersByTime(5000);
 
-            // Clear desync with low correction rate
+            // Clear desync: only 30 more corrected samples this tick
             mockTrackMonitor.setInboundRtp({
                 kind: 'audio',
-                insertedSamplesForDeceleration: 20,
-                removedSamplesForAcceleration: 10,
+                insertedSamplesForDeceleration: 120,
+                removedSamplesForAcceleration: 60,
                 receivingAudioSamples: 970, // 30/1000 = 3% < 5%
                 desync: true // Was in desync state
             });
@@ -408,12 +436,12 @@ describe('AudioDesyncDetector', () => {
             detector.update();
             expect(mockTrackMonitor.getInboundRtp()?.desync).toBe(false);
 
-            // 25% correction rate - should trigger
+            // 25% correction rate this tick - should trigger
             mockTrackMonitor.setInboundRtp({
                 kind: 'audio',
-                insertedSamplesForDeceleration: 150,
-                removedSamplesForAcceleration: 100,
-                receivingAudioSamples: 750,
+                insertedSamplesForDeceleration: 250,
+                removedSamplesForAcceleration: 150,
+                receivingAudioSamples: 750, // +150 +100 = 250/1000 = 25%
                 desync: false
             });
 

@@ -3,113 +3,107 @@ import { Detector } from "./Detector";
 
 export type PlayoutDiscrepancyIssuePayload = {
 	trackId: string;
+	/** Frames delivered to the track minus frames painted, over the tick that opened the episode. */
 	frameSkew: number;
-	ewmaFps: number;
+	/** {@link frameSkew} over the frames received in that tick — what the thresholds compare. */
+	skewRatio?: number;
+	/** The track's smoothed frame rate at that moment, for scale — a skew of 10 means very different things at 30fps and at 5. */
+	ewmaFps?: number;
+	/** How long the episode lasted; filled in on resolution. */
 	durationInMs?: number;
 }
 
 /**
- * Playout Discrepancy Detector
- * 
- * Detects discrepancies between frames received and frames rendered in inbound video tracks.
- * This can indicate video playout issues where frames are being dropped during rendering,
- * potentially due to performance issues, processing delays, or display problems.
- * 
- * **Detection Logic:**
- * - Monitors delta between `deltaFramesReceived` and `deltaFramesRendered`
- * - Calculates frame skew: received frames - rendered frames
- * - Uses hysteresis with high/low thresholds to prevent oscillation
- * - Triggers when frame skew exceeds high threshold, clears when below low threshold
- * 
- * **Configuration Options:**
- * - `disabled`: Boolean to enable/disable the detector
- * - `highSkewThreshold`: Frame skew threshold to trigger detection
- * - `lowSkewThreshold`: Frame skew threshold to clear detection (hysteresis)
- * 
- * **Events Emitted:**
- * - `inbound-video-playout-discrepancy`: Emitted when playout discrepancy is detected
- * 
- * **Issues Created:**
- * - Type: `inbound-video-playout-discrepancy`
- * - Payload: `{ trackId, frameSkew, ewmaFps }`
- * 
- * @example
- * ```typescript
- * // Configuration
- * const config = {
- *   playoutDiscrepancyDetector: {
- *     disabled: false,
- *     highSkewThreshold: 10,  // Trigger when 10+ frames are skewed
- *     lowSkewThreshold: 3     // Clear when skew drops below 3 frames
- *   }
- * };
- * 
- * // Listen for playout discrepancy events
- * monitor.on('inbound-video-playout-discrepancy', ({ trackMonitor, frameSkew }) => {
- *   console.log('Video playout discrepancy on track:', trackMonitor.track.id);
- *   console.log('Frame skew:', frameSkew, 'frames');
- * });
- * ```
+ * Compares the frames delivered to an inbound video track against the frames the
+ * browser actually painted, and reports when the two diverge: video that arrives
+ * perfectly well over the network and never reaches the screen. The viewer sees a
+ * frozen or stuttering tile while every network statistic reads healthy, which is what
+ * makes this worth separating from loss, jitter or a decoder problem — the frames are
+ * here, and the rendering path is what dropped them.
+ *
+ * The two skew thresholds are hysteresis rather than two conditions: the episode opens
+ * once the per-tick skew reaches `highSkewThreshold` and closes only once it falls
+ * below `lowSkewThreshold`, so a track hovering at the boundary does not flap the issue
+ * on and off. A tick where nothing was painted at all (`deltaFramesRendered === 0`) is
+ * judged like any other — it is the worst case of the failure being looked for, not a
+ * missing measurement.
+ *
+ * It refuses to judge a backgrounded tab, where the browser stops rendering by design
+ * and the skew is throttling rather than a fault, and it stands down on a paused
+ * consumer or a paused remote sender, resolving any open episode in each case. A tick
+ * with no `deltaFramesReceived` or no `deltaFramesRendered` carries no measurement and
+ * is skipped without disturbing the current state.
+ *
+ * Issue raised: `inbound-video-playout-discrepancy`, resolved when the skew drops below
+ * the low threshold or the detector stands down.
+ * Monitor event: `inbound-video-playout-discrepancy`.
+ * Config: `playoutDiscrepancyDetector`.
  */
 export class PlayoutDiscrepancyDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'inbound-video-playout-discrepancy';
-	/** Unique identifier for this detector type */
 	public readonly name = 'playout-discrepancy-detector';
-	/** Runtime kill-switch. Flip to true to silence this detector without removing it. */
 	public disabled = false;
+	public includeIssueInSample = true;
 	
 	private readonly issueKey: string;
 
-	/** Timestamp when the current discrepancy episode started. */
 	private _startedDiscrepancyAt?: number;
 
-	/**
-	 * Creates a new PlayoutDiscrepancyDetector instance
-	 * @param trackMonitor - The inbound track monitor to analyze for playout discrepancies
-	 */
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
 	) {
 		this.issueKey = `${PlayoutDiscrepancyDetector.ISSUE_TYPE}-track-${trackMonitor.track.id}`;
 	}
 
-	/** Gets the peer connection monitor that owns this track */
 	private get peerConnection() {
 		return this.trackMonitor.getPeerConnection();
 	}
 
-	/** Gets the detector configuration from the client monitor */
 	private get config() {
 		return this.peerConnection.parent.config.playoutDiscrepancyDetector!;
 	}
 
-	/** Flag indicating if playout discrepancy is currently active */
 	public active = false;
 
-	/**
-	 * Updates the detector state and checks for video playout discrepancies
-	 * 
-	 * This method monitors the difference between received and rendered frames
-	 * to detect when video frames are being dropped during playout.
-	 * 
-	 * **Processing Steps:**
-	 * 1. Skip if detector is disabled or required stats are missing
-	 * 2. Calculate frame skew (received - rendered frames)
-	 * 3. Apply hysteresis logic using high/low thresholds
-	 * 4. Emit events and create issues when discrepancy is first detected
-	 * 5. Track active state to prevent duplicate alerts
-	 */
+	private _standDown(comment: string): void {
+		if (!this.active) return;
+
+		this._resolve(comment);
+		this.active = false;
+	}
+
 	public update() {
 
 		if (this.disabled) return;
+
+		if (!this.peerConnection.parent.activeTab) {
+			if (this.active) {
+				this._resolve('tab in background');
+				this.active = false;
+			}
+
+			return;
+		}
+
+		if (this.trackMonitor.paused) return this._standDown('consumer paused');
+		if (this.trackMonitor.remoteOutboundTrackPaused) return this._standDown('remote track paused');
+
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
-		if (!inboundRtp || !inboundRtp.deltaFramesReceived || !inboundRtp.deltaFramesRendered || !inboundRtp.ewmaFps) return;
+		if (!inboundRtp) return;
 
-		const frameSkew = inboundRtp.deltaFramesReceived - inboundRtp.deltaFramesRendered;
+		if (inboundRtp.deltaFramesReceived === undefined) return;
+		if (inboundRtp.deltaFramesRendered === undefined) return;
+
+		const framesReceived = inboundRtp.deltaFramesReceived;
+
+		if (framesReceived < this.config.minFramesReceived) return this._standDown('too few frames to judge');
+
+		const frameSkew = framesReceived - inboundRtp.deltaFramesRendered;
+		const skewRatio = frameSkew / framesReceived;
 
 		if (this.active) {
-			if (frameSkew < this.config.lowSkewThreshold) {
+			if (skewRatio < this.config.lowSkewRatio) {
 				this._resolve('playout discrepancy ended');
 				this.active = false;
 				return;
@@ -118,7 +112,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 			return;
 		}
 
-		if (frameSkew < this.config.highSkewThreshold) return;
+		if (skewRatio < this.config.highSkewRatio) return;
 
 		this.active = true;
 
@@ -132,6 +126,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 		this._raise({
 			trackId: this.trackMonitor.track.id,
 			frameSkew,
+			skewRatio,
 			ewmaFps: inboundRtp.ewmaFps,
 		});
 	}
@@ -140,6 +135,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 		this._startedDiscrepancyAt = Date.now();
 
 		this.peerConnection.parent.raiseIssue<PlayoutDiscrepancyIssuePayload>(this.issueKey, {
+				includeInSample: this.includeIssueInSample,
 			type: PlayoutDiscrepancyDetector.ISSUE_TYPE,
 			payload,
 		});
