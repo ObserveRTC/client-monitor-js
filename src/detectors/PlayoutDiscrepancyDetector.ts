@@ -5,6 +5,8 @@ export type PlayoutDiscrepancyIssuePayload = {
 	trackId: string;
 	/** Frames delivered to the track minus frames painted, over the tick that opened the episode. */
 	frameSkew: number;
+	/** {@link frameSkew} over the frames received in that tick — what the thresholds compare. */
+	skewRatio?: number;
 	/** The track's smoothed frame rate at that moment, for scale — a skew of 10 means very different things at 30fps and at 5. */
 	ewmaFps?: number;
 	/** How long the episode lasted; filled in on resolution. */
@@ -93,10 +95,15 @@ export class PlayoutDiscrepancyDetector implements Detector {
 		if (inboundRtp.deltaFramesReceived === undefined) return;
 		if (inboundRtp.deltaFramesRendered === undefined) return;
 
-		const frameSkew = inboundRtp.deltaFramesReceived - inboundRtp.deltaFramesRendered;
+		const framesReceived = inboundRtp.deltaFramesReceived;
+
+		if (framesReceived < this.config.minFramesReceived) return this._standDown('too few frames to judge');
+
+		const frameSkew = framesReceived - inboundRtp.deltaFramesRendered;
+		const skewRatio = frameSkew / framesReceived;
 
 		if (this.active) {
-			if (frameSkew < this.config.lowSkewThreshold) {
+			if (skewRatio < this.config.lowSkewRatio) {
 				this._resolve('playout discrepancy ended');
 				this.active = false;
 				return;
@@ -105,7 +112,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 			return;
 		}
 
-		if (frameSkew < this.config.highSkewThreshold) return;
+		if (skewRatio < this.config.highSkewRatio) return;
 
 		this.active = true;
 
@@ -119,6 +126,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 		this._raise({
 			trackId: this.trackMonitor.track.id,
 			frameSkew,
+			skewRatio,
 			ewmaFps: inboundRtp.ewmaFps,
 		});
 	}

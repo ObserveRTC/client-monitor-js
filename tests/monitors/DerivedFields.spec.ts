@@ -79,10 +79,11 @@ describe('InboundRtpMonitor derived fields', () => {
 		});
 	});
 
-	// The guard that every delta-based detector rests on: on SSRC reuse or a
-	// stats-object replacement the counters restart, and an unguarded
-	// subtraction would hand every downstream rate a negative number.
-	it('treats a counter going backwards as no progress', () => {
+	// The guard every delta-based detector rests on. On SSRC reuse or a
+	// stats-object replacement the counters restart: an unguarded subtraction
+	// would hand downstream a negative number, and a zero would be the opposite
+	// claim — "nothing moved" is what the stall checks read as proof.
+	it('reports no delta at all when a counter goes backwards', () => {
 		const monitor = inbound('video', {
 			packetsReceived: 1000,
 			packetsLost: 50,
@@ -108,12 +109,14 @@ describe('InboundRtpMonitor derived fields', () => {
 			totalDecodeTime: 0.01,
 		} as any);
 
-		expect(monitor.deltaPacketsReceived).toBe(0);
-		expect(monitor.deltaPacketsLost).toBe(0);
-		expect(monitor.deltaBytesReceived).toBe(0);
-		expect(monitor.deltaFramesDecoded).toBe(0);
-		expect(monitor.deltaFramesDropped).toBe(0);
-		expect(monitor.bitrate).toBe(0);
+		expect(monitor.deltaPacketsReceived).toBeUndefined();
+		expect(monitor.deltaPacketsLost).toBeUndefined();
+		expect(monitor.deltaBytesReceived).toBeUndefined();
+		expect(monitor.deltaFramesDecoded).toBeUndefined();
+		expect(monitor.deltaFramesDropped).toBeUndefined();
+		// no delta, no rate — a stale bitrate would describe traffic this
+		// interval did not see
+		expect(monitor.bitrate).toBeUndefined();
 	});
 
 	// Silence inflates `concealedSamples`; without the subtraction every quiet
@@ -213,7 +216,7 @@ describe('OutboundRtpMonitor derived fields', () => {
 		} as any);
 	}
 
-	it('treats a counter going backwards as no progress', () => {
+	it('reports no delta at all when a counter goes backwards', () => {
 		const monitor = outbound({ packetsSent: 5000, bytesSent: 500000, framesEncoded: 300 });
 
 		monitor.accept({
@@ -226,9 +229,9 @@ describe('OutboundRtpMonitor derived fields', () => {
 			framesEncoded: 1,
 		} as any);
 
-		expect(monitor.deltaPacketsSent).toBe(0);
-		expect(monitor.deltaBytesSent).toBe(0);
-		expect(monitor.deltaFramesEncoded).toBe(0);
+		expect(monitor.deltaPacketsSent).toBeUndefined();
+		expect(monitor.deltaBytesSent).toBeUndefined();
+		expect(monitor.deltaFramesEncoded).toBeUndefined();
 	});
 
 	it('derives encode cost per frame and the retransmission share', () => {
@@ -306,7 +309,7 @@ describe('OutboundRtpMonitor derived fields', () => {
 describe('RemoteInboundRtpMonitor derived fields', () => {
 	// `packetsLost` legitimately decreases when a late packet arrives, so the
 	// guard is not merely defensive here.
-	it('does not report a negative loss delta', () => {
+	it('reports no loss delta when the counter goes backwards', () => {
 		const monitor = new RemoteInboundRtpMonitor(mockPeerConnection(), {
 			id: 'rin-1',
 			timestamp: 1000,
@@ -325,7 +328,7 @@ describe('RemoteInboundRtpMonitor derived fields', () => {
 			packetsLost: 18,
 		} as any);
 
-		expect(monitor.deltaPacketsLost).toBe(0);
+		expect(monitor.deltaPacketsLost).toBeUndefined();
 		expect(monitor.deltaPacketsReceived).toBe(100);
 	});
 

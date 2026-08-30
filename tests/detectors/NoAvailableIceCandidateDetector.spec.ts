@@ -63,7 +63,9 @@ class MockPeerConnectionMonitor {
     public parent = new MockClientMonitor();
     public closed = false;
     public connectionState: string | undefined = 'new';
-    public iceGatheringState: string | undefined = 'new';
+    // Gathering has finished looking by default; that is what makes zero
+    // candidates evidence rather than a work-in-progress observation.
+    public iceGatheringState: string | undefined = 'complete';
     public localIceCandidates: unknown[] = [];
 }
 
@@ -152,6 +154,26 @@ describe('NoAvailableIceCandidateDetector', () => {
             const events = mockClientMonitor.emitted.filter(entry => entry.name === 'no-available-ice-candidate');
 
             expect(events).toHaveLength(1);
+        });
+
+        it('says nothing while gathering is still running', () => {
+            mockPeerConnection.iceGatheringState = 'gathering';
+            mockPeerConnection.connectionState = 'failed';
+
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+        });
+
+        it('says nothing when the source reports no gathering state at all', () => {
+            // a stats source that emits no candidate rows is not a source that
+            // observed zero candidates
+            mockPeerConnection.iceGatheringState = undefined;
+            mockPeerConnection.connectionState = 'failed';
+
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
         it('records the gathering state in the payload', () => {

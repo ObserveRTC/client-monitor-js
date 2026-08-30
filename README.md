@@ -243,10 +243,11 @@ const monitor = new ClientMonitor({
 
     dryInboundTrackDetector: { thresholdInMs: 5000 },
     dryOutboundTrackDetector: { thresholdInMs: 5000 },
-    videoFreezesDetector: {},
+    videoFreezesDetector: { minConsecutiveTicks: 2 },
     playoutDiscrepancyDetector: {
-        lowSkewThreshold: 2,
-        highSkewThreshold: 5,
+        lowSkewRatio: 0.1,
+        highSkewRatio: 0.25,
+        minFramesReceived: 10,
     },
     syntheticSamplesDetector: {
         minSynthesizedSamplesDuration: 1000,
@@ -328,8 +329,8 @@ const monitor = new ClientMonitor({
         minReceivedFps: 5,             // too thin a stream to judge a decoder on
     },
     captureFailureDetector: {
-        silenceThresholdInMs: 30000, // long on purpose: silence != a broken mic
-        silenceRmsThreshold: 0.001,
+        silenceThresholdInMs: 60000, // long on purpose: silence != a broken mic
+        silenceRmsThreshold: 0.0001,
         createEvent: true,
     },
 
@@ -606,7 +607,7 @@ Owns the whole freeze/repair domain of an inbound video track. It derives the fr
 **Use the result:** on `freezed-video-track`, overlay a spinner/last-frame treatment on the tile. `video-recovery-failed` is your escalation signal — pair it with [`stuck-decoder`](#stuckdecoderdetector): if both fire, recreate the consumer; if only recovery fails (no bytes checked here), the producer or SFU forwarding needs the look.
 
 ```javascript
-videoFreezesDetector: {},          // freeze issue on/off ({} = defaults, null = off)
+videoFreezesDetector: { minConsecutiveTicks: 2 },  // consecutive frozen intervals before an issue (null = off)
 videoRecoveryDetector: {
     windowInMs: 30000,             // window for PLI/keyframe rates
     pliRateAlertOn: 0.5,           // real-world storms run ~0.5-0.7 PLI/s sustained
@@ -710,8 +711,9 @@ Detects a growing skew between frames *received* and frames *rendered* on an inb
 
 ```javascript
 playoutDiscrepancyDetector: {
-    lowSkewThreshold: 2,  // frames of skew at which the issue resolves
-    highSkewThreshold: 5, // frames of skew at which it raises
+    lowSkewRatio: 0.1,     // share of received frames at which the issue resolves
+    highSkewRatio: 0.25,   // share of received frames at which it raises
+    minFramesReceived: 10, // below this the interval carries too few frames to judge
 }
 ```
 
@@ -822,8 +824,8 @@ Watches the source end of outbound tracks: the device is gone (`capture-track-en
 
 ```javascript
 captureFailureDetector: {
-    silenceThresholdInMs: 30000, // long on purpose: silence ≠ broken until it persists
-    silenceRmsThreshold: 0.001,  // interval-integrated RMS, not the flickery audioLevel
+    silenceThresholdInMs: 60000, // long on purpose: silence ≠ broken until it persists
+    silenceRmsThreshold: 0.0001, // interval-integrated RMS, not the flickery audioLevel
     createEvent: true,           // also buffer CAPTURE_TRACK_ENDED / _MUTED into samples
 }
 ```
@@ -1640,65 +1642,75 @@ if (sample) {
 
 ### Sample Compression
 
-For efficient data transmission and storage, ObserveRTC provides dedicated compression packages for `ClientSample` objects:
+`ClientSample` objects compress well because consecutive samples are nearly identical — the same tracks, the same peer connections, counters that moved a little. Two codec packages exploit that by encoding **each sample as the delta from the previous one**; pick one by the wire format you want:
 
-**@observertc/samples-encoder** - Compresses ClientSample objects for transmission:
+| Package | Wire format | Use it when |
+| --- | --- | --- |
+| `@observertc/samples-protobuf-codec` | Protobuf binary | You want the smallest payload and already speak protobuf on the server. |
+| `@observertc/samples-json-codec` | JSON | You want zero dependencies (~2 KB gzipped) and a payload you can read in a log. |
+
+Both expose the same shape: a `ClientSampleEncoder`, a `ClientSampleDecoder`, and a `createClientSampleCodec()` factory that returns a matched pair.
+
+**Encoding on the client:**
 
 ```javascript
-import { SamplesEncoder } from "@observertc/samples-encoder";
+import { ClientSampleEncoder } from "@observertc/samples-protobuf-codec";
 
-const encoder = new SamplesEncoder();
-const sample = monitor.createSample();
+const encoder = new ClientSampleEncoder();
 
-// Encode the sample for efficient transmission
-const encodedSample = encoder.encode(sample);
+monitor.on("sample-created", ({ sample }) => {
+    const encoded = encoder.encode(sample);
 
-// Send compressed data over the network
-fetch("/api/samples", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/octet-stream",
-    },
-    body: encodedSample,
+    fetch("/api/samples", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: encoded,
+    });
 });
 ```
 
-**@observertc/samples-decoder** - Decompresses received ClientSample objects:
+**Decoding on the server:**
 
 ```javascript
-import { SamplesDecoder } from "@observertc/samples-decoder";
+import { ClientSampleDecoder } from "@observertc/samples-protobuf-codec";
 
-const decoder = new SamplesDecoder();
+// one decoder per client connection — see "Delta encoding is stateful" below
+const decoder = new ClientSampleDecoder();
 
-// Receive compressed sample data
-const compressedData = await response.arrayBuffer();
-
-// Decode back to ClientSample object
-const decodedSample = decoder.decode(compressedData);
-
-// Process the restored sample
-console.log("Decoded sample:", decodedSample);
+const sample = decoder.decode(new Uint8Array(await request.arrayBuffer()));
 ```
 
-**Benefits of Using Compression:**
+**Delta encoding is stateful, and that has three consequences:**
 
--   **Reduced Bandwidth**: Compressed samples require significantly less network bandwidth
--   **Faster Transmission**: Smaller payloads improve upload/download times
--   **Storage Efficiency**: Compressed samples consume less storage space
--   **Schema Consistency**: Ensures proper serialization/deserialization of all ClientSample fields
+1. **One encoder per client, one decoder per client.** Each holds the previous sample as its baseline. Sharing an encoder across clients, or decoding two clients' streams through one decoder, produces garbage rather than an error.
+2. **Samples must be decoded in the order they were encoded.** A dropped or reordered payload desynchronises the pair. Use `tryDecode()` where the transport can lose messages — it returns `undefined` instead of throwing, so you can drop the sample and wait for the next resync rather than tearing down the connection.
+3. **Call `reset()` on both sides when a client reconnects.** The encoder starts a fresh baseline; the decoder must be told to expect one.
+
+**Transport-specific helpers.** Where the payload has to survive a text channel, each codec carries its own:
+
+```javascript
+// protobuf: base64 for text transports, or the raw protobuf message
+encoder.encodeToBase64(sample);   decoder.decodeBase64(text);
+encoder.encodeToMessage(sample);  decoder.decodeFromMessage(message);
+
+// json: a plain JSON-serialisable delta
+encoder.encodeToJson(sample);     decoder.decodeJson(json);
+                                  decoder.tryDecodeJson(json);
+```
+
+**Errors** are `ProtobufCodecError` / `JsonCodecError`, each carrying a `code` and a `context` describing what failed — a schema mismatch and a desynchronised baseline report differently, which is what you want in a log.
+
+**Schema compatibility.** Both codecs export a `schemaVersion` describing the `ClientSample` shape they were built against. This monitor ships schema **3.6.0** (`ClientMonitor.samplingSchemaVersion`). Check the two agree before deploying — a codec built against an older schema silently drops fields the monitor now sends.
 
 **Installation:**
 
 ```bash
-# For encoding (client-side)
-npm install @observertc/samples-encoder
-
-# For decoding (server-side)
-npm install @observertc/samples-decoder
-
-# Both packages (if needed)
-npm install @observertc/samples-encoder @observertc/samples-decoder
+# choose one
+npm install @observertc/samples-protobuf-codec
+npm install @observertc/samples-json-codec
 ```
+
+Both packages ship CommonJS and ESM builds with type definitions.
 
 **Integration with ObserveRTC Stack:**
 These compression packages are part of the broader ObserveRTC ecosystem and are designed to work seamlessly with:
@@ -1823,7 +1835,7 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
 | `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
 | `freezed-video-track` | `freezeCount` increases | No new freezes for one tick | `'freezed-video-track'` | `FreezedVideoTrackIssuePayload` |
-| `inbound-video-playout-discrepancy` | `framesReceived - framesRendered > highSkewThreshold` | Skew drops below `lowSkewThreshold` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
+| `inbound-video-playout-discrepancy` | `(framesReceived - framesRendered) / framesReceived > highSkewRatio` | Ratio drops below `lowSkewRatio` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
 | `ice-disconnected` | An ICE transport stayed `disconnected` past `disconnectedThresholdInMs` | ICE reconnects, or the transport goes away | — | `IceDisconnectedIssuePayload` |
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
 | `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, but receiving nothing for `transportStallThresholdInMs` | Inbound traffic resumes | — | `IceTransportStalledIssuePayload` |
@@ -3397,7 +3409,7 @@ interface ClientMonitorEvents {
 **A**:
 
 1. Increase sampling period
-2. Use sample compression (@observertc/samples-encoder)
+2. Use a delta codec (@observertc/samples-protobuf-codec or @observertc/samples-json-codec)
 3. Filter samples before sending
 4. Disable unnecessary detectors
 

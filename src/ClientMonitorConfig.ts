@@ -85,7 +85,24 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Pass `null` to disable the detector entirely; pass `{}` (or omit) to
      * enable it with defaults.
      */
-    videoFreezesDetector: Record<string, never> | null;
+    videoFreezesDetector: {
+        /**
+         * Consecutive collection intervals the track has to stay frozen before
+         * an issue is raised.
+         *
+         * A confidence floor, not a persistence bar: the stats carry cumulative
+         * counters, so one interval can say a freeze happened but never how long
+         * it lasted, and `freezeCount` advances on any inter-frame gap past
+         * roughly `max(3 * average, average + 150ms)` — a sub-second hiccup
+         * nobody notices. A second consecutive observation is what separates
+         * that from a real freeze: either the counter advanced again, or nothing
+         * has rendered since.
+         *
+         * The freeze state is still derived on the first tick and still scored;
+         * only the issue waits.
+         */
+        minConsecutiveTicks: number;
+    } | null;
 
     /**
      * Configuration for detecting inbound track stalling during monitoring.
@@ -111,14 +128,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     playoutDiscrepancyDetector: {
         /**
-         * The low watermark for the skew of frames between the received and rendered
+         * Skew at which an open episode resolves, as a **fraction of the frames
+         * received in the interval**.
          */
-        lowSkewThreshold: number;
+        lowSkewRatio: number;
 
         /**
-         * The high watermark for the skew of frames between the received and rendered
+         * Skew at which an episode opens, as a fraction of the frames received
+         * in the interval. A raw frame count cannot work here: five frames of
+         * skew is 8% of a 2s interval at 30fps and 3% of a 5s one, so the same
+         * number means a different thing at every collecting period and every
+         * frame rate.
          */
-        highSkewThreshold: number;
+        highSkewRatio: number;
+
+        /**
+         * Frames the interval must carry before the ratio is computed at all —
+         * a skew of 2 out of 3 frames is noise, not a discrepancy.
+         */
+        minFramesReceived: number;
     } | null;
 
     syntheticSamplesDetector: {

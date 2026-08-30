@@ -110,6 +110,13 @@ export class NoAvailableIceCandidateDetector implements Detector {
 
 		if (this._everConnected) return;
 
+		// Zero candidate rows is only evidence once gathering says it is done
+		// looking. Before that it means gathering is still running, and where
+		// the field is absent — a stats source that reports no candidates at
+		// all, or rows dropped in validation — it means nothing was measured.
+		// Neither is "gathering produced nothing".
+		if (this.peerConnection.iceGatheringState !== 'complete') return;
+
 		const failing = connectionState === 'disconnected' || connectionState === 'failed';
 		if (!failing && now - this._firstSeenAt < this.config.thresholdInMs) return;
 		if (this._raisedAt !== undefined) return;

@@ -138,7 +138,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
 
-            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {}),
+            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {
+                minConsecutiveTicks: 2,
+            }),
             dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
                 thresholdInMs: 5000,
             }),
@@ -225,8 +227,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 createEvent: true,
             }),
             captureFailureDetector: detectorDefault(monitorConfig.captureFailureDetector, {
-                silenceThresholdInMs: 30000,
-                silenceRmsThreshold: 0.001,
+                silenceThresholdInMs: 60000,
+                silenceRmsThreshold: 0.0001,
                 createEvent: true,
             }),
             codecChangeDetector: detectorDefault(monitorConfig.codecChangeDetector, {
@@ -247,8 +249,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 createEvent: true,
             }),
             playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
-                lowSkewThreshold: 2,
-                highSkewThreshold: 5,
+                lowSkewRatio: 0.1,
+                highSkewRatio: 0.25,
+                minFramesReceived: 10,
             }),
             longPcConnectionEstablishmentDetector: detectorDefault(monitorConfig.longPcConnectionEstablishmentDetector, {
                 thresholdInMs: 5000,

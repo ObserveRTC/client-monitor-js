@@ -5,6 +5,20 @@ import { ClientIssuePayload } from "../ClientMonitorEvents";
 
 export type FreezedVideoTrackIssuePayload = {
 	trackId?: string;
+	/** Consecutive intervals the track was frozen when the issue was raised. */
+	frozenTicks?: number;
+	/**
+	 * Time those intervals actually spanned, from the stats timestamps rather
+	 * than the nominal collecting period — the window the freeze time below is
+	 * a share of.
+	 */
+	observedSpanInMs?: number;
+	/**
+	 * Freeze time accrued over that span. `undefined` where the browser reports
+	 * no `totalFreezesDuration`, which is the only way to know how much of the
+	 * span was frozen rather than merely that a freeze happened in it.
+	 */
+	freezeTimeInMs?: number;
 	durationInMs?: number;
 }
 
@@ -59,6 +73,18 @@ type WindowEntry = {
  * at the first-hop network. Its clock only starts once a keyframe has actually been asked for, since
  * a freeze with no PLI is a different problem.
  *
+ * The issue waits for `minConsecutiveTicks` intervals of freeze before it is raised. The counters
+ * are cumulative, so a single interval can say a freeze happened but never how long it lasted —
+ * and `freezeCount` advances on any inter-frame gap past roughly `max(3 * average, average +
+ * 150ms)`, which is a sub-second hiccup nobody notices. Surviving into a second observation is
+ * what separates that from a freeze worth reporting: either the counter advanced again, or
+ * nothing has rendered since. The freeze *state* is still derived on the first tick, so the score
+ * reflects it either way.
+ *
+ * The payload carries what the local rule cannot: the freeze time accrued and the span it accrued
+ * over, taken from the stats timestamps rather than the nominal collecting period, so a server can
+ * judge severity from the frozen share of a measured window.
+ *
  * A backgrounded tab, a paused consumer and a paused remote sender all stand the detector down, and
  * the stand-down swallows the monotonic counter rather than skipping the tick, so the quiet period
  * is not replayed as freezes on the way back — a throttled tab does not render, and its freeze
@@ -83,6 +109,9 @@ export class FreezedVideoTrackDetector implements Detector {
 	private readonly _recoveryIssueKey: string;
 
 	private _lastFreezeCount = 0;
+	private _frozenTicks = 0;
+	private _frozenSpanInMs = 0;
+	private _frozenFreezeTimeInMs?: number;
 	private _startedFreezeAt?: number;
 
 	private readonly _window: WindowEntry[] = [];
@@ -110,6 +139,9 @@ export class FreezedVideoTrackDetector implements Detector {
 	/** Swallows the monotonic counter rather than skipping the tick, so the stand-down period is not replayed as freezes on the way back. */
 	private _standDown(inboundRtp: InboundRtpMonitor, comment: string): void {
 		this._lastFreezeCount = inboundRtp.freezeCount ?? 0;
+		this._frozenTicks = 0;
+		this._frozenSpanInMs = 0;
+		this._frozenFreezeTimeInMs = undefined;
 
 		if (!inboundRtp.isFreezed) return;
 
@@ -149,8 +181,33 @@ export class FreezedVideoTrackDetector implements Detector {
 
 		inboundRtp.isFreezed = frozen;
 
+		if (frozen) {
+			this._frozenTicks += 1;
+			// `deltaTime` is the stats timestamps differenced, not the nominal
+			// collecting period — a late collection would otherwise understate
+			// how long the track was actually frozen.
+			this._frozenSpanInMs += inboundRtp.deltaTime ?? 0;
+
+			if (inboundRtp.deltaTotalFreezesDuration !== undefined) {
+				this._frozenFreezeTimeInMs = (this._frozenFreezeTimeInMs ?? 0) + inboundRtp.deltaTotalFreezesDuration * 1000;
+			}
+		} else {
+			this._frozenTicks = 0;
+			this._frozenSpanInMs = 0;
+			this._frozenFreezeTimeInMs = undefined;
+		}
+
 		if (config.videoFreezesDetector) {
-			this._checkFreeze(wasFrozen, frozen, inboundRtp.trackIdentifier);
+			// The counters are cumulative, so one interval cannot say how long a
+			// freeze lasted — only that at least one happened. Surviving into a
+			// second consecutive observation can: either the counter advanced
+			// again, or nothing has rendered since. Both mean more than the
+			// single sub-second hiccup that `freezeCount` increments on
+			// routinely. `isFreezed` is set regardless, so the score still
+			// reflects the first tick.
+			const confirmed = config.videoFreezesDetector.minConsecutiveTicks <= this._frozenTicks;
+
+			this._checkFreeze(frozen, confirmed, inboundRtp.trackIdentifier);
 		}
 
 		const recoveryConfig = config.videoRecoveryDetector;
@@ -167,8 +224,13 @@ export class FreezedVideoTrackDetector implements Detector {
 		}
 	}
 
-	private _checkFreeze(wasFrozen: boolean, frozen: boolean, trackId?: string) {
-		if (!wasFrozen && frozen) {
+	private _checkFreeze(frozen: boolean, confirmed: boolean, trackId: string | undefined) {
+		// The issue's own edge, not the state's: `isFreezed` is set on the first
+		// frozen tick while the issue waits for confirmation, so reading the
+		// state here would miss the raise entirely.
+		const raised = this._startedFreezeAt !== undefined;
+
+		if (!raised && frozen && confirmed) {
 			const clientMonitor = this.peerConnection.parent;
 
 			clientMonitor.emit('freezed-video-track', {
@@ -181,9 +243,16 @@ export class FreezedVideoTrackDetector implements Detector {
 			clientMonitor.raiseIssue<FreezedVideoTrackIssuePayload>(this.issueKey, {
 				includeInSample: this.includeIssueInSample,
 				type: FreezedVideoTrackDetector.ISSUE_TYPE,
-				payload: { trackId },
+				payload: {
+					trackId,
+					frozenTicks: this._frozenTicks,
+					observedSpanInMs: Math.round(this._frozenSpanInMs),
+					freezeTimeInMs: this._frozenFreezeTimeInMs === undefined
+						? undefined
+						: Math.round(this._frozenFreezeTimeInMs),
+				},
 			});
-		} else if (wasFrozen && !frozen) {
+		} else if (raised && !frozen) {
 			this._resolve(this.issueKey, 'video freeze ended', this._startedFreezeAt);
 			this._startedFreezeAt = undefined;
 		}

@@ -99,23 +99,13 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 			return; // logger?
 		}
 
-		this.deltaBytesReceived = 0;
-		this.deltaBytesSent = 0;
-		this.deltaPacketsReceived = 0;
-		this.deltaPacketsSent = 0;
-
-		if (this.packetsSent !== undefined && stats.packetsSent !== undefined && this.packetsSent <= stats.packetsSent) {
-			this.deltaPacketsSent = stats.packetsSent - this.packetsSent;
-		}
-		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined && this.packetsReceived <= stats.packetsReceived) {
-			this.deltaPacketsReceived = stats.packetsReceived - this.packetsReceived;
-		}
-		if (this.bytesSent !== undefined && stats.bytesSent !== undefined && this.bytesSent <= stats.bytesSent) {
-			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
-		}
-		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined && this.bytesReceived <= stats.bytesReceived) {
-			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
-		}
+		// `undefined`, not `0`, when the report carries no counter — the two are
+		// the opposite claim, and the stall checks read a zero as proof.
+		// `IceTransportMonitor` has always done it this way.
+		this.deltaPacketsSent = positiveDelta(stats.packetsSent, this.packetsSent);
+		this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);
+		this.deltaBytesSent = positiveDelta(stats.bytesSent, this.bytesSent);
+		this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived);
 
 		this.deltaTotalRoundTripTime = positiveDelta(stats.totalRoundTripTime, this.totalRoundTripTime);
 		this.deltaResponsesReceived = positiveDelta(stats.responsesReceived, this.responsesReceived);

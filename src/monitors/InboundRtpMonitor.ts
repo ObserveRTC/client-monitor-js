@@ -136,6 +136,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	public deltaFramesDropped?: number;
 	public deltaKeyFramesDecoded?: number;
 	public deltaTotalDecodeTime?: number;
+	public deltaTotalFreezesDuration?: number;
 	public deltaPliCount?: number;
 	public deltaFirCount?: number;
 	public deltaNackCount?: number;
@@ -203,15 +204,21 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.receivingAudioSamples = this.deltaTotalSamplesReceived;
 		}
 		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
-			this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived) ?? 0;
-			this.bitrate = Math.max(0, this.deltaBytesReceived * 8 / (elapsedInSec));
+			this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived);
+			// a counter reset leaves the delta undefined; carrying the previous
+			// bitrate forward would describe traffic this interval did not see
+			this.bitrate = this.deltaBytesReceived === undefined
+				? undefined
+				: Math.max(0, this.deltaBytesReceived * 8 / elapsedInSec);
 		}
 		if (this.packetsLost !== undefined && stats.packetsLost !== undefined) {
-			this.deltaPacketsLost = positiveDelta(stats.packetsLost, this.packetsLost) ?? 0;
+			this.deltaPacketsLost = positiveDelta(stats.packetsLost, this.packetsLost);
 		}
 		if (this.packetsReceived !== undefined && stats.packetsReceived !== undefined) {
-			this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived) ?? 0;
-			this.packetRate = this.deltaPacketsReceived / elapsedInSec;
+			this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);
+			this.packetRate = this.deltaPacketsReceived === undefined
+				? undefined
+				: this.deltaPacketsReceived / elapsedInSec;
 		}
 
 		// ---- audio: concealment and jitter-buffer pressure ----
@@ -277,6 +284,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 			this.avgQpPerFrame = undefined;
 		}
 		this.deltaTotalDecodeTime = positiveDelta(stats.totalDecodeTime, this.totalDecodeTime);
+		this.deltaTotalFreezesDuration = positiveDelta(stats.totalFreezesDuration, this.totalFreezesDuration);
 		this.deltaPliCount = positiveDelta(stats.pliCount, this.pliCount);
 		this.deltaFirCount = positiveDelta(stats.firCount, this.firCount);
 		this.deltaNackCount = positiveDelta(stats.nackCount, this.nackCount);
