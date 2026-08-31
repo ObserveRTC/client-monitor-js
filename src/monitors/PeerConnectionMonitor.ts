@@ -24,10 +24,12 @@ import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTupleChangeDetector } from "../detectors/IceTupleChangeDetector";
 import { IceConnectivityDetector } from "../detectors/IceConnectivityDetector";
 import { BlockedTransportDetector } from "../detectors/BlockedTransportDetector";
+import { DtlsHandshakeDetector } from "../detectors/DtlsHandshakeDetector";
 import { NoAvailableIceCandidateDetector } from "../detectors/NoAvailableIceCandidateDetector";
 import { MediaPipelineDetector } from "../detectors/MediaPipelineDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
+import { attributeRtpToTransport } from "../utils/common";
 import { SelectedIcePath } from "./SelectedIcePath";
 import { sampledScoreReasons } from "../scores/utils";
 import {
@@ -195,6 +197,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 		if (parent.config.blockedTransportDetector !== null) {
 			this.detectors.add(new BlockedTransportDetector(this));
+		}
+		if (parent.config.dtlsHandshakeDetector !== null) {
+			this.detectors.add(new DtlsHandshakeDetector(this));
 		}
 		if (parent.config.noAvailableIceCandidateDetector !== null) {
 			this.detectors.add(new NoAvailableIceCandidateDetector(this));
@@ -457,7 +462,10 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		// assembled from signals belonging to two different candidates.
 		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.usingTcp);
 		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.usingTurn);
-		this.iceState = selectedIceCandidatePairs?.[0]?.getIceTransport()?.iceState as W3C.RtcIceTransportState;
+		// The most severe state across the transports: with BUNDLE there is exactly
+		// one, and without it a failed transport must not be masked by a healthy
+		// sibling that happened to be listed first.
+		this.iceState = this._mostSevereIceState();
 
 		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
 		this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
@@ -608,6 +616,44 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public get selectedIceCandidatePairs() {
 		return this.iceTransports.map(iceTransport => iceTransport.getSelectedCandidatePair())
 		.filter(pair => pair !== undefined) as IceCandidatePairMonitor[];
+	}
+
+	/**
+	 * The RTP monitors that belong to `transport` — the bound convenience over
+	 * the single attribution rule in `utils/common.attributeRtpToTransport`.
+	 */
+	public attributeRtpToTransport<T extends { transportId?: string }>(
+		rtps: T[],
+		transport: IceTransportMonitor,
+	): T[] {
+		return attributeRtpToTransport(rtps, transport.id, this.mappedIceTransportMonitors.size);
+	}
+
+	/** Severity used to fold several transports' ICE states into one pc-level state. */
+	private static readonly ICE_STATE_SEVERITY: Record<string, number> = {
+		failed: 6,
+		disconnected: 5,
+		checking: 4,
+		new: 3,
+		connected: 2,
+		completed: 1,
+		closed: 0,
+	};
+
+	private _mostSevereIceState(): W3C.RtcIceTransportState | undefined {
+		let worst: string | undefined;
+
+		for (const transport of this.mappedIceTransportMonitors.values()) {
+			const state = transport.iceState;
+
+			if (state === undefined) continue;
+			if (worst === undefined
+				|| (PeerConnectionMonitor.ICE_STATE_SEVERITY[worst] ?? -1) < (PeerConnectionMonitor.ICE_STATE_SEVERITY[state] ?? -1)) {
+				worst = state;
+			}
+		}
+
+		return worst as W3C.RtcIceTransportState | undefined;
 	}
 
 	public set connectionState(state: W3C.RtcPeerConnectionState | undefined) {

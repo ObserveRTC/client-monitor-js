@@ -23,6 +23,8 @@ import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
 import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
 import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import { DtlsHandshakeFailedIssuePayload, DtlsHandshakeStalledIssuePayload } from "./detectors/DtlsHandshakeDetector";
+import { LongPcConnectionEstablishmentStage } from "./detectors/LongPcConnectionEstablishment";
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
@@ -162,6 +164,8 @@ export type DryOutboundTrackEventPayload = ClientMonitorBaseEvent & {
 
 export type TooLongPcConnectionEstablishmentEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
+	/** Which stage of establishment the connection is actually stuck in. */
+	stalledStage: LongPcConnectionEstablishmentStage,
 }
 
 export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
@@ -193,6 +197,14 @@ export type BlockedTransportEventPayload = ClientMonitorBaseEvent
 export type NoAvailableIceCandidateEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& NoAvailableIceCandidateIssuePayload;
+
+export type DtlsHandshakeFailedEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& DtlsHandshakeFailedIssuePayload;
+
+export type DtlsHandshakeStalledEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& DtlsHandshakeStalledIssuePayload;
 
 export type MediaPipelineStalledEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
@@ -417,6 +429,8 @@ export type ClientMonitorEvents = {
 	'ice-restart': [IceRestartEventPayload],
 	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
 	'blocked-transport': [BlockedTransportEventPayload],
+	'dtls-handshake-failed': [DtlsHandshakeFailedEventPayload],
+	'dtls-handshake-stalled': [DtlsHandshakeStalledEventPayload],
 	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
 	'media-pipeline-stalled': [MediaPipelineStalledEventPayload],
 	'audio-concealment': [AudioConcealmentEventPayload],

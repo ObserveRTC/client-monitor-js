@@ -1,4 +1,5 @@
 import { IceTransportStats } from "../schema/ClientSample";
+import { positiveDelta } from "../utils/common";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class IceTransportMonitor implements IceTransportStats {
@@ -31,6 +32,14 @@ export class IceTransportMonitor implements IceTransportStats {
 	deltaBytesReceived?: number | undefined;
 	sendingBitrate?: number | undefined;
 	receivingBitrate?: number | undefined;
+	/**
+	 * How many times the browser switched the selected candidate pair since the
+	 * previous tick, from the native `selectedCandidatePairChanges` counter
+	 * (Chrome 80+, Firefox 155+; absent on Safari). `undefined` until the
+	 * transport has had a selection: the spec counter also increments on the
+	 * very first none → some selection, which is not churn.
+	 */
+	deltaSelectedCandidatePairChanges?: number | undefined;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -68,6 +77,16 @@ export class IceTransportMonitor implements IceTransportStats {
 		return this._peerConnection.mappedIceCandidatePairMonitors.get(this.selectedCandidatePairId ?? '');
 	}
 
+	/**
+	 * The live `SelectedIcePath` of this transport, when one exists. Paths are
+	 * keyed by the candidate pair's `pathKey`, which is the transport id for
+	 * every native flow, so this resolves for anything but the pathless
+	 * legacy fallbacks.
+	 */
+	public getSelectedIcePath() {
+		return this._peerConnection.mappedSelectedIcePaths.get(this.id);
+	}
+
 	public accept(stats: Omit<IceTransportStats, 'appData'>): void {
 		this._visited = true;
 
@@ -103,10 +122,51 @@ export class IceTransportMonitor implements IceTransportStats {
 			this.receivingBitrate = undefined;
 		}
 
+		// Only counted once the transport already had a selection: the spec counter
+		// also increments going from no selected pair to having one (its very first
+		// selection), and treating that as a switch would read every connection
+		// setup as churn. A backwards counter (reset) yields `undefined`, never 0.
+		this.deltaSelectedCandidatePairChanges = this.selectedCandidatePairId !== undefined
+			? positiveDelta(stats.selectedCandidatePairChanges, this.selectedCandidatePairChanges)
+			: undefined;
+
 		Object.assign(this, stats);
 	}
 
 	public createSample(): IceTransportStats {
+		// Constant after the handshake, so re-sending them every sample carries no
+		// information: they are emitted in the first sample and again only when one
+		// of them changes (the ufrag changes exactly at an ICE restart — a change
+		// worth seeing). `sendIceTransportMetadataOnChangeOnly: false` restores the
+		// legacy every-sample emission.
+		const staticMetadata: Pick<IceTransportStats,
+			'iceRole' | 'iceLocalUsernameFragment' | 'localCertificateId' | 'remoteCertificateId'
+			| 'tlsVersion' | 'dtlsCipher' | 'dtlsRole' | 'srtpCipher'> = {
+			iceRole: this.iceRole,
+			iceLocalUsernameFragment: this.iceLocalUsernameFragment,
+			localCertificateId: this.localCertificateId,
+			remoteCertificateId: this.remoteCertificateId,
+			tlsVersion: this.tlsVersion,
+			dtlsCipher: this.dtlsCipher,
+			dtlsRole: this.dtlsRole,
+			srtpCipher: this.srtpCipher,
+		};
+
+		let sampledStaticMetadata: typeof staticMetadata | undefined = staticMetadata;
+
+		if (this._peerConnection.parent.config.sendIceTransportMetadataOnChangeOnly) {
+			const fingerprint = [
+				this.iceRole, this.iceLocalUsernameFragment, this.localCertificateId, this.remoteCertificateId,
+				this.tlsVersion, this.dtlsCipher, this.dtlsRole, this.srtpCipher,
+			].join('|');
+
+			if (this._sampledStaticMetadataFingerprint === fingerprint) {
+				sampledStaticMetadata = undefined;
+			} else {
+				this._sampledStaticMetadataFingerprint = fingerprint;
+			}
+		}
+
 		return {
 			id: this.id,
 			timestamp: this.timestamp,
@@ -114,22 +174,17 @@ export class IceTransportMonitor implements IceTransportStats {
 			packetsReceived: this.packetsReceived,
 			bytesSent: this.bytesSent,
 			bytesReceived: this.bytesReceived,
-			iceRole: this.iceRole,
-			iceLocalUsernameFragment: this.iceLocalUsernameFragment,
 			dtlsState: this.dtlsState,
 			iceState: this.iceState,
 			selectedCandidatePairId: this.selectedCandidatePairId,
-			localCertificateId: this.localCertificateId,
-			remoteCertificateId: this.remoteCertificateId,
-			tlsVersion: this.tlsVersion,
-			dtlsCipher: this.dtlsCipher,
-			dtlsRole: this.dtlsRole,
-			srtpCipher: this.srtpCipher,
 			selectedCandidatePairChanges: this.selectedCandidatePairChanges,
 			ccfbMessagesSent: this.ccfbMessagesSent,
 			ccfbMessagesReceived: this.ccfbMessagesReceived,
 			attachments: this.attachments,
+			...(sampledStaticMetadata ?? {}),
 		};
 	}
+
+	private _sampledStaticMetadataFingerprint?: string;
 
 }

@@ -52,20 +52,81 @@ export class LongPcConnectionEstablishmentDetector implements Detector{
 		}
 		this._evented = true;
 		const clientMonitor = this.peerConnection.parent;
+		const stalledStage = this._stalledStage();
 
 		clientMonitor.emit('too-long-pc-connection-establishment', {
 			peerConnectionMonitor: this.peerConnection,
 			clientMonitor,
+			stalledStage,
 		});
 
 		if (this.config.createEvent) {
+			const [ transport ] = this._sortedBySeverity();
+
 			clientMonitor.addEvent({
 				type: ClientEventTypes.LONG_PC_CONNECTION_ESTABLISHMENT,
 				payload: {
 					peerConnectionId: this.peerConnection.peerConnectionId,
 					duration,
+					// `connecting` covers both ICE and DTLS — this names which of them
+					// the connection is actually stuck in.
+					stalledStage,
+					iceState: transport?.iceState,
+					dtlsState: transport?.dtlsState,
+					iceGatheringState: this.peerConnection.iceGatheringState,
 				}
 			})
 		}
 	}
+
+	/**
+	 * Where establishment is actually stuck. `connectionState: 'connecting'`
+	 * covers ICE and the DTLS handshake alike; the per-transport states can name
+	 * the stage — `ice-gathering` before any transport exists, `ice-checking`
+	 * while a transport is still negotiating connectivity, `dtls` once every
+	 * transport's ICE side is done (proven by `iceState` where the browser
+	 * reports one, by the selected pair being `succeeded` where it does not) yet
+	 * the connection still is not `connected`, and `unknown` when the stats give
+	 * no verdict.
+	 */
+	private _stalledStage(): LongPcConnectionEstablishmentStage {
+		// nullish-guarded so a partially mocked monitor (tests, custom sources) stays judgeable
+		const transports = this.peerConnection.iceTransports ?? [];
+
+		if (transports.length === 0) {
+			return this.peerConnection.iceGatheringState === 'gathering' ? 'ice-gathering' : 'unknown';
+		}
+
+		let anyIceDone = false;
+
+		for (const transport of transports) {
+			const iceState = transport.iceState;
+
+			if (iceState === 'checking' || iceState === 'new') return 'ice-checking';
+			if (iceState === 'connected' || iceState === 'completed') {
+				anyIceDone = true;
+				continue;
+			}
+			// no reported iceState (Safari, reconstructed Firefox transport):
+			// a succeeded selected pair proves the ICE side done
+			if (iceState === undefined && transport.getSelectedCandidatePair()?.state === 'succeeded') {
+				anyIceDone = true;
+			}
+		}
+
+		return anyIceDone ? 'dtls' : 'unknown';
+	}
+
+	private _sortedBySeverity() {
+		const severity: Record<string, number> = {
+			failed: 6, disconnected: 5, checking: 4, new: 3, connected: 2, completed: 1, closed: 0,
+		};
+
+		return [ ...(this.peerConnection.iceTransports ?? []) ].sort(
+			(a, b) => (severity[b.iceState ?? ''] ?? -1) - (severity[a.iceState ?? ''] ?? -1)
+		);
+	}
 }
+
+/** Which stage of establishment a too-long `connecting` is actually stuck in. */
+export type LongPcConnectionEstablishmentStage = 'ice-gathering' | 'ice-checking' | 'dtls' | 'unknown';

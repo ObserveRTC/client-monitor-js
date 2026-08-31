@@ -80,7 +80,7 @@ export class FirefoxStatsAdapter implements StatsAdapter {
 		bytesSent: 0,
 		bytesReceived: 0,
 		selectedCandidatePairId: undefined,
-		selectedCandidatePairChanges: -1,
+		selectedCandidatePairChanges: 0,
 	};
 
 	private _selectedCandidatePair?: SelectedIceCandidatePairStats;
