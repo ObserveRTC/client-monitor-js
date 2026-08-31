@@ -1,6 +1,7 @@
 import { IceTransportMonitor } from "../monitors/IceTransportMonitor";
 import { IcePathKind } from "../monitors/IceCandidatePairMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
+import { attributeRtpToTransport } from "../utils/common";
 import { Detector } from "./Detector";
 
 /**
@@ -201,13 +202,10 @@ export class BlockedTransportDetector implements Detector {
 		);
 	}
 
-	/** When no outbound RTP carries a `transportId` (some browsers omit it), every stream is attributed to the transport — exact under BUNDLE. */
 	private _outboundMediaBitrateOf(transport: IceTransportMonitor): number {
-		const outboundRtps = this.peerConnection.outboundRtps;
-		const attributed = outboundRtps.filter((outboundRtp) => outboundRtp.transportId === transport.id);
-		const relevant = 0 < attributed.length
-			? attributed
-			: outboundRtps.filter((outboundRtp) => outboundRtp.transportId === undefined);
+		const relevant = attributeRtpToTransport(
+			this.peerConnection.outboundRtps, transport.id, this.peerConnection.iceTransports.length,
+		);
 
 		return relevant.reduce((acc, outboundRtp) => acc + (outboundRtp.bitrate ?? 0), 0);
 	}

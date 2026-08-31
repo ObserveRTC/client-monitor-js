@@ -271,6 +271,9 @@ const monitor = new ClientMonitor({
         maxSendShare: 0.1,            // transport send below this share of produced => not leaving
         stunFreshnessInMs: 10000,     // how recent a STUN response must be to count as verified
     },
+    dtlsHandshakeDetector: {
+        stalledThresholdInMs: 6000,   // ICE healthy but DTLS still `new`/`connecting` for this long
+    },
     noAvailableIceCandidateDetector: {
         thresholdInMs: 6000,          // grace for `new`/`connecting` with zero local candidates
     },
@@ -453,6 +456,7 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`LongPcConnectionEstablishmentDetector`](#longpcconnectionestablishmentdetector) | peer connection | event `too-long-pc-connection-establishment` | Connection setup taking suspiciously long |
 | [`IceConnectivityDetector`](#iceconnectivitydetector) | ICE transports | issues `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path`; events `ice-restart`, `ice-restart-recommended` | Runtime ICE health and *when* an ICE restart is warranted |
 | [`BlockedTransportDetector`](#blockedtransportdetector) | ICE transports | issue `blocked-transport` | STUN passes but media does not — the firewall / policy-middlebox signature |
+| [`DtlsHandshakeDetector`](#dtlshandshakedetector) | ICE transports | issues `dtls-handshake-failed`, `dtls-handshake-stalled` | The network path works but the secure media transport never negotiates — certificate mismatch, DTLS intolerance, a middlebox eating DTLS |
 | [`NoAvailableIceCandidateDetector`](#noavailableicecandidatedetector) | peer connection | issue `no-available-ice-candidate` | Zero local ICE candidates while the connection falls over — no usable network at all |
 | [`MediaPipelineDetector`](#mediapipelinedetector) | peer connection | issue `media-pipeline-stalled` | The first broken stage of the media pipeline nothing else covers: encoded frames never leave the sender, or transport traffic never demuxes |
 | [`IceTupleChangeDetector`](#icetuplechangedetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
@@ -890,7 +894,7 @@ monitor.on('issue-resolved', (issue) => {
 
 #### LongPcConnectionEstablishmentDetector
 
-Emits `'too-long-pc-connection-establishment'` (and the `LONG_PC_CONNECTION_ESTABLISHMENT` client event) when a peer connection stays in `connecting` past the threshold. Re-arms on any exit from `connecting`, so slow *retries* are reported too.
+Emits `'too-long-pc-connection-establishment'` (and the `LONG_PC_CONNECTION_ESTABLISHMENT` client event) when a peer connection stays in `connecting` past the threshold. Re-arms on any exit from `connecting`, so slow *retries* are reported too. Since 4.8.0 the payload names *where* setup is stuck via `stalledStage` — `'ice-gathering'`, `'ice-checking'`, `'dtls'` or `'unknown'` — because `connecting` covers ICE and the DTLS handshake alike, and the two have different fixes.
 
 **Use the result:** show "connecting is taking longer than usual"; if it repeats, retry with `iceTransportPolicy: 'relay'` to test whether direct connectivity is the blocker. The [`never-established`](#iceconnectivitydetector) restart recommendation is this detector's escalation.
 
@@ -905,7 +909,7 @@ longPcConnectionEstablishmentDetector: {
 
 #### IceConnectivityDetector
 
-Runtime ICE and transport health, per ICE transport (a peer connection without BUNDLE has several, and they fail independently). Raises `ice-disconnected` (only after the threshold — transient blips self-heal), `ice-connection-failed` (immediately — `failed` is terminal for the generation), `ice-transport-stalled` (still sending, receiving nothing, after inbound had been seen) and `unstable-ice-path` (selected path flapping).
+Runtime ICE and transport health, per ICE transport (a peer connection without BUNDLE has several, and they fail independently). Raises `ice-disconnected` (only after the threshold — transient blips self-heal), `ice-connection-failed` (immediately — `failed` is terminal for the generation), `ice-transport-stalled` (still sending, receiving nothing, after inbound had been seen) and `unstable-ice-path` (selected path flapping). Path switches are counted as the larger of the observed path transitions and the browser's own `selectedCandidatePairChanges` counter (Chrome 80+, Firefox 155+), which also sees flaps too fast for tick-to-tick diffing; the issue payload carries the native count as `nativePairChanges`, and an inferred ICE restart never counts as churn.
 
 **Use the result — the restart loop:** the library names *when* an ICE restart is warranted; performing it is the application's job. `'ice-restart-recommended'` carries a `reason` and a `recommendationCount` so you can escalate to a full rejoin when restarts stop helping; `'ice-restart'` then reports whether the restart you performed `recovered` or `failed`.
 
@@ -964,6 +968,24 @@ blockedTransportDetector: {
 **Use the result:** tell the user their network blocks media (a TURN/TLS fallback or a network change is the fix, an ICE restart on the same path is not), and correlate server-side: many `blocked-transport` clients on one corporate network is a firewall policy, not N user problems.
 
 **Sources:** [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675) · [RTCIceCandidatePairStats (W3C webrtc-stats)](https://www.w3.org/TR/webrtc-stats/#candidatepair-dict*) · [WebRTC and firewalls (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/firewall/)
+
+#### DtlsHandshakeDetector
+
+Separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned before: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all used to present as a generically slow `connecting`.
+
+Raises two issues, per ICE transport. `dtls-handshake-failed` fires immediately on `dtlsState: 'failed'` — the handshake is terminal for this transport until an ICE restart re-keys it. `dtls-handshake-stalled` fires when the ICE side is proven healthy while `dtlsState` sits in `new`/`connecting` past `stalledThresholdInMs`. ICE health comes from the transport's `iceState` where the browser reports one, and from the selected candidate pair being `succeeded` where it does not (Safari, and the transport reconstructed for Firefox < 153) — the payload's `iceEvidence` names which proof was used.
+
+What it will not judge: a transport on its first observed tick (Firefox 153/154 report pre-negotiation transport values that only 155 makes trustworthy); `dtlsState: 'closed'`, which is a shutdown, not a failure; and a transport whose ICE side is not proven healthy, where the ICE detectors own whatever is wrong. An inferred ICE restart clears the stall timer, since the new generation re-runs the handshake.
+
+```javascript
+dtlsHandshakeDetector: {
+    stalledThresholdInMs: 6000, // ICE healthy, DTLS still `new`/`connecting` for this long
+}
+```
+
+**Use the result:** `dtls-handshake-failed` is a configuration or interop problem, not a network problem — check certificate fingerprints in signaling and TLS interception on the client's network; an ICE restart on the same path *can* help because it re-keys DTLS. Server-side, a failure rate concentrated on one browser version is a browser regression; concentrated on one customer network, a middleware/DPI policy.
+
+**Sources:** [RTCDtlsTransport.state (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCDtlsTransport/state) · [RTCTransportStats (W3C webrtc-stats)](https://www.w3.org/TR/webrtc-stats/#transportstats-dict*) · [RFC 8827: WebRTC Security Architecture](https://datatracker.ietf.org/doc/html/rfc8827)
 
 #### NoAvailableIceCandidateDetector
 
@@ -1598,6 +1620,11 @@ Sampling creates periodic snapshots (`ClientSample`) containing the complete sta
 
 ### Sample Structure
 
+The sample schema version is **3.7.0** (`ClientMonitor.samplingSchemaVersion`). Two things to know on the consuming side:
+
+-   **Payloads may nest.** Client event, issue, meta and extension-stat payloads are records that may carry nested structures — records on the wire, never pre-serialised JSON strings. (`PEER_CONNECTION_ICE_PATH_CHANGED` ships its `from`/`to` path evidence as structured records since 3.7.0.)
+-   **Static ICE transport metadata ships on change only.** `iceRole`, `dtlsRole`, `iceLocalUsernameFragment`, `tlsVersion`, `dtlsCipher`, `srtpCipher` and the certificate references appear in a transport's first sample and again only when a value changes — absence means *unchanged*, not unknown; keep the last seen value per transport `id`. Set `sendIceTransportMetadataOnChangeOnly: false` to restore every-sample emission.
+
 A `ClientSample` includes:
 
 -   **Client metadata**: clientId, callId, timestamp, score
@@ -1840,6 +1867,8 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
 | `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, but receiving nothing for `transportStallThresholdInMs` | Inbound traffic resumes | — | `IceTransportStalledIssuePayload` |
 | `unstable-ice-path` | `pathSwitchThreshold` selected-path switches within `pathSwitchWindowInMs` | The window drains | — | `UnstableIcePathIssuePayload` |
+| `dtls-handshake-failed` | An ICE transport reached `dtlsState: 'failed'` | A later handshake connects (after an ICE restart re-keys it) | `'dtls-handshake-failed'` | `DtlsHandshakeFailedIssuePayload` |
+| `dtls-handshake-stalled` | ICE proven healthy while DTLS sat in `new`/`connecting` past `stalledThresholdInMs` | The handshake completes | `'dtls-handshake-stalled'` | `DtlsHandshakeStalledIssuePayload` |
 | `audio-concealment` | Audible concealment share (silence excluded) crosses `onThreshold` over the window | Share falls below `offThreshold` | `'audio-concealment'` | `AudioConcealmentIssuePayload` |
 | `audio-jitter-buffer-stress` | Target delay grown **and** NetEQ time-stretching, for `minConsecutiveTicks` | Either condition clears | `'audio-jitter-buffer-stress'` | `JitterBufferStressIssuePayload` |
 | `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
@@ -2194,6 +2223,8 @@ monitor.on('ice-path-changed',      (e) => { /* selected path changed: direct <-
 monitor.on('ice-restart',           (e) => { /* a new ICE generation was inferred */ });
 monitor.on('ice-restart-recommended', (e) => { /* YOUR app decides whether to restartIce() */ });
 monitor.on('ice-tuple-changed',     (e) => { /* low-level: the selected tuple set changed */ });
+monitor.on('dtls-handshake-failed',  (e) => { /* DTLS is terminal for this transport — config/interop, not network */ });
+monitor.on('dtls-handshake-stalled', (e) => { /* ICE fine, DTLS not completing — something eats DTLS */ });
 monitor.on('new-selected-ice-path', (e) => { /* an ICE transport selected its first path */ });
 
 // Score & stats lifecycle.

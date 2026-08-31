@@ -357,6 +357,10 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		return this._peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
 	}
 
+	public getSelectedCandidatePair() {
+		return this.getIceTransport()?.getSelectedCandidatePair();
+	}
+
 	public getCodec() {
 		return this._peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}

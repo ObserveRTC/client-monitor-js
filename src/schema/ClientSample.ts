@@ -1,5 +1,5 @@
 
-export const schemaVersion = "3.6.0";
+export const schemaVersion = "3.7.0";
 
 /**
 * The WebRTC app provided custom stats payload
@@ -13,7 +13,7 @@ export type ExtensionStat = {
 	/**
 	* The payload of the extension stats the custom app provides
 	*/
-	payload?: Record<string, boolean | string | number>;
+	payload?: Record<string, unknown>;
 
 }
 
@@ -29,7 +29,7 @@ export type ClientMetaData = {
 	/**
 	* The attributes of the meta data entry, if applicable.
 	*/
-	payload?: Record<string, boolean | string | number>;
+	payload?: Record<string, unknown>;
 
 	/**
 	* The unique identifier of the peer connection for which the event was generated.
@@ -70,7 +70,7 @@ export type ClientIssue = {
 	/**
 	* The attributes of the issue, if applicable.
 	*/
-	payload?: Record<string, boolean | string | number>;
+	payload?: Record<string, unknown>;
 
 	/**
 	* The timestamp in epoch format when the event was generated.
@@ -91,7 +91,7 @@ export type ClientEvent = {
 	/**
 	* The attributes of the event, if applicable.
 	*/
-	payload?: Record<string, boolean | string | number>;
+	payload?: Record<string, unknown>;
 
 	/**
 	* The timestamp in epoch format when the event was generated.
@@ -360,6 +360,18 @@ export type IceCandidateStats = {
 
 /**
 * ICE Transport Stats
+*
+* Payload expectation since schema 3.7.0: the mostly-static members —
+* `iceRole`, `iceLocalUsernameFragment`, `localCertificateId`,
+* `remoteCertificateId`, `tlsVersion`, `dtlsCipher`, `dtlsRole`,
+* `srtpCipher` — are shipped in a transport's first sample and again only
+* when one of their values changes (the ufrag changing is exactly an ICE
+* restart). Consumers keep the last seen value per transport `id`; absence
+* in a sample means "unchanged", not "unknown". The client config
+* `sendIceTransportMetadataOnChangeOnly: false` restores every-sample
+* emission. Dynamic members (`iceState`, `dtlsState`,
+* `selectedCandidatePairId`, `selectedCandidatePairChanges`, byte/packet
+* counters) are shipped every sample as before.
 */
 export type IceTransportStats = {
 	/**

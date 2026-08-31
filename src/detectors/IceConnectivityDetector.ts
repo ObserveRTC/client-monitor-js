@@ -64,6 +64,14 @@ export type UnstableIcePathIssuePayload = {
 	switches: number;
 	windowInMs: number;
 	kind: IcePathKind;
+	/**
+	 * Switches inside the window according to the browser's own
+	 * `selectedCandidatePairChanges` counter, when the browser reports one
+	 * (Chrome 80+, Firefox 155+). It also counts flaps too fast for the
+	 * tick-to-tick path diffing to observe, which is why `switches` can
+	 * exceed the observed transition count.
+	 */
+	nativePairChanges?: number;
 	durationInMs?: number;
 };
 
@@ -138,6 +146,19 @@ type TransportState = {
 	restartRecommendations: number;
 	inboundStalledSince?: number;
 	stallRaisedAt?: number;
+
+	/**
+	 * When the browser reported a selected-pair change through the native
+	 * `selectedCandidatePairChanges` counter: one entry per change, timestamped
+	 * at the tick that observed it. Complements the path diffing, which cannot
+	 * see a flap that departs and returns within one collecting period.
+	 */
+	nativeSwitchTimestamps: number[];
+	/**
+	 * Ticks left during which native pair changes are not recorded — set on an
+	 * inferred ICE restart, whose own reselection is not churn.
+	 */
+	suppressNativeChurnTicks: number;
 };
 
 const DISCONNECTED_ISSUE_TYPE = 'ice-disconnected';
@@ -226,6 +247,8 @@ export class IceConnectivityDetector implements Detector {
 			this._checkIceState(transport, state);
 			this._checkInboundStall(transport, state);
 			this._checkIceRestart(transport, state);
+			// after restart detection, which suppresses the restart's own reselection
+			this._recordNativePairChanges(transport, state);
 			recommendedThisTick = this._checkRestartRecommendation(transport, state) || recommendedThisTick;
 		}
 
@@ -241,10 +264,45 @@ export class IceConnectivityDetector implements Detector {
 	}
 
 	/**
+	 * Records this tick's native selected-pair changes, when the browser reports
+	 * the `selectedCandidatePairChanges` counter (Chrome 80+, Firefox 155+). The
+	 * path diffing in `SelectedIcePath` is the classifier and the portable
+	 * fallback, but it is tick-to-tick and structurally blind to a flap that
+	 * departs and returns within one collecting period — the native counter is
+	 * the browser's own ground truth for *how many* switches happened.
+	 */
+	private _recordNativePairChanges(transport: IceTransportMonitor, state: TransportState) {
+		if (0 < state.suppressNativeChurnTicks) {
+			state.suppressNativeChurnTicks -= 1;
+
+			return;
+		}
+
+		const delta = transport.deltaSelectedCandidatePairChanges;
+
+		if (delta === undefined || delta <= 0) return;
+
+		const now = Date.now();
+		const since = now - this.config.pathSwitchWindowInMs;
+
+		for (let i = 0; i < Math.min(delta, 16); ++i) {
+			state.nativeSwitchTimestamps.push(now);
+		}
+
+		state.nativeSwitchTimestamps = state.nativeSwitchTimestamps.filter((timestamp) => since <= timestamp);
+
+		if (64 < state.nativeSwitchTimestamps.length) {
+			state.nativeSwitchTimestamps.splice(0, state.nativeSwitchTimestamps.length - 64);
+		}
+	}
+
+	/**
 	 * Raises `unstable-ice-path` when a selected path switched at least `pathSwitchThreshold` times
 	 * inside `pathSwitchWindowInMs` — a path that keeps moving is a different failure from one that is
-	 * down, and the switching itself is what the user hears. Resolved when the rate falls back below
-	 * the threshold, or when the path disappears.
+	 * down, and the switching itself is what the user hears. Counted as the larger of the observed
+	 * path transitions and the browser's own `selectedCandidatePairChanges` deltas, which also see
+	 * flaps too fast for tick-to-tick diffing. Resolved when the rate falls back below the threshold,
+	 * or when the path disappears.
 	 */
 	private _checkPathStability() {
 		const { pathSwitchWindowInMs, pathSwitchThreshold } = this.config;
@@ -254,7 +312,10 @@ export class IceConnectivityDetector implements Detector {
 		for (const path of this.peerConnection.selectedIcePaths) {
 			seenKeys.add(path.key);
 
-			const switches = path.getSwitchCountSince(now - pathSwitchWindowInMs);
+			const since = now - pathSwitchWindowInMs;
+			const nativePairChanges = this._states.get(path.transportId ?? '')
+				?.nativeSwitchTimestamps.filter((timestamp) => since <= timestamp).length ?? 0;
+			const switches = Math.max(path.getSwitchCountSince(since), nativePairChanges);
 			const raisedAt = this._unstablePaths.get(path.key);
 
 			if (switches < pathSwitchThreshold) {
@@ -281,6 +342,7 @@ export class IceConnectivityDetector implements Detector {
 						switches,
 						windowInMs: pathSwitchWindowInMs,
 						kind: path.kind,
+						nativePairChanges: 0 < nativePairChanges ? nativePairChanges : undefined,
 					},
 				}
 			);
@@ -304,6 +366,8 @@ export class IceConnectivityDetector implements Detector {
 				restartPending: false,
 				sawInboundTraffic: false,
 				restartRecommendations: 0,
+				nativeSwitchTimestamps: [],
+				suppressNativeChurnTicks: 0,
 			};
 			this._states.set(transport.id, state);
 		}
@@ -347,6 +411,9 @@ export class IceConnectivityDetector implements Detector {
 		state.stallRaisedAt = undefined;
 		state.inboundStalledSince = undefined;
 		state.sawInboundTraffic = false;
+		// the restart's own reselection increments the native counter, and is not churn
+		state.nativeSwitchTimestamps = [];
+		state.suppressNativeChurnTicks = 2;
 
 		this._notifyRestart(transport, state, 'detected');
 	}
@@ -614,16 +681,29 @@ export class IceConnectivityDetector implements Detector {
 		this._establishmentRecommendedAt = now;
 		this._establishmentRecommendations += 1;
 
-		const [ firstTransport ] = this.peerConnection.iceTransports;
+		// The transport whose state best explains the stall — the most severe one.
+		// A connection without BUNDLE has several transports, and the failing one
+		// is the story, not whichever healthy sibling happened to be listed first.
+		const severity: Record<string, number> = {
+			failed: 6, disconnected: 5, checking: 4, new: 3, connected: 2, completed: 1, closed: 0,
+		};
+		let subject: IceTransportMonitor | undefined;
+
+		for (const transport of this.peerConnection.iceTransports) {
+			if (subject === undefined
+				|| (severity[subject.iceState ?? ''] ?? -1) < (severity[transport.iceState ?? ''] ?? -1)) {
+				subject = transport;
+			}
+		}
 
 		this._recommendRestart({
 			peerConnectionId: this.peerConnection.peerConnectionId,
 			reason: 'never-established',
 			conditionDurationInMs,
-			iceGeneration: this._states.get(firstTransport?.id ?? '')?.iceGeneration ?? 0,
+			iceGeneration: this._states.get(subject?.id ?? '')?.iceGeneration ?? 0,
 			recommendationCount: this._establishmentRecommendations,
-			iceState: firstTransport?.iceState,
-			dtlsState: firstTransport?.dtlsState,
+			iceState: subject?.iceState,
+			dtlsState: subject?.dtlsState,
 		});
 	}
 
