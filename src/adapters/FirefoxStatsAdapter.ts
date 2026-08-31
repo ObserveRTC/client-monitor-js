@@ -80,7 +80,10 @@ export class FirefoxStatsAdapter implements StatsAdapter {
 		bytesSent: 0,
 		bytesReceived: 0,
 		selectedCandidatePairId: undefined,
-		selectedCandidatePairChanges: -1,
+		// Spec semantics: "initially zero", and going from no selected pair to
+		// having one also increments — so the first selection lands on 1, the
+		// same as a native counter.
+		selectedCandidatePairChanges: 0,
 	};
 
 	private _selectedCandidatePair?: SelectedIceCandidatePairStats;

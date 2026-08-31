@@ -147,6 +147,13 @@ export { StuckDecoderDetector } from './detectors/StuckDecoderDetector';
 export type { StuckDecoderIssuePayload, StuckDecoderVariant } from './detectors/StuckDecoderDetector';
 export { IceConnectivityDetector } from './detectors/IceConnectivityDetector';
 export { BlockedTransportDetector } from './detectors/BlockedTransportDetector';
+export { DtlsHandshakeDetector } from './detectors/DtlsHandshakeDetector';
+export type {
+    DtlsIceEvidence,
+    DtlsHandshakeFailedIssuePayload,
+    DtlsHandshakeStalledIssuePayload,
+} from './detectors/DtlsHandshakeDetector';
+export type { LongPcConnectionEstablishmentStage } from './detectors/LongPcConnectionEstablishment';
 export type {
     BlockedTransportEvidence,
     BlockedTransportIssuePayload,

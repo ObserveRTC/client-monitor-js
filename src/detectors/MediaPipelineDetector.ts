@@ -1,4 +1,5 @@
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
+import { attributeRtpToTransport } from "../utils/common";
 import { Detector } from "./Detector";
 
 /**
@@ -160,8 +161,8 @@ export class MediaPipelineDetector implements Detector {
 			seenTransports.add(transport.id);
 
 			const state = this._getState(this._demuxStates, transport.id);
-			const inboundRtps = this.peerConnection.inboundRtps.filter(
-				(inboundRtp) => inboundRtp.transportId === undefined || inboundRtp.transportId === transport.id
+			const inboundRtps = attributeRtpToTransport(
+				this.peerConnection.inboundRtps, transport.id, this.peerConnection.iceTransports.length,
 			);
 			const receivingBitrate = transport.receivingBitrate;
 			let demuxedDelta: number | undefined;

@@ -671,6 +671,30 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     } | null;
 
     /**
+     * Configuration for detecting DTLS handshake trouble on an ICE transport:
+     * a `dtlsState` of `failed` (terminal for the handshake), or a transport
+     * whose ICE side is proven healthy while DTLS sits in `new`/`connecting`
+     * past `stalledThresholdInMs` — the signature that separates a network
+     * connectivity failure (owned by the ICE detectors) from a secure media
+     * transport negotiation failure: certificate fingerprint mismatch, DTLS
+     * version intolerance, or a middlebox that passes STUN but eats DTLS.
+     *
+     * Where the browser reports no transport `iceState` (Safari, and the
+     * transport reconstructed for Firefox < 153), ICE health is proven by the
+     * selected candidate pair being `succeeded` instead.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    dtlsHandshakeDetector: {
+        /**
+         * How long (in milliseconds) DTLS may stay in `new`/`connecting` on a
+         * transport whose ICE side is already healthy before the stall issue
+         * is raised. `dtlsState: 'failed'` raises immediately regardless.
+         */
+        stalledThresholdInMs: number;
+    } | null;
+
+    /**
      * Configuration for detecting that the client has no usable network at
      * all: ICE gathering produced zero local candidates while the peer
      * connection falls to `disconnected`/`failed` (or never leaves
@@ -762,6 +786,20 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * DEFAULT: true (only an explicit `false` disables shipping)
      */
     sendScoreReasonsToServer?: boolean;
+
+    /**
+     * Whether the mostly-static ICE transport metadata (`iceRole`, `dtlsRole`,
+     * `iceLocalUsernameFragment`, `tlsVersion`, `dtlsCipher`, `srtpCipher` and
+     * the certificate references) is shipped only in the first sample of a
+     * transport and again when one of the values changes, instead of being
+     * repeated in every sample. The values are constant after the DTLS
+     * handshake, so on-change emission removes pure redundancy from the wire;
+     * the ufrag changing is exactly an ICE restart, which is a change worth
+     * shipping. Set to `false` to restore the legacy every-sample emission.
+     *
+     * DEFAULT: true (only an explicit `false` disables on-change emission)
+     */
+    sendIceTransportMetadataOnChangeOnly?: boolean;
 
     /**
      * Additional metadata to be included in the client monitor.

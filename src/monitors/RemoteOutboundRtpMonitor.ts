@@ -65,6 +65,14 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 		return this._peerConnection.mappedCodecMonitors.get(this.codecId ?? '');
 	}
 
+	public getIceTransport() {
+		return this._peerConnection.mappedIceTransportMonitors.get(this.transportId ?? '');
+	}
+
+	public getSelectedCandidatePair() {
+		return this.getIceTransport()?.getSelectedCandidatePair();
+	}
+
 	public accept(stats: Omit<RemoteOutboundRtpStats, 'appData'>): void {
 		this._visited = true;
 

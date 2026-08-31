@@ -23,23 +23,20 @@ import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
 import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
 import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import { DtlsHandshakeFailedIssuePayload, DtlsHandshakeStalledIssuePayload } from "./detectors/DtlsHandshakeDetector";
+import { LongPcConnectionEstablishmentStage } from "./detectors/LongPcConnectionEstablishment";
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
 /**
- * A value the ClientSample schema (3.5.0) can carry inside a payload:
- * payloads are flat records of primitives on the wire, never nested
- * structures and never pre-serialised JSON strings.
- */
-export type ClientPayloadValue = boolean | string | number;
-
-/**
  * The shape every sampled payload must have — client events, client issues,
- * meta items and extension stats all carry this. `undefined` and `null`
- * entries are legal on the API (DOM types produce them); `undefined` keys
- * disappear when the sample serialises.
+ * meta items and extension stats all carry this. Since schema 3.7.0 payloads
+ * may carry nested structures, not only flat records of primitives; they are
+ * records on the wire, never pre-serialised JSON strings. `undefined` and
+ * `null` entries are legal on the API (DOM types produce them); `undefined`
+ * keys disappear when the sample serialises.
  */
-export type ClientPayload = Record<string, ClientPayloadValue | null | undefined>;
+export type ClientPayload = Record<string, unknown>;
 
 export type ClientIssuePayload = ClientPayload;
 
@@ -162,6 +159,8 @@ export type DryOutboundTrackEventPayload = ClientMonitorBaseEvent & {
 
 export type TooLongPcConnectionEstablishmentEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
+	/** Which stage of establishment the connection is actually stuck in. */
+	stalledStage: LongPcConnectionEstablishmentStage,
 }
 
 export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
@@ -193,6 +192,14 @@ export type BlockedTransportEventPayload = ClientMonitorBaseEvent
 export type NoAvailableIceCandidateEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& NoAvailableIceCandidateIssuePayload;
+
+export type DtlsHandshakeFailedEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& DtlsHandshakeFailedIssuePayload;
+
+export type DtlsHandshakeStalledEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& DtlsHandshakeStalledIssuePayload;
 
 export type MediaPipelineStalledEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
@@ -417,6 +424,8 @@ export type ClientMonitorEvents = {
 	'ice-restart': [IceRestartEventPayload],
 	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
 	'blocked-transport': [BlockedTransportEventPayload],
+	'dtls-handshake-failed': [DtlsHandshakeFailedEventPayload],
+	'dtls-handshake-stalled': [DtlsHandshakeStalledEventPayload],
 	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
 	'media-pipeline-stalled': [MediaPipelineStalledEventPayload],
 	'audio-concealment': [AudioConcealmentEventPayload],

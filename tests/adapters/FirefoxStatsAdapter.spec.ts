@@ -228,7 +228,9 @@ describe('FirefoxStatsAdapter', () => {
 			expect(transport).toBeDefined();
 			expect(transport.id).toBe('T1');
 			expect(transport.selectedCandidatePairId).toBe('CP1');
-			expect(transport.selectedCandidatePairChanges).toBe(0);
+			// spec semantics: "initially zero", and none -> some also increments,
+			// so the very first selection lands on 1 like a native counter
+			expect(transport.selectedCandidatePairChanges).toBe(1);
 			expect(inbound.transportId).toBe(transport.id);
 		});
 
@@ -249,7 +251,7 @@ describe('FirefoxStatsAdapter', () => {
 			expect(transport.bytesReceived).toBe(4000);
 			expect(transport.packetsSent).toBe(20);
 			expect(transport.selectedCandidatePairId).toBe('CP2');
-			expect(transport.selectedCandidatePairChanges).toBe(1);
+			expect(transport.selectedCandidatePairChanges).toBe(2); // first selection + one switch
 		});
 
 		it('stays a no-op when a native transport report is present, wherever it appears', () => {

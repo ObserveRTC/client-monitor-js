@@ -28,6 +28,10 @@ import {
 } from "./detectors/CaptureFailureDetector";
 import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
 import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
+import {
+    DtlsHandshakeFailedIssuePayload,
+    DtlsHandshakeStalledIssuePayload,
+} from "./detectors/DtlsHandshakeDetector";
 import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
 import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
 
@@ -117,6 +121,8 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
     | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
     | RaisedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
+    | RaisedClientIssue<DtlsHandshakeFailedIssuePayload>      & { type: 'dtls-handshake-failed' }
+    | RaisedClientIssue<DtlsHandshakeStalledIssuePayload>     & { type: 'dtls-handshake-stalled' }
     | RaisedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' }
     | RaisedClientIssue<MediaPipelineStalledIssuePayload>       & { type: 'media-pipeline-stalled' };
 
@@ -151,6 +157,8 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
     | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
     | ResolvedClientIssue<BlockedTransportIssuePayload>         & { type: 'blocked-transport' }
+    | ResolvedClientIssue<DtlsHandshakeFailedIssuePayload>      & { type: 'dtls-handshake-failed' }
+    | ResolvedClientIssue<DtlsHandshakeStalledIssuePayload>     & { type: 'dtls-handshake-stalled' }
     | ResolvedClientIssue<NoAvailableIceCandidateIssuePayload>    & { type: 'no-available-ice-candidate' }
     | ResolvedClientIssue<MediaPipelineStalledIssuePayload>       & { type: 'media-pipeline-stalled' };
 
@@ -189,6 +197,8 @@ export function isClientMonitorIssue(
         case 'silent-audio-source':
         case 'stuck-decoder':
         case 'blocked-transport':
+        case 'dtls-handshake-failed':
+        case 'dtls-handshake-stalled':
         case 'no-available-ice-candidate':
         case 'media-pipeline-stalled':
             return true;

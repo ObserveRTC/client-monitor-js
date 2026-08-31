@@ -1,11 +1,13 @@
 /* eslint-disable no-shadow */
 
 /**
- * The shape schema 3.5.0 allows for every client event payload: a flat record
- * of primitives. `null`/`undefined` entries are legal on the API (DOM types
- * produce them); `undefined` keys disappear when the sample serialises.
+ * The shape schema 3.7.0 allows for every client event payload: a record that
+ * may carry nested structures, not only flat primitives — but always a record
+ * on the wire, never a pre-serialised JSON string. `null`/`undefined` entries
+ * are legal on the API (DOM types produce them); `undefined` keys disappear
+ * when the sample serialises.
  */
-export type ClientEventPayloadRecord = Record<string, boolean | string | number | null | undefined>;
+export type ClientEventPayloadRecord = Record<string, unknown>;
 
 
 export enum ClientEventTypes {
@@ -289,10 +291,17 @@ export interface PeerConnectionIcePathChangedEventPayload extends ClientEventPay
 	peerConnectionId: string;
 	/** Why the path changed: 'initial-selection', 'direct-to-relay', ... */
 	transition: string;
-	/** The previous path evidence as a JSON document. Absent for the first path observed on a transport. */
-	from?: string;
-	/** The path evidence that is selected now, as a JSON document. */
-	to: string;
+	/**
+	 * The previous path evidence as a structured record (a pre-serialised JSON
+	 * string before schema 3.7.0). Absent for the first path observed on a
+	 * transport.
+	 */
+	from?: Record<string, string | number | boolean | undefined>;
+	/**
+	 * The path evidence that is selected now, as a structured record (a
+	 * pre-serialised JSON string before schema 3.7.0).
+	 */
+	to: Record<string, string | number | boolean | undefined>;
 }
 
 export interface IceRestartEventPayload extends ClientEventPayloadRecord {
@@ -310,6 +319,19 @@ export interface IceRestartEventPayload extends ClientEventPayloadRecord {
 export interface LongPcConnectionEstablishmentEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	duration: number;
+	/**
+	 * Which stage of establishment the connection is actually stuck in:
+	 * 'ice-gathering', 'ice-checking', 'dtls' or 'unknown'. `connectionState:
+	 * 'connecting'` covers ICE and the DTLS handshake alike — this names which
+	 * of them is holding the connection up. Since schema 3.7.0.
+	 */
+	stalledStage?: string;
+	/** ICE state of the most severe transport at raise time. Since schema 3.7.0. */
+	iceState?: string;
+	/** DTLS state of the most severe transport at raise time. Since schema 3.7.0. */
+	dtlsState?: string;
+	/** The peer connection's ICE gathering state at raise time. Since schema 3.7.0. */
+	iceGatheringState?: string;
 }
 
 export interface ExcessiveSynthesizedAudioEventPayload extends ClientEventPayloadRecord {

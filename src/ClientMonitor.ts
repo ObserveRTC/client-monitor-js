@@ -283,6 +283,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
+            sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
+            dtlsHandshakeDetector: detectorDefault(monitorConfig.dtlsHandshakeDetector, {
+                // sits between the ICE detectors' 5000ms thresholds and
+                // noAvailableIceCandidateDetector's 6000ms, so ICE-level causes
+                // are reported by their own detectors first
+                stalledThresholdInMs: 6000,
+            }),
             appData: monitorConfig.appData ?? {} as AppData,
         }
 
