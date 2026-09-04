@@ -25,6 +25,36 @@ export type StuckDecoderIssuePayload = {
 	durationInMs?: number;
 }
 
+export type StuckDecoderDetectorConfig = {
+	/**
+	 * Floor (in milliseconds) on how long nothing may decode, with RTP
+	 * flowing, before raising. The effective wait is
+	 * `max(thresholdInMs, rttMultiplier × RTT)` — a wedge never self-heals,
+	 * so the wait only needs to outlast a legitimate PLI → keyframe
+	 * recovery round trip, and that cost scales with RTT rather than
+	 * being a fixed number of seconds.
+	 */
+	thresholdInMs: number;
+
+	/**
+	 * Multiple of the connection's current RTT the condition must outlast.
+	 * Extends the wait on high-latency paths where recovery legitimately
+	 * takes longer; on a low-RTT path `thresholdInMs` dominates.
+	 */
+	rttMultiplier: number;
+
+	/**
+	 * Receive bitrate (bps) above which the stream counts as "still being
+	 * delivered" — separates the wedge from a dry/starved track. A rate,
+	 * not a per-tick byte count, so it means the same thing at every
+	 * collecting period.
+	 */
+	minBitrate: number;
+
+	/** PLIs that must have been sent during the stuck stretch. */
+	minPliCount: number;
+}
+
 /**
  * Watches an inbound video track for the wedge where RTP keeps arriving but no frame
  * ever decodes again: a corrupt or incomplete frame breaks the decode chain, PLIs go
@@ -47,6 +77,13 @@ export type StuckDecoderIssuePayload = {
  * `minPliCount` PLIs must have gone out in that stretch as well — the browser asking
  * for repair confirms it considers itself stuck.
  *
+ * That wait is counted in the stream's own time, by accumulating the inbound RTP's
+ * `deltaTime`, rather than in wall-clock elapsed. The dead bytes and the PLIs already
+ * come from the stats deltas, so the stretch they are attributed to has to be measured
+ * the same way or the three no longer describe the same interval: a collection that
+ * ran late would report a wedge as having lasted longer than the counters it is
+ * reported alongside can account for.
+ *
  * It refuses to judge a paused consumer, a paused remote sender or a backgrounded tab,
  * where suspended decoding with bytes still flowing is expected rather than broken,
  * and it stands down below `minBitrate`, since a dead pipe is starvation and not a
@@ -57,6 +94,10 @@ export type StuckDecoderIssuePayload = {
  * stands down.
  * Monitor event: `stuck-decoder` — the hook for the application-side mitigation.
  * Config: `stuckDecoderDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Receive — frames to decoder
+ *
  */
 export class StuckDecoderDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'stuck-decoder';
@@ -67,7 +108,8 @@ export class StuckDecoderDetector implements Detector {
 
 	private readonly issueKey: string;
 
-	private _stuckSince?: number;
+	/** Stats time accumulated over the current wedge; `0` outside one. */
+	private _stuckForInMs = 0;
 	private _deadBytes = 0;
 	private _plisSinceStuck = 0;
 	private _sawAssembledFrames = false;
@@ -110,9 +152,7 @@ export class StuckDecoderDetector implements Detector {
 			return this._reset('rtp not flowing');
 		}
 
-		const now = Date.now();
-
-		this._stuckSince ??= now;
+		this._stuckForInMs += inboundRtp.deltaTime ?? 0;
 		this._deadBytes += deltaBytes;
 		this._plisSinceStuck += inboundRtp.deltaPliCount ?? 0;
 
@@ -122,7 +162,7 @@ export class StuckDecoderDetector implements Detector {
 
 		if (this._alertOn) return;
 
-		const stuckForInMs = now - this._stuckSince;
+		const stuckForInMs = this._stuckForInMs;
 
 		// A wedge never self-heals, so the wait only has to outlast a legitimate PLI -> keyframe recovery, which scales with RTT.
 		const rttInMs = (this.peerConnection.avgRttInSec ?? 0) * 1000;
@@ -132,7 +172,8 @@ export class StuckDecoderDetector implements Detector {
 		if (this._plisSinceStuck < this.config.minPliCount) return;
 
 		this._alertOn = true;
-		this._startedAt = now;
+		// wall clock, deliberately: read only to report how long the issue stood
+		this._startedAt = Date.now();
 
 		const variant: StuckDecoderVariant = inboundRtp.deltaFramesReceived === undefined
 			? 'unknown'
@@ -168,7 +209,7 @@ export class StuckDecoderDetector implements Detector {
 	}
 
 	private _reset(comment: string) {
-		this._stuckSince = undefined;
+		this._stuckForInMs = 0;
 		this._deadBytes = 0;
 		this._plisSinceStuck = 0;
 		this._sawAssembledFrames = false;

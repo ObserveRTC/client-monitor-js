@@ -86,14 +86,17 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	}
 
 	/**
-	 * True when this candidate was obtained from a TURN server. Relay candidates
-	 * are only ever obtained from TURN, so `candidateType` — not the candidate
-	 * `url` — is the primary TURN signal: a srflx candidate discovered through a
-	 * TURN server's STUN function also carries a `turn:` url. `relayProtocol` is
-	 * kept as a fallback for stats that omit `candidateType`.
+	 * True when this candidate was obtained from a TURN server.
+	 *
+	 * Read from `candidateType` and nothing else. Relay candidates are only ever
+	 * obtained from TURN, and `candidateType` — not the candidate `url` — is the
+	 * signal, because a srflx candidate discovered through a TURN server's STUN
+	 * function also carries a `turn:` url. A browser omitting `candidateType`,
+	 * which the specification requires, is an adapter's problem to fix before the
+	 * monitors see the report; it is not something to second-guess here.
 	 */
 	public get isRelay(): boolean {
-		return this.candidateType === 'relay' || this.turnTransport !== undefined;
+		return this.candidateType === 'relay';
 	}
 
 	/**

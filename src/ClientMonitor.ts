@@ -138,27 +138,203 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
 
-            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {
-                minConsecutiveTicks: 2,
+            // Detector defaults, one entry per detector, keyed by the
+            // detector's own `name` in camelCase. The grouping follows
+            // `ClientMonitorConfig` — connectivity, transport quality, pipeline
+            // disruption, perceived quality, telemetry — so the two files can be
+            // read side by side. Where two detectors carry the same tunable they
+            // each carry their own default here, deliberately: the values may be
+            // equal today, and changing one must not move the other.
+
+            // Connectivity — layer 1: reachability. The 6000ms floor is what the
+            // DTLS stall threshold below is positioned against, so the two move
+            // together.
+            iceReachabilityDetector: detectorDefault(monitorConfig.iceReachabilityDetector, {
+                thresholdInMs: 6000,
             }),
-            dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
+            // Layer 2 — traversal. Telemetry, and nothing to tune.
+            iceTraversalDetector: detectorDefault(monitorConfig.iceTraversalDetector, {}),
+            // Layer 3 — path establishment. "Slow" and "demonstrably failed" are
+            // two findings with two thresholds; the second is well past the first,
+            // since a slow connection has to be given time to stop being merely
+            // slow. Recommending a restart is a third decision with a threshold of
+            // its own, on `iceRestartRecommendationDetector`.
+            icePathEstablishmentDetector: detectorDefault(monitorConfig.icePathEstablishmentDetector, {
                 thresholdInMs: 5000,
+                createEvent: true,
+            }),
+            iceEstablishmentFailedDetector: detectorDefault(monitorConfig.iceEstablishmentFailedDetector, {
+                thresholdInMs: 15000,
+            }),
+            // Layer 4 — secure transport. `failed` is terminal and needs no
+            // threshold; the stall threshold sits between the layer-5 5000ms
+            // thresholds and `iceReachabilityDetector`'s 6000ms, so ICE-level
+            // causes are reported by their own detectors first.
+            dtlsHandshakeFailedDetector: detectorDefault(monitorConfig.dtlsHandshakeFailedDetector, {}),
+            dtlsHandshakeStalledDetector: detectorDefault(monitorConfig.dtlsHandshakeStalledDetector, {
+                stalledThresholdInMs: 6000,
+            }),
+            // Layer 5 — path continuity. Four findings about a path that already
+            // worked: it is down, it is finished, it is up but delivering nothing,
+            // it will not settle.
+            iceDisconnectedDetector: detectorDefault(monitorConfig.iceDisconnectedDetector, {
+                disconnectedThresholdInMs: 5000,
+            }),
+            iceConnectionFailedDetector: detectorDefault(monitorConfig.iceConnectionFailedDetector, {}),
+            iceTransportStalledDetector: detectorDefault(monitorConfig.iceTransportStalledDetector, {
+                transportStallThresholdInMs: 5000,
+            }),
+            unstableIcePathDetector: detectorDefault(monitorConfig.unstableIcePathDetector, {
+                pathSwitchWindowInMs: 30000,
+                pathSwitchThreshold: 3,
+            }),
+            // Connectivity telemetry: an ICE restart is a fact rather than a
+            // fault, and recommending one is advice rather than a finding. The
+            // recommendation thresholds are deliberately wider than the issue
+            // thresholds they sit beside — the issue says the path is down, the
+            // recommendation says it has been down long enough that a
+            // renegotiation is worth the disruption.
+            iceRestartDetector: detectorDefault(monitorConfig.iceRestartDetector, {
+                createEvent: true,
+            }),
+            iceRestartRecommendationDetector: detectorDefault(monitorConfig.iceRestartRecommendationDetector, {
+                createEvent: true,
+                iceRestartRecommendationThresholdInMs: 10000,
+                iceRestartRecommendationCooldownInMs: 15000,
+                restartRecommendationThresholdInMs: 10000,
+                restartRecommendationCooldownInMs: 15000,
+            }),
+            // Transport Quality — the properties of a working path. Each
+            // threshold below is a round starting point meant to be tuned
+            // against a real fleet, not a measurement of anything.
+            // Capacity, one detector per direction, and the same two ratios each: how
+            // far the bitrate has to fall to open a finding, and how far it has to come
+            // back to close one — the gap between them being the hysteresis. The
+            // downlink adds the one it cannot do without, since it has no bandwidth
+            // estimate to read. `collapseRatio: 0.75` is the one number here that is a
+            // measurement rather than a round starting point: against a 500 kbit
+            // throttle it separated the throttled collections from the healthy ones
+            // with precision 1.00 and recall 0.67.
+            uplinkCongestionDetector: detectorDefault(monitorConfig.uplinkCongestionDetector, {
+                // Calibrated against captured sessions rather than a loopback shaper;
+                // see docs/CAPACITY_DETECTOR_FIELD_EVAL.md. The middle of a plateau:
+                // everything from 0.45 to 0.70 reached the same findings there.
+                minConfidence: 0.65,
+            }),
+            // The downlink has no recovery ratio: with no incoming bandwidth estimate
+            // there is nothing that says what the path can carry now, so the episode
+            // ends when the browser stops reporting a bandwidth limitation instead.
+            downlinkCongestionDetector: detectorDefault(monitorConfig.downlinkCongestionDetector, {
+                collapseRatio: 0.6,
+                bufferElevationRatio: 2,
+            }),
+            transportDelayDetector: detectorDefault(monitorConfig.transportDelayDetector, {
+                // Round trip around 300ms is where turn-taking starts to break
+                // down; ITU-T G.114 puts one-way "generally acceptable" at 150ms.
+                thresholdInMs: 300,
+                recoveryThresholdInMs: 200,
+                durationInMs: 6000,
+            }),
+            transportLossDetector: detectorDefault(monitorConfig.transportLossDetector, {
+                threshold: 0.05,
+                recoveryThreshold: 0.01,
+                durationInMs: 6000,
+            }),
+            blockedStunRequestsDetector: detectorDefault(monitorConfig.blockedStunRequestsDetector, {
+                responseReceivedTimeoutInMs: 10000,
+                requestsSentTimeoutInMs: 10000,
+            }),
+            blockedOutboundMediaDetector: detectorDefault(monitorConfig.blockedOutboundMediaDetector, {
+                thresholdInMs: 10000,
+            }),
+            // The one detector whose default is `null`: its premise — the far end's
+            // RTCP outliving its media — is false wherever rtcp-mux is in force,
+            // which is every browser. See `ClientMonitorConfig` for the full why.
+            blockedInboundMediaDetector: detectorDefault(monitorConfig.blockedInboundMediaDetector, null),
+            transportJitterDetector: detectorDefault(monitorConfig.transportJitterDetector, {
+                thresholdInMs: 100,
+                recoveryThresholdInMs: 30,
+                durationInMs: 6000,
+            }),
+            // Pipeline Disruption — the send chain, from the capture device to
+            // the wire.
+            captureSourceLostDetector: detectorDefault(monitorConfig.captureSourceLostDetector, {
+                createEvent: true,
+            }),
+            silentAudioSourceDetector: detectorDefault(monitorConfig.silentAudioSourceDetector, {
+                silenceThresholdInMs: 60000,
+                silenceRmsThreshold: 0.0001,
+            }),
+            sourceCaptureBottleneckDetector: detectorDefault(monitorConfig.sourceCaptureBottleneckDetector, {
+                durationInMs: 15_000,
+                captureFpsRatioThreshold: 0.9,
+            }),
+            encoderPerformanceDetector: detectorDefault(monitorConfig.encoderPerformanceDetector, {
+                encodeFpsRatioThreshold: 0.7,
+                encodeTimeBudgetRatio: 0.8,
+                // null: CpuPerformanceDetector owns the CPU signal — see the detector
+                cpuLimitationShareThreshold: null,
+                minConsecutiveTicks: 2,
+                // Starts at the same value as
+                // `sourceCaptureBottleneckDetector.captureFpsRatioThreshold`, and is
+                // free to move independently of it: this one decides when the
+                // encoder is excused, that one decides when the camera is blamed.
+                sourceSupplyRatioThreshold: 0.9,
+            }),
+            rtpSenderStalledDetector: detectorDefault(monitorConfig.rtpSenderStalledDetector, {
+                thresholdInMs: 4000,
             }),
             dryOutboundTrackDetector: detectorDefault(monitorConfig.dryOutboundTrackDetector, {
                 thresholdInMs: 5000,
             }),
-            audioDesyncDetector: detectorDefault(monitorConfig.audioDesyncDetector, {
-                // aligned with the documented defaults; the previous 0.5/0.25
-                // required half of all samples to be corrected before alerting
-                fractionalCorrectionAlertOffThreshold: 0.05,
-                fractionalCorrectionAlertOnThreshold: 0.1,
+            // Pipeline Disruption — the receive chain, from the transport to the
+            // renderer.
+            transportDemuxStalledDetector: detectorDefault(monitorConfig.transportDemuxStalledDetector, {
+                thresholdInMs: 4000,
+                minTransportReceiveBitrateBps: 20000,
             }),
-            syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
-                minSynthesizedSamplesDuration: 0,
-                createEvent: true,
+            dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
+                thresholdInMs: 5000,
             }),
-            congestionDetector: detectorDefault(monitorConfig.congestionDetector, {
-                sensitivity: 'medium',
+            frameAssemblyStalledDetector: detectorDefault(monitorConfig.frameAssemblyStalledDetector, {
+                thresholdInMs: 3000,
+                minPacketsReceived: 20,
+            }),
+            decoderBottleneckDetector: detectorDefault(monitorConfig.decoderBottleneckDetector, {
+                durationInMs: 15_000,
+                decodeFpsRatioThreshold: 0.9,
+                minReceivedFps: 5,
+            }),
+            decoderPerformanceDetector: detectorDefault(monitorConfig.decoderPerformanceDetector, {
+                decodeTimeBudgetRatio: 0.8,
+                dropRatioThreshold: 0.1,
+                minFramesReceived: 10,
+                quietLossThreshold: 0.02,
+                minConsecutiveTicks: 2,
+            }),
+            stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
+                thresholdInMs: 4000,
+                rttMultiplier: 15,
+                minBitrate: 10000,
+                minPliCount: 2,
+            }),
+            playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
+                lowSkewRatio: 0.1,
+                highSkewRatio: 0.25,
+                minFramesReceived: 10,
+            }),
+            // Pipeline Disruption — the repair loop beside the receive chain, and
+            // the machine behind both chains.
+            keyframeStormDetector: detectorDefault(monitorConfig.keyframeStormDetector, {
+                windowInMs: 30000,
+                // real-world storms run ~0.5-0.7 PLI/s sustained; healthy
+                // streams stay well under 0.1/s outside of joins
+                pliRateAlertOn: 0.5,
+                pliRateAlertOff: 0.15,
+            }),
+            videoRecoveryFailedDetector: detectorDefault(monitorConfig.videoRecoveryFailedDetector, {
+                recoveryFailedThresholdInMs: 5000,
+                recoveryFailedMinPliCount: 2,
             }),
             cpuPerformanceDetector: detectorDefault(monitorConfig.cpuPerformanceDetector, {
                 incomingDecodedFramesRatioThresholds: {
@@ -176,59 +352,51 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 encoderCpuLimitationShareThreshold: 0.3,
                 encodeTimeBudgetRatio: 0.8,
             }),
-            audioConcealmentDetector: detectorDefault(monitorConfig.audioConcealmentDetector, {
-                // Webex-aligned: >3% concealment is a significant change, a
-                // "severely concealed second" is >5%
-                onThreshold: 0.03,
-                offThreshold: 0.01,
-                // must span several collections at the commonly recommended
-                // ~5s collecting period — a 5s window would hold one sample
-                windowInMs: 15000,
-                minSamplesInWindow: 24000, // half a second of 48kHz audio
+            // Perceived Quality — what the person on the other end would say
+            // about the picture and the sound.
+            pixelatedVideoDetector: detectorDefault(monitorConfig.pixelatedVideoDetector, {
+                // Camera video typically runs 0.05–0.2 bits per pixel; below
+                // roughly 0.03 blocking artefacts are usually visible.
+                threshold: 0.03,
+                recoveryThreshold: 0.05,
+                durationInMs: 8000,
+            }),
+            inboundVideoFlowStateDetector: detectorDefault(monitorConfig.inboundVideoFlowStateDetector, {
+                frozenAfterInMs: 2000,
+                minFreezeCountForChoppy: 2,
+                observationWindowInMs: 5000,
+                continuousDurationInMs: 30000,
+            }),
+            inventedSpeechDetector: detectorDefault(monitorConfig.inventedSpeechDetector, {
+                // RFC 7294 calls a second with more than 5% concealment severely
+                // concealed; applied here as a rate rather than a per-second verdict
+                allowedInventedRatio: 0.05,
+                // 0.4s of invention beyond the allowance opens the issue — 2s of
+                // audio at 25% invented — and 8s of clean audio closes it
+                raiseAfterInventedMs: 400,
+            }),
+            audioPlayoutSynthesisDetector: detectorDefault(monitorConfig.audioPlayoutSynthesisDetector, {
+                minSynthesizedSamplesDuration: 0,
+                createEvent: true,
+            }),
+            // ITU-R BT.1359-1: audio ahead of video is detectable around +45ms and
+            // unacceptable around +90ms, while audio behind is forgiven to roughly
+            // −125ms and −185ms. Raise at the acceptability limits, resolve back
+            // inside the detectability ones.
+            avDesyncPlayoutDetector: detectorDefault(monitorConfig.avDesyncPlayoutDetector, {
+                audioAheadRaiseInMs: 90,
+                audioAheadResolveInMs: 45,
+                audioBehindRaiseInMs: 185,
+                audioBehindResolveInMs: 125,
+                sustainForInMs: 3000,
             }),
             jitterBufferStressDetector: detectorDefault(monitorConfig.jitterBufferStressDetector, {
                 targetDelayThresholdInMs: 200,
                 timeStretchThreshold: 0.02,
                 minConsecutiveTicks: 2,
             }),
-            decoderPerformanceDetector: detectorDefault(monitorConfig.decoderPerformanceDetector, {
-                decodeTimeBudgetRatio: 0.8,
-                dropRatioThreshold: 0.1,
-                minFramesReceived: 10,
-                quietLossThreshold: 0.02,
-                minConsecutiveTicks: 2,
-            }),
-            videoRecoveryDetector: detectorDefault(monitorConfig.videoRecoveryDetector, {
-                windowInMs: 30000,
-                // real-world storms run ~0.5-0.7 PLI/s sustained; healthy
-                // streams stay well under 0.1/s outside of joins
-                pliRateAlertOn: 0.5,
-                pliRateAlertOff: 0.15,
-                recoveryFailedThresholdInMs: 5000,
-                recoveryFailedMinPliCount: 2,
-            }),
-            outboundFrameSupplyDetector: detectorDefault(monitorConfig.outboundFrameSupplyDetector, {
-                durationInMs: 15_000,
-                captureFpsRatioThreshold: 0.9,
-            }),
-            encoderPerformanceDetector: detectorDefault(monitorConfig.encoderPerformanceDetector, {
-                encodeFpsRatioThreshold: 0.7,
-                encodeTimeBudgetRatio: 0.8,
-                // null: CpuPerformanceDetector owns the CPU signal — see the detector
-                cpuLimitationShareThreshold: null,
-                minConsecutiveTicks: 2,
-            }),
-            inboundFrameSupplyDetector: detectorDefault(monitorConfig.inboundFrameSupplyDetector, {
-                durationInMs: 15_000,
-                decodeFpsRatioThreshold: 0.9,
-                minReceivedFps: 5,
-            }),
-            simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
-                createEvent: true,
-            }),
-            captureFailureDetector: detectorDefault(monitorConfig.captureFailureDetector, {
-                silenceThresholdInMs: 60000,
-                silenceRmsThreshold: 0.0001,
+            // Telemetry — facts about the session that are not faults.
+            captureTrackMutedDetector: detectorDefault(monitorConfig.captureTrackMutedDetector, {
                 createEvent: true,
             }),
             codecChangeDetector: detectorDefault(monitorConfig.codecChangeDetector, {
@@ -237,59 +405,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             videoResolutionChangeDetector: detectorDefault(monitorConfig.videoResolutionChangeDetector, {
                 createEvent: true,
             }),
-            stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
-                thresholdInMs: 4000,
-                rttMultiplier: 15,
-                minBitrate: 10000,
-                minPliCount: 2,
+            simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
+                createEvent: true,
             }),
             statsGapDetector: detectorDefault(monitorConfig.statsGapDetector, {
                 gapRatioThreshold: 2,
                 minGapInMs: 5000,
                 createEvent: true,
             }),
-            playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
-                lowSkewRatio: 0.1,
-                highSkewRatio: 0.25,
-                minFramesReceived: 10,
-            }),
-            longPcConnectionEstablishmentDetector: detectorDefault(monitorConfig.longPcConnectionEstablishmentDetector, {
-                thresholdInMs: 5000,
-                createEvent: true,
-            }),
-            blockedTransportDetector: detectorDefault(monitorConfig.blockedTransportDetector, {
-                thresholdInMs: 5000,
-                minMediaBitrateBps: 10000,
-                maxReturnBitrateBps: 2000,
-                maxSendShare: 0.1,
-                stunFreshnessInMs: 10000,
-            }),
-            noAvailableIceCandidateDetector: detectorDefault(monitorConfig.noAvailableIceCandidateDetector, {
-                thresholdInMs: 6000,
-            }),
-            mediaPipelineDetector: detectorDefault(monitorConfig.mediaPipelineDetector, {
-                thresholdInMs: 4000,
-                minTransportReceiveBitrateBps: 20000,
-            }),
-            iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
-                disconnectedThresholdInMs: 5000,
-                transportStallThresholdInMs: 5000,
-                createEvent: true,
-                pathSwitchWindowInMs: 30000,
-                pathSwitchThreshold: 3,
-                iceRestartRecommendationThresholdInMs: 10000,
-                iceRestartRecommendationCooldownInMs: 15000,
-            }),
+
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
-            dtlsHandshakeDetector: detectorDefault(monitorConfig.dtlsHandshakeDetector, {
-                // sits between the ICE detectors' 5000ms thresholds and
-                // noAvailableIceCandidateDetector's 6000ms, so ICE-level causes
-                // are reported by their own detectors first
-                stalledThresholdInMs: 6000,
-            }),
             appData: monitorConfig.appData ?? {} as AppData,
         }
 

@@ -1,8 +1,10 @@
 import { Detectors } from "../detectors/Detectors";
 import { DryOutboundTrackDetector } from "../detectors/DryOutboundTrackDetector";
-import { CaptureFailureDetector } from "../detectors/CaptureFailureDetector";
+import { CaptureSourceLostDetector } from "../detectors/CaptureSourceLostDetector";
+import { CaptureTrackMutedDetector } from "../detectors/CaptureTrackMutedDetector";
+import { SilentAudioSourceDetector } from "../detectors/SilentAudioSourceDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
-import { OutboundFrameSupplyDetector } from "../detectors/OutboundFrameSupplyDetector";
+import { SourceCaptureBottleneckDetector } from "../detectors/SourceCaptureBottleneckDetector";
 import { EncoderPerformanceDetector } from "../detectors/EncoderPerformanceDetector";
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
@@ -24,6 +26,19 @@ export type OutboundTrackContext = {
 export class OutboundTrackMonitor {
 	public readonly direction = 'outbound';
 	public readonly detectors: Detectors;
+
+	/**
+	 * True once the capture source behind this track went away on its own — the
+	 * device was unplugged, the link dropped, the user stopped the share or revoked
+	 * the permission. Set from the track's `ended` event by `PeerConnectionMonitor`,
+	 * and never true for a track the application stopped itself.
+	 *
+	 * That distinction is the whole value of the flag, and it is only available here.
+	 * `readyState` reaches `ended` either way, so it cannot tell a lost device from a
+	 * deliberate teardown; the `ended` event fires only for the former, since
+	 * `stop()` is by specification the one way a track ends without it.
+	 */
+	public sourceEnded = false;
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
 
 	/**
@@ -97,8 +112,17 @@ export class OutboundTrackMonitor {
 		if (monitorConfig.dryOutboundTrackDetector !== null) {
 			this.detectors.add(new DryOutboundTrackDetector(this));
 		}
-		if (monitorConfig.captureFailureDetector !== null) {
-			this.detectors.add(new CaptureFailureDetector(this));
+		// The three capture-side findings — the device gone, the OS taking it away,
+		// a live microphone producing silence — share nothing, so each is its own
+		// class with its own config key.
+		if (monitorConfig.captureSourceLostDetector !== null) {
+			this.detectors.add(new CaptureSourceLostDetector(this));
+		}
+		if (monitorConfig.captureTrackMutedDetector !== null) {
+			this.detectors.add(new CaptureTrackMutedDetector(this));
+		}
+		if (monitorConfig.silentAudioSourceDetector !== null) {
+			this.detectors.add(new SilentAudioSourceDetector(this));
 		}
 		if (monitorConfig.codecChangeDetector !== null) {
 			this.detectors.add(new CodecChangeDetector(this));
@@ -106,11 +130,16 @@ export class OutboundTrackMonitor {
 
 		if (this.kind === 'audio') this.calculatedScore.weight = 1;
 		else if (this.kind === 'video') {
-			// Order matters: EncoderPerformanceDetector reads whether
-			// `capture-bottleneck` is active, so the capture check has to have
-			// run this tick. `Detectors.update()` preserves registration order.
-			if (monitorConfig.outboundFrameSupplyDetector !== null) {
-				this.detectors.add(new OutboundFrameSupplyDetector(this));
+			// Registration order is the run order, but nothing here depends on it any
+			// more: `EncoderPerformanceDetector` used to read whether
+			// `capture-bottleneck` was active this tick and now re-derives that
+			// condition itself, comparing `mediaSource.sourceFps` against the
+			// `frameRate` in the track's own `getSettings()`. So either of these two
+			// can be disabled, or reordered, without changing what the other
+			// concludes — which is what makes the config keys below independently
+			// meaningful rather than a chain a user can accidentally break.
+			if (monitorConfig.sourceCaptureBottleneckDetector !== null) {
+				this.detectors.add(new SourceCaptureBottleneckDetector(this));
 			}
 			if (monitorConfig.encoderPerformanceDetector !== null) {
 				this.detectors.add(new EncoderPerformanceDetector(this));

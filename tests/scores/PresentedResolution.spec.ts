@@ -3,16 +3,16 @@ import { DefaultScoreCalculator } from "../../src/scores/DefaultScoreCalculator"
 import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 
 const noDetectorsConfig = {
-	audioDesyncDetector: null,
-	freezedVideoTrackDetector: null,
+	avDesyncPlayoutDetector: null,
 	dryInboundTrackDetector: null,
 	playoutDiscrepancyDetector: null,
-	audioConcealmentDetector: null,
+	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,
 	decoderPerformanceDetector: null,
-	inboundFrameSupplyDetector: null,
+	decoderBottleneckDetector: null,
 	stuckDecoderDetector: null,
 	videoResolutionChangeDetector: null,
+	inboundVideoFlowStateDetector: null,
 	codecChangeDetector: null,
 };
 

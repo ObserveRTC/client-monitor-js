@@ -1,8 +1,80 @@
 import { ClientMonitor } from "..";
+import { Detector } from "./Detector";
 
 export type CpuPerformanceIssuePayload = {
 	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
+}
+
+export type CpuPerformanceDetectorConfig = {
+	/**
+	 * Thresholds for the ratio of decoded to received frames on inbound
+	 * video tracks. When the decoder cannot keep up with the incoming
+	 * stream (a classic sign of CPU limitation) frames are received but
+	 * never decoded, so the decoded/received ratio drops.
+	 *
+	 * This replaces FPS-volatility based detection, which false-triggered
+	 * on content such as screen share whose frame rate legitimately swings
+	 * (e.g. 15 -> 1 fps when the shared content goes static). When fps
+	 * drops legitimately, received and decoded frames drop together so the
+	 * ratio stays close to 1.0 and no alert fires.
+	 *
+	 * - `alertOn`: ratio at or below which the alert turns ON (e.g. 0.7).
+	 * - `alertOff`: ratio at or above which the alert turns OFF (e.g. 0.85);
+	 *   should be higher than `alertOn` to provide hysteresis.
+	 * - `minReceivedFrames`: the minimum number of frames that must have
+	 *   been received in an interval before the ratio is evaluated, guarding
+	 *   against noise at low frame rates (e.g. 1 received, 0 decoded).
+	 * - `frameArrivalBurstFactor`: burst guard against bursty frame
+	 *   *arrival* being read as CPU limitation. The detector keeps a
+	 *   smoothed (EWMA) frames-received-per-interval baseline per track;
+	 *   an interval whose received count exceeds
+	 *   `frameArrivalBurstFactor * baseline` is a burst — a simulcast
+	 *   layer switch, keyframe recovery or post-stall queue flush
+	 *   momentarily outpaces the decoder without the CPU being the
+	 *   problem — and its ratio is skipped rather than judged. A track's
+	 *   first interval (no baseline yet) is also skipped, since a fresh
+	 *   consumer routinely starts with a keyframe burst. Sustained decoder
+	 *   starvation still alerts because its low ratio persists across
+	 *   ordinary-arrival intervals. Set to `undefined` to disable the
+	 *   guard and judge every interval.
+	 */
+	incomingDecodedFramesRatioThresholds: {
+		alertOn: number;
+		alertOff: number;
+		minReceivedFrames: number;
+		frameArrivalBurstFactor?: number;
+	};
+
+	/**
+	 * Thresholds for the duration of collecting performance stats.
+	 * - `lowWatermark`: The minimum duration threshold (in milliseconds).
+	 * - `highWatermark`: The maximum duration threshold (in milliseconds).
+	 */
+	durationOfCollectingStatsThreshold: {
+		lowWatermark: number;
+		highWatermark: number;
+	};
+
+	/**
+	 * Share of an interval (`0..1`) an outbound video stream must spend
+	 * explicitly CPU-limited, per `qualityLimitationDurations.cpu`, before
+	 * that counts as CPU limitation. Corroborates the instantaneous
+	 * `qualityLimitationReason`, which flickers.
+	 *
+	 * Set to `undefined` to skip this check.
+	 */
+	encoderCpuLimitationShareThreshold?: number;
+
+	/**
+	 * Fraction of the per-frame time budget that encoding one frame may
+	 * consume before the encoder counts as CPU-pressured. The budget is
+	 * derived from the stream's own frame rate (33ms at 30fps), so this is
+	 * portable across frame rates in a way a fixed millisecond value is not.
+	 *
+	 * Set to `undefined` to skip this check.
+	 */
+	encodeTimeBudgetRatio?: number;
 }
 
 /**
@@ -29,8 +101,12 @@ export type CpuPerformanceIssuePayload = {
  * or with no arrival baseline yet, are skipped rather than counted either way.
  *
  * Raises `cpulimitation`. Emits `cpulimitation`. Config: `cpuPerformanceDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Across both chains — the machine
+ *
  */
-export class CpuPerformanceDetector {
+export class CpuPerformanceDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'cpulimitation';
 
 	/** 0.3 ≈ the last ~5 ticks dominate: the baseline follows a legitimate rate change within a few intervals, while a single-tick spike barely moves it. */

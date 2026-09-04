@@ -52,8 +52,8 @@ Loss, jitter and RTT are properties of the *transport* — every stream riding i
 shares them, and no single track owns them. They are subtracted **once**, on the
 peer connection.
 
-Freezes, low or volatile frame rates, dropped frames, pixelation, audio
-concealment, time-stretch, jitter-buffer delay: these are *measurements of
+Freezes, low or volatile frame rates, dropped frames, pixelation, invented
+speech, time-stretch, jitter-buffer delay: these are *measurements of
 damage the user experienced*. They are subtracted on the **track**, and only
 there.
 
@@ -62,10 +62,10 @@ interchangeable:
 
 - **The same loss does different damage to different tracks.** 2% loss is
   inaudible on an Opus stream with FEC and PLC, and very visible on video
-  without it. The loss figure cannot tell you which happened; the concealment
-  rate and the freeze count can.
+  without it. The loss figure cannot tell you which happened; the share of
+  audio NetEQ had to invent and the freeze count can.
 - **Damage happens without loss.** In a captured session, 754 of 772 intervals
-  measured **zero** packet loss, and 31 of them still had audible concealment
+  measured **zero** packet loss, and 31 of them still had audible invention
   above 0.5% — jitter-buffer underruns and late arrivals, not packets that never
   came. A path-only view calls that session clean, because by its own metric it
   was.
@@ -108,7 +108,7 @@ Client Score     =  ────────────────────
 | video track | 2 |
 
 1. **Every track** computes its own score from what the user perceived on it —
-   freezes, pixelation, concealment, frame delivery. Never loss or jitter.
+   freezes, pixelation, invented speech, frame delivery. Never loss or jitter.
 2. **Every peer connection** computes a *stability score* from path-level
    signals — RTT, jitter and packet loss.
 3. **The client score** averages each peer connection's scaled track average,
@@ -244,13 +244,16 @@ the peer connection's reason; what the loss *did* to this audio is measured
 directly by the three penalties below.
 
 Three **issue-gated, normalized** penalties
-(see [Issue-gated penalties](#issue-gated-penalties)):
+(see [Issue-gated penalties](#issue-gated-penalties)). Two of the three are gated
+on the same issue: a stressed jitter buffer is charged both for how deep it had to
+go and for how much audio it had to warp to hold that depth, which are separate
+costs to a listener.
 
 | Reason | Gating issue | Scaling metric | Activation | Saturation |
 | --- | --- | --- | --- | --- |
-| `audio-concealment` | `audio-concealment` | `concealmentRate` (audible share of samples concealed) | detector `onThreshold` (default 0.03) | 0.10 |
+| `invented-speech` | `invented-speech` | `inventedSpeechRatio` (audible share of the interval's audio NetEQ invented) | detector `allowedInventedRatio` (default 0.05) | 0.10 |
 | `high-jitter-buffer-delay` | `audio-jitter-buffer-stress` | `jitterBufferTargetDelayInMs` | detector `targetDelayThresholdInMs` (default 200 ms) | 500 ms |
-| `audio-time-stretch` | `audio-desync` | `timeStretchRate` (share of samples NetEQ stretched/compressed) | detector `fractionalCorrectionAlertOnThreshold` (default 0.1) | 0.3 |
+| `audio-time-stretch` | `audio-jitter-buffer-stress` | `timeStretchRate` (share of samples NetEQ stretched/compressed) | detector `timeStretchThreshold` (default 0.02) | 0.3 |
 
 ## Inbound video track score
 
@@ -260,7 +263,7 @@ Three **issue-gated, normalized** penalties
 | `low-fps` | step −1.0 | EWMA fps < 10 | Only while frames are actually flowing (`deltaFramesReceived > 0`) — a dry or paused track is `DryInboundTrackDetector`'s verdict, not a score matter. **Skipped for screen share.** |
 | `dropped-video-frames` | normalized 0–1 | 0.1 → 0.2 dropped fraction | `framesDropped / (framesDropped + framesRendered)`. |
 | `video-frame-corruptions` | normalized 0–1 | 0.05 → 0.5 probability | Per-interval average corruption probability (`deltaCorruptionProbability`). |
-| `frozen-video` | step −2.0 | track currently frozen | From the freeze state `FreezedVideoTrackDetector` derives; a frozen picture dominates every other quality aspect. |
+| `frozen-video` | step −2.0 | track currently frozen | From the freeze state `FrozenVideoTrackDetector` derives; a frozen picture dominates every other quality aspect. |
 | `pixelated-video` | normalized 0–1 × **0.5 / 2.0 / 3.0** | codec activation QP → saturation QP | Average quantization parameter per decoded frame (`qpSum / framesDecoded`), the encoder stating how coarsely it had to quantize. Blur and blockiness long before anything freezes. The multiplier is chosen by how big the picture is presented — see below. This is the only reason whose range exceeds 2.0. |
 
 QP scales are codec-specific and not comparable across codecs (H.264 runs
@@ -464,7 +467,7 @@ instead, should declare `presentedResolution` itself.
 The same base-bitrate curve as inbound audio, on the sending bitrate. **Nothing
 else is subtracted**: the loss the far end reported belongs to the peer
 connection, and the send side has no perception to measure — there is no
-decoder here, so there is no concealment or time-stretch to observe. A track
+decoder here, so there is no invented speech or time-stretch to observe. A track
 whose source `audioLevel` is near zero is not scored at all (nothing meaningful
 is being sent).
 
@@ -539,8 +542,8 @@ Every key of the `DefaultScoreCalculatorSubtractionReason` union:
 | `cpu-limitation` | outbound track | video | 2.0 | The encoder spent ≥ 30% of the interval CPU-limited — the machine cannot keep up; expect resolution/fps degradation for every receiver. |
 | `bandwidth-limitation` | outbound track | video | 1.0 | The encoder spent ≥ 50% of the interval bandwidth-limited — the uplink is the bottleneck and BWE is adapting down. |
 | `downscaled-screenshare` | outbound track | video | 2.0 | A screen-share track is encoded well below the captured resolution — shared text becomes unreadable at the far end. |
-| `audio-concealment` | inbound track | audio | 1.0 | NetEQ is audibly concealing missing audio (issue-gated; scaled by the audible concealment rate). The listener hears gaps, warbles or robotic artifacts. |
-| `audio-time-stretch` | inbound track | audio | 1.0 | NetEQ is stretching/compressing a significant share of samples to keep up (issue-gated; scaled by the time-stretch rate). Audio may sound sped-up, slowed-down or drift against video. |
+| `invented-speech` | inbound track | audio | 1.0 | NetEQ is audibly inventing audio the sender never sent (issue-gated; scaled by the share of the interval it invented). The listener hears gaps, warbles or robotic artifacts. |
+| `audio-time-stretch` | inbound track | audio | 1.0 | NetEQ is stretching/compressing a significant share of samples to keep up (issue-gated on `audio-jitter-buffer-stress`; scaled by the time-stretch rate). Audio may sound sped-up or slowed-down. It is **not** a lip-sync reason — `av-desync` is the issue that measures that, and it carries no score penalty. |
 | `high-jitter-buffer-delay` | inbound track | audio | 1.0 | The jitter buffer's target delay adds noticeable latency (issue-gated; scaled by the target delay above the threshold). The audio plays cleanly, but late. |
 
 ## Where the reasons surface
@@ -566,17 +569,29 @@ All activation/saturation points of the normalized ramps are
 `FRAME_CORRUPTION_PROBABILITY_ACTIVATION`,
 `TARGET_BITRATE_DEVIATION_ACTIVATION`, `BITRATE_VOLATILITY_ACTIVATION`, the
 matching `*_SATURATION` constants, and the audio saturations
-`AUDIO_CONCEALMENT_SATURATION`, `TIME_STRETCH_SATURATION`,
+`INVENTED_SPEECH_SATURATION`, `TIME_STRETCH_SATURATION`,
 `JITTER_BUFFER_TARGET_DELAY_SATURATION_IN_MS`).
 
 The **activation** thresholds of the issue-gated audio penalties come from
 the corresponding detector's configuration
-(`audioConcealmentDetector.onThreshold`,
+(`inventedSpeechDetector.allowedInventedRatio`,
 `jitterBufferStressDetector.targetDelayThresholdInMs`,
-`audioDesyncDetector.fractionalCorrectionAlertOnThreshold`), so tuning a
+`jitterBufferStressDetector.timeStretchThreshold`), so tuning a
 detector tunes the score with it; the `DEFAULT_*` constants only fill in when
 a detector config is absent. Configuring a saturation at or below its
 activation degenerates that ramp into a binary 0/1 step.
+
+`audio-time-stretch` reads the third of those as of 4.10.0. Until then it was
+gated on the `audio-desync` issue and scaled against
+`audioDesyncDetector.fractionalCorrectionAlertOnThreshold` — a threshold belonging
+to a detector that formed a *different* ratio from the same two NetEQ counters, so
+the penalty ramped from a point nothing in it had defined. Both halves now come
+from `JitterBufferStressDetector`, which is the detector that actually owns
+`timeStretchRate`. The practical effect is a penalty that starts much earlier: the
+activation fell from 0.1 to 0.02, so a 5% stretch rate that used to cost nothing
+now costs about 0.11, and a 20% one costs 0.64 rather than 0.5. Tune
+`timeStretchThreshold` if that is too eager — it moves the detector and the
+penalty together, which is the point.
 
 For entirely different scoring logic, replace the calculator: see the
 README's [Custom Score Calculator](../README.md#custom-score-calculator)

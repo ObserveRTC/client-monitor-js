@@ -9,6 +9,7 @@ const CONFIG = {
 	encodeTimeBudgetRatio: 0.8,
 	cpuLimitationShareThreshold: 0.3,
 	minConsecutiveTicks: 2,
+	sourceSupplyRatioThreshold: 0.9,
 };
 
 function setup() {
@@ -171,19 +172,13 @@ describe('EncoderPerformanceDetector', () => {
 		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
 	});
 
-	it('says nothing while capture-bottleneck is active', () => {
-		// Chained and mutually exclusive: an encoder handed too few frames has
-		// nothing to answer for, so OutboundFrameSupplyDetector's issue is the
-		// whole answer. The chain is read from the issue, so raising it here is
-		// exactly what that detector does a tick earlier.
+	it('says nothing while the source is short of the rate it promised', () => {
+		// Mutually exclusive with the capture half, and decided here from the two
+		// raw readings — what the source produced against the frame rate the track
+		// was configured for — rather than by consulting `capture-bottleneck`.
 		const { ticks, trackMonitor, clientMonitor } = setup();
 
-		clientMonitor.raiseIssue('capture-bottleneck-track-video-track-1', {
-			type: 'capture-bottleneck',
-			payload: {},
-		});
-
-		trackMonitor.setMediaSource({ sourceFps: 3 });
+		trackMonitor.setMediaSource({ sourceFps: 3 }); // configured for 30
 		// encoding 1 of every 3 frames it is given would be "behind" on its own
 		trackMonitor.setOutboundRtps([layer({ fps: 1, encodeTimePerFrameInMs: 400 })]);
 		ticks(6);
@@ -191,20 +186,100 @@ describe('EncoderPerformanceDetector', () => {
 		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
 	});
 
+	it('still stands down when the capture detector is disabled entirely', () => {
+		// The regression this replaced a chained `isIssueActive()` call to prevent.
+		// Nothing raises `capture-bottleneck` here — no capture detector exists, and
+		// its configuration is absent — and the encoder must still not be blamed for
+		// frames a starving camera never handed it.
+		const { detector, trackMonitor, clientMonitor } = setup();
+
+		delete clientMonitor.config.sourceCaptureBottleneckDetector;
+		expect(clientMonitor.activeIssues.size).toBe(0);
+
+		trackMonitor.setMediaSource({ sourceFps: 3 });
+		trackMonitor.setOutboundRtps([layer({ fps: 1, encodeTimePerFrameInMs: 400 })]);
+		for (let i = 0; i < 6; ++i) detector.update();
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
+	});
+
+	it('takes the shortfall threshold from its own config block', () => {
+		// `sourceSupplyRatioThreshold` is what decides when the source counts as
+		// not supplying and the encoder is therefore excused. Loosening it widens
+		// what this detector is willing to judge.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		// 20fps out of a configured 30 is 67%: short at the shipped 0.9, ample at 0.5
+		clientMonitor.config.encoderPerformanceDetector = { ...CONFIG, sourceSupplyRatioThreshold: 0.5 };
+
+		trackMonitor.setMediaSource({ sourceFps: 20 });
+		trackMonitor.setOutboundRtps([layer({ fps: 5 })]);
+		ticks(2);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
+
+		clientMonitor.config.encoderPerformanceDetector = { ...CONFIG, sourceSupplyRatioThreshold: 0.9 };
+		ticks(2);
+
+		expect(clientMonitor.activeIssues.size).toBe(0);
+	});
+
+	it('is unmoved by how the capture half is configured', () => {
+		// The two thresholds ship equal and are independent: they answer different
+		// questions of the same measurement — is the camera failing to deliver
+		// what it promised, against has it fallen short far enough that the
+		// encoder is excused — so retuning one must not silently retune the other.
+		// This detector reads `encoderPerformanceDetector` and nothing else.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		clientMonitor.config.encoderPerformanceDetector = { ...CONFIG, sourceSupplyRatioThreshold: 0.5 };
+		// 20 of a configured 30 is 67%: below the capture half's threshold either
+		// way, and above this detector's, so the encoder stays judgeable.
+		clientMonitor.config.sourceCaptureBottleneckDetector = { durationInMs: 15_000, captureFpsRatioThreshold: 0.9 };
+
+		trackMonitor.setMediaSource({ sourceFps: 20 });
+		trackMonitor.setOutboundRtps([layer({ fps: 5 })]);
+		ticks(2);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
+	});
+
+	it('judges a screen share, whose frame rate is content-driven', () => {
+		// A still document legitimately delivers far under its stated rate. Reading
+		// that as a capture shortfall would excuse the encoder for the rest of the
+		// call, which is why the capture half declines to judge screen shares at all.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		trackMonitor.isScreenShare = true;
+		trackMonitor.setMediaSource({ sourceFps: 3 });
+		trackMonitor.setOutboundRtps([layer({ fps: 1 })]);
+		ticks(2);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
+	});
+
+	it('makes no judgement when the track states no frame rate', () => {
+		// Nothing was promised, so nothing was fallen short of — the encoder is not
+		// excused by an expectation that was never expressed.
+		const { ticks, trackMonitor, clientMonitor } = setup();
+
+		trackMonitor.track.setSettings({});
+		trackMonitor.setMediaSource({ sourceFps: 3 });
+		trackMonitor.setOutboundRtps([layer({ fps: 1 })]);
+		ticks(2);
+
+		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();
+	});
+
 	it('resumes judging once capture recovers', () => {
 		const { ticks, trackMonitor, clientMonitor } = setup();
 
-		clientMonitor.raiseIssue('capture-bottleneck-track-video-track-1', {
-			type: 'capture-bottleneck',
-			payload: {},
-		});
-
-		trackMonitor.setMediaSource({ sourceFps: 30 });
+		trackMonitor.setMediaSource({ sourceFps: 3 }); // source short of its configured 30
 		trackMonitor.setOutboundRtps([layer({ fps: 10 })]);
 		ticks(4);
 		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeUndefined();
 
-		clientMonitor.resolveIssue('capture-bottleneck-track-video-track-1');
+		trackMonitor.setMediaSource({ sourceFps: 30 });
 		ticks(2);
 
 		expect(clientMonitor.issueOfType('encoder-bottleneck')).toBeDefined();

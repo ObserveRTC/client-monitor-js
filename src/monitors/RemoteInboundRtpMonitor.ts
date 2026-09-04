@@ -43,6 +43,19 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	deltaTotalRoundTripTime?: number;
 	deltaRoundTripTimeMeasurements?: number;
 
+	/**
+	 * Milliseconds between this stats report and the previous one, from the
+	 * reports' own timestamps. Detectors accumulate this to measure how long a
+	 * condition has held, so a late or skipped collection still measures the
+	 * time the condition actually held underneath.
+	 *
+	 * `remote-inbound-rtp` advances only when a receiver report arrives, and
+	 * `getStats()` keeps serving the last one in between — so **`0` means no new
+	 * report this collection**, and every interval field below is `undefined`
+	 * alongside it. `undefined` means no second report has been seen yet. A
+	 * positive value is the only reading that says the far end just spoke.
+	 */
+	deltaTime?: number | undefined;
 
 	/**
 	 * Additional data attached to this stats, will be shipped to the server
@@ -75,6 +88,18 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		return result;
 	}
 
+	/**
+	 * Milliseconds of **stats time** this monitor has observed, accumulated from
+	 * `deltaTime` — the clock every window and duration in the library is measured
+	 * on, and the one thing `Date.now()` must never stand in for.
+	 *
+	 * It advances by what each collection actually cost rather than by one nominal
+	 * period, so a late or skipped collection widens a window by the time the
+	 * condition really held underneath. It never goes backwards and it is not a
+	 * timestamp: only differences between two readings of it mean anything.
+	 */
+	public statsClockTime = 0;
+
 	public getPeerConnection() {
 		return this._peerConnection;
 	}
@@ -99,9 +124,29 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
+
 		if (elapsedInMs <= 0) {
-			return; // logger?
+			// The same receiver report came back. Every field below measures the gap
+			// between two reports, so with no new report there is no measurement, and
+			// carrying the previous one forward would hand a detector a stale number as
+			// a current one — which is how a path whose RTCP has stopped keeps reading
+			// as healthy. With rtcp-mux that is the norm rather than an edge case: RTCP
+			// shares the RTP five-tuple, so anything that drops the media drops the
+			// reports about it too.
+			this.deltaTime = 0;
+			this.deltaPacketsReceived = undefined;
+			this.deltaPacketsLost = undefined;
+			this.deltaFractionLost = undefined;
+			this.deltaTotalRoundTripTime = undefined;
+			this.deltaRoundTripTimeMeasurements = undefined;
+			this.avgRoundTripTimeInSec = undefined;
+			this.packetRate = undefined;
+
+			return;
 		}
+
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 		const elapsedInSeconds = elapsedInMs / 1000;
 
 		this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);

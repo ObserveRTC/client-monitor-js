@@ -13,6 +13,29 @@ export type PlayoutDiscrepancyIssuePayload = {
 	durationInMs?: number;
 }
 
+export type PlayoutDiscrepancyDetectorConfig = {
+	/**
+	 * Skew at which an open episode resolves, as a **fraction of the frames
+	 * received in the interval**.
+	 */
+	lowSkewRatio: number;
+
+	/**
+	 * Skew at which an episode opens, as a fraction of the frames received
+	 * in the interval. A raw frame count cannot work here: five frames of
+	 * skew is 8% of a 2s interval at 30fps and 3% of a 5s one, so the same
+	 * number means a different thing at every collecting period and every
+	 * frame rate.
+	 */
+	highSkewRatio: number;
+
+	/**
+	 * Frames the interval must carry before the ratio is computed at all —
+	 * a skew of 2 out of 3 frames is noise, not a discrepancy.
+	 */
+	minFramesReceived: number;
+}
+
 /**
  * Compares the frames delivered to an inbound video track against the frames the
  * browser actually painted, and reports when the two diverge: video that arrives
@@ -38,6 +61,10 @@ export type PlayoutDiscrepancyIssuePayload = {
  * the low threshold or the detector stands down.
  * Monitor event: `inbound-video-playout-discrepancy`.
  * Config: `playoutDiscrepancyDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Receive — decoder to renderer
+ *
  */
 export class PlayoutDiscrepancyDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'inbound-video-playout-discrepancy';
@@ -118,7 +145,11 @@ export class PlayoutDiscrepancyDetector implements Detector {
 
 		const clientMonitor = this.peerConnection.parent;
 
-		clientMonitor.emit(PlayoutDiscrepancyDetector.ISSUE_TYPE, {
+		// Written out rather than referenced through the static: the event name is what
+		// an application greps for when it wants to know who emits this, and every
+		// sibling detector spells its own out here. That the issue type happens to
+		// share the string is a coincidence of naming, not a reason to couple them.
+		clientMonitor.emit('inbound-video-playout-discrepancy', {
 			trackMonitor: this.trackMonitor,
 			clientMonitor: clientMonitor,
 		});

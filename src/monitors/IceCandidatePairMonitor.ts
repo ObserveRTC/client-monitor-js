@@ -52,7 +52,31 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	public deltaBytesSent?: number | undefined;
 	public deltaBytesReceived?: number | undefined;
 	public deltaTotalRoundTripTime?: number | undefined;
+	public deltaRequestsSent?: number | undefined;
+	/**
+	 * Consent requests sent in the interval. Kept separate from `deltaRequestsSent`
+	 * because the spec counts them separately: `requestsSent` is connectivity checks
+	 * only, and after nomination the STUN still leaving on the selected pair is
+	 * consent. A consumer asking "did we send any STUN at all" needs both.
+	 */
+	public deltaConsentRequestsSent?: number | undefined;
 	public deltaResponsesReceived?: number | undefined;
+	/**
+	 * Packets the OS refused to send on this pair in the interval — a socket error,
+	 * not a network one. `undefined` where the browser does not report the counter,
+	 * which is a different thing from zero and must not be read as "none".
+	 */
+	public deltaPacketsDiscardedOnSend?: number | undefined;
+	/** Bytes behind `deltaPacketsDiscardedOnSend`. */
+	public deltaBytesDiscardedOnSend?: number | undefined;
+
+	/**
+	 * Milliseconds between this stats report and the previous one, from the
+	 * reports' own timestamps. Detectors accumulate this to measure how long a
+	 * condition has held, so a late or skipped collection still measures the
+	 * time the condition actually held underneath.
+	 */
+	deltaTime?: number | undefined;
 
 	/**
 	 * STUN round trip averaged over the checks that completed in this interval,
@@ -98,6 +122,8 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 
 		// `undefined`, not `0`, when the report carries no counter — the two are
 		// the opposite claim, and the stall checks read a zero as proof.
@@ -109,6 +135,10 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 
 		this.deltaTotalRoundTripTime = positiveDelta(stats.totalRoundTripTime, this.totalRoundTripTime);
 		this.deltaResponsesReceived = positiveDelta(stats.responsesReceived, this.responsesReceived);
+		this.deltaRequestsSent = positiveDelta(stats.requestsSent, this.requestsSent);
+		this.deltaConsentRequestsSent = positiveDelta(stats.consentRequestsSent, this.consentRequestsSent);
+		this.deltaPacketsDiscardedOnSend = positiveDelta(stats.packetsDiscardedOnSend, this.packetsDiscardedOnSend);
+		this.deltaBytesDiscardedOnSend = positiveDelta(stats.bytesDiscardedOnSend, this.bytesDiscardedOnSend);
 		this.avgRoundTripTimeInSec = this.deltaTotalRoundTripTime !== undefined &&
 			this.deltaResponsesReceived !== undefined &&
 			this.deltaResponsesReceived > 0
@@ -116,7 +146,32 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 			: undefined;
 
 		Object.assign(this, stats);
+
+		// `Object.assign` copies what is present and leaves what is not, so a field
+		// the browser has stopped reporting keeps its last value for the life of the
+		// pair. For most of this report that is harmless — the counters are
+		// cumulative and keep coming — but the two bandwidth estimates are the one
+		// place absence is itself the fact: the specification says
+		// `availableOutgoingBitrate` "must not exist for candidate pairs that were
+		// never used for sending packets … or candidate pairs that have been used
+		// previously but are not currently in use". A pair that stops being used
+		// would otherwise go on offering the estimate it had while it was, and a
+		// detector reading it could not tell a live estimate from a memory of one.
+		this.availableOutgoingBitrate = stats.availableOutgoingBitrate;
+		this.availableIncomingBitrate = stats.availableIncomingBitrate;
 	}
+
+	/**
+	 * Milliseconds of **stats time** this monitor has observed, accumulated from
+	 * `deltaTime` — the clock every window and duration in the library is measured
+	 * on, and the one thing `Date.now()` must never stand in for.
+	 *
+	 * It advances by what each collection actually cost rather than by one nominal
+	 * period, so a late or skipped collection widens a window by the time the
+	 * condition really held underneath. It never goes backwards and it is not a
+	 * timestamp: only differences between two readings of it mean anything.
+	 */
+	public statsClockTime = 0;
 
 	public getPeerConnection() {
 		return this._peerConnection;

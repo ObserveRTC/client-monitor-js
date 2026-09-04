@@ -3,10 +3,18 @@ import { Detector } from "./Detector";
 
 export type DryOutboundTrackIssuePayload = {
 	trackId: string;
-	/** How long the track had already been dry when the issue was raised, in milliseconds. */
+	/** How long the track had already been dry when the issue was raised, in milliseconds of stats time. */
 	duration: number;
 	/** How long the episode lasted; filled in when the issue is resolved. */
 	durationInMs?: number;
+}
+
+export type DryOutboundTrackDetectorConfig = {
+	/**
+	 * The time threshold (in milliseconds) to determine if an outbound track
+	 * is considered stalled.
+	 */
+	thresholdInMs: number;
 }
 
 /**
@@ -21,7 +29,16 @@ export type DryOutboundTrackIssuePayload = {
  * silence is now accounted for. A stall must last `thresholdInMs` before it is raised, once per
  * episode rather than once per tick.
  *
+ * The threshold is counted in the sender's own time: each dry tick adds the outbound RTP's
+ * `deltaTime`, the interval between the two stats reports that showed no bytes, not wall-clock
+ * elapsed. A stalled encoder and a main thread too busy to collect on schedule tend to arrive
+ * together, and on wall-clock elapsed the second would be counted as evidence for the first.
+ *
  * Raises `dry-outbound-track`. Emits `dry-outbound-track`. Config: `dryOutboundTrackDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Send — RTP sender to the wire
+ *
  */
 export class DryOutboundTrackDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'dry-outbound-track';
@@ -47,31 +64,32 @@ export class DryOutboundTrackDetector implements Detector {
 		return this.peerConnection.parent.config.dryOutboundTrackDetector!;
 	}
 
-	private _activatedAt?: number;
+	/** Stats time accumulated over the current dry stretch; `0` whenever the silence is explained or over. */
+	private _dryForInMs = 0;
 
 	public update() {
 		if (this.disabled) return;
 		if (this.trackMonitor.paused || this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
-			this._activatedAt = undefined;
+			this._dryForInMs = 0;
 			if (this._startedDryAt !== undefined) {
 				this._resolve('track paused, muted or not live');
 			}
 			return;
 		}
 
-		if (this.trackMonitor.getOutboundRtps()?.[0]?.deltaBytesSent !== 0) {
-			this._activatedAt = undefined;
+		const outboundRtp = this.trackMonitor.getOutboundRtps()?.[0];
+
+		if (outboundRtp?.deltaBytesSent !== 0) {
+			this._dryForInMs = 0;
 			if (this._startedDryAt !== undefined) {
 				this._resolve('dry outbound track recovered');
 			}
 			return;
 		}
 
-		if (!this._activatedAt) {
-			this._activatedAt = Date.now();
-		}
+		this._dryForInMs += outboundRtp.deltaTime ?? 0;
 
-		const duration = Date.now() - this._activatedAt;
+		const duration = this._dryForInMs;
 
 		if (duration < this.config.thresholdInMs) return;
 

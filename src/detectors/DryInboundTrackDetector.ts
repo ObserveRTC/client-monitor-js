@@ -3,10 +3,18 @@ import { Detector } from "./Detector";
 
 export type DryInboundTrackIssuePayload = {
 	trackId: string;
-	/** How long the track had already been dry when the issue was raised, in milliseconds. */
+	/** How long the track had already been dry when the issue was raised, in milliseconds of stats time. */
 	duration: number;
 	/** How long the episode lasted; filled in when the issue is resolved. */
 	durationInMs?: number;
+}
+
+export type DryInboundTrackDetectorConfig = {
+	/**
+	 * The time threshold (in milliseconds) to determine if an inbound track
+	 * is considered stalled.
+	 */
+	thresholdInMs: number;
 }
 
 /**
@@ -22,7 +30,18 @@ export type DryInboundTrackIssuePayload = {
  * has an explanation even though no bytes have flowed. A stall must last `thresholdInMs` before
  * it is raised, and it is raised once per episode rather than once per tick.
  *
+ * That threshold is measured in the stream's own time: each dry tick adds the inbound RTP's
+ * `deltaTime`, the gap between the two stats reports the zero-byte reading came from, rather than
+ * wall-clock elapsed. The two only agree while collection runs on schedule, and a track goes dry
+ * for reasons — a wedged main thread, a sleeping device — that make it run late. Wall-clock elapsed
+ * would then count the library's own absence towards the threshold; the stats timestamps count the
+ * stretch over which the browser genuinely saw no bytes.
+ *
  * Raises `dry-inbound-track`. Emits `dry-inbound-track`. Config: `dryInboundTrackDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Receive — the wire to the track
+ *
  */
 export class DryInboundTrackDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'dry-inbound-track';
@@ -48,31 +67,32 @@ export class DryInboundTrackDetector implements Detector {
 		return this.peerConnection.parent.config.dryInboundTrackDetector!;
 	}
 
-	private _activatedAt?: number;
+	/** Stats time accumulated over the current dry stretch; `0` whenever the silence is explained or over. */
+	private _dryForInMs = 0;
 
 	public update() {
 		if (this.disabled) return;
 		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
-			this._activatedAt = undefined;
+			this._dryForInMs = 0;
 			if (this._startedDryAt !== undefined) {
 				this._resolve(this.trackMonitor.paused ? 'consumer paused' : 'remote track paused');
 			}
 			return;
 		}
 
-		if (this.trackMonitor.getInboundRtp()?.deltaBytesReceived !== 0) {
-			this._activatedAt = undefined;
+		const inboundRtp = this.trackMonitor.getInboundRtp();
+
+		if (inboundRtp?.deltaBytesReceived !== 0) {
+			this._dryForInMs = 0;
 			if (this._startedDryAt !== undefined) {
 				this._resolve('dry inbound track recovered');
 			}
 			return;
 		}
 
-		if (!this._activatedAt) {
-			this._activatedAt = Date.now();
-		}
+		this._dryForInMs += inboundRtp.deltaTime ?? 0;
 
-		const duration = Date.now() - this._activatedAt;
+		const duration = this._dryForInMs;
 		const clientMonitor = this.peerConnection.parent;
 
 		if (duration < this.config.thresholdInMs) return;

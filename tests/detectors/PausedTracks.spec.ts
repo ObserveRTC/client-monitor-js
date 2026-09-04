@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { CaptureFailureDetector } from "../../src/detectors/CaptureFailureDetector";
-import { FreezedVideoTrackDetector } from "../../src/detectors/FreezedVideoTrackDetector";
-import { AudioDesyncDetector } from "../../src/detectors/AudioDesyncDetector";
+import { CaptureSourceLostDetector } from "../../src/detectors/CaptureSourceLostDetector";
+import { SilentAudioSourceDetector } from "../../src/detectors/SilentAudioSourceDetector";
+import { InboundVideoFlowStateDetector } from "../../src/detectors/InboundVideoFlowStateDetector";
+import { AVDesyncPlayoutDetector } from "../../src/detectors/AVDesyncPlayoutDetector";
 import { PlayoutDiscrepancyDetector } from "../../src/detectors/PlayoutDiscrepancyDetector";
 import { SimulcastLayerDetector } from "../../src/detectors/SimulcastLayerDetector";
 import {
@@ -21,38 +22,38 @@ import {
  * then arrives as one delta on the first tick back.
  */
 describe('detectors stand down on a paused track', () => {
-	describe('CaptureFailureDetector: silent-audio-source', () => {
+	describe('SilentAudioSourceDetector', () => {
 		function setup() {
 			const trackMonitor = new MockOutboundTrackMonitor('audio');
 
 			trackMonitor.peerConnection.parent.config = {
-				captureFailureDetector: {
+				silentAudioSourceDetector: {
 					silenceRmsThreshold: 0.001,
 					silenceThresholdInMs: 10_000,
+				},
+				captureSourceLostDetector: {
 					createEvent: false,
 				},
 			};
-			trackMonitor.setMediaSource({ rmsAudioLevel: 0 });
+			trackMonitor.setMediaSource({ rmsAudioLevel: 0, deltaTime: 2_000 });
 
-			return { trackMonitor, detector: new CaptureFailureDetector(trackMonitor as any) };
+			return {
+				trackMonitor,
+				detector: new SilentAudioSourceDetector(trackMonitor as any),
+				endedDetector: new CaptureSourceLostDetector(trackMonitor as any),
+			};
 		}
 
-		const silentFor = (detector: CaptureFailureDetector, ms: number) => {
-			const start = Date.now();
-
-			jest.spyOn(Date, 'now').mockReturnValue(start);
+		/** One collection carrying `ms` of stats time on a silent source. */
+		const silentFor = (trackMonitor: MockOutboundTrackMonitor, detector: SilentAudioSourceDetector, ms: number) => {
+			trackMonitor.setMediaSource({ rmsAudioLevel: 0, deltaTime: ms });
 			detector.update();
-			jest.spyOn(Date, 'now').mockReturnValue(start + ms);
-			detector.update();
-			(Date.now as jest.Mock).mockRestore?.();
 		};
-
-		afterEach(() => jest.restoreAllMocks());
 
 		it('reports a live microphone producing nothing', () => {
 			const { trackMonitor, detector } = setup();
 
-			silentFor(detector, 30_000);
+			silentFor(trackMonitor, detector, 30_000);
 
 			expect(trackMonitor.peerConnection.parent.issueOfType('silent-audio-source')).toBeDefined();
 		});
@@ -64,7 +65,7 @@ describe('detectors stand down on a paused track', () => {
 			// capturing, so `track.enabled` stays true and only `paused` says so
 			trackMonitor.paused = true;
 
-			silentFor(detector, 30_000);
+			silentFor(trackMonitor, detector, 30_000);
 
 			expect(trackMonitor.peerConnection.parent.issueOfType('silent-audio-source')).toBeUndefined();
 		});
@@ -72,7 +73,7 @@ describe('detectors stand down on a paused track', () => {
 		it('resolves an open silence issue when the sender is paused mid-episode', () => {
 			const { trackMonitor, detector } = setup();
 
-			silentFor(detector, 30_000);
+			silentFor(trackMonitor, detector, 30_000);
 			expect(trackMonitor.peerConnection.parent.isIssueActive(`silent-audio-source-track-${trackMonitor.track.id}`)).toBe(true);
 
 			trackMonitor.paused = true;
@@ -82,64 +83,92 @@ describe('detectors stand down on a paused track', () => {
 			expect(trackMonitor.peerConnection.parent.resolvedIssues.pop()?.comment).toBe('sender paused');
 		});
 
-		it('still reports the capture device ending while paused', () => {
+		it('still reports the capture device being lost while paused', () => {
 			// a camera unplugged during a pause is a fact about the device, true
 			// whether or not anyone was receiving it — the application resuming
 			// onto a device that no longer exists needs to know
-			const { trackMonitor, detector } = setup();
+			const { trackMonitor, endedDetector } = setup();
 
 			trackMonitor.paused = true;
+			// The device went away by itself, which is what the detector reports —
+			// `readyState` alone would also cover the application's own stop().
 			trackMonitor.track.readyState = 'ended';
-			detector.update();
+			trackMonitor.sourceEnded = true;
+			endedDetector.update();
 
-			expect(trackMonitor.peerConnection.parent.issueOfType('capture-track-ended')).toBeDefined();
+			expect(trackMonitor.peerConnection.parent.issueOfType('capture-source-lost')).toBeDefined();
 		});
 	});
 
-	describe('FreezedVideoTrackDetector', () => {
+	describe('InboundVideoFlowStateDetector', () => {
 		function setup() {
 			const trackMonitor = new MockInboundTrackMonitor('video');
 
-			trackMonitor.peerConnection.parent.config = { videoFreezesDetector: {} };
-			trackMonitor.setInboundRtp({ freezeCount: 0, deltaFramesRendered: 30, isFreezed: false, trackIdentifier: 'v' });
+			trackMonitor.peerConnection.parent.config = {
+				inboundVideoFlowStateDetector: {
+					frozenAfterInMs: 2000, minFreezeCountForChoppy: 2,
+					observationWindowInMs: 5000, continuousDurationInMs: 30000,
+				},
+			};
+			trackMonitor.setInboundRtp({
+				kind: 'video',
+				deltaTime: 1000, deltaFreezeCount: 0, deltaTotalFreezesDuration: 0,
+				deltaFramesRendered: 30, trackIdentifier: 'v',
+			});
 
-			return { trackMonitor, detector: new FreezedVideoTrackDetector(trackMonitor as any) };
+			return { trackMonitor, detector: new InboundVideoFlowStateDetector(trackMonitor as any) };
 		}
 
-		it('swallows freezes accrued during a pause instead of replaying them on resume', () => {
+		/**
+		 * A paused track renders nothing, and a stopped renderer is the browser's doing
+		 * rather than a media problem — so neither the flag nor a finding may follow.
+		 */
+		it('does not read a pause as a freeze, or replay it on resume', () => {
 			const { trackMonitor, detector } = setup();
 			const inboundRtp = trackMonitor.getInboundRtp();
 
 			detector.update();
 
 			trackMonitor.paused = true;
-			// a long pause accrues freeze starts as the renderer runs dry
-			inboundRtp.freezeCount = 12;
+			// a long pause: the renderer runs dry and the counters catch up on resume
+			inboundRtp.deltaFreezeCount = 12;
+			inboundRtp.deltaTotalFreezesDuration = 12;
 			inboundRtp.deltaFramesRendered = 0;
-			detector.update();
+			for (let i = 0; i < 5; ++i) detector.update();
 
-			expect(inboundRtp.isFreezed).toBe(false);
+			expect(trackMonitor.frameFlowState).toBeUndefined();
 
 			// resumed, frames flowing again, no further freezes
 			trackMonitor.paused = false;
+			inboundRtp.deltaFreezeCount = 0;
+			inboundRtp.deltaTotalFreezesDuration = 0;
 			inboundRtp.deltaFramesRendered = 30;
 			detector.update();
 
-			expect(inboundRtp.isFreezed).toBe(false);
-			expect(trackMonitor.peerConnection.parent.issueOfType('freezed-video-track')).toBeUndefined();
+			// Judged again, and judged fine — the freezes accrued while paused were
+			// swallowed rather than replayed.
+			expect(trackMonitor.frameFlowState).toBe('continuous');
+			expect(trackMonitor.peerConnection.parent.issueOfType('video-flow-disrupted')).toBeUndefined();
 		});
 
-		it('reports those freezes on a track that is not paused', () => {
+		it('reports the same freeze on a track that is not paused', () => {
 			const { trackMonitor, detector } = setup();
 			const inboundRtp = trackMonitor.getInboundRtp();
 
 			detector.update();
 
-			inboundRtp.freezeCount = 4;
 			inboundRtp.deltaFramesRendered = 0;
 			detector.update();
 
-			expect(inboundRtp.isFreezed).toBe(true);
+			// The state moves with the finding, not with the collection: one stopped
+			// collection is not yet long enough to be one.
+			expect(trackMonitor.frameFlowState).toBe('continuous');
+			expect(trackMonitor.peerConnection.parent.issueOfType('video-flow-disrupted')).toBeUndefined();
+
+			detector.update();
+
+			expect(trackMonitor.peerConnection.parent.issueOfType('video-flow-disrupted')).toBeDefined();
+			expect(trackMonitor.frameFlowState).toBe('frozen');
 		});
 
 		it('stands down when the remote sender pauses', () => {
@@ -149,53 +178,87 @@ describe('detectors stand down on a paused track', () => {
 			detector.update();
 
 			trackMonitor.remoteOutboundTrackPaused = true;
-			inboundRtp.freezeCount = 4;
+			inboundRtp.deltaFreezeCount = 4;
+			inboundRtp.deltaTotalFreezesDuration = 4;
 			inboundRtp.deltaFramesRendered = 0;
 			detector.update();
 
-			expect(inboundRtp.isFreezed).toBe(false);
+			expect(trackMonitor.frameFlowState).toBeUndefined();
 		});
 	});
 
-	describe('AudioDesyncDetector', () => {
+	describe('AVDesyncPlayoutDetector', () => {
 		function setup() {
 			const trackMonitor = new MockInboundTrackMonitor('audio');
+			const videoTrackMonitor = new MockInboundTrackMonitor('video', trackMonitor.peerConnection);
 
 			trackMonitor.peerConnection.parent.config = {
-				audioDesyncDetector: {
-					fractionalCorrectionAlertOnThreshold: 0.1,
-					fractionalCorrectionAlertOffThreshold: 0.05,
+				avDesyncPlayoutDetector: {
+					audioAheadRaiseInMs: 90,
+					audioAheadResolveInMs: 45,
+					audioBehindRaiseInMs: 185,
+					audioBehindResolveInMs: 125,
+					sustainForInMs: 3000,
 				},
 			};
-			trackMonitor.setInboundRtp({
-				kind: 'audio',
-				insertedSamplesForDeceleration: 0,
-				removedSamplesForAcceleration: 0,
-				receivingAudioSamples: 48_000,
-				desync: false,
-			});
+			trackMonitor.linkedVideoTrack = videoTrackMonitor;
+			trackMonitor.setInboundRtp({ kind: 'audio', deltaTime: 1000 });
+			// 150ms of audio ahead of video: past the raise threshold, so only the
+			// pause is keeping this quiet.
+			trackMonitor.linkedVideoPlayoutDiffInMs = 150;
 
-			return { trackMonitor, detector: new AudioDesyncDetector(trackMonitor as any) };
+			return { trackMonitor, detector: new AVDesyncPlayoutDetector(trackMonitor as any) };
 		}
 
-		it('does not read the concealment burst of a pause as a desync on resume', () => {
+		/** `count` collections carrying a second of stats time each. */
+		const skewedFor = (detector: AVDesyncPlayoutDetector, count: number) => {
+			for (let i = 0; i < count; ++i) detector.update();
+		};
+
+		it('reports a sustained skew on a track that is not paused', () => {
 			const { trackMonitor, detector } = setup();
-			const inboundRtp = trackMonitor.getInboundRtp();
 
-			detector.update();
+			skewedFor(detector, 3);
 
-			// NetEQ stretches hard through the starved pause
+			expect(trackMonitor.peerConnection.parent.issueOfType('av-desync')).toBeDefined();
+		});
+
+		it('does not read a skew measured across a pause as desync on resume', () => {
+			const { trackMonitor, detector } = setup();
+
+			// Two thirds of the way to the sustain window, then paused: whatever the
+			// playout timestamps do while nothing is being rendered is not evidence.
+			skewedFor(detector, 2);
+
 			trackMonitor.paused = true;
-			inboundRtp.insertedSamplesForDeceleration = 2_000_000;
-			detector.update();
+			skewedFor(detector, 5);
 
-			// first tick back: a handful of real samples against that counter
 			trackMonitor.paused = false;
-			inboundRtp.receivingAudioSamples = 960;
+			skewedFor(detector, 2);
+
+			expect(trackMonitor.peerConnection.parent.issueOfType('av-desync')).toBeUndefined();
+		});
+
+		it('stands down when the remote sender pauses', () => {
+			const { trackMonitor, detector } = setup();
+
+			trackMonitor.remoteOutboundTrackPaused = true;
+			skewedFor(detector, 10);
+
+			expect(trackMonitor.peerConnection.parent.issueOfType('av-desync')).toBeUndefined();
+		});
+
+		it('resolves an open desync issue when the receiving leg is paused mid-episode', () => {
+			const { trackMonitor, detector } = setup();
+
+			skewedFor(detector, 3);
+			expect(trackMonitor.peerConnection.parent.isIssueActive(`av-desync-track-${trackMonitor.track.id}`)).toBe(true);
+
+			trackMonitor.paused = true;
 			detector.update();
 
-			expect(inboundRtp.desync).toBe(false);
-			expect(trackMonitor.peerConnection.parent.issueOfType('audio-desync')).toBeUndefined();
+			expect(trackMonitor.peerConnection.parent.isIssueActive(`av-desync-track-${trackMonitor.track.id}`)).toBe(false);
+			expect(trackMonitor.peerConnection.parent.resolvedIssues.pop()?.comment).toBe('track paused');
 		});
 	});
 

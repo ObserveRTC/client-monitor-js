@@ -3,6 +3,15 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
+export type CodecChangeDetectorConfig = {
+	/**
+	 * Whether to buffer a `CODEC_CHANGED` client event into the sample.
+	 *
+	 * DEFAULT: true
+	 */
+	createEvent?: boolean;
+}
+
 /**
  * Records which codec each track is actually using, and when that changes. An observation rather
  * than a fault: the codec in use is the missing column in nearly every aggregate quality
@@ -17,6 +26,10 @@ import { ClientEventTypes } from "../schema/ClientEventTypes";
  *
  * Raises no issue. Emits `codec-changed`, plus the `CODEC_CHANGED` client event unless
  * `createEvent` is false. Config: `codecChangeDetector`.
+ *
+ * Category: Telemetry
+ * Layer: Media
+ *
  */
 export class CodecChangeDetector implements Detector {
 	public readonly name = 'codec-change-detector';

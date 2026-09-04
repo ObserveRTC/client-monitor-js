@@ -6,12 +6,15 @@ import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 
 const noDetectorsConfig = {
     dryOutboundTrackDetector: null,
-    captureFailureDetector: null,
+    captureSourceLostDetector: null,
+    captureTrackMutedDetector: null,
+    silentAudioSourceDetector: null,
     codecChangeDetector: null,
-    outboundFrameSupplyDetector: null,
-    inboundFrameSupplyDetector: null,
+    sourceCaptureBottleneckDetector: null,
+    decoderBottleneckDetector: null,
     simulcastLayerDetector: null,
     videoResolutionChangeDetector: null,
+    inboundVideoFlowStateDetector: null,
 };
 
 function createMockMediaSource() {
@@ -69,14 +72,14 @@ describe('InboundTrackMonitor contentType', () => {
     const noInboundDetectorsConfig = {
         dryInboundTrackDetector: null,
         codecChangeDetector: null,
-        videoFreezesDetector: null,
-        videoRecoveryDetector: null,
+        keyframeStormDetector: null,
+        videoRecoveryFailedDetector: null,
         playoutDiscrepancyDetector: null,
         decoderPerformanceDetector: null,
         stuckDecoderDetector: null,
         videoResolutionChangeDetector: null,
-        audioDesyncDetector: null,
-        audioConcealmentDetector: null,
+        avDesyncPlayoutDetector: null,
+        inventedSpeechDetector: null,
         jitterBufferStressDetector: null,
     };
 
@@ -238,7 +241,24 @@ describe('DefaultScoreCalculator', () => {
                 calculatedScore: { weight: 1, value: undefined as number | undefined },
                 getInboundRtp: () => ({ deltaFractionLost: 0, ...overrides.inboundRtp }),
                 getPeerConnection: () => ({
-                    parent: { isIssueActive: (key: string) => activeIssueKeys.has(key) },
+                    parent: {
+                        isIssueActive: (key: string) => activeIssueKeys.has(key),
+                        // Each penalty ramps from its own detector's activation point, so
+                        // the calculator reads the detector's config rather than holding a
+                        // threshold of its own. `InventedSpeechDetector` allows 5% before
+                        // anything accumulates, and that is where the penalty starts.
+                        // Both jitter-buffer penalties read `JitterBufferStressDetector`'s
+                        // block, including the time-stretch one: it is that detector's
+                        // signal, and until 4.10.0 it was scaled against a threshold
+                        // belonging to a detector that did not measure it.
+                        config: {
+                            inventedSpeechDetector: { allowedInventedRatio: 0.05 },
+                            jitterBufferStressDetector: {
+                                targetDelayThresholdInMs: 200,
+                                timeStretchThreshold: 0.02,
+                            },
+                        },
+                    },
                 }),
             };
         }
@@ -255,7 +275,7 @@ describe('DefaultScoreCalculator', () => {
             // Loss is a property of the path, shared by every stream on the
             // transport, so it is attributed once on the peer connection. What
             // the loss *did* to this audio is measured directly, and penalized,
-            // as concealment and time-stretch below.
+            // as invented speech and time-stretch below.
             const track = createAudioTrackMock({ inboundRtp: { deltaFractionLost: 0.03 } });
 
             calculator._calculateInboundAudioTrackScore(track);
@@ -272,61 +292,92 @@ describe('DefaultScoreCalculator', () => {
             expect((track.calculatedScore as any).reasons['high-packetloss']).toBeUndefined();
         });
 
-        it('scales the audio-concealment penalty with the audible concealment rate', () => {
+        it('scales the invented-speech penalty with the share of audio that was invented', () => {
             const track = createAudioTrackMock({
-                activeIssueKeys: [ 'audio-concealment-track-audio-1' ],
-                inboundRtp: { concealmentRate: 0.065 },
+                activeIssueKeys: [ 'invented-speech-track-audio-1' ],
+                inboundRtp: { inventedSpeechRatio: 0.075 },
             });
 
             calculator._calculateInboundAudioTrackScore(track);
 
-            // (0.065 - 0.03) / (0.1 - 0.03) = 0.5
-            expect((track.calculatedScore as any).reasons['audio-concealment']).toBe(0.5);
+            // (0.075 - 0.05) / (0.1 - 0.05) = 0.5
+            expect((track.calculatedScore as any).reasons['invented-speech']).toBe(0.5);
             expect(track.calculatedScore.value).toBe(4.5);
         });
 
-        it('saturates the audio-concealment penalty at 1.0', () => {
+        it('saturates the invented-speech penalty at 1.0', () => {
             const track = createAudioTrackMock({
-                activeIssueKeys: [ 'audio-concealment-track-audio-1' ],
-                inboundRtp: { concealmentRate: 0.2 },
+                activeIssueKeys: [ 'invented-speech-track-audio-1' ],
+                inboundRtp: { inventedSpeechRatio: 0.2 },
             });
 
             calculator._calculateInboundAudioTrackScore(track);
 
-            expect((track.calculatedScore as any).reasons['audio-concealment']).toBe(1.0);
+            expect((track.calculatedScore as any).reasons['invented-speech']).toBe(1.0);
             expect(track.calculatedScore.value).toBe(4.0);
         });
 
-        it('adds no concealment penalty on a tick where the rate fell back under the threshold', () => {
-            // hysteresis keeps the issue open, but this tick sounds fine
+        it('adds no invented-speech penalty on a tick that stayed inside the allowance', () => {
+            // The issue is still open — the accumulator drains at the allowance and
+            // takes seconds to empty — but this tick is audio nobody would complain
+            // about, so it contributes nothing.
             const track = createAudioTrackMock({
-                activeIssueKeys: [ 'audio-concealment-track-audio-1' ],
-                inboundRtp: { concealmentRate: 0.01 },
+                activeIssueKeys: [ 'invented-speech-track-audio-1' ],
+                inboundRtp: { inventedSpeechRatio: 0.04 },
             });
 
             calculator._calculateInboundAudioTrackScore(track);
 
-            expect((track.calculatedScore as any).reasons['audio-concealment']).toBeUndefined();
+            expect((track.calculatedScore as any).reasons['invented-speech']).toBeUndefined();
             expect(track.calculatedScore.value).toBe(5.0);
         });
 
-        it('stacks jitter-buffer-stress and desync issue penalties, each scaled by its metric', () => {
+        it('stacks both jitter-buffer-stress penalties, each scaled by its own metric', () => {
+            // One issue, two costs: how deep the buffer had to go, and how much
+            // audio it had to warp to hold that depth.
             const track = createAudioTrackMock({
-                activeIssueKeys: [
-                    'audio-jitter-buffer-stress-track-audio-1',
-                    'audio-desync-track-audio-1',
-                ],
+                activeIssueKeys: [ 'audio-jitter-buffer-stress-track-audio-1' ],
                 inboundRtp: {
                     jitterBufferTargetDelayInMs: 350, // (350 - 200) / (500 - 200) = 0.5
-                    timeStretchRate: 0.2, // (0.2 - 0.1) / (0.3 - 0.1) = 0.5
+                    timeStretchRate: 0.2, // (0.2 - 0.02) / (0.3 - 0.02) = 0.64
                 },
             });
 
             calculator._calculateInboundAudioTrackScore(track);
 
             expect((track.calculatedScore as any).reasons['high-jitter-buffer-delay']).toBe(0.5);
-            expect((track.calculatedScore as any).reasons['audio-time-stretch']).toBe(0.5);
-            expect(track.calculatedScore.value).toBe(4.0);
+            expect((track.calculatedScore as any).reasons['audio-time-stretch']).toBe(0.64);
+            expect(track.calculatedScore.value).toBe(3.86);
+        });
+
+        it('starts the time-stretch penalty where the jitter-buffer detector stops tolerating stretching', () => {
+            // 5% of samples warped: nothing at all under the old gating, which
+            // ramped from a 10% threshold belonging to the deleted audio-desync
+            // detector, and a real cost against the 2% this detector actually acts on.
+            const track = createAudioTrackMock({
+                activeIssueKeys: [ 'audio-jitter-buffer-stress-track-audio-1' ],
+                inboundRtp: { timeStretchRate: 0.05 }, // (0.05 - 0.02) / (0.3 - 0.02) = 0.11
+            });
+
+            calculator._calculateInboundAudioTrackScore(track);
+
+            expect((track.calculatedScore as any).reasons['audio-time-stretch']).toBe(0.11);
+            expect(track.calculatedScore.value).toBe(4.89);
+        });
+
+        it('charges no time-stretch penalty without an open jitter-buffer-stress issue', () => {
+            // The gate moved with the signal in 4.10.0: `av-desync` is measured from
+            // playout timestamps and says nothing about how hard NetEQ is working,
+            // so it no longer opens this penalty.
+            const track = createAudioTrackMock({
+                activeIssueKeys: [ 'av-desync-track-audio-1' ],
+                inboundRtp: { timeStretchRate: 0.2 },
+            });
+
+            calculator._calculateInboundAudioTrackScore(track);
+
+            expect((track.calculatedScore as any).reasons['audio-time-stretch']).toBeUndefined();
+            expect(track.calculatedScore.value).toBe(5.0);
         });
     });
 
@@ -391,7 +442,9 @@ describe('DefaultScoreCalculator', () => {
         };
 
         it('penalizes a frozen track', () => {
-            const track = createVideoTrackMock({ isFreezed: true });
+            const track = createVideoTrackMock({});
+
+            (track as any).frameFlowState = 'frozen';
 
             ticks(track);
 

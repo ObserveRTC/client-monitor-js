@@ -88,29 +88,3 @@ export function positiveDelta(current?: number, previous?: number): number | und
 export function maxTickGapInMs(collectingPeriodInMs: number): number {
 	return Math.max(collectingPeriodInMs * 3, 15_000);
 }
-
-/**
- * The single RTP-to-transport attribution rule: streams attribute to a
- * transport by their explicit `transportId`; streams carrying none (older
- * browsers, exotic stacks) attribute to the transport only when it is the peer
- * connection's sole transport — exact under BUNDLE, and never counted twice
- * when a connection without BUNDLE has several transports.
- *
- * Every consumer that maps RTP streams onto a transport must go through this,
- * so two detectors can never disagree about which transport a stream belongs
- * to. `PeerConnectionMonitor.attributeRtpToTransport` is the bound
- * convenience over it.
- */
-export function attributeRtpToTransport<T extends { transportId?: string }>(
-	rtps: T[],
-	transportId: string,
-	transportCount: number,
-): T[] {
-	const attributed = rtps.filter((rtp) => rtp.transportId === transportId);
-
-	if (0 < attributed.length) return attributed;
-
-	return transportCount === 1
-		? rtps.filter((rtp) => rtp.transportId === undefined)
-		: [];
-}

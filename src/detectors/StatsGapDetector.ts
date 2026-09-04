@@ -2,6 +2,29 @@ import { Detector } from "./Detector";
 import { ClientMonitor } from "../ClientMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
+export type StatsGapDetectorConfig = {
+	/**
+	 * Multiple of `collectingPeriodInMs` the actual interval must exceed to
+	 * count as a gap.
+	 */
+	gapRatioThreshold: number;
+
+	/**
+	 * Absolute floor (milliseconds) below which an overrun is treated as
+	 * ordinary scheduling jitter, so a short collecting period does not
+	 * report a gap on every tick.
+	 */
+	minGapInMs: number;
+
+	/**
+	 * Whether to buffer a `STATS_COLLECTION_GAP` client event into the
+	 * sample.
+	 *
+	 * DEFAULT: true
+	 */
+	createEvent?: boolean;
+}
+
 /**
  * Protects the monitor from itself. Every rate this library reports is a delta
  * divided by an elapsed time, and all of them assume collection happened roughly on
@@ -23,6 +46,10 @@ import { ClientEventTypes } from "../schema/ClientEventTypes";
  * Monitor event: `stats-collection-gap`; client event `STATS_COLLECTION_GAP` when
  * `createEvent` is left on.
  * Config: `statsGapDetector`.
+ *
+ * Category: Telemetry
+ * Layer: Lifecycle
+ *
  */
 export class StatsGapDetector implements Detector {
 	public readonly name = 'stats-gap-detector';

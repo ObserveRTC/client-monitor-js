@@ -20,6 +20,13 @@ interface EventHandler {
 interface OutboundRtpStats {
     bytesSent?: number;
     deltaBytesSent?: number;
+    /**
+     * The gap between the two stats reports this delta came from, as
+     * `OutboundRtpMonitor` derives it. The dry stretch is measured by accumulating
+     * this rather than by reading the wall clock, so the specs below drive it
+     * instead of advancing timers.
+     */
+    deltaTime?: number;
 }
 
 // Mock dependencies
@@ -128,12 +135,16 @@ describe('DryOutboundTrackDetector', () => {
         mockClientMonitor = mockTrackMonitor.getPeerConnection().parent as MockClientMonitor;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         detector = new DryOutboundTrackDetector(mockTrackMonitor as any);
-        jest.useFakeTimers();
     });
 
-    afterEach(() => {
-        jest.useRealTimers();
-    });
+    /** One collection, describing `deltaTime` milliseconds of the sender's own time. */
+    const tick = (deltaTime = 0) => {
+        const outboundRtp = mockTrackMonitor.getOutboundRtps()[0];
+
+        if (outboundRtp) outboundRtp.deltaTime = deltaTime;
+
+        detector.update();
+    };
 
     describe('Constructor', () => {
         it('should create detector with correct name', () => {
@@ -150,8 +161,7 @@ describe('DryOutboundTrackDetector', () => {
             detector.disabled = true;
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick(6000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -159,7 +169,7 @@ describe('DryOutboundTrackDetector', () => {
         it('should return early if track is sending data', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 1000, deltaBytesSent: 100 });
 
-            detector.update();
+            tick();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
@@ -167,9 +177,8 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
             mockTrackMonitor.paused = true;
 
-            detector.update();
-            jest.advanceTimersByTime(60000);
-            detector.update();
+            tick();
+            tick(60000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -178,9 +187,8 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
             mockTrackMonitor.track.muted = true;
 
-            detector.update();
-            jest.advanceTimersByTime(60000);
-            detector.update();
+            tick();
+            tick(60000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -189,9 +197,8 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
             mockTrackMonitor.track.readyState = 'ended';
 
-            detector.update();
-            jest.advanceTimersByTime(60000);
-            detector.update();
+            tick();
+            tick(60000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -204,9 +211,8 @@ describe('DryOutboundTrackDetector', () => {
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
 
             expect(eventSpy).toHaveBeenCalledWith({
                 trackMonitor: mockTrackMonitor,
@@ -222,25 +228,46 @@ describe('DryOutboundTrackDetector', () => {
             });
         });
 
-        it('should reset the timer when the track gets paused mid-count', () => {
+        it('should reset the accumulator when the track gets paused mid-count', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(3000);
+            // 3s of dry time on the books
+            tick();
+            tick(3000);
 
-            // Producer paused - resets the timer
+            // Producer paused - discards the accumulated dry time
             mockTrackMonitor.paused = true;
-            detector.update();
+            tick(3000);
 
-            // Producer resumed
+            // Producer resumed, and the new stretch starts from zero
             mockTrackMonitor.paused = false;
-            detector.update();
+            tick();
 
-            // Total elapsed would be over the threshold, but the timer restarted
-            jest.advanceTimersByTime(4000);
-            detector.update();
+            // The dry stretches total 7s, but only 4s of them are the current one
+            tick(4000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
+        });
+
+        // A stalled encoder and a main thread too busy to collect on schedule tend to
+        // arrive together; on wall-clock elapsed the second was counted as evidence
+        // for the first.
+        it('should not count wall-clock time the collector spent away', () => {
+            jest.useFakeTimers();
+            jest.setSystemTime(0);
+
+            mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
+
+            tick();
+
+            // A minute passes with the collector blocked; the reports it reads when it
+            // comes back are only a second apart.
+            jest.setSystemTime(60_000);
+            tick(1000);
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            jest.useRealTimers();
         });
 
         it('should emit the detector event only once per dry episode', () => {
@@ -249,15 +276,13 @@ describe('DryOutboundTrackDetector', () => {
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
 
             expect(eventSpy).toHaveBeenCalledTimes(1);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
-            jest.advanceTimersByTime(5000);
-            detector.update();
+            tick(5000);
 
             expect(eventSpy).toHaveBeenCalledTimes(1);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
@@ -266,13 +291,12 @@ describe('DryOutboundTrackDetector', () => {
         it('should resolve the issue when the track starts sending again', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 1000, deltaBytesSent: 100 });
-            detector.update();
+            tick();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -281,24 +305,22 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
             // Raise the dry issue
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
             // The producer gets paused - the silence is now explained, so the
             // active issue must be resolved instead of staying open.
             mockTrackMonitor.paused = true;
-            detector.update();
+            tick();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
             // After resume, a new dry episode needs the full threshold again
             mockTrackMonitor.paused = false;
-            detector.update();
+            tick();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick(6000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
 
@@ -307,13 +329,11 @@ describe('DryOutboundTrackDetector', () => {
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(8000);
-            detector.update();
+            tick();
+            tick(8000);
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
-            jest.advanceTimersByTime(4000);
-            detector.update();
+            tick(4000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
     });

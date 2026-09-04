@@ -10,7 +10,8 @@
  */
 
 export type TestIssue = {
-	key: string;
+	/** Absent for a fire-and-forget `addIssue`, which has no identity to resolve on. */
+	key?: string;
 	type: string;
 	payload: Record<string, unknown>;
 	raisedAt: number;
@@ -62,6 +63,28 @@ export class MockClientMonitor {
 			payload: event.payload,
 			timestamp: event.timestamp ?? Date.now(),
 		});
+	}
+
+	/**
+	 * The fire-and-forget counterpart of `raiseIssue`: reported, buffered, and never
+	 * entered into `activeIssues`, because there is no condition that could later be
+	 * found resolved. `raisedIssues` collects both kinds, so assertions about what a
+	 * detector reported read the same either way; `getIssues()` is what separates
+	 * them, and it must never grow an entry from here.
+	 */
+	public addIssue(input: { type: string, payload?: Record<string, unknown>, timestamp?: number }) {
+		const issue: TestIssue = {
+			key: undefined,
+			type: input.type,
+			payload: input.payload ?? {},
+			raisedAt: input.timestamp ?? Date.now(),
+			updatedAt: input.timestamp ?? Date.now(),
+		};
+
+		this.raisedIssues.push(issue);
+		this.emit('issue', issue);
+
+		return issue;
 	}
 
 	public raiseIssue(key: string, input: { type: string, payload?: Record<string, unknown> }) {
@@ -139,6 +162,15 @@ export class MockClientMonitor {
 export class MockPeerConnectionMonitor {
 	public peerConnectionId = 'pc-1';
 
+	/**
+	 * Track id to track monitor, as the real peer connection keeps it. Only a
+	 * detector that has to reach *another* track needs it — `AVDesyncPlayoutDetector`
+	 * resolves its audio track's linked video track through here — but it is
+	 * cheap enough to hand every mock, and an empty map is the honest stand-in
+	 * for a peer connection carrying one track.
+	 */
+	public readonly mappedInboundTracks = new Map<string, any>();
+
 	public constructor(
 		public parent: MockClientMonitor = new MockClientMonitor(),
 	) {}
@@ -178,6 +210,19 @@ export class MockInboundTrackMonitor {
 	public remoteOutboundTrackPaused = false;
 	public track: MockMediaStreamTrack;
 
+	/**
+	 * The lip-sync skew the real `InboundTrackMonitor` derives before its
+	 * detectors run — this audio track's playout minus its linked video track's,
+	 * positive when audio is ahead. A spec sets it directly; how it is derived
+	 * from the two `estimatedPlayoutTimestamp` values, and when it goes
+	 * `undefined`, is covered against the real monitor in
+	 * tests/monitors/LinkedVideoTrack.spec.ts.
+	 */
+	public linkedVideoPlayoutDiffInMs?: number;
+
+	/** The video track a spec has paired with this audio track, if any. */
+	public linkedVideoTrack?: MockInboundTrackMonitor;
+
 	private _inboundRtp: any = null;
 
 	public constructor(
@@ -202,6 +247,10 @@ export class MockInboundTrackMonitor {
 	public setInboundRtp(stats: any) {
 		this._inboundRtp = stats;
 	}
+
+	public getLinkedVideoTrack() {
+		return this.linkedVideoTrack;
+	}
 }
 
 export class MockOutboundTrackMonitor {
@@ -209,6 +258,12 @@ export class MockOutboundTrackMonitor {
 	public track: MockMediaStreamTrack;
 	public isScreenShare = false;
 	public paused = false;
+	/**
+	 * Set by `PeerConnectionMonitor` from the track's `ended` event, and only ever
+	 * for a source that went away by itself — a track the application stopped
+	 * reaches `readyState === 'ended'` without it.
+	 */
+	public sourceEnded = false;
 
 	private _mediaSource: any = null;
 	private _outboundRtps: any[] = [];

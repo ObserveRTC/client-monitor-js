@@ -22,6 +22,31 @@ export type DecoderPerformanceIssuePayload = {
 	durationInMs?: number;
 }
 
+export type DecoderPerformanceDetectorConfig = {
+	/**
+	 * Fraction of the per-frame time budget decoding may consume before the
+	 * decoder counts as overloaded. The budget comes from the stream's own
+	 * frame rate.
+	 */
+	decodeTimeBudgetRatio: number;
+
+	/** Δ`framesDropped` / Δ`framesReceived` above which frames are being dropped after arrival. */
+	dropRatioThreshold: number;
+
+	/** Frames that must have been received in the interval before judging. */
+	minFramesReceived: number;
+
+	/**
+	 * Loss fraction above which the network is the better explanation and
+	 * the detector stays silent — the whole point of this detector is to
+	 * only blame the client when the frames actually arrived.
+	 */
+	quietLossThreshold: number;
+
+	/** Consecutive collections the condition must hold before raising. */
+	minConsecutiveTicks: number;
+}
+
 /**
  * Watches inbound video for the client failing to decode what it was sent. It exists to make
  * network-versus-client attribution possible at all: frames missing because they never arrived
@@ -33,7 +58,7 @@ export type DecoderPerformanceIssuePayload = {
  * `quietLossThreshold` — before either symptom counts: decode time per frame exceeding the
  * budget the stream's own frame rate implies (1000/fps: 33ms at 30fps, 66ms at 15fps), or frames
  * being dropped after they had already arrived. Rising loss alongside PLI is the other story
- * entirely, `FreezedVideoTrackDetector` owns it, and both detectors firing at once is the honest
+ * entirely, `InboundVideoFlowStateDetector` owns it, and both detectors firing at once is the honest
  * answer when both things are true. A symptom must also persist for `minConsecutiveTicks`, so
  * one slow interval never becomes an issue.
  *
@@ -45,6 +70,10 @@ export type DecoderPerformanceIssuePayload = {
  *
  * Raises `video-decoder-overloaded`. Emits `video-decoder-overloaded`.
  * Config: `decoderPerformanceDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Receive — frames to decoder
+ *
  */
 export class DecoderPerformanceDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'video-decoder-overloaded';
@@ -100,7 +129,7 @@ export class DecoderPerformanceDetector implements Detector {
 			return this._alertOn ? this._clear('no loss reading; cannot clear the network') : undefined;
 		}
 
-		// loss dominating means the network owns the frame loss, not the decoder (`FreezedVideoTrackDetector` covers that)
+		// loss dominating means the network owns the frame loss, not the decoder (`InboundVideoFlowStateDetector` covers that)
 		if (this.config.quietLossThreshold < fractionLost) {
 			this._consecutiveTicks = 0;
 

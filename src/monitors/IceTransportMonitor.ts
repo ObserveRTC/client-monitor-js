@@ -1,9 +1,24 @@
 import { IceTransportStats } from "../schema/ClientSample";
+import { BlockedStunRequestsDetector } from "../detectors/BlockedStunRequestsDetector";
+import { Detectors } from "../detectors/Detectors";
 import { positiveDelta } from "../utils/common";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class IceTransportMonitor implements IceTransportStats {
 	private _visited = true;
+
+	/**
+	 * The detectors bound to this transport, run once per collection by
+	 * `PeerConnectionMonitor`.
+	 *
+	 * A transport-level registry exists because some findings are about one transport
+	 * rather than about the connection as a whole. Binding a detector here gives it
+	 * plain per-transport state instead of a map keyed by transport id, and makes its
+	 * lifecycle the transport's: a transport that is replaced gets a new monitor and
+	 * with it a detector whose clocks start from zero, and one that goes away takes its
+	 * detector with it rather than having to be swept for.
+	 */
+	public readonly detectors: Detectors;
 
 	timestamp: number;
 	id: string;
@@ -42,6 +57,37 @@ export class IceTransportMonitor implements IceTransportStats {
 	deltaSelectedCandidatePairChanges?: number | undefined;
 
 	/**
+	 * Milliseconds between this stats report and the previous one, taken from the
+	 * reports' own `timestamp` fields rather than from when collection ran.
+	 * Detectors asking "how long has this condition held" accumulate this rather
+	 * than wall-clock elapsed: when a collection runs late or is skipped, this
+	 * still measures the time the condition actually held underneath, instead of
+	 * the time the library happened to spend not looking.
+	 */
+	deltaTime?: number | undefined;
+
+	/**
+	 * True once this transport has ever reached `connected` or `completed`, and
+	 * never false again. It is what separates a path that never established from
+	 * one that established and was then lost — two conditions with different
+	 * causes and different fixes that `iceState === 'failed'` alone conflates.
+	 */
+	everConnected = false;
+
+	/**
+	 * True while `BlockedStunRequestsDetector` has an open finding on this transport:
+	 * STUN requests keep going out and nothing comes back. Set when it raises, cleared
+	 * when it resolves.
+	 *
+	 * It is stored here, on the transport it is a statement about, so that its lifetime
+	 * is correct by construction. A transport that is replaced is dropped from the peer
+	 * connection along with its detector, and the flag goes with it — nothing has to
+	 * remember to reset it. `PeerConnectionMonitor.blockedTransport` folds this over the
+	 * transports that currently exist, which is where callers should read it.
+	 */
+	public blocked = false;
+
+	/**
 	 * Additional data attached to this stats, will be shipped to the server
 	 */
 	attachments?: Record<string, unknown> | undefined;
@@ -59,6 +105,14 @@ export class IceTransportMonitor implements IceTransportStats {
 		this.timestamp = options.timestamp;
 
 		Object.assign(this, options);
+
+		this.detectors = new Detectors();
+
+		// Gated on its own config key, like every other detector: `null` leaves it
+		// unregistered on every transport of every peer connection.
+		if (_peerConnection.parent.config.blockedStunRequestsDetector !== null) {
+			this.detectors.add(new BlockedStunRequestsDetector(this));
+		}
 	}
 
 	public get visited(): boolean {
@@ -69,12 +123,42 @@ export class IceTransportMonitor implements IceTransportStats {
 		return result;
 	}
 
+	/**
+	 * Milliseconds of **stats time** this monitor has observed, accumulated from
+	 * `deltaTime` — the clock every window and duration in the library is measured
+	 * on, and the one thing `Date.now()` must never stand in for.
+	 *
+	 * It advances by what each collection actually cost rather than by one nominal
+	 * period, so a late or skipped collection widens a window by the time the
+	 * condition really held underneath. It never goes backwards and it is not a
+	 * timestamp: only differences between two readings of it mean anything.
+	 */
+	public statsClockTime = 0;
+
 	public getPeerConnection() {
 		return this._peerConnection;
 	}
 
 	public getSelectedCandidatePair() {
 		return this._peerConnection.mappedIceCandidatePairMonitors.get(this.selectedCandidatePairId ?? '');
+	}
+
+	/**
+	 * The RTP streams carried by this transport, by their `transportId`.
+	 *
+	 * A plain reference lookup, because `transportId` is spec-required on every RTP report
+	 * and restoring it where a browser omits it is the stats adapters' job — they all run
+	 * `inferTransportId()` before the monitors see anything. Re-deriving it here would put
+	 * the same rule at two layers, and the monitor's copy would be the one nobody tests
+	 * against real browser output.
+	 */
+	public getOutboundRtps() {
+		return this._peerConnection.outboundRtps.filter((rtp) => rtp.transportId === this.id);
+	}
+
+	/** The inbound RTP streams carried by this transport. See `getOutboundRtps()`. */
+	public getInboundRtps() {
+		return this._peerConnection.inboundRtps.filter((rtp) => rtp.transportId === this.id);
 	}
 
 	/**
@@ -95,6 +179,13 @@ export class IceTransportMonitor implements IceTransportStats {
 
 		if (elapsedInMs <= 0) {
 			return; // logger?
+		}
+
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
+
+		if (stats.iceState === 'connected' || stats.iceState === 'completed') {
+			this.everConnected = true;
 		}
 
 		if (this.packetsSent !== undefined && stats.packetsSent !== undefined && this.packetsSent <= stats.packetsSent) {

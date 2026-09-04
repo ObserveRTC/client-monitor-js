@@ -202,7 +202,7 @@ const monitor = new ClientMonitor({
     clientId: "unique-client-id",
     callId: "unique-call-id",
     collectingPeriodInMs: 2000, // Default: 2000ms
-    samplingPeriodInMs: 4000, // Optional, no default
+    samplingPeriodInMs: 4000, // Default: 8000ms
 
     // Integration settings (optional with defaults)
     integrateNavigatorMediaDevices: true, // Default: true
@@ -216,22 +216,182 @@ const monitor = new ClientMonitor({
     //   • Pass `null`                         → detector is NOT constructed at all.
     //   • Pass an object                      → detector enabled with your overrides.
     //
-    // After construction, every built-in detector also exposes a public `disabled`
-    // boolean flag — flip it at runtime to silence the detector without removing it.
-    audioDesyncDetector: {
-        fractionalCorrectionAlertOnThreshold: 0.1,
-        fractionalCorrectionAlertOffThreshold: 0.05,
+    // One block per detector, keyed by the detector's own `name` in camelCase:
+    // `frame-assembly-stalled-detector` reads `frameAssemblyStalledDetector` and
+    // nothing else. No key is shared and no detector reads a neighbour's block,
+    // so any detector can be tuned or switched off on its own. Where two
+    // detectors want the same tunable they each carry their own copy with its
+    // own default — deliberately, so tuning one never retunes the other.
+    //
+    // The seven keys retired in 4.10.0 are listed under
+    // "Detector config keys that changed" below; there is no alias for any of
+    // them. After construction, every built-in detector also exposes a public
+    // `disabled` boolean flag — flip it at runtime to silence the detector
+    // without removing it.
+    //
+    // The blocks below are in the same order as `ClientMonitorConfig`, grouped
+    // by detector category. Every value shown is the built-in default.
+
+    // ── Connectivity ──────────────────────────────────────────────
+    iceReachabilityDetector: {
+        thresholdInMs: 6000,          // grace for `new`/`connecting` with zero local candidates
+    },
+    // Telemetry, and nothing to tune: `{}` enables, `null` disables.
+    iceTraversalDetector: {},
+    icePathEstablishmentDetector: {
+        thresholdInMs: 5000,          // how long `connecting` may last before it is reported
+        createEvent: true,            // also buffer LONG_PC_CONNECTION_ESTABLISHMENT into samples
+    },
+    iceEstablishmentFailedDetector: {
+        // The other half of layer 3: establishment that demonstrably did not work.
+        // Well past icePathEstablishmentDetector.thresholdInMs — a connection that
+        // is merely slow has to be given time to stop being merely slow.
+        thresholdInMs: 15000,
+    },
+    // `dtlsState: 'failed'` is terminal, so there is no threshold: `{}` / `null`.
+    dtlsHandshakeFailedDetector: {},
+    dtlsHandshakeStalledDetector: {
+        stalledThresholdInMs: 6000,   // ICE healthy but DTLS still `new`/`connecting` for this long
+    },
+    iceDisconnectedDetector: {
+        disconnectedThresholdInMs: 5000, // how long `disconnected` may self-heal
+    },
+    // ICE never self-heals from `failed`, so there is nothing to tune here either.
+    iceConnectionFailedDetector: {},
+    iceTransportStalledDetector: {
+        transportStallThresholdInMs: 5000, // sending but receiving nothing for this long
+    },
+    unstableIcePathDetector: {
+        pathSwitchWindowInMs: 30000,  // window for counting selected-path switches
+        pathSwitchThreshold: 3,       // switches in that window => unstable path
+    },
+    iceRestartDetector: {
+        createEvent: true,            // also buffer ICE_RESTART into samples
+    },
+    // All four recommendation conditions live here, thresholds and cooldowns
+    // included. They are its own rather than borrowed from the detectors that
+    // raise the corresponding issues, so disabling those does not silence the
+    // recommendation — and it is normal to want the advice to wait longer than
+    // the issue did.
+    iceRestartRecommendationDetector: {
+        createEvent: true,            // also buffer ICE_RESTART_RECOMMENDED into samples
+        iceRestartRecommendationThresholdInMs: 10000, // per transport: disconnected / stalled
+        iceRestartRecommendationCooldownInMs: 15000,  // min gap between those recommendations
+        restartRecommendationThresholdInMs: 10000,    // per pc: never established at all
+        restartRecommendationCooldownInMs: 15000,     // min gap between those recommendations
     },
 
-    congestionDetector: {
-        sensitivity: "medium", // 'low', 'medium', 'high'
+    // ── Transport Quality ── properties of a path that already works. Round
+    //    starting points, meant to be tuned against a real fleet.
+    uplinkCongestionDetector: {
+        headroomDropRatio: 0.25,      // (available - sending) dropping this far below its average
+        sendDelayGrowthRatio: 3,      // pacer queue over its own EWMA baseline
+    },                                // (no recovery ratio: it resolves on the browser's verdict)
+    downlinkCongestionDetector: {
+        collapseRatio: 0.6,           // arriving bitrate below this share of its rolling max
+        bufferElevationRatio: 2,      // video jitter buffer delay over its own baseline
+    },                                // (no recoveryRatio: it resolves on the browser's verdict)
+    transportDelayDetector: {
+        thresholdInMs: 300,           // smoothed RTT at or above which the path counts as slow
+        recoveryThresholdInMs: 200,   // RTT below which it resolves (hysteresis)
+        durationInMs: 6000,           // stats time it must stay high before raising
+    },
+    transportLossDetector: {
+        threshold: 0.05,              // mean interval loss fraction (0..1), worse direction wins
+        recoveryThreshold: 0.01,
+        durationInMs: 6000,
+    },
+    blockedTransportDetector: {
+        thresholdInMs: 5000,          // how long the STUN-ok-but-media-blocked discrepancy must persist
+        maxSendShare: 0.1,            // transport send below this share of produced => not leaving
+        stunFreshnessInMs: 10000,     // how recent a STUN response must be to count as verified
+    },
+    transportJitterDetector: {
+        thresholdInMs: 100,           // mean inter-arrival jitter
+        recoveryThresholdInMs: 30,
+        durationInMs: 6000,
     },
 
+    // ── Pipeline Disruption ── the send chain ──────────────────────────
+    captureTrackEndedDetector: {
+        createEvent: true,            // also buffer CAPTURE_TRACK_ENDED into samples
+    },
+    silentAudioSourceDetector: {
+        silenceThresholdInMs: 60000,  // long on purpose: silence != a broken mic
+        silenceRmsThreshold: 0.0001,  // interval-integrated RMS, not the flickery audioLevel
+    },
+    // Frame supply: is whatever produces this track's frames delivering what it
+    // should? Average over a duration, compare, judge.
+    sourceCaptureBottleneckDetector: {
+        durationInMs: 15000,           // average the capture device over this long ...
+        captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
+    },
+    encoderPerformanceDetector: {
+        encodeFpsRatioThreshold: 0.7,  // encoder below 70% of source fps = behind
+        encodeTimeBudgetRatio: 0.8,    // encode time per frame vs the frame budget
+        cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
+        minConsecutiveTicks: 2,        // two reads agreeing, not a span of time
+        // Its own field, starting at the same value as
+        // sourceCaptureBottleneckDetector.captureFpsRatioThreshold and free to move
+        // independently: this one decides when the encoder is excused, that one
+        // decides when the camera is blamed.
+        sourceSupplyRatioThreshold: 0.9,
+    },
+    rtpSenderStalledDetector: {
+        thresholdInMs: 4000,          // frames encoding while no packet leaves, in stats time
+    },
+    dryOutboundTrackDetector: { thresholdInMs: 5000 },
+
+    // ── Pipeline Disruption ── the receive chain ──────────────────────
+    transportDemuxStalledDetector: {
+        thresholdInMs: 4000,                  // its own copy, not shared with the sender detector
+        minTransportReceiveBitrateBps: 20000, // above this, incoming transport traffic must demux
+    },
+    dryInboundTrackDetector: { thresholdInMs: 5000 },
+    frameAssemblyStalledDetector: {
+        thresholdInMs: 3000,          // packets arriving with no frame completed, in stats time
+        minPacketsReceived: 20,       // below this it is a trickle, not a stall
+    },
+    decoderBottleneckDetector: {
+        durationInMs: 15000,           // average the decoder over this long ...
+        decodeFpsRatioThreshold: 0.9,  // ... then require 90% of what arrived
+        minReceivedFps: 5,             // too thin a stream to judge a decoder on
+    },
+    decoderPerformanceDetector: {
+        decodeTimeBudgetRatio: 0.8,  // share of the per-frame budget decoding may use
+        dropRatioThreshold: 0.1,
+        minFramesReceived: 10,
+        quietLossThreshold: 0.02,    // above this, blame the network instead
+        minConsecutiveTicks: 2,
+    },
+    stuckDecoderDetector: {
+        thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier x RTT)
+        rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
+        minBitrate: 10000,     // bps below which this is a dry track, not a wedge
+        minPliCount: 2,
+    },
+    playoutDiscrepancyDetector: {
+        lowSkewRatio: 0.1,
+        highSkewRatio: 0.25,
+        minFramesReceived: 10,
+    },
+
+    // ── Pipeline Disruption ── the repair loop, and the machine ────────────
+    keyframeStormDetector: {
+        windowInMs: 30000,
+        pliRateAlertOn: 0.5,         // real-world storms run ~0.5-0.7 PLI/s sustained
+        pliRateAlertOff: 0.15,
+    },
+    videoRecoveryFailedDetector: {
+        recoveryFailedThresholdInMs: 5000, // stalled with PLIs out for this long
+        recoveryFailedMinPliCount: 2,      // proof we actually asked for repair
+    },
     cpuPerformanceDetector: {
         incomingDecodedFramesRatioThresholds: {
             alertOn: 0.7,
             alertOff: 0.85,
             minReceivedFrames: 10,
+            frameArrivalBurstFactor: 2.5, // ~2.5x the smoothed arrival rate reads as a burst
         },
         durationOfCollectingStatsThreshold: {
             lowWatermark: 5000,
@@ -241,103 +401,45 @@ const monitor = new ClientMonitor({
         encodeTimeBudgetRatio: 0.8,              // share of the per-frame budget encoding may use
     },
 
-    dryInboundTrackDetector: { thresholdInMs: 5000 },
-    dryOutboundTrackDetector: { thresholdInMs: 5000 },
-    videoFreezesDetector: { minConsecutiveTicks: 2 },
-    playoutDiscrepancyDetector: {
-        lowSkewRatio: 0.1,
-        highSkewRatio: 0.25,
-        minFramesReceived: 10,
+    // ── Perceived Quality ─────────────────────────────────────
+    pixelatedVideoDetector: {
+        threshold: 0.03,              // bits/pixel at or below which the picture is coarse
+        recoveryThreshold: 0.05,      // above this it resolves
+        durationInMs: 8000,
     },
-    syntheticSamplesDetector: {
-        minSynthesizedSamplesDuration: 1000,
+    choppyVideoDetector: {
+        minFramesPerSecond: 10,       // smoothed fps below this is too slow
+        maxFpsVolatility: 0.2,        // volatility above this is too erratic
+        durationInMs: 8000,
     },
-    longPcConnectionEstablishmentDetector: {
-        thresholdInMs: 5000,
+    frozenVideoTrackDetector: {
+        minConsecutiveTicks: 2,       // consecutive frozen intervals before an issue
     },
-    iceConnectivityDetector: {
-        disconnectedThresholdInMs: 5000,   // how long `disconnected` must last before an issue
-        transportStallThresholdInMs: 5000, // sending but receiving nothing for this long
-        pathSwitchWindowInMs: 30000,       // window for counting selected-path switches
-        pathSwitchThreshold: 3,            // switches in that window => unstable path
-        iceRestartRecommendationThresholdInMs: 10000, // before recommending a restart
-        iceRestartRecommendationCooldownInMs: 15000,  // min gap between recommendations
-        createEvent: true,
+    inventedSpeechDetector: {
+        allowedInventedRatio: 0.05,  // RFC 7294 calls a second above 5% concealment severely concealed
+        raiseAfterInventedMs: 400,   // invention beyond the allowance before the issue opens
     },
-    blockedTransportDetector: {
-        thresholdInMs: 5000,          // how long the STUN-ok-but-media-blocked discrepancy must persist
-        minMediaBitrateBps: 10000,    // "producer is demonstrably producing" bar
-        maxReturnBitrateBps: 2000,    // at or below this, the return path is STUN-only
-        maxSendShare: 0.1,            // transport send below this share of produced => not leaving
-        stunFreshnessInMs: 10000,     // how recent a STUN response must be to count as verified
+    audioPlayoutSynthesisDetector: {
+        minSynthesizedSamplesDuration: 0, // synthesized audio per interval before reporting
+        createEvent: true,                // also buffer EXCESSIVE_SYNTHESIZED_AUDIO into samples
     },
-    dtlsHandshakeDetector: {
-        stalledThresholdInMs: 6000,   // ICE healthy but DTLS still `new`/`connecting` for this long
-    },
-    noAvailableIceCandidateDetector: {
-        thresholdInMs: 6000,          // grace for `new`/`connecting` with zero local candidates
-    },
-    mediaPipelineDetector: {
-        thresholdInMs: 4000,               // how long a broken pipeline boundary must persist
-        minTransportReceiveBitrateBps: 20000, // above this, incoming transport traffic must demux
-    },
-
-    audioConcealmentDetector: {
-        onThreshold: 0.03,        // Webex treats >3% concealment as significant, >5% as severe
-        offThreshold: 0.01,
-        windowInMs: 15000,        // spans several collections even at a 5s collecting period
-        minSamplesInWindow: 24000,
+    avDesyncPlayoutDetector: {
+        // Asymmetric on purpose: audio ahead of the picture is far more
+        // objectionable than audio behind it (ITU-R BT.1359-1).
+        audioAheadRaiseInMs: 90,     // audio ahead by this much raises
+        audioAheadResolveInMs: 45,   // …and resolves back below this
+        audioBehindRaiseInMs: 185,   // magnitudes, for audio lagging the picture
+        audioBehindResolveInMs: 125,
+        sustainForInMs: 3000,        // stats time past the threshold before raising
     },
     jitterBufferStressDetector: {
         targetDelayThresholdInMs: 200,
         timeStretchThreshold: 0.02,
         minConsecutiveTicks: 2,
     },
-    decoderPerformanceDetector: {
-        decodeTimeBudgetRatio: 0.8,  // share of the per-frame budget decoding may use
-        dropRatioThreshold: 0.1,
-        minFramesReceived: 10,
-        quietLossThreshold: 0.02,    // above this, blame the network instead
-        minConsecutiveTicks: 2,
-    },
-    videoRecoveryDetector: {
-        windowInMs: 30000,
-        pliRateAlertOn: 0.5,         // real-world storms run ~0.5-0.7 PLI/s sustained
-        pliRateAlertOff: 0.15,
-        recoveryFailedThresholdInMs: 5000,
-        recoveryFailedMinPliCount: 2,
-    },
-    stuckDecoderDetector: {
-        thresholdInMs: 4000,   // floor; effective wait = max(this, rttMultiplier x RTT)
-        rttMultiplier: 15,     // high-RTT paths get more time to recover legitimately
-            minBitrate: 10000,     // bps below which this is a dry track, not a wedge
-        minPliCount: 2,
-    },
-    // Frame supply: is whatever produces this track's frames delivering what it
-    // should? Average over a duration, compare, judge. The config *types* live
-    // in the detector files; the defaults are here with every other detector's.
-    outboundFrameSupplyDetector: {
-        durationInMs: 15000,           // average the capture device over this long ...
-        captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
-    },
-    encoderPerformanceDetector: {
-        encodeFpsRatioThreshold: 0.7,  // encoder below 70% of source fps = behind
-        encodeTimeBudgetRatio: 0.8,    // encode time per frame vs the frame budget
-        cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
-        minConsecutiveTicks: 2,        // two reads agreeing, not a span of time
-    },
-    inboundFrameSupplyDetector: {
-        durationInMs: 15000,           // average the decoder over this long ...
-        decodeFpsRatioThreshold: 0.9,  // ... then require 90% of what arrived
-        minReceivedFps: 5,             // too thin a stream to judge a decoder on
-    },
-    captureFailureDetector: {
-        silenceThresholdInMs: 60000, // long on purpose: silence != a broken mic
-        silenceRmsThreshold: 0.0001,
-        createEvent: true,
-    },
 
-    // Observations — these emit events and never raise issues.
+    // ── Telemetry ── these emit events and never raise issues ───────────────
+    captureTrackMutedDetector: { createEvent: true },
     codecChangeDetector: { createEvent: true },
     videoResolutionChangeDetector: { createEvent: true },
     simulcastLayerDetector: { createEvent: true },
@@ -347,8 +449,9 @@ const monitor = new ClientMonitor({
         createEvent: true,
     },
 
-    // To outright disable a detector at construction time, pass `null`:
-    //   freezedVideoDetector: null,
+    // To outright disable a detector at construction time, pass `null`. Because
+    // every detector has a key of its own, that removes exactly one detector:
+    //   frozenVideoTrackDetector: null,
     //   playoutDiscrepancyDetector: null,
 
     // Application data (optional)
@@ -434,38 +537,165 @@ Detectors turn the collected stats into *verdicts*. Each one watches a specific 
 
 Configuration follows one convention everywhere: omit a detector's config key to get defaults, pass `null` to not construct it at all, or flip the instance's `disabled` flag at runtime to silence it without removing it (see [Controlling which detectors run](#controlling-which-detectors-run)).
 
+> **This section gets you started and then hands off.** Every detector belongs to one of five categories, and each category has a deep reference carrying the algorithm, the thresholds, the stand-downs, the false positives and what each detector refuses to claim. The map of the categories, the rules that decide which one a detector lands in, and a complete index of all 45 classes — class, `name` string, issue type, layer and config key — are in [docs/DETECTOR_TAXONOMY.md](./docs/DETECTOR_TAXONOMY.md).
+>
+> | Category | Question it answers | Deep reference |
+> |---|---|---|
+> | Connectivity | Can this endpoint establish and keep the path? | [docs/CONNECTIVITY_DETECTORS.md](./docs/CONNECTIVITY_DETECTORS.md) |
+> | Transport Quality | The path exists — is it carrying traffic well enough? | [docs/TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md) |
+> | Pipeline Disruption | Did the media chain stop, or do two components disagree? | [docs/PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md) |
+> | Perceived Quality | Is what the user sees and hears degraded? | [docs/PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md) |
+> | Telemetry | What is this session's shape, and what changed about it? | [docs/TELEMETRY_DETECTORS.md](./docs/TELEMETRY_DETECTORS.md) |
+>
+> The groupings below are by **subject** — audio, video, send side, connection — which is how you look a detector up when you have a symptom. The categories are by **detection shape**, which is how the library decides what belongs where. The two do not line up one-to-one, and [the taxonomy explains why](./docs/DETECTOR_TAXONOMY.md#category-is-not-subject).
+
 ### Detector overview
 
 | Detector | Watches | Reports | Good for |
 |---|---|---|---|
-| [`AudioConcealmentDetector`](#audioconcealmentdetector) | inbound audio | issue `audio-concealment` | How the audio actually *sounded* — catches degradation packet loss numbers miss |
+| [`InventedSpeechDetector`](#inventedspeechdetector) | inbound audio | issue `invented-speech` | How the audio actually *sounded* — catches degradation packet loss numbers miss |
 | [`JitterBufferStressDetector`](#jitterbufferstressdetector) | inbound audio | issue `audio-jitter-buffer-stress` | The jitter buffer adding latency *and* stretching audio — delay the user hears |
-| [`AudioDesyncDetector`](#audiodesyncdetector) | inbound audio | issue `audio-desync` | Playback drifting out of sync through heavy sample correction |
-| [`SynthesizedSamplesDetector`](#synthesizedsamplesdetector) | audio playout | event `synthesized-audio` | The playout device injecting synthesized audio |
-| [`FreezedVideoTrackDetector`](#freezedvideotrackdetector) | inbound video | issues `freezed-video-track`, `keyframe-storm`, `video-recovery-failed` | Frozen pictures and a repair loop that stopped working |
+| [`AVDesyncPlayoutDetector`](#avdesyncdetector) | inbound audio + its linked video | issue `av-desync` | Lip sync: the two tracks of one participant playing out at different points in the sender's timeline |
+| [`AudioPlayoutSynthesisDetector`](#audioplayoutsynthesisdetector) | audio playout | event `synthesized-audio` | The playout device injecting synthesized audio |
+| [`FrozenVideoTrackDetector`](#frozenvideotrackdetector) | inbound video | issue `frozen-video-track` | The picture stopped moving, with no claim about why |
+| [`KeyframeStormDetector`](#keyframestormdetector--videorecoveryfaileddetector) | inbound video | issue `keyframe-storm` | Keyframes requested far faster than any healthy stream needs — a self-reinforcing repair loop |
+| [`VideoRecoveryFailedDetector`](#keyframestormdetector--videorecoveryfaileddetector) | inbound video | issue `video-recovery-failed` | We asked for a keyframe repeatedly and nothing came back |
+| [`PixelatedVideoDetector`](#pixelatedvideodetector--choppyvideodetector) | inbound video | issue `pixelated-video` | Too few bits per pixel for too long — the picture the viewer calls blocky |
+| [`ChoppyVideoDetector`](#pixelatedvideodetector--choppyvideodetector) | inbound video | issue `video-choppy` | Frame rate consistently too low, or erratic enough to read as stutter |
 | [`DecoderPerformanceDetector`](#decoderperformancedetector) | inbound video | issue `video-decoder-overloaded` | Frames arrived but this device cannot decode them in time |
+| [`FrameAssemblyStalledDetector`](#frameassemblystalleddetector) | inbound video | issue `frame-assembly-stalled` | Packets keep arriving and no complete frame is ever assembled from them |
 | [`StuckDecoderDetector`](#stuckdecoderdetector) | inbound video | issue `stuck-decoder` | RTP flowing, nothing decoding — the wedge only recreating the consumer fixes |
 | [`PlayoutDiscrepancyDetector`](#playoutdiscrepancydetector) | inbound video | issue `inbound-video-playout-discrepancy` | Frames received but not rendered — a rendering pipeline backlog |
 | [`DryInboundTrackDetector` / `DryOutboundTrackDetector`](#dryinboundtrackdetector--dryoutboundtrackdetector) | tracks | issues `dry-inbound-track`, `dry-outbound-track` | A track that should be flowing but carries no bytes at all |
-| [`OutboundFrameSupplyDetector`](#outboundframesupplydetector) | outbound video | issue `capture-bottleneck` | The camera is not delivering the frames it was configured for — caught *while it degrades*, not once it has stopped |
+| [`SourceCaptureBottleneckDetector`](#sourcecapturebottleneckdetector) | outbound video | issue `capture-bottleneck` | The camera is not delivering the frames it was configured for — caught *while it degrades*, not once it has stopped |
 | [`EncoderPerformanceDetector`](#encoderperformancedetector) | outbound video | issue `encoder-bottleneck` | The camera is delivering and the encoder cannot keep up with it |
-| [`InboundFrameSupplyDetector`](#inboundframesupplydetector) | inbound video | issue `decoder-bottleneck` | Frames arrived and the decoder did not turn enough of them into pictures |
-| [`CaptureFailureDetector`](#capturefailuredetector) | outbound tracks | issues `capture-track-ended`, `silent-audio-source` | Vanished devices and microphones producing pure silence |
-| [`CongestionDetector`](#congestiondetector) | peer connection | issue `congestion` | Bandwidth-limited sending corroborated by RTT / loss |
+| [`DecoderBottleneckDetector`](#decoderbottleneckdetector) | inbound video | issue `decoder-bottleneck` | Frames arrived and the decoder did not turn enough of them into pictures |
+| [`CaptureTrackEndedDetector`](#capture-detectors) | outbound tracks | issue `capture-track-ended` | The capture device went away — unplugged, quit, stopped from the browser bar |
+| [`SilentAudioSourceDetector`](#capture-detectors) | outbound audio | issue `silent-audio-source` | A live, unmuted microphone producing nothing but digital silence |
+| [`CaptureTrackMutedDetector`](#capture-detectors) | outbound tracks | event `capture-track-muted` / `CAPTURE_TRACK_MUTED` | The OS or another application took the device — a timestamp, not a fault |
+| [`UplinkCongestionDetector`](#uplinkcongestiondetector) | peer connection | issue `uplink-congestion` | The outgoing bandwidth estimate collapsing while we still want it |
+| [`DownlinkCongestionDetector`](#downlinkcongestiondetector) | peer connection | issue `downlink-congestion` | Arriving bitrate collapsing with the video jitter buffer deepening |
+| [`TransportDelayDetector`](#transport-quality-detectors) | peer connection | issue `transport-delay-degraded` | A working path whose round trip is long enough, for long enough, to break turn-taking |
+| [`TransportLossDetector`](#transport-quality-detectors) | peer connection | issue `transport-loss-sustained` | A path persistently dropping a material share of what crosses it |
+| [`TransportJitterDetector`](#transport-quality-detectors) | peer connection | issue `transport-delivery-unstable` | Packets arrive, but unevenly enough to force the receiver to buffer |
 | [`CpuPerformanceDetector`](#cpuperformancedetector) | whole client | issue `cpulimitation` | The device running out of CPU for encode/decode |
-| [`LongPcConnectionEstablishmentDetector`](#longpcconnectionestablishmentdetector) | peer connection | event `too-long-pc-connection-establishment` | Connection setup taking suspiciously long |
-| [`IceConnectivityDetector`](#iceconnectivitydetector) | ICE transports | issues `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path`; events `ice-restart`, `ice-restart-recommended` | Runtime ICE health and *when* an ICE restart is warranted |
+| [`IcePathEstablishmentDetector`](#icepathestablishmentdetector) | peer connection | event `ice-path-establishment-slow` | Connection setup taking suspiciously long, and where it is stuck |
+| [`IceEstablishmentFailedDetector`](#iceestablishmentfaileddetector) | peer connection | issue `ice-establishment-failed` | The call never connected: candidates existed, nothing was ever nominated |
+| [`IceDisconnectedDetector`](#the-layer-5-detectors) | ICE transports | issue `ice-disconnected` | A working path went `disconnected` and stayed there past the threshold |
+| [`IceConnectionFailedDetector`](#the-layer-5-detectors) | ICE transports | issue `ice-connection-failed` | The browser gave up on the ICE generation — with `everConnected` saying which fault it is |
+| [`IceTransportStalledDetector`](#the-layer-5-detectors) | ICE transports | issue `ice-transport-stalled` | Still sending on a connected path, nothing coming back |
+| [`UnstableIcePathDetector`](#the-layer-5-detectors) | ICE transports | issue `unstable-ice-path` | The selected path will not settle |
+| [`IceRestartDetector`](#the-restart-loop) | ICE transports | event `ice-restart` / `ICE_RESTART` | A new ICE generation was inferred, and whether it recovered or failed |
+| [`IceRestartRecommendationDetector`](#the-restart-loop) | ICE transports | event `ice-restart-recommended` / `ICE_RESTART_RECOMMENDED` | *When* an ICE restart is warranted — your app decides whether to perform one |
 | [`BlockedTransportDetector`](#blockedtransportdetector) | ICE transports | issue `blocked-transport` | STUN passes but media does not — the firewall / policy-middlebox signature |
-| [`DtlsHandshakeDetector`](#dtlshandshakedetector) | ICE transports | issues `dtls-handshake-failed`, `dtls-handshake-stalled` | The network path works but the secure media transport never negotiates — certificate mismatch, DTLS intolerance, a middlebox eating DTLS |
-| [`NoAvailableIceCandidateDetector`](#noavailableicecandidatedetector) | peer connection | issue `no-available-ice-candidate` | Zero local ICE candidates while the connection falls over — no usable network at all |
-| [`MediaPipelineDetector`](#mediapipelinedetector) | peer connection | issue `media-pipeline-stalled` | The first broken stage of the media pipeline nothing else covers: encoded frames never leave the sender, or transport traffic never demuxes |
-| [`IceTupleChangeDetector`](#icetuplechangedetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
+| [`RtpSenderStalledDetector`](#rtpsenderstalleddetector--transportdemuxstalleddetector) | peer connection | issue `rtp-sender-stalled` | Frames encode and no packet leaves the sender |
+| [`TransportDemuxStalledDetector`](#rtpsenderstalleddetector--transportdemuxstalleddetector) | peer connection | issue `transport-demux-stalled` | Traffic arrives on the transport and no inbound RTP accounts for it |
+| [`DtlsHandshakeFailedDetector`](#the-dtls-detectors) | ICE transports | issue `dtls-handshake-failed` | `dtlsState: 'failed'` — terminal for this key exchange |
+| [`DtlsHandshakeStalledDetector`](#the-dtls-detectors) | ICE transports | issue `dtls-handshake-stalled` | ICE proven healthy while DTLS never answers at all |
+| [`IceReachabilityDetector`](#icereachabilitydetector) | peer connection | issue `no-available-ice-candidate` | Zero local ICE candidates while the connection falls over — no usable network at all |
+| [`IceTraversalDetector`](#icetraversaldetector) | ICE transports | event `ice-tuple-changed` | The low-level signal that the selected network tuple changed |
 | [`CodecChangeDetector`](#observation-detectors) | tracks | event `codec-changed` / `CODEC_CHANGED` | Which codec/profile is actually in use, and when it changed |
 | [`VideoResolutionChangeDetector`](#observation-detectors) | video tracks | event `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | The adaptation ladder, with the *reason* attached |
 | [`SimulcastLayerDetector`](#observation-detectors) | outbound video | event `simulcast-layer-changed` / `SIMULCAST_LAYER_CHANGED` | Which simulcast layers are actually being sent |
 | [`StatsGapDetector`](#observation-detectors) | the monitor itself | event `stats-collection-gap` / `STATS_COLLECTION_GAP` | Backgrounded-tab gaps that would otherwise read as network spikes |
 
-The last four are **observations**: they emit events and never raise issues, because what they report is not a fault — it is the missing context in most investigations.
+45 classes, 35 issue types, and 10 that emit events only — because what they
+report is not a fault but the missing context in most investigations.
+
+### One detector, one issue
+
+**Every class in the table above raises at most one issue type.** A detector that
+would raise two different issues is two detectors, and each keeps at most one
+collection — one map, set or array — for the thing it tracks. That is why the
+table is long: `IcePathStabilityDetector` became six classes,
+`DtlsHandshakeDetector` two, `CaptureFailureDetector` three,
+`MediaPipelineDetector` two, and the freeze/repair trio three.
+
+The reasons are practical. `Detectors.update()` wraps each `update()` in its own
+try/catch, so a class owning four findings loses all four to one malformed stats
+report while four classes lose one. `disabled` and `includeIssueInSample` are per
+detector, so a class owning four findings can only be silenced as a block. And a
+single class holding four conditions accumulates shared state that couples them.
+
+**And every class reads a config block of its own**, keyed by its `name` in
+camelCase — `frame-assembly-stalled-detector` reads `frameAssemblyStalledDetector`
+and nothing else. That is the config counterpart of the same rule: a key shared by
+six classes means a `null` meant to silence one finding takes five neighbours with
+it, and a threshold read out of a neighbour's block means tuning that detector
+silently retunes this one. Where two detectors genuinely want the same tunable,
+each carries its own copy with its own default.
+
+**No issue type was renamed by any of this.** The issue type is the public
+contract that dashboards and `observer-js` consume; the class is an
+implementation unit. What did change is the detector `name` strings passed to
+`detectors.disable()`, and the config keys — every detector now reads a block
+named after itself, so the group keys that used to construct several classes are
+retired. Both mappings are in
+[Controlling which detectors run](#controlling-which-detectors-run), and note that
+a split name or key can only ever have resolved to one of its parts.
+
+Two more rules hold across every implementation, and both are visible in the
+sections below. **Implementations stay deliberately simple** — there is no
+shared base class or threshold helper, and duplicated straightforward bookkeeping
+is preferred to an abstraction that would need a parameter per caller. **Derived
+values are computed on the monitored object; detectors only compare them against
+thresholds** — `bitPerPixel`, `ewmaFps`, `fpsVolatility`, `avgInboundFractionLost`,
+`avgOutboundFractionLost`, `avgInboundJitterInMs` and `ewmaRttInSec` all live on
+the monitors, so the same numbers are available to a scoring implementation or to
+your own code without a detector in the way. The full reasoning is in
+[docs/DETECTOR_TAXONOMY.md](./docs/DETECTOR_TAXONOMY.md#the-five-design-rules).
+
+### Duration is measured in stats time
+
+Every detector that waits for a condition to persist accumulates the monitored
+object's **`deltaTime`** — the gap between consecutive stats reports'
+`timestamp`s — rather than wall-clock elapsed. `Date.now()` is used for the issue
+lifecycle only: `raisedAt`, the `durationInMs` computed at resolution, and
+`resolvedAt`.
+
+This matters most in exactly the conditions detectors fire under. A saturated
+main thread, a backgrounded tab or a throttled timer makes collections run late
+or be skipped. Measured against the wall clock, a tab hidden for a minute has
+"watched" a minute of blocked media and a minute of stalled handshake, and every
+duration threshold crosses at once on the tick where the tab comes back — on
+evidence nobody observed. Measured in stats time it has watched whatever the
+collector managed to sample. The rule cuts the other way too: a collection that
+ran late means the condition held for longer than one nominal period, and
+`deltaTime` credits it with that.
+
+### When a detector cannot see its inputs
+
+A silent detector is saying one of two very different things: *nothing is wrong*,
+or *the browser did not report the stats I need*. `inputsUnavailable` is the
+difference, set per tick and only for missing **evidence**:
+
+```ts
+import { TransportDelayDetector } from '@observertc/client-monitor-js';
+
+const delay = pcMonitor.detectors
+    .getByName<TransportDelayDetector>('transport-delay-detector');
+
+if (delay?.inputsUnavailable) {
+    // no RTT was reported this tick — "no issue" here means "no measurement"
+}
+```
+
+**The generic parameter is load-bearing.** `inputsUnavailable` is a public field
+on the eight detector classes that compute it, not a member of the `Detector`
+interface, and a bare `getByName()` returns `Detector | undefined` — which does
+not declare the flag. `getByName<T>()`, or a cast, is how you name the class you
+are asking for. The interface stays that small on purpose: nothing in the library
+reads the flag yet, so it moves onto the contract only if and when something does.
+
+The case is not hypothetical: Firefox still does not populate `bytesSent` /
+`bytesReceived` on `RTCTransportStats` as of 153, so every detector reading a
+transport bitrate is permanently silent there — correctly, having no evidence,
+but invisibly. A dashboard counting issues without counting this reads those
+sessions as healthy.
+
+A detector standing down because a track is paused, a tab is backgrounded or a
+sender is muted is **not** unavailable. That is *not applicable*, which is a
+different statement about a different thing.
 
 ### Which issues belong in the sample
 
@@ -482,61 +712,75 @@ In case shrinking down the sample size is something your application wants, the 
 
 | Detector | Issue | Derivable from one component's sampled stats? | From what |
 | --- | --- | --- | --- |
-| `FreezedVideoTrackDetector` | `freezed-video-track` | **Yes** | `inbound-rtp` `freezeCount`, `totalFreezesDuration` |
-| `FreezedVideoTrackDetector` | `keyframe-storm` | **Yes** | `inbound-rtp` `pliCount`, `firCount`, `keyFramesDecoded` |
-| `FreezedVideoTrackDetector` | `video-recovery-failed` | No | tick-level sequencing of freeze + PLI + keyframe counters |
-| `AudioDesyncDetector` | `audio-desync` | **Yes** | `inbound-rtp` inserted/removed sample totals |
-| `AudioConcealmentDetector` | `audio-concealment` | **Yes** | `inbound-rtp` `concealedSamples`, `silentConcealedSamples` |
+| `FrozenVideoTrackDetector` | `frozen-video-track` | **Yes** | `inbound-rtp` `freezeCount`, `totalFreezesDuration` |
+| `KeyframeStormDetector` | `keyframe-storm` | **Yes** | `inbound-rtp` `pliCount`, `firCount`, `keyFramesDecoded` |
+| `VideoRecoveryFailedDetector` | `video-recovery-failed` | No | tick-level sequencing of freeze + PLI + keyframe counters |
+| `PixelatedVideoDetector` | `pixelated-video` | **Yes** | `inbound-rtp` `bytesReceived`, `frameWidth`, `frameHeight`, `framesPerSecond` — but the screen-share and pause guards are not sampled |
+| `ChoppyVideoDetector` | `video-choppy` | Partially | `inbound-rtp` `framesPerSecond`; the EWMA and the volatility window are per collecting tick and coarser at the sampling period |
+| `FrameAssemblyStalledDetector` | `frame-assembly-stalled` | **Yes** (approx.) | `inbound-rtp` `packetsReceived` vs `framesReceived`; the pause and background guards are not sampled |
+| `AVDesyncPlayoutDetector` | `av-desync` | No | joins `estimatedPlayoutTimestamp` across two `inbound-rtp` reports, and the pairing between them is application-declared context that never reaches the sample |
+| `InventedSpeechDetector` | `invented-speech` | **Yes** | `inbound-rtp` `concealedSamples`, `silentConcealedSamples`, `totalSamplesReceived` |
 | `JitterBufferStressDetector` | `audio-jitter-buffer-stress` | **Yes** (approx.) | `inbound-rtp` jitter-buffer totals; the consecutive-tick nuance is lost |
-| `SynthesizedSamplesDetector` | event only | **Yes** | `media-playout` synthesized-sample totals |
+| `AudioPlayoutSynthesisDetector` | event only | **Yes** | `media-playout` synthesized-sample totals |
 | `PlayoutDiscrepancyDetector` | `inbound-video-playout-discrepancy` | **Yes** | `inbound-rtp` `framesReceived` vs `framesRendered` |
 | `DecoderPerformanceDetector` | `video-decoder-overloaded` | Partially | `inbound-rtp` decode/drop totals; frame-budget + quiet-loss guards are coarser at the sampling period |
 | `StuckDecoderDetector` | `stuck-decoder` | No | tick-level bytes-up/frames-flat/PLI-up fingerprint; drives consumer recreation |
 | `DryInboundTrackDetector` | `dry-inbound-track` | No | guards read `MediaStreamTrack.muted`/`readyState` + remote pause state — not in the sample |
 | `DryOutboundTrackDetector` | `dry-outbound-track` | No | same non-sampled track-state guards |
-| `CaptureFailureDetector` | `capture-track-ended` | No | `MediaStreamTrack` `ended` event — no stats representation |
-| `CaptureFailureDetector` | `silent-audio-source` | No | energy totals are sampled, but the live/enabled/unmuted guards are not |
-| `OutboundFrameSupplyDetector` | `capture-bottleneck` | No | the frame rate is a counter differenced against measured elapsed time, and the guards read `track.getSettings()`, pause state, screen-share content type and live track state — none of it reconstructable from a sample |
-| `EncoderPerformanceDetector` | `encoder-bottleneck` | No | joins the media source's frame rate with the highest active layer's encode time and CPU-limitation shares per collecting tick, and chains off whether `capture-bottleneck` is active |
-| `InboundFrameSupplyDetector` | `decoder-bottleneck` | No | differences `framesDecoded` against `framesReceived` per collecting tick, behind pause and live-track guards that are not sampled |
-| `CongestionDetector` | `congestion` | Mostly | `candidate-pair` available bitrates + `outbound-rtp` `qualityLimitationReason` — two components, but both sampled |
+| `CaptureTrackEndedDetector` | `capture-track-ended` | No | `MediaStreamTrack` `ended` event — no stats representation |
+| `SilentAudioSourceDetector` | `silent-audio-source` | No | energy totals are sampled, but the live/enabled/unmuted guards are not |
+| `SourceCaptureBottleneckDetector` | `capture-bottleneck` | No | the frame rate is a counter differenced against measured elapsed time, and the guards read `track.getSettings()`, pause state, screen-share content type and live track state — none of it reconstructable from a sample |
+| `EncoderPerformanceDetector` | `encoder-bottleneck` | No | joins the media source's frame rate with the highest active layer's encode time and CPU-limitation shares per collecting tick, and compares `sourceFps` against `track.getSettings().frameRate`, which is not sampled |
+| `DecoderBottleneckDetector` | `decoder-bottleneck` | No | differences `framesDecoded` against `framesReceived` per collecting tick, behind pause and live-track guards that are not sampled |
+| `UplinkCongestionDetector` | `uplink-congestion` | Mostly | `candidate-pair.availableOutgoingBitrate`, `sendingBitrate` and the outbound pacer counters — all sampled, but the EWMA baselines it compares against are not |
+| `DownlinkCongestionDetector` | `downlink-congestion` | Mostly | Inbound bitrate and `jitterBufferDelay` / `jitterBufferEmittedCount` — sampled, with the same caveat about the baseline |
 | `CpuPerformanceDetector` | `cpulimitation` | No | joins send-side and receive-side evidence plus `durationOfCollectingStatsInMs`, which is not sampled |
-| `IceConnectivityDetector` | `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path` | No | state transitions and episode timing happen *between* samples |
+| `TransportDelayDetector` | `transport-delay-degraded` | **Yes** (approx.) | `candidate-pair` / `remote-inbound-rtp` round trip; the EWMA smoothing is per collecting tick |
+| `TransportLossDetector` | `transport-loss-sustained` | **Yes** (approx.) | `inbound-rtp` and `remote-inbound-rtp` loss totals; the per-tick "carried packets" gating that keeps muted tracks out of the mean is lost |
+| `TransportJitterDetector` | `transport-delivery-unstable` | **Yes** (approx.) | `inbound-rtp` `jitter`, averaged; same per-tick gating caveat |
+| `IceDisconnectedDetector`, `IceConnectionFailedDetector`, `IceTransportStalledDetector`, `UnstableIcePathDetector` | `ice-disconnected`, `ice-connection-failed`, `ice-transport-stalled`, `unstable-ice-path` | No | state transitions and episode timing happen *between* samples |
 | `BlockedTransportDetector` | `blocked-transport` | No | joins candidate-pair STUN counters + transport bytes + outbound-rtp bitrate per collecting tick |
-| `NoAvailableIceCandidateDetector` | `no-available-ice-candidate` | No | connection-state jumps + gathering state; with no network the next sample may never leave the device |
-| `MediaPipelineDetector` | `media-pipeline-stalled` | No | cross-references outbound-rtp vs its own packet counters and transport bytes vs inbound-rtp bytes per collecting tick |
+| `IceReachabilityDetector` | `no-available-ice-candidate` | No | connection-state jumps + gathering state; with no network the next sample may never leave the device |
+| `IceEstablishmentFailedDetector` | `ice-establishment-failed` | No | needs the *latched* fact that no pair was ever nominated, plus connection-state history; a connection that never establishes may never ship a sample either |
+| `RtpSenderStalledDetector` | `rtp-sender-stalled` | No | cross-references `framesEncoded` against `packetsSent` per collecting tick, behind track live/muted and layer-active guards |
+| `TransportDemuxStalledDetector` | `transport-demux-stalled` | No | cross-references transport bytes against inbound-rtp bytes per collecting tick |
 
 
 ---
 
 ### Audio detectors
 
-#### AudioConcealmentDetector
+> Three of these four are **Perceived Quality** — invented speech, jitter-buffer stress and desync are continuously-measured perceptual values judged over an accumulator or a window, and so is `AudioPlayoutSynthesisDetector` despite emitting only an event. Full reference, including why the audio-clarity sub-layer is deliberately empty and what each proxy cannot claim: [docs/PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md).
 
-Reports how the audio actually *sounded*. Opus + NetEQ conceal a lot of loss inaudibly, and audio also degrades without dramatic loss — so the **audible** concealment share (silent concealment subtracted) is both more sensitive and more specific than packet loss. Judged over a sliding window, since concealment is bursty.
+#### InventedSpeechDetector
+
+Reports a listener being fed audio the sender never sent. When packets are missing or late, NetEQ fabricates audio from what came before so playout never stops — usually inaudibly, which is why packet loss is a poor proxy for how a call sounded. What the listener hears is the fabrication, so that is what this measures: the **audible** invented share (silent concealment subtracted, because concealment during talker silence is indistinguishable from the real thing).
+
+One accumulator, in milliseconds, is the whole of it. Each tick adds `inventedSpeechRatio × deltaTime` of invention and drains `allowedInventedRatio × deltaTime` of allowance, clamped to `[0, raiseAfterInventedMs]`; the issue opens when it is full and closes when it is empty. Two properties follow, and both are the point: **the verdict does not depend on how often you poll** — a rate integrated over elapsed time has no tick-length artefact — and **a brief pause does not end an episode**, since a clean tick drains only the allowance. Someone who breaks up, pauses for breath and breaks up again is one issue, not three.
 
 **Use the result:** show a "poor audio from X" indicator on the affected participant's tile. Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
 
 ```javascript
-audioConcealmentDetector: {
-    onThreshold: 0.03,         // audible concealment share that raises (Webex: >3% = significant)
-    offThreshold: 0.01,        // share below which it resolves (hysteresis)
-    windowInMs: 15000,         // sliding window; spans several ticks even at 5s collection
-    minSamplesInWindow: 24000, // don't judge on less than ~0.5s of 48kHz audio
+inventedSpeechDetector: {
+    allowedInventedRatio: 0.05, // share that may be invented without counting — and the drain rate
+    raiseAfterInventedMs: 400,  // invented ms beyond the allowance before the issue opens
 }
+// At these defaults: 0.4s of excess invention opens it (two seconds of audio at
+// 25% invented), and raiseAfterInventedMs / allowedInventedRatio = 8s of clean
+// audio closes it.
 ```
 
 ```typescript
-monitor.on('audio-concealment', ({ trackMonitor, concealmentRate }) => {
+monitor.on('invented-speech', ({ trackMonitor, inventedSpeechRatio }) => {
     // the user is HEARING this — mark the participant's tile
-    ui.setAudioQualityWarning(trackMonitor.track.id, { rate: concealmentRate });
+    ui.setAudioQualityWarning(trackMonitor.track.id, { rate: inventedSpeechRatio });
 });
 monitor.on('issue-resolved', (issue) => {
-    if (issue.type === 'audio-concealment') ui.clearAudioQualityWarning(/* by key */);
+    if (issue.type === 'invented-speech') ui.clearAudioQualityWarning(/* by key */);
 });
 ```
 
-**Sources:** [Voice quality monitoring (Webex)](https://help.webex.com/article/kqh7le/Voice-quality-monitoring) · [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+**Sources:** [RFC 7294 §3.4 (severely concealed seconds)](https://www.rfc-editor.org/rfc/rfc7294#section-3.4) · [Voice quality monitoring (Webex)](https://help.webex.com/article/kqh7le/Voice-quality-monitoring) · [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
 #### JitterBufferStressDetector
 
@@ -560,35 +804,52 @@ monitor.on('audio-jitter-buffer-stress', ({ trackMonitor, targetDelayInMs }) => 
 
 **Sources:** [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [NetEQ (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/neteq/) · [RTCRtpReceiver.jitterBufferTarget (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpReceiver/jitterBufferTarget)
 
-#### AudioDesyncDetector
+#### AVDesyncPlayoutDetector
 
-Detects heavy sample correction (acceleration/deceleration) on an inbound audio track — the signature of playback drifting and being yanked back, which the user perceives as warbly or out-of-sync audio.
+Lip sync: a participant's voice and their lips playing out at measurably different points in that participant's own timeline. It is the only detector in the library that compares **two** streams — synchronization is a relationship, and no reading of the audio track alone contains the answer.
 
-**Use the result:** correlate with lip-sync complaints; persistent desync on one track is usually the far end's capture clock, so route the report to *that* participant's diagnostics rather than the listener's.
+The measurement is the difference between the two tracks' `estimatedPlayoutTimestamp`. Both values are already expressed on the *sender's* NTP clock, because each has been resolved through that sender's RTCP sender reports, so they subtract directly: positive means audio is ahead of the picture.
+
+**You must declare the pairing.** The library cannot infer which video track belongs with which audio track — an SFU forwards independent streams, and `MediaStream` grouping does not survive every topology. Until you declare it, this detector reports `inputsUnavailable` rather than guessing, because a wrong pairing produces a confidently wrong number:
+
+```typescript
+monitor.setInboundTrackContext(audioTrack.id, { linkedVideoTrackId: videoTrack.id });
+```
+
+**The thresholds are asymmetric on purpose.** Sound arrives after light in the physical world, so a viewer forgives audio lagging far more readily than audio leading; ITU-R BT.1359-1 puts the acceptability limits near +90 ms ahead against −185 ms behind. A single absolute threshold would be either too strict on lag or too lax on lead.
 
 ```javascript
-audioDesyncDetector: {
-    fractionalCorrectionAlertOnThreshold: 0.1,  // >10% of samples corrected raises
-    fractionalCorrectionAlertOffThreshold: 0.05, // <5% resolves
+avDesyncPlayoutDetector: {
+    audioAheadRaiseInMs: 90,     // audio ahead of the picture — the objectionable direction
+    audioAheadResolveInMs: 45,
+    audioBehindRaiseInMs: 185,   // magnitudes, for audio lagging the picture
+    audioBehindResolveInMs: 125,
+    sustainForInMs: 3000,        // stats time past the threshold before the issue opens
 }
 ```
 
 ```typescript
-monitor.on('audio-desync-track', ({ trackMonitor }) => {
-    diagnostics.flag('audio-desync', trackMonitor.track.id);
+monitor.on('av-desync', ({ trackMonitor, linkedVideoTrackId, playoutDiffInMs, direction }) => {
+    diagnostics.flag('av-desync', trackMonitor.track.id, { linkedVideoTrackId, playoutDiffInMs, direction });
 });
 ```
 
-**Sources:** [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+**Use the result:** report it against the *sender*, not the listener — one participant desynchronised for everybody is that participant's pipeline, while one listener seeing it on every speaker is local. And read it together with the coverage caveat below, because absence of this issue is very often absence of measurement.
 
-#### SynthesizedSamplesDetector
+**Support is thin, and the flag says so.** `estimatedPlayoutTimestamp` is populated by Firefox, exposed by Chrome only when A/V sync is enabled internally, and not reported by Safari. Where it is missing — or where no pairing was declared — the detector sets `inputsUnavailable` instead of staying quiet, so a dashboard can tell "in sync" from "never measured". One further limitation the spec creates: the timestamp may be extrapolated between sender reports, so a frozen renderer can keep reporting smooth playout and this detector will believe it. Treat a `frozen-video-track` issue as a reason to distrust a clean sync reading over the same interval.
+
+**Replaces `AudioDesyncDetector` (removed in 4.10.0).** That detector read NetEQ's accelerate and preemptive-expand counters, which measure jitter-buffer adaptation rather than synchronization — and since A/V sync logic corrects drift by *raising* NetEQ's target delay, it tended to fire on the correction rather than the fault. That signal is still read, correctly labelled, by [`JitterBufferStressDetector`](#jitterbufferstressdetector). No tuning carries over: the quantity changed from a fraction of samples to milliseconds of skew.
+
+**Sources:** [ITU-R BT.1359-1 — Relative timing of sound and vision for broadcasting](https://www.itu.int/rec/R-REC-BT.1359/en) · [W3C webrtc-stats: `estimatedPlayoutTimestamp`](https://www.w3.org/TR/webrtc-stats/#dom-rtcinboundrtpstreamstats-estimatedplayouttimestamp)
+
+#### AudioPlayoutSynthesisDetector
 
 Watches `media-playout` for synthesized (concealment/generated) samples injected at the playout device level, and emits `'synthesized-audio'` plus the `EXCESSIVE_SYNTHESIZED_AUDIO` client event when the duration in one interval exceeds the configured minimum.
 
 **Use the result:** sustained synthesized playout with otherwise healthy inbound stats points at the *output* path — suggest the user switch audio output device.
 
 ```javascript
-syntheticSamplesDetector: {
+audioPlayoutSynthesisDetector: {
     minSynthesizedSamplesDuration: 0, // ms of synthesized audio per interval before reporting
     createEvent: true,                // also buffer EXCESSIVE_SYNTHESIZED_AUDIO into samples
 }
@@ -600,36 +861,129 @@ syntheticSamplesDetector: {
 
 ### Video detectors
 
-#### FreezedVideoTrackDetector
+> These split across two categories, and the split is the useful part. `frozen-video-track`, `pixelated-video` and `video-choppy` are **Perceived Quality** — they say the picture is bad, without saying where it broke ([docs/PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md)). The rest are **Pipeline Disruption** — they name a boundary in the receive chain, or a repair loop beside it, and their answer is a stage rather than an experience ([docs/PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md)). Both can be right about the same thirty seconds, and neither reads the other.
 
-Owns the whole freeze/repair domain of an inbound video track. It derives the freeze state (a freeze persists until frames actually render again) and watches the repair loop — PLI/FIR out, keyframes back in:
+#### FrozenVideoTrackDetector
 
--   `freezed-video-track` — the picture is frozen (config: `videoFreezesDetector`).
--   `keyframe-storm` — sustained PLI rate; self-reinforcing congestion, since keyframes are large (config: `videoRecoveryDetector`).
--   `video-recovery-failed` — PLIs going out, picture still frozen, keyframes not advancing: the repair request left the client and nothing came back, which points at SFU forwarding (config: `videoRecoveryDetector`).
+Reports that an inbound video track's picture has stopped moving — the freeze the person watching actually sees, **without any claim about why**. Raises `frozen-video-track` and nothing else; the repair loop around a freeze is a different question with a different audience and lives in [`KeyframeStormDetector` and `VideoRecoveryFailedDetector`](#keyframestormdetector--videorecoveryfaileddetector), each deriving its own condition from the same raw counters rather than from this detector's verdict.
 
-**Use the result:** on `freezed-video-track`, overlay a spinner/last-frame treatment on the tile. `video-recovery-failed` is your escalation signal — pair it with [`stuck-decoder`](#stuckdecoderdetector): if both fire, recreate the consumer; if only recovery fails (no bytes checked here), the producer or SFU forwarding needs the look.
+A freeze starts when `freezeCount` advances and persists until frames render again: `freezeCount` counts freeze *starts*, so its delta alone would declare a persistent freeze over after a single tick, which is why staying frozen additionally requires `deltaFramesRendered === 0`. The issue waits for `minConsecutiveTicks` intervals — `freezeCount` advances on any inter-frame gap past roughly `max(3 × average, average + 150ms)`, which is a sub-second hiccup nobody notices, and surviving into a second observation is what separates that from a freeze worth reporting.
+
+**The freeze state is published, not just the issue.** `inboundRtp.isFreezed` is derived here and read by `DefaultScoreCalculator` to score the track — a property of the stats rather than a conclusion about a fault, so it belongs with whoever computes it. It follows that `frozenVideoTrackDetector: null` also removes the flag, and the score stops penalising freezes.
+
+**Use the result:** overlay a spinner or last-frame treatment on the participant's tile. The payload carries `freezeTimeInMs` alongside `observedSpanInMs` — both from the stats timestamps rather than the nominal collecting period — so a server can judge severity from the frozen share of a measured window even when a collection ran late.
 
 ```javascript
-videoFreezesDetector: { minConsecutiveTicks: 2 },  // consecutive frozen intervals before an issue (null = off)
-videoRecoveryDetector: {
-    windowInMs: 30000,             // window for PLI/keyframe rates
+frozenVideoTrackDetector: { minConsecutiveTicks: 2 },  // consecutive frozen intervals before an issue (null = off)
+```
+
+```typescript
+monitor.on('frozen-video-track', ({ trackMonitor }) => ui.showFreezeOverlay(trackMonitor.track.id));
+```
+
+A backgrounded tab, a paused consumer and a paused remote sender all stand the detector down, and the stand-down swallows the monotonic counter rather than skipping the tick — so the quiet period is not replayed as freezes on the way back.
+
+**One caveat that changes what you will actually see.** All three stats adapters in the tree document `inbound-rtp.framesRendered` as never emitted, so on every browser the library adapts, the "persists until frames render again" clause cannot engage: what remains is `freezeCount` advancing in each of `minConsecutiveTicks` consecutive collections. Repeated freezing raises as intended; a **single continuous freeze**, which increments the counter once and then holds, does not. This is recorded as a defect rather than documented as behaviour — see [docs/PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md#visual--continuity).
+
+**Sources:** [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### KeyframeStormDetector / VideoRecoveryFailedDetector
+
+The repair loop around a freeze: PLI/FIR out, keyframes back in. Two classes, two issues, a config key each (`keyframeStormDetector`, `videoRecoveryFailedDetector`), and neither reads the other or `frozen-video-track`.
+
+`keyframe-storm` fires when `pliRate` stays above `pliRateAlertOn` over a rolling window. A PLI goes out whenever the decoder cannot continue from what it has, so an occasional one is ordinary; a stream of them says every repair attempt is itself being lost or arriving unusable. It is worth an issue of its own because the loop is **self-reinforcing**: a keyframe is several times the size of a delta frame, so a burst of keyframe requests puts a burst of large frames on a link that was already dropping packets — the request made to fix the picture worsens the congestion that provoked it. Left running, a call can sit in this state indefinitely at full bitrate and never show a moving picture.
+
+`video-recovery-failed` is the failure worth waking an SFU operator for: keyframes were requested, repeatedly, over a sustained stretch, and none arrived. `frozen-video-track` says a viewer is looking at a still picture; this says the mechanism that exists to end it is not working. A freeze that repairs itself in a second is a lossy first hop; a freeze where PLI after PLI leaves the client and `keyFramesDecoded` never moves points past the first hop — at forwarding, at a consumer wired to a producer that is gone, at a far-side encoder that stopped producing keyframes. Both halves of the evidence are required: `recoveryFailedThresholdInMs` of stall *and* `recoveryFailedMinPliCount` requests, so the claim ("we asked and nothing came back") always has both.
+
+Neither derives its stall condition from `inboundRtp.isFreezed`. That flag is `FrozenVideoTrackDetector`'s conclusion and disappears when `frozenVideoTrackDetector` is `null`; what `VideoRecoveryFailedDetector` actually needs is narrower anyway — frames not rendering **and** `deltaKeyFramesDecoded === 0`, which is the precise statement that the repair did not land.
+
+**Use the result:** `video-recovery-failed` is your escalation signal — pair it with [`stuck-decoder`](#stuckdecoderdetector): if both fire, recreate the consumer; if only recovery fails, the producer or SFU forwarding needs the look.
+
+```javascript
+keyframeStormDetector: {
+    windowInMs: 30000,             // window for the PLI rate
     pliRateAlertOn: 0.5,           // real-world storms run ~0.5-0.7 PLI/s sustained
-    pliRateAlertOff: 0.15,
-    recoveryFailedThresholdInMs: 5000, // frozen + PLIs out + no keyframe for this long
+    pliRateAlertOff: 0.15,         // hysteresis: the first honest reading below this closes it
+},
+videoRecoveryFailedDetector: {
+    recoveryFailedThresholdInMs: 5000, // stalled with PLIs out for this long
     recoveryFailedMinPliCount: 2,      // proof we actually asked for repair
 }
 ```
 
 ```typescript
-monitor.on('freezed-video-track', ({ trackMonitor }) => ui.showFreezeOverlay(trackMonitor.track.id));
+monitor.on('keyframe-storm', ({ trackMonitor, pliRate }) => metrics.gauge('pli-storm', pliRate));
 monitor.on('video-recovery-failed', ({ trackMonitor, pliCountSinceStalled }) => {
     // we asked for a keyframe repeatedly and nothing came back — not a local problem
     reportToServer('recovery-failed', trackMonitor.track.id, { pliCountSinceStalled });
 });
 ```
 
+The storm window is accumulated from each tick's `deltaTime` rather than wall-clock elapsed, so a throttled tab cannot stretch the denominator and hide a storm the media clock says is still raging. Raising needs half a window of history behind it — a rate computed over one short interval is a count, not a rate.
+
 **Sources:** [PLI: Picture Loss Indication (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/pli/) · [RFC 4585: RTP/AVPF (PLI/FIR)](https://datatracker.ietf.org/doc/html/rfc4585) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### PixelatedVideoDetector / ChoppyVideoDetector
+
+Perceived video quality: nothing has stalled, frames arrive and decode and render on time, and the experience is still bad. Both threshold values the inbound RTP monitor already computes and that nothing previously read.
+
+`pixelated-video` is judged on **`bitPerPixel`** — bitrate divided by width × height × frame rate — the picture being drawn with too few bits for its size, for long enough to be worth complaining about. Bits per pixel was chosen over quantizer parameters for a plain reason: `qpSum` is optional, absent on some codecs, and its scale differs between them, so a QP threshold is really a per-codec table that silently produces nothing where it has no entry. `bitPerPixel` is derived from three fields every browser reports and means the same thing everywhere. It is not a precise perceptual model and does not pretend to be.
+
+`video-choppy` is judged on **`ewmaFps`** and **`fpsVolatility`**, and reports either fault under one issue with the payload naming which was seen. The two legs are genuinely different and neither implies the other: a steady 8 fps is smooth-but-slow and usually means the sender is limited; 25 fps swinging between 5 and 40 is fast-but-lurching and usually means delivery is bursty. Both are the same complaint from the viewer ("it's juddery"), which is why one issue with an `evidence` field keeps the viewer's question intact while preserving the distinction that matters to whoever investigates.
+
+| `evidence` | Meaning |
+|---|---|
+| `low-framerate` | `ewmaFps` below `minFramesPerSecond` |
+| `unstable-framerate` | `fpsVolatility` above `maxFpsVolatility` — mean absolute deviation over the monitor's rolling window, relative to its mean |
+
+Neither class holds a window of its own. The arithmetic lives on `InboundRtpMonitor`, and these detectors compare two numbers against two thresholds and count how long the answer stayed bad — a derived value is a fact about the stream that anything may want, while a threshold is an opinion belonging to whoever is judging.
+
+```javascript
+pixelatedVideoDetector: {
+    threshold: 0.03,          // bits/pixel at or below which the picture counts as coarse
+    recoveryThreshold: 0.05,  // above this it resolves (hysteresis)
+    durationInMs: 8000,       // stats time it must stay coarse before raising
+},
+choppyVideoDetector: {
+    minFramesPerSecond: 10,   // smoothed fps below this is too slow
+    maxFpsVolatility: 0.2,    // volatility above this is too erratic
+    durationInMs: 8000,
+},
+```
+
+```typescript
+monitor.on('pixelated-video', ({ trackMonitor, bitPerPixel }) => ui.hintPoorVideo(trackMonitor.track.id, { bitPerPixel }));
+monitor.on('video-choppy',    ({ trackMonitor, evidence })    => ui.hintPoorVideo(trackMonitor.track.id, { evidence }));
+```
+
+**Screen shares are excluded** rather than given a second threshold. A static slide legitimately spends almost nothing per pixel and sits at 2 fps jumping when the slide changes, and that is correct behaviour. Camera video typically runs 0.05–0.2 bits per pixel; below roughly 0.03 blocking artefacts are usually visible. Both also stand down on a paused consumer or a paused remote sender, `video-choppy` additionally on a backgrounded tab, and both set `inputsUnavailable` when the browser reports no frame size or frame rate — "nothing was observed about picture quality" is not the same as "the picture is fine".
+
+**Threshold caveat.** These numbers are round starting points chosen from what camera video usually looks like, not measurements of anything. Tune them against your own fleet before alerting on them.
+
+**Sources:** [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### FrameAssemblyStalledDetector
+
+Watches the one boundary in the receive chain that nothing else watches: packets arriving from the network, and frames coming out of reassembly. When `packetsReceived` keeps advancing and `framesReceived` does not, RTP is being delivered and no complete picture is being made from it — every frame is missing pieces, or the depacketizer has lost the stream. Raises `frame-assembly-stalled`.
+
+Naming this boundary matters because the same condition otherwise surfaces as [`stuck-decoder`](#stuckdecoderdetector), which points at the decoder for something that happened before the decoder ever saw a frame. (`StuckDecoderDetector` already half-admits this with its `assembly` variant; this detector is the other half, stated directly.)
+
+```javascript
+frameAssemblyStalledDetector: {
+    thresholdInMs: 3000,     // stats time packets must keep arriving with no frame completed
+    minPacketsReceived: 20,  // below this it is a trickle, not a stall
+}
+```
+
+```typescript
+monitor.on('frame-assembly-stalled', ({ trackMonitor, packetsSinceLastFrame }) => {
+    reportToServer('frame-assembly-stalled', trackMonitor.track.id, { packetsSinceLastFrame });
+});
+```
+
+**Deliberately narrow.** It says nothing about *why* frames are not assembling — sustained loss inside every frame and a codec mismatch look identical from here, and both are real. Attribution is what co-firing with [`transport-loss-sustained`](#transport-quality-detectors) is for, and that comparison belongs to whoever reads the issues. A sender that has simply stopped sending is not this: no packets arrive, so nothing accumulates, and [`dry-inbound-track`](#dryinboundtrackdetector--dryoutboundtrackdetector) owns that. Pause, mute and a backgrounded tab each reset the stall rather than counting toward it, and a browser that does not report `framesReceived` sets `inputsUnavailable` rather than staying quietly silent.
+
+**Sources:** [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
 #### DecoderPerformanceDetector
 
@@ -656,21 +1010,21 @@ monitor.on('video-decoder-overloaded', ({ trackMonitor, decodeTimePerFrameInMs, 
 
 **Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
-#### InboundFrameSupplyDetector
+#### DecoderBottleneckDetector
 
 The receive-side counterpart of `capture-bottleneck`: frames arrived and the decoder did not turn enough of them into pictures. Raises `decoder-bottleneck`.
 
 **The rule, in full:** add up the frames that arrived and the frames that were decoded; once `durationInMs` has accumulated, compare them. Decoded below `decodeFpsRatioThreshold` of arrived → raise. At or above → resolve. Start a new window.
 
 ```javascript
-inboundFrameSupplyDetector: {
+decoderBottleneckDetector: {
     durationInMs: 15000,        // average the decoder over this long ...
     decodeFpsRatioThreshold: 0.9, // ... then require 90% of what arrived
     minReceivedFps: 5,          // too thin a stream to judge a decoder on
 }
 ```
 
-**The bar is the arrival rate, never the sender's.** Frames that never arrived are the network's story — `FreezedVideoTrackDetector` and the peer connection's loss reasons tell it — so a stream throttled to 5fps that decodes cleanly is silent. That is also what separates it from [`DecoderPerformanceDetector`](#decoderperformancedetector), which asks whether decoding *cost* too much over consecutive ticks: that one is about the price of decoding, this one about frames going missing. Both firing at once is the honest answer when both are true.
+**The bar is the arrival rate, never the sender's.** Frames that never arrived are the network's story — `FrozenVideoTrackDetector` and the peer connection's loss reasons tell it — so a stream throttled to 5fps that decodes cleanly is silent. That is also what separates it from [`DecoderPerformanceDetector`](#decoderperformancedetector), which asks whether decoding *cost* too much over consecutive ticks: that one is about the price of decoding, this one about frames going missing. Both firing at once is the honest answer when both are true.
 
 **Use the result:** the client cannot decode what it was handed — drop to a lower simulcast layer, or ask the SFU for one.
 
@@ -733,6 +1087,8 @@ monitor.on('inbound-video-playout-discrepancy', ({ trackMonitor }) => {
 
 ### Track activity
 
+> Both are **Pipeline Disruption**, at the two ends of the chain: `dry-outbound-track` is the last send-side boundary and `dry-inbound-track` the first receive-side one. Full reference: [docs/PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md).
+
 #### DryInboundTrackDetector / DryOutboundTrackDetector
 
 Raise `dry-inbound-track` / `dry-outbound-track` when a track that should be flowing carries no bytes at all past a threshold. This is *starvation* — contrast with [`stuck-decoder`](#stuckdecoderdetector), where bytes flow and nothing decodes.
@@ -758,14 +1114,16 @@ monitor.on('dry-inbound-track', async ({ trackMonitor }) => {
 
 ### Send side
 
-#### OutboundFrameSupplyDetector
+> Every detector in this group is **Pipeline Disruption**, watching one boundary of the send chain `capture → frame supply → encoder → RTP sender`. The boundary each one owns, the one boundary nothing watches, and the naming debt three of the issue types carry are in [docs/PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md).
 
-Is the capture device delivering the frames the track was configured to capture? The send-side mirror of [`InboundFrameSupplyDetector`](#inboundframesupplydetector), which asks the same of the decoder. Raises `capture-bottleneck`.
+#### SourceCaptureBottleneckDetector
+
+Is the capture device delivering the frames the track was configured to capture? The send-side mirror of [`DecoderBottleneckDetector`](#decoderbottleneckdetector), which asks the same of the decoder. Raises `capture-bottleneck`.
 
 **The rule, in full:** add up the frames the source delivered and the time it had to deliver them; once `durationInMs` has accumulated, compare the average against `getSettings().frameRate`. Below `captureFpsRatioThreshold` of it → raise. At or above → resolve. Start again. Two running totals, no history buffer.
 
 ```javascript
-outboundFrameSupplyDetector: {
+sourceCaptureBottleneckDetector: {
     durationInMs: 15000,           // average the capture device over this long ...
     captureFpsRatioThreshold: 0.9, // ... then require 90% of the configured fps
 }
@@ -803,12 +1161,13 @@ encoderPerformanceDetector: {
     encodeTimeBudgetRatio: 0.8,        // encode time per frame vs the frame budget
     cpuLimitationShareThreshold: null, // null = ignore the browser's CPU-limited signal
     minConsecutiveTicks: 2,            // two reads agreeing, not a span of time
+    sourceSupplyRatioThreshold: 0.9,   // below this share of the promised fps, the encoder is excused
 }
 ```
 
-**Everything is measured against what the source actually delivered**, never against what the track was configured to capture at. An encoder handed 3fps and emitting 3fps is doing its job perfectly; comparing it to a configured 30 would call that a catastrophic failure. Whether the source itself is short is the *other* detector's question — and while its `capture-bottleneck` is active, this one says nothing at all. The frames were never there to encode. The two issues are mutually exclusive by construction.
+**Everything is measured against what the source actually delivered**, never against what the track was configured to capture at. An encoder handed 3fps and emitting 3fps is doing its job perfectly; comparing it to a configured 30 would call that a catastrophic failure. It also stands down entirely while the source is short of the rate it promised — `mediaSource.sourceFps` under `sourceSupplyRatioThreshold` of `track.getSettings().frameRate` — because the frames were never there to encode. The two issues are mutually exclusive by construction.
 
-That chain is read from the issue rather than shared through a field: this detector checks `ClientMonitor.isIssueActive('capture-bottleneck-track-<id>')`. `OutboundTrackMonitor` registers the capture detector first and `Detectors.update()` preserves registration order, so the verdict is same-tick.
+That comparison is made here, from the two raw readings, and **not** by consulting `capture-bottleneck`. An earlier version called `ClientMonitor.isIssueActive('capture-bottleneck-track-<id>')` and stood down on the result, which made the verdict depend on things that have nothing to do with the encoder: disable `SourceCaptureBottleneckDetector` and this one silently stopped standing down, and the two only agreed within a single tick because `OutboundTrackMonitor` happens to register the capture detector first and `Detectors.update()` preserves registration order. Detectors observe; they do not consume each other's verdicts. Both still reach the same judgement about the source on defaults because they read the same two numbers. The ratio each compares them against is its own field, though — `sourceSupplyRatioThreshold` here, `captureFpsRatioThreshold` on the capture detector, both defaulting to `0.9`. Sharing one field was the last thread between the two, and it ran the wrong way: raising the bar for blaming the camera silently widened the range in which the encoder was excused. They ask different questions of the same measurement — *is the camera failing to deliver what it promised?* against *has the camera fallen short far enough that the encoder is excused?* — and are now tunable apart. The stand-down is skipped for screen shares, whose frame rate is content-driven, exactly as `capture-bottleneck` is never raised for one.
 
 **Why `minConsecutiveTicks` here and a duration on the capture side.** They answer different questions. A tick count is a *confidence* floor — every signal above is a per-interval ratio that a single stats read can get wrong, so what is wanted is two independent reads agreeing, which is two samples whatever the collecting period happens to be. A duration is a *persistence* bar — the capture case, where the device has to stay short long enough to matter. `DecoderPerformanceDetector` and `JitterBufferStressDetector` use ticks for the same reason this one does.
 
@@ -820,17 +1179,32 @@ That chain is read from the issue rather than shared through a field: this detec
 monitor.on('encoder-bottleneck', () => sender.dropTopSimulcastLayer());
 ```
 
-#### CaptureFailureDetector
+#### Capture detectors
 
-Watches the source end of outbound tracks: the device is gone (`capture-track-ended`), the OS or another app took it (`capture-track-muted` event), or a live, unmuted microphone has produced nothing but silence for a long stretch (`silent-audio-source` — the threshold is deliberately long, because only duration separates a dead mic from a quiet person).
+Three classes watch the source end of outbound tracks, one per finding, each registered from a config key of its own — so `captureTrackMutedDetector: null` silences the mute telemetry and leaves the two issue-raising classes running.
 
-**Use the result:** `capture-track-ended` → open the device picker. `silent-audio-source` → the classic "are you speaking? we can't hear you" banner, with a shortcut to switch microphone.
+| Class | Reports | What it means |
+|---|---|---|
+| `CaptureTrackEndedDetector` | issue `capture-track-ended` | `readyState` turned `ended`: a webcam unplugged, a Bluetooth headset that dropped its link, a screen share stopped from the browser's own bar, a virtual camera whose application quit |
+| `SilentAudioSourceDetector` | issue `silent-audio-source` | A live, unmuted, enabled microphone capturing nothing but digital silence |
+| `CaptureTrackMutedDetector` | event `capture-track-muted` only | `track.muted` flipped true: the OS grabbed the microphone, another application claimed the camera, the lid closed, the privacy shutter moved |
+
+**None of these leaves a trace in RTP.** The encoder keeps its `outbound-rtp` entry and the counters simply stop advancing, so every detector reading transport or encoder stats sees a track that went quiet with no way to say why. The track object is the only place the reason is written down.
+
+`capture-track-ended` is raised exactly once per track monitor and nothing resolves it — `ended` is terminal by specification, and the application has to acquire a new track. It is deliberately not conditioned on the sender being live: a device unplugged during a pause is a fact about the device, and an application about to resume onto a device that no longer exists is precisely who needs to be told.
+
+`silent-audio-source` reads the media source's `rmsAudioLevel`, which integrates `totalAudioEnergy` over the interval — the instantaneous `audioLevel` reads zero between words and would fire on every pause for breath. The threshold is measured in tens of seconds on purpose: a microphone capturing nothing and a person who simply is not talking are the same measurement, and only duration separates them. A paused sender, a track that is not `live`, or a muted or disabled track each stand the check down and resolve any open issue.
+
+**`capture-track-muted` raises no issue, by design.** A muted source is very often exactly what the user intended, and `track.muted` covers the deliberate system mute and the accidental device grab with the same flag — calling it a fault would file thousands of correct system mutes as call failures. What it is worth is a timestamp: the record of when capture stopped, next to which the silence and dry-track findings that follow stop looking mysterious. Only the false → true transition is reported, never the first observation (a track already muted when monitoring began says nothing about a change) and never the return to unmuted (the sibling detectors observe the recovery directly).
+
+**Use the result:** `capture-track-ended` → open the device picker. `silent-audio-source` → the classic "are you speaking? we can't hear you" banner, with a shortcut to switch microphone. `capture-track-muted` → log it and read it alongside whatever else fired.
 
 ```javascript
-captureFailureDetector: {
+captureTrackEndedDetector: { createEvent: true }, // also buffer CAPTURE_TRACK_ENDED into samples
+captureTrackMutedDetector: { createEvent: true }, // also buffer CAPTURE_TRACK_MUTED into samples
+silentAudioSourceDetector: {
     silenceThresholdInMs: 60000, // long on purpose: silence ≠ broken until it persists
     silenceRmsThreshold: 0.0001, // interval-integrated RMS, not the flickery audioLevel
-    createEvent: true,           // also buffer CAPTURE_TRACK_ENDED / _MUTED into samples
 }
 ```
 
@@ -847,28 +1221,174 @@ monitor.on('capture-track-ended', () => ui.openDevicePicker('audioinput'));
 
 ### Connection & client health
 
-#### CongestionDetector
+> This group spans three categories. The transport-quality four are in
+> [docs/TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md),
+> the ICE and DTLS detectors in
+> [docs/CONNECTIVITY_DETECTORS.md](./docs/CONNECTIVITY_DETECTORS.md), and the two
+> stage-boundary detectors at the end in
+> [docs/PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md).
+>
+> **The connectivity layer model.** The ICE and DTLS detectors below are not an
+> assorted pile — they are the five layers a WebRTC connection climbs before
+> media flows (reachability → discovery/traversal → path establishment → secure
+> transport → path continuity), where **an issue belongs to the first layer
+> whose proof fails**. That is what keeps "the user cannot connect" from
+> producing five issues that all mean approximately the same thing. A layer holds
+> **one class per issue**, not one class per layer: layer 5 holds four classes,
+> layers 3 and 4 two each, and the order they are registered in carries no
+> meaning, because no detector reads another's conclusion.
+>
+> There is no longer a sixth "media flow" layer.
+> [`BlockedTransportDetector`](#blockedtransportdetector) moved to **Transport
+> Quality**, because every connectivity stage completes and holds while it fires
+> — the path is simply not delivering, which is Transport Quality's membership
+> test rather than Connectivity's.
+>
+> **Category is not subject**, which is the one thing to know before reading the
+> map: [`IceTraversalDetector`](#icetraversaldetector) and the two in
+> [the restart loop](#the-restart-loop) are **Telemetry** even though their
+> subject is connectivity and they are documented with the layer model, because a
+> restart is what a healthy application *does* and a relay path is a cost rather
+> than a fault. See
+> [docs/DETECTOR_TAXONOMY.md](./docs/DETECTOR_TAXONOMY.md#category-is-not-subject).
+>
+> Reading a failed session: **start at the lowest layer that raised an issue**;
+> everything above it is downstream of that failure.
 
-Detects network congestion on a peer connection: bandwidth-limited outbound streams, corroborated (depending on `sensitivity`) by an RTT jump over its own EWMA baseline or by outbound loss. The RTT it reads never mixes RTCP and ICE measurements.
 
-**Use the result:** reduce what you send — lower simulcast layers or cap the bitrate — and show a network-quality indicator. The event payload carries the available bitrates plus the maxima seen before congestion, which sizes *how much* to back off.
+#### UplinkCongestionDetector
+
+Reports the sending path no longer carrying what the encoder wants to produce. Three things must hold together: the browser reporting the encoder bandwidth-limited, the **room left on the path** (`availableOutgoingBitrate - sendingBitrate`) dropping far below its own average, and packets queueing in the pacer on the way out.
+
+The room is the signal. On a healthy call it is comfortably positive and steady — the encoder asks for less than the path offers. When a path narrows the estimate drops immediately and the encoder takes a beat to follow it down, so the room falls through zero and goes sharply negative for a collection or two. That moment is what this looks for: not a level, but a sender pressed against a ceiling that just moved.
+
+**Use the result:** reduce what you send — lower simulcast layers or cap the bitrate — and show a network-quality indicator. The payload carries the estimate now and the maximum it fell away from, which sizes *how much* to back off.
 
 ```javascript
-congestionDetector: {
-    sensitivity: 'medium', // 'high': any bw-limitation | 'medium': + RTT rise | 'low': + >5% loss
+uplinkCongestionDetector: {
+    headroomDropRatio: 0.25,    // room must drop this far below its average, as a share of the path's recent max
+    sendDelayGrowthRatio: 3,    // pacer queue this many times its own EWMA baseline
 }
 ```
 
 ```typescript
-monitor.on('congestion', ({ availableOutgoingBitrate, maxSendingBitrate }) => {
-    sender.capBitrate(Math.min(availableOutgoingBitrate, maxSendingBitrate * 0.8));
+monitor.on('uplink-congestion', ({ availableOutgoingBitrate, sendingBitrate, headroomInBps }) => {
+    // headroomInBps is negative here: the encoder is over the ceiling by that much.
+    sender.capBitrate(availableOutgoingBitrate * 0.8);
     ui.setNetworkIndicator('poor');
 });
 ```
 
-**Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+**It never rests on `qualityLimitationReason` alone, and that is the point.** The browser saying the encoder is limited by bandwidth is nearly always true on a real call: over a throttled run it read `bandwidth` on every collection, including every healthy one — precision 0.53. As one of three it is a filter rather than a claim. Its *absence* is what closes the finding, and there is no recovery threshold on any bitrate: nothing knows what the path can carry after it narrows, so a link that settles at half its old capacity has recovered and a ratio against its old maximum would never say so.
+
+**The room shape rules out the look-alike by construction.** A muted camera, a replaced track or a still screen share drags the estimate down — an estimator cannot probe above what is being sent — and a detector watching the estimate alone reads that as a narrowing path. All three make the room *grow*, because the encoder is asking for less while the path keeps offering what it did.
+
+Where the browser computed no estimate, or reports no limitation verdict, the detector sets [`inputsUnavailable`](#when-a-detector-cannot-see-its-inputs) rather than reading as a healthy path.
+
+**Sources:** [W3C webrtc-stats: availableOutgoingBitrate](https://www.w3.org/TR/webrtc-stats/#dom-rtcicecandidatepairstats-availableoutgoingbitrate) · [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/)
+
+#### DownlinkCongestionDetector
+
+Reports the receiving path no longer carrying what is being sent to it. There is no incoming bandwidth estimate to read — `availableIncomingBitrate` is absent on Chrome, whose congestion control is send-side, so the estimate for your downlink is computed at the far end and never reaches you — so the verdict is rebuilt from three things that must hold together: the browser reporting the path bandwidth-limited, `receivingBitrate` collapsing below `collapseRatio` of its rolling maximum, *and* the video jitter buffer holding frames at `bufferElevationRatio` of its own pre-episode baseline.
+
+It closes the finding when the browser stops reporting a bandwidth limitation, not on a bitrate threshold: nothing here knows what the path can carry now, so a link that settles at half its old capacity has recovered and a ratio against its old maximum would never say so.
+
+**Use the result:** ask the sender for less (a lower simulcast layer, a lower target), and show the receiving side of your network indicator.
+
+```javascript
+downlinkCongestionDetector: {
+    collapseRatio: 0.6,        // arriving bitrate below this share of its rolling max
+    bufferElevationRatio: 2,   // buffer delay over its own pre-episode baseline
+}
+```
+
+```typescript
+monitor.on('downlink-congestion', ({ receivingBitrate, maxReceivingBitrate, jitterBufferDelayInMs }) => {
+    ui.setNetworkIndicator('poor');
+    signaling.requestLowerLayer();
+});
+```
+
+**The buffer half is what makes it mean anything.** A static screen share, a muted camera or a dropped simulcast layer collapses the arriving bitrate with the buffer perfectly normal — the sender simply had less to send. **Loss is recorded on the payload and not read:** measured against a 500 kbit throttle it ran at 39% and 47% for about six seconds and then read zero for the rest of an unchanged throttle, because the far end's estimator had adapted down and stopped overshooting. Anything resting on it resolves in the middle of the episode it is reporting.
+
+**Know this before you trend it: it is blind on a receive-only connection.** `qualityLimitationReason` describes this endpoint's *encoder*, and a connection that sends nothing reports none — so a webinar attendee or a spectator sets [`inputsUnavailable`](#when-a-detector-cannot-see-its-inputs) rather than getting a verdict. Same for an audio-only sender and for browsers that do not implement the field. On a shared last mile the sending verdict is about the link both directions cross, which is what makes it worth gating on; where the two directions do not share a bottleneck, the gate can be shut while your downlink is genuinely congested.
+
+**Sources:** [W3C webrtc-stats: jitterBufferDelay](https://www.w3.org/TR/webrtc-stats/#dom-rtcinboundrtpstreamstats-jitterbufferdelay) · [W3C webrtc-stats: availableIncomingBitrate](https://www.w3.org/TR/webrtc-stats/#dom-rtcicecandidatepairstats-availableincomingbitrate)
+
+##### The `congestion` event
+
+The two detectors raise two issue types, because they answer two questions from two sets of evidence. But plenty of applications only want to know that this connection is capacity-limited *somewhere* — enough to dim a network badge — so both also emit **`congestion`**, discriminated on `direction`:
+
+```typescript
+monitor.on('congestion', (event) => {
+    ui.setNetworkIndicator('poor');
+
+    if (event.direction === 'uplink') sender.capBitrate(event.availableOutgoingBitrate * 0.8);
+    else signaling.requestLowerLayer();
+});
+
+// The same question asked of a connection rather than of the event stream:
+if (peerConnectionMonitor.congested) { /* either direction */ }
+```
+
+It carries the whole payload of whichever detector fired rather than a flattened summary, because a bandwidth estimate and an arriving bitrate are not the same quantity and should not share a field name. A connection congested both ways fires it twice, once per direction, as the two findings open — two independent verdicts, since neither detector consults the other. There is no combined *issue*: `getActiveIssuesByType` takes `'uplink-congestion'` or `'downlink-congestion'`, and `peerConnectionMonitor.congested` is the one-word reading of the pair.
+
+#### Transport quality detectors
+
+The path is established, ICE is connected, DTLS completed — and the transport is still the reason the call is bad. Congestion was the only detector here for a long time, answering for both directions from one signal; it is now two, and three more cover the properties of a working path that had no owner at all.
+
+> Full reference for all five — where each number is derived, the shared two-threshold shape, the false positives and what each one refuses to claim: [docs/TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md).
+
+| Property | Detector | Issue | The question |
+|---|---|---|---|
+| Capacity | `UplinkCongestionDetector` | `uplink-congestion` | Is our sending path narrower than what we want to put on it? |
+| | `DownlinkCongestionDetector` | `downlink-congestion` | Is our receiving path narrower than what is being sent to us? |
+| Delay | `TransportDelayDetector` | `transport-delay-degraded` | Does the round trip take too long? |
+| Delivery reliability | `TransportLossDetector` | `transport-loss-sustained` | Are packets being dropped? |
+| | [`BlockedTransportDetector`](#blockedtransportdetector) | `blocked-transport` | Are they being dropped *completely*, by policy? |
+| Delivery stability | `TransportJitterDetector` | `transport-delivery-unstable` | Do they arrive evenly? |
+
+**`transport-delay-degraded`** reads `pcMonitor.ewmaRttInSec`, already smoothed on the peer connection — a single inflated RTT sample is common and means nothing. What the detector adds is duration and hysteresis: the round trip must stay above `thresholdInMs` for `durationInMs` of *stats time*, and must fall below `recoveryThresholdInMs` to clear, so a call sitting exactly on the line does not flap the issue open and shut. Round trip around 300 ms is where turn-taking starts to break down; ITU-T G.114 puts one-way "generally acceptable" at 150 ms. Note that **RTT to an SFU is a half-path measurement** and never sees the far leg — this is evidence about *this endpoint's* path and must not be presented as end-to-end latency.
+
+**`transport-loss-sustained`** watches both directions with one threshold and reports whichever is worse, with the direction in the payload. Loss has always been visible to this library, but only as somebody else's qualifier: it gated the retired `CongestionDetector`'s low-sensitivity mode and stands `DecoderPerformanceDetector` down so it does not blame a decoder for a network fault. Neither makes a claim *about the loss*, so nothing could raise it, resolve it, or count it. The means it reads — `avgInboundFractionLost` and `avgOutboundFractionLost` — exclude streams that carried nothing this tick rather than counting them as healthy; without that gating, a call with eight muted tracks and one bleeding one looks fine.
+
+**`transport-delivery-unstable`** reads `avgInboundJitterInMs`: packets arrive, but not evenly, forcing the receiver to buffer more than it should. Capacity may be fine and loss may be zero; what is wrong is the timing. Keep it distinct from [`audio-jitter-buffer-stress`](#jitterbufferstressdetector), which measures the *jitter buffer* straining — deep target delay plus audible time-stretching — a perceived symptom on one track. This measures the network delivering unevenly, which is its cause and lives on the path. They frequently co-fire, and that co-firing is informative precisely because neither consults the other: cause and symptom confirmed independently is evidence, whereas a symptom detector that only fires when a cause detector already fired is just an echo.
+
+```javascript
+transportDelayDetector: {
+    thresholdInMs: 300,          // smoothed RTT at or above which the path counts as slow
+    recoveryThresholdInMs: 200,  // RTT below which it resolves
+    durationInMs: 6000,          // stats time it must stay high before raising
+},
+transportLossDetector: {
+    threshold: 0.05,             // mean interval loss fraction (0..1)
+    recoveryThreshold: 0.01,
+    durationInMs: 6000,
+},
+transportJitterDetector: {
+    thresholdInMs: 100,          // mean inter-arrival jitter
+    recoveryThresholdInMs: 30,
+    durationInMs: 6000,
+},
+```
+
+```typescript
+monitor.on('transport-delay-degraded',    ({ rttInMs })              => ui.setNetworkIndicator('slow', rttInMs));
+monitor.on('transport-loss-sustained',    ({ fractionLost, direction }) => metrics.gauge(`loss.${direction}`, fractionLost));
+monitor.on('transport-delivery-unstable', ({ jitterInMs })           => metrics.gauge('jitter', jitterInMs));
+```
+
+**None of them reads any other.** They will co-fire when several are true, and that is the honest answer: a path can be uncongested and slow (a long physical route, a relay on the wrong continent) or congested and short; a well-behaved congestion controller produces a congested path with very little loss, while a lossy wireless link produces loss with no congestion signal at all.
+
+All three new detectors set `inputsUnavailable` when the browser reports nothing to judge, so "no issue" and "no measurement" stay distinguishable.
+
+**Threshold caveat.** These are round starting points meant to be tuned against a real fleet, not measurements of anything.
+
+**Sources:** [ITU-T G.114 (one-way transmission time)](https://www.itu.int/rec/T-REC-G.114) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
 #### CpuPerformanceDetector
+
+> Filed under **Pipeline Disruption** even though it names a cause rather than a boundary — the one strained member of that category, and [the taxonomy says why it is kept there anyway](./docs/PIPELINE_DISRUPTION_DETECTORS.md#across-both-chains--the-machine).
 
 Client-wide CPU pressure: outbound streams explicitly CPU-limited (instantaneous label *and* sustained duration shares), encode time per frame over budget, inbound decode falling behind receive, or stats collection itself slowing down.
 
@@ -892,45 +1412,147 @@ monitor.on('issue-resolved', (issue) => {
 
 **Sources:** [Power-up getStats for client monitoring (webrtcHacks)](https://webrtchacks.com/power-up-getstats-for-client-monitoring/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
 
-#### LongPcConnectionEstablishmentDetector
+#### IcePathEstablishmentDetector
 
-Emits `'too-long-pc-connection-establishment'` (and the `LONG_PC_CONNECTION_ESTABLISHMENT` client event) when a peer connection stays in `connecting` past the threshold. Re-arms on any exit from `connecting`, so slow *retries* are reported too. Since 4.8.0 the payload names *where* setup is stuck via `stalledStage` — `'ice-gathering'`, `'ice-checking'`, `'dtls'` or `'unknown'` — because `connecting` covers ICE and the DTLS handshake alike, and the two have different fixes.
+Emits `'ice-path-establishment-slow'` (and the `LONG_PC_CONNECTION_ESTABLISHMENT` client event) when a peer connection stays in `connecting` past the threshold. Re-arms on any exit from `connecting`, so slow *retries* are reported too. Since 4.8.0 the payload names *where* setup is stuck via `stalledStage` — `'ice-gathering'`, `'ice-checking'`, `'dtls'` or `'unknown'` — because `connecting` covers ICE and the DTLS handshake alike, and the two have different fixes.
 
-**Use the result:** show "connecting is taking longer than usual"; if it repeats, retry with `iceTransportPolicy: 'relay'` to test whether direct connectivity is the blocker. The [`never-established`](#iceconnectivitydetector) restart recommendation is this detector's escalation.
+**It raises no issue, on purpose:** saying establishment is slow is not yet a claim that it has failed. That claim belongs to [`IceEstablishmentFailedDetector`](#iceestablishmentfaileddetector), the other half of layer 3, with its own threshold well past this one's. The `never-established` ICE restart recommendation used to live here too; it now belongs to [`IceRestartRecommendationDetector`](#the-restart-loop) alongside the other three restart reasons, so that the rate limiting across all four is shared — and since 4.10.0 its threshold and cooldown live in that detector's own config block rather than in this one, so `icePathEstablishmentDetector: null` no longer silences the recommendation.
+
+**Use the result:** show "connecting is taking longer than usual"; if it repeats, retry with `iceTransportPolicy: 'relay'` to test whether direct connectivity is the blocker. `stalledStage` says whether to look at the network (`ice-gathering`, `ice-checking`) or at certificates and DTLS interop (`dtls`).
 
 ```javascript
-longPcConnectionEstablishmentDetector: {
-    thresholdInMs: 5000,
-    createEvent: true,
+icePathEstablishmentDetector: {
+    thresholdInMs: 5000,  // `connecting` for this long is reported
+    createEvent: true,    // also buffer LONG_PC_CONNECTION_ESTABLISHMENT into samples
 }
 ```
 
 **Sources:** [RTCPeerConnection.connectionState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionState) · [ICE (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice/)
 
-#### IceConnectivityDetector
+#### IceEstablishmentFailedDetector
 
-Runtime ICE and transport health, per ICE transport (a peer connection without BUNDLE has several, and they fail independently). Raises `ice-disconnected` (only after the threshold — transient blips self-heal), `ice-connection-failed` (immediately — `failed` is terminal for the generation), `ice-transport-stalled` (still sending, receiving nothing, after inbound had been seen) and `unstable-ice-path` (selected path flapping). Path switches are counted as the larger of the observed path transitions and the browser's own `selectedCandidatePairChanges` counter (Chrome 80+, Firefox 155+), which also sees flaps too fast for tick-to-tick diffing; the issue payload carries the native count as `nativePairChanges`, and an inferred ICE restart never counts as churn.
+The other half of layer 3, and the one that produces an issue: `ice-establishment-failed` is **the call that never connected** — by a wide margin the most common connectivity failure a user actually reports, and until this detector existed the one thing the library could not put in `activeIssues`. Layer 3 emitted an event when establishment dragged on, but an event is a notification: it is gone the moment it fires, it does not resolve, and nothing asking "what is wrong with this session right now" could see it. So the single most user-visible failure produced an empty issue list, which reads as a healthy call.
 
-**Use the result — the restart loop:** the library names *when* an ICE restart is warranted; performing it is the application's job. `'ice-restart-recommended'` carries a `reason` and a `recommendationCount` so you can escalate to a full rejoin when restarts stop helping; `'ice-restart'` then reports whether the restart you performed `recovered` or `failed`.
+Three facts must hold together, none sufficient alone, for the whole of `thresholdInMs` of accumulated stats time:
 
-| `reason` | Meaning |
+-   **Local candidates exist** — so this is emphatically not the no-network case, which [`IceReachabilityDetector`](#icereachabilitydetector) owns. The two are mutually exclusive by construction rather than by suppression.
+-   **The peer connection never reached `connected`** — so this is establishment failing, not a working call that later broke, which the [layer-5 detectors](#the-layer-5-detectors) own.
+-   **No candidate pair was ever nominated or reached `succeeded`** — which separates "checks are still running and might yet win" from "nothing ever won". The check is *latched*: a pair that won once is proof establishment got there, however the pair looks on any later tick.
+
+The default 15 s sits well past `icePathEstablishmentDetector.thresholdInMs` on purpose — a connection that is merely slow has to be given time to stop being merely slow. Measuring in stats time rather than wall clock matters here more than almost anywhere: ICE checking legitimately takes seconds, and a wall-clock threshold would punish a slow collection rather than a slow connection.
+
+**The payload carries what was tried, not only that it failed** — which is where the candidate types and pair states this library has collected since forever finally earn their place:
+
+| `localCandidateCounts` shows | Reading |
 |---|---|
-| `ice-failed` | ICE gave up on this generation — restart immediately. |
-| `ice-disconnected` | `disconnected` outlasted the self-heal window. |
-| `transport-stalled` | ICE says connected, but the selected path stopped delivering. |
-| `never-established` | The connection never finished connecting (covers stuck DTLS). |
+| host only | Gathering never reached a STUN server |
+| host + srflx, no relay | TURN was never configured or never answered — the most common cause of a call that fails only between certain networks |
+| relay present, every pair `in-progress` or `failed` | The relay is unreachable, or the far end never answered the checks |
+
+`candidatePairStates` is every distinct pair `state` seen, deduplicated and sorted, and `candidatePairCount` how many there were.
 
 ```javascript
-iceConnectivityDetector: {
-    disconnectedThresholdInMs: 5000,   // how long `disconnected` may self-heal
-    transportStallThresholdInMs: 5000, // sending-but-not-receiving tolerance
-    pathSwitchWindowInMs: 30000,       // window for counting selected-path switches
-    pathSwitchThreshold: 3,            // switches in the window => unstable path
-    iceRestartRecommendationThresholdInMs: 10000,
-    iceRestartRecommendationCooldownInMs: 15000,
-    createEvent: true,                 // buffer ICE_RESTART / _RECOMMENDED into samples
+iceEstablishmentFailedDetector: {
+    thresholdInMs: 15000, // stats time the connection must go on failing to establish
 }
 ```
+
+```typescript
+monitor.on('issue', (issue) => {
+    if (issue.type !== 'ice-establishment-failed') return;
+    const { localCandidateCounts, candidatePairStates } = issue.payload;
+    if (localCandidateCounts.relay === 0) ui.showBanner('This network needs a TURN relay to connect');
+    reportToServer('establishment-failed', { localCandidateCounts, candidatePairStates });
+});
+```
+
+**What it will not claim:** which side is at fault. Every fact here is local — what this endpoint gathered and how its own checks went — and a far end that never sent an answer looks exactly like a far end whose candidates cannot be reached. The counts are evidence for a human or for server-side correlation, not a verdict.
+
+**Sources:** [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### The layer-5 detectors
+
+Runtime health of a path that **already worked**, per ICE transport — a peer connection without BUNDLE has several and they fail independently. Four classes, four issues, four config keys — `iceDisconnectedDetector`, `iceConnectionFailedDetector`, `iceTransportStalledDetector`, `unstableIcePathDetector` — each of which removes exactly its own class when set to `null`.
+
+| Class | Issue | Raised when |
+|---|---|---|
+| `IceDisconnectedDetector` | `ice-disconnected` | `disconnected` outlasted `disconnectedThresholdInMs` |
+| `IceConnectionFailedDetector` | `ice-connection-failed` | `iceState` reached `failed` — immediately, since it is terminal for the generation |
+| `IceTransportStalledDetector` | `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, nothing coming back, after inbound had been seen |
+| `UnstableIcePathDetector` | `unstable-ice-path` | `pathSwitchThreshold` selected-path switches inside `pathSwitchWindowInMs` |
+
+Each keeps its own per-transport state and each reads the ICE local username fragment itself to notice a new generation, rather than asking `IceRestartDetector` — so none depends on another or on the order they run in. That is about twenty duplicated lines per class, and it is deliberate.
+
+**`ice-disconnected` waits; `ice-connection-failed` does not.** `disconnected` on its own is never worth an issue: it is what a browser says when consent checks have missed for a moment, and a Wi-Fi roam or a brief radio dropout produces it several times in an ordinary call while ICE quietly recovers. Only duration separates the blip from the outage. `failed` is the opposite — the browser will not retry candidates on its own, so there is nothing to wait out. A transport falling from `disconnected` into `failed` does *not* resolve the disconnection issue: it has not recovered, it has got worse.
+
+**`ice-connection-failed` carries `everConnected`**, and that field is the reason the issue is worth reading rather than just counting. `IceTransportMonitor.everConnected` is a latch — set the first time the transport reads `connected` or `completed`, never cleared — so it is the transport's own record rather than an inference. `failed` alone conflates two faults that share a state and share nothing else:
+
+| `everConnected` | Meaning | Where to look |
+|---|---|---|
+| `false` | The path **never worked**: no candidate pair ever won | Symmetric NAT with no TURN, a firewall eating the checks, a TURN credential the client never got |
+| `true` | The path **worked and was lost** | The network underneath: the interface changed, the NAT binding expired, the route died |
+
+**`ice-transport-stalled` is the quiet failure**: every state reads healthy while the transport keeps sending and receives nothing back. No state machine will ever report it, because as far as the browser is concerned nothing has gone wrong. Our own outbound traffic is what makes the expectation defensible — a live path returns at least STUN consent responses and RTCP for whatever we send. The mirror case, silence in *both* directions, is deliberately **not** reportable: it cannot be told apart from a legitimately idle connection. Two guards keep it off send-only transports, which is the ordinary shape of an SFU uplink: inbound traffic must have been seen on the transport before, and inbound RTP must be attributed to it at all.
+
+**`unstable-ice-path` counts switches as the larger of two sources.** Diffing `selectedCandidatePairId` tick to tick is portable but blind to a flap that departs and returns inside one collecting period; the browser's own `selectedCandidatePairChanges` delta (Chrome 80+, Firefox 155+) sees exactly those but is absent on Safari. Taking the maximum uses the better evidence where it exists and still works where it does not; the payload carries the native count separately as `nativePairChanges`. The window is *tumbling*, not sliding — each tick adds the transport's `deltaTime`, and once `pathSwitchWindowInMs` accumulates both counters reset. Three switches in thirty seconds is reasoned rather than arbitrary: a legitimate handover produces one, occasionally two, and consent checks run roughly every five seconds, so three means no path survived even a few consent intervals.
+
+```javascript
+iceDisconnectedDetector:     { disconnectedThresholdInMs: 5000 },   // how long `disconnected` may self-heal
+iceConnectionFailedDetector: {},                                    // terminal state, nothing to tune
+iceTransportStalledDetector: { transportStallThresholdInMs: 5000 }, // sending-but-not-receiving tolerance
+unstableIcePathDetector: {
+    pathSwitchWindowInMs: 30000,       // window for counting selected-path switches
+    pathSwitchThreshold: 3,            // switches in the window => unstable path
+}
+```
+
+```typescript
+monitor.on('issue', (issue) => {
+    if (issue.type !== 'ice-connection-failed') return;
+    // "never worked" and "worked and was lost" need different evidence and different fixes
+    reportToServer(issue.payload.everConnected ? 'path-lost' : 'path-never-worked', issue.payload);
+});
+```
+
+**Sources:** [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+#### The restart loop
+
+Two classes sit beside the connectivity ladder rather than on it. Neither raises an issue and neither ever will: a restart is a fact about the connection, not a fault — restarts are exactly what a healthy application does when a network changes underneath a call, so an issue would flag the recovery rather than the problem.
+
+`IceRestartRecommendationDetector` names *when* an ICE restart is warranted; performing it is the application's job, because only the application knows whether renegotiation is safe right now, whether signalling is even up, and what an SFU on the other end expects. Four conditions warrant one, and they live in one class because they answer one question — *would starting ICE over help?* — and because the rate limiting only means anything if it is shared. Two detectors each politely waiting out their own cooldown produce twice the nagging.
+
+| `reason` | Scope | Waits for |
+|---|---|---|
+| `ice-failed` | per transport | Nothing — ICE never self-heals from `failed`. |
+| `ice-disconnected` | per transport | `iceRestartRecommendationThresholdInMs`. |
+| `transport-stalled` | per transport | `iceRestartRecommendationThresholdInMs`. |
+| `never-established` | per peer connection | `restartRecommendationThresholdInMs`. |
+
+`never-established` is measured against `connectingStartedAt` rather than any transport clock, because the fault is the absence of a working transport — there may be none in a reportable state, or none at all. It yields to `ice-failed` and `ice-disconnected`: a transport in either state names what went wrong, where "it never connected" only names what did not happen.
+
+**All four thresholds and cooldowns live in one block of its own**, `iceRestartRecommendationDetector`, and they are its own rather than borrowed from the detectors that raise the corresponding issues — recommending a renegotiation is a different decision from reporting a fault, and it is normal to want the advice to wait longer than the issue did. It used to read the `never-established` pair out of `icePathEstablishmentDetector` and the per-transport pair out of the path-stability key, so each half was gated by a different neighbour. Both halves now run whenever this key is set, and `iceRestartRecommendationDetector: null` is the one way to silence any of it:
+
+```javascript
+iceRestartDetector: { createEvent: true },
+iceRestartRecommendationDetector: {
+    createEvent: true,
+    iceRestartRecommendationThresholdInMs: 10000, // per transport: disconnected / stalled
+    iceRestartRecommendationCooldownInMs: 15000,
+    restartRecommendationThresholdInMs: 10000,    // per pc: never established at all
+    restartRecommendationCooldownInMs: 15000,
+}
+```
+
+Every verdict here is reached from raw transport and connection state, never by asking the layer-5 detectors what they concluded — which is why the stall condition and all its guards are written out a second time in this class. A restart already in flight suppresses further recommendations until it resolves, since asking for a second while the first is still negotiating is how an application ends up in a restart loop.
+
+`IceRestartDetector` then reports what happened. The evidence is a changed ICE local username fragment, which is renegotiated per generation and is the one field a restart cannot leave alone — an inference, not a report, since the browser exposes no "a restart happened" signal and stats cannot separate one the application asked for from one the browser started itself. Firefox's transport report is reconstructed by `FirefoxStatsAdapter` and carries no fragment, so the detector falls back to the selected local candidate's `usernameFragment` and stays silent when neither exists. Three outcomes are emitted rather than one, because "a restart was attempted" and "the restart worked" are different facts:
+
+| `outcome` | Meaning |
+|---|---|
+| `detected` | A new generation was observed. |
+| `recovered` | That generation reached `connected` / `completed`. |
+| `failed` | That generation reached `failed`. A generation still checking has no outcome yet, and none is invented for it. |
 
 ```typescript
 monitor.on('ice-restart-recommended', ({ peerConnectionMonitor, reason, recommendationCount }) => {
@@ -940,26 +1562,42 @@ monitor.on('ice-restart-recommended', ({ peerConnectionMonitor, reason, recommen
 monitor.on('ice-restart', ({ outcome }) => metrics.count(`ice-restart.${outcome}`));
 ```
 
-**Sources:** [ICE restart: recovering connectivity (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice-restart/) · [RTCPeerConnection.restartIce (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/restartIce) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445) · [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675)
+A rising `recommendationCount` against a flat `iceGeneration` is what tells you the advice is not being taken; a rising count *with* a rising generation says restarts are being performed and are not working, which is the escalation-to-rejoin signal.
+
+**Sources:** [ICE restart: recovering connectivity (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/ice-restart/) · [RTCPeerConnection.restartIce (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/restartIce) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445)
 
 #### BlockedTransportDetector
 
-The firewall signature: a middlebox that lets ICE/STUN through but blocks the media itself. Every connectivity signal looks healthy — the candidate pair is `succeeded`, consent checks keep passing, `iceConnectionState` is `connected` — yet the call carries nothing. The existing detectors structurally miss this case: STUN consent responses count into the pair's `bytesReceived`, so the pair never looks dry and the inbound-stall check never fires, while the dry-track detectors see outbound-rtp counters advancing and stay silent.
+> **Transport Quality**, not Connectivity — it *requires* every connectivity stage to have completed before it will judge. Full reference, including the two `evidence` shapes and the Firefox fallback that makes it work at all: [docs/TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md).
 
-Raises `blocked-transport` (per ICE transport) when, sustained for `thresholdInMs`, all three hold: STUN demonstrably alive (`responsesReceived` advanced within `stunFreshnessInMs`), the application demonstrably producing (outbound RTP on the transport ≥ `minMediaBitrateBps`), and the media demonstrably not traversing. The payload's `evidence` field says which discrepancy was observed:
+**Transport Quality → delivery reliability**, not a connectivity layer. It used to be filed as a sixth connectivity layer, "media flow", on the reasoning that the network is the subject. That was the wrong cut: every connectivity stage completes and *holds* while this fires — the candidate pair is `succeeded`, consent checks keep passing, `iceConnectionState` reads `connected` — and the path simply is not delivering, which is Transport Quality's membership test word for word. Under the delivery-reliability heading it also sits where it belongs relative to its neighbour: [`transport-loss-sustained`](#transport-quality-detectors) is a path dropping a share of what crosses it, and `blocked-transport` is a path dropping all of it for a reason that is policy rather than capacity. The issue type, its payload and the `blockedTransportDetector` config key are unchanged.
 
-| `evidence` | Meaning |
-|---|---|
-| `media-not-leaving-transport` | RTP senders produce bytes but the transport's own send counter barely moves — host firewall, blocked socket, dead route. |
-| `no-return-traffic` | Media leaves at full rate, STUN answers, but nothing except STUN comes back — not even RTCP. Classic DPI / UDP-throttling firewall. |
+The firewall signature: a middlebox that lets ICE/STUN through but blocks the media itself. Every connectivity signal looks healthy and yet the call carries nothing. The other detectors structurally miss this case: STUN consent responses count into the pair's `bytesReceived`, so the pair never looks dry and [`ice-transport-stalled`](#the-layer-5-detectors) never fires, while the dry-track detectors see outbound-rtp counters advancing and stay silent.
 
-The detector judges the *sending* side, where the client holds both halves of the proof. A firewall blocking only the receive direction shows up on the remote peer's sending side, or as a dry inbound track here.
+Raises `blocked-transport` (per ICE transport) when, sustained for `thresholdInMs`, all of these hold: ICE brought the path up and the selected pair is `succeeded`, STUN is demonstrably alive (`responsesReceived` advanced within `stunFreshnessInMs`), at least one outbound RTP stream is attributed to the transport, and the transport's own send counter is moving at under `maxSendShare` of what those senders produce.
+
+**Only the send side is judged, and that is a deliberate limit.** There the client holds both halves of the proof — it produced the bytes and it reads what the transport put on the wire. On the receive side it holds one half: what *should* have arrived is a fact about the far end that no client stat reports, so a middlebox eating media, an SFU that stopped forwarding, a paused producer and a silent speaker are the same reading in `getStats()`. A dry return path is [`dry-inbound-track`](#dryinboundtrackdetector)'s finding, and a block in the receive direction surfaces on the remote peer's own sending side.
+
+**Nothing is gated on media having flowed successfully first.** A blocked transport is normally blocked from its first packet — the user is behind a corporate firewall, nothing gets out, and reloading puts them behind the same wall — so any "it was working and then stopped" bar would switch the detector off in the case it exists for.
+
+The payload's `evidence` field splits the fault by where it happened:
+
+| `evidence` | Meaning | Where the fault is |
+|---|---|---|
+| `media-discarded-on-send` | The pair's `packetsDiscardedOnSend` is advancing — the OS refused the packets. | On this machine: socket error, host firewall, full send buffer. |
+| `media-not-leaving-transport` | No discard counter advancing, whether because the browser reports none or because it reports zero. | Beyond this machine: the packets left as far as this endpoint can tell. |
+
+An *unreported* `packetsDiscardedOnSend` falls on the same side as a zero one — a counter the browser does not publish is not evidence of a local fault.
+
+**One instance judges one transport**, and lives on `IceTransportMonitor.detectors`, so reaching it means `iceTransport.detectors.getByName('blocked-transport-detector')` rather than the peer connection's registry. A replaced transport gets a detector whose clocks start at zero; a transport that goes away takes its detector with it, leaving the issue open, as with every monitor-bound detector. The `blockedTransportDetector` config key gates construction on every transport at once.
+
+Every clock — how long the discrepancy has held, how long since STUN last answered, and the interval under the fallback bitrate — accumulates the ICE transport's own `deltaTime`. That matters most in exactly the conditions this detector fires under: a saturated main thread that delays collections would otherwise credit the firewall with time the library merely spent not looking, and would age out a perfectly fresh STUN response for the same reason.
+
+**It detects only where the browser supplies the stats, and never infers them.** Where the transport's byte counters are missing (Firefox through 153) the selected pair's own `deltaBytesSent` is read instead — a different real measurement of the same traffic. Where `responsesReceived` is missing (Firefox before 142) there is no substitute for proof that the path still answers, so the transport is not judged at all and `inputsUnavailable` is set, rather than reading ICE's `connected` as consent. A consent counter that has not advanced *yet* is treated the same way: the freshness clock starts when the first response lands, not at zero.
 
 ```javascript
 blockedTransportDetector: {
     thresholdInMs: 5000,          // discrepancy persistence before raising
-    minMediaBitrateBps: 10000,    // below this the transport is legitimately quiet
-    maxReturnBitrateBps: 2000,    // at/below this the return path counts as STUN-only
     maxSendShare: 0.1,            // transport send under this share of produced => blocked on send
     stunFreshnessInMs: 10000,     // consent checks run ~5s; must comfortably exceed one interval
 }
@@ -969,17 +1607,29 @@ blockedTransportDetector: {
 
 **Sources:** [RFC 7675: STUN consent freshness](https://datatracker.ietf.org/doc/html/rfc7675) · [RTCIceCandidatePairStats (W3C webrtc-stats)](https://www.w3.org/TR/webrtc-stats/#candidatepair-dict*) · [WebRTC and firewalls (BlogGeek.me glossary)](https://bloggeek.me/webrtcglossary/firewall/)
 
-#### DtlsHandshakeDetector
+#### The DTLS detectors
 
-Separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned before: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all used to present as a generically slow `connecting`.
+Layer 4 separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned before: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all used to present as a generically slow `connecting`.
 
-Raises two issues, per ICE transport. `dtls-handshake-failed` fires immediately on `dtlsState: 'failed'` — the handshake is terminal for this transport until an ICE restart re-keys it. `dtls-handshake-stalled` fires when the ICE side is proven healthy while `dtlsState` sits in `new`/`connecting` past `stalledThresholdInMs`. ICE health comes from the transport's `iceState` where the browser reports one, and from the selected candidate pair being `succeeded` where it does not (Safari, and the transport reconstructed for Firefox < 153) — the payload's `iceEvidence` names which proof was used.
+Two classes, per ICE transport, each with a config key of its own — because the browser announcing a verdict and the browser saying nothing at all are different problems with different evidence, and either can now be switched off without the other.
 
-What it will not judge: a transport on its first observed tick (Firefox 153/154 report pre-negotiation transport values that only 155 makes trustworthy); `dtlsState: 'closed'`, which is a shutdown, not a failure; and a transport whose ICE side is not proven healthy, where the ICE detectors own whatever is wrong. An inferred ICE restart clears the stall timer, since the new generation re-runs the handshake.
+`DtlsHandshakeFailedDetector` raises **`dtls-handshake-failed`** on the first tick reporting `dtlsState: 'failed'`. There is nothing to wait for and nothing to average — `failed` is the browser's terminal verdict on this key exchange — so there is no maturity guard and no duration threshold, and the issue is raised once per transport rather than once per tick. Only a later `connected` resolves it, which in practice means an ICE restart re-ran the handshake and the new generation succeeded; a transport dropping back to `new`/`connecting` after a restart is not yet evidence of anything, so the issue stays open until one actually completes. Its `dtlsHandshakeFailedDetector` block is empty by design: `failed` is not a matter of degree, so there is nothing here to tune — `{}` enables the detector, `null` removes it.
+
+`DtlsHandshakeStalledDetector` raises **`dtls-handshake-stalled`** when the ICE side is proven healthy while `dtlsState` sits in `new`/`connecting` past `stalledThresholdInMs`. This is the half with no verdict to read: a handshake being eaten by a middlebox and one that is a few hundred milliseconds from completing look identical in a single stats report, and only duration separates them — accumulated in stats time, so a collection that ran late credits the handshake with exactly the time it spent quiet.
+
+The ICE-health proof is what keeps the layer honest, since DTLS cannot complete over a path that is not yet usable and reporting it would mean re-reporting what the ICE detectors already own. It has two forms, and the payload's `iceEvidence` records which one carried it — a finding resting on the weaker of them is worth less to whoever reads it:
+
+| `iceEvidence` | Meaning |
+|---|---|
+| `transport-ice-state` | The transport reported `iceState` `connected`/`completed`. |
+| `selected-pair-succeeded` | No `iceState` reported (Safari, and the transport reconstructed for Firefox < 153); the selected pair being `succeeded` stood in. |
+
+What the stall detector will not judge: a transport on its first observed tick (Firefox 153/154 report pre-negotiation transport values that only 155 makes trustworthy); `dtlsState: 'closed'`, which is a shutdown, not a failure; and a transport whose ICE side is not proven healthy, where the ICE detectors own whatever is wrong. An inferred ICE restart clears the stall timer, since the new generation re-runs the handshake and deserves the full threshold rather than inheriting the old one's.
 
 ```javascript
-dtlsHandshakeDetector: {
-    stalledThresholdInMs: 6000, // ICE healthy, DTLS still `new`/`connecting` for this long
+dtlsHandshakeFailedDetector: {},  // terminal state, nothing to tune
+dtlsHandshakeStalledDetector: {
+    stalledThresholdInMs: 6000,   // ICE healthy, DTLS still `new`/`connecting` for this long
 }
 ```
 
@@ -987,14 +1637,14 @@ dtlsHandshakeDetector: {
 
 **Sources:** [RTCDtlsTransport.state (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCDtlsTransport/state) · [RTCTransportStats (W3C webrtc-stats)](https://www.w3.org/TR/webrtc-stats/#transportstats-dict*) · [RFC 8827: WebRTC Security Architecture](https://datatracker.ietf.org/doc/html/rfc8827)
 
-#### NoAvailableIceCandidateDetector
+#### IceReachabilityDetector
 
 The other end of the connectivity spectrum: the client cannot even *begin* to connect because ICE gathering produced **zero local candidates**. A healthy establishment gathers a host candidate within milliseconds — even without internet, any up interface yields one. Zero candidates while the connection state jumps from `new`/`connecting` straight to `disconnected`/`failed` means there was nothing to connect *with*: no interface, airplane mode, a VPN that tore down every route. This is a different diagnosis from every other ICE issue — those describe a path that existed and stopped working; this one says no path was ever possible.
 
-Raises `no-available-ice-candidate` (per peer connection) immediately on `disconnected`/`failed` with zero local candidates on a never-connected PC, and after `thresholdInMs` when the PC just sits in `new`/`connecting` with nothing gathered. Resolves when a local candidate appears or the connection reaches `connected`. Never fires on a connection that once connected — mid-call network loss belongs to `IceConnectivityDetector`.
+Raises `no-available-ice-candidate` (per peer connection) immediately on `disconnected`/`failed` with zero local candidates on a never-connected PC, and after `thresholdInMs` when the PC just sits in `new`/`connecting` with nothing gathered. Zero candidate rows count as evidence only once `iceGatheringState` reads `complete` — before that they mean gathering is still running, and where the field is absent they mean nothing was measured. Resolves when a local candidate appears or the connection reaches `connected`. Never fires on a connection that once connected — mid-call network loss belongs to [the layer-5 detectors](#the-layer-5-detectors), and an establishment that had candidates but never won a pair belongs to [`ice-establishment-failed`](#iceestablishmentfaileddetector). The two layer-1 and layer-3 issues are mutually exclusive by construction rather than by suppression.
 
 ```javascript
-noAvailableIceCandidateDetector: {
+iceReachabilityDetector: {
     thresholdInMs: 6000, // grace for `new`/`connecting` before the sustained variant raises
 }
 ```
@@ -1003,29 +1653,41 @@ noAvailableIceCandidateDetector: {
 
 **Sources:** [RTCPeerConnection.connectionState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionState) · [RTCPeerConnection.iceGatheringState (MDN)](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/iceGatheringState) · [RFC 8445: ICE](https://datatracker.ietf.org/doc/html/rfc8445)
 
-#### MediaPipelineDetector
+#### RtpSenderStalledDetector / TransportDemuxStalledDetector
 
-The pipeline stage classifier: media moves through a fixed chain (capture → encoder → RTP sender → transport → wire, mirrored on receive), every stage has a monotonic counter proving progress, and a disruption is locatable as the *first* boundary where the upstream counter advances and the downstream one does not. Most boundaries are owned by specialist detectors; this one raises `media-pipeline-stalled` for the two nothing else covers:
+Media moves through a fixed chain — capture → frame supply → encoder → RTP sender ‖ RTP receiver → frame assembly → decoder → renderer — every stage carries a monotonic counter proving progress, and a disruption is *locatable* as the boundary where the upstream counter advances and the downstream one stays flat. Most boundaries are owned by specialist detectors; these two cover the ones nothing else does. The whole chain, boundary by boundary, is [docs/PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md). Each has a config key of its own and raises its own issue:
 
-| `stage` | Direction | Meaning |
+| Class | Issue | The boundary |
 |---|---|---|
-| `rtp-sender` | send | `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` — an encoded frame always packetizes, so a sustained violation is a wedged sender/pacer (seen after `replaceTrack` races and simulcast reconfigurations). Guarded by track live + unmuted + layer active. |
-| `transport-demux` | receive | The ICE transport receives ≥ `minTransportReceiveBitrateBps` — well above what RTCP + STUN can explain — while every inbound RTP of the transport stays flat: traffic arrives that never demuxes (SSRC mismatch after renegotiation, a consumer against a dead producer). Requires at least one inbound RTP to exist. |
+| `RtpSenderStalledDetector` | `rtp-sender-stalled` | `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` on the same outbound RTP — an encoded frame always packetizes, so a sustained violation is a wedged sender or pacer (seen after `replaceTrack` races and simulcast reconfigurations). State is kept per ssrc, since simulcast layers wedge one at a time. |
+| `TransportDemuxStalledDetector` | `transport-demux-stalled` | The ICE transport receiving at or above `minTransportReceiveBitrateBps` — well above what RTCP + STUN can explain — while every inbound RTP attributed to it reports zero bytes. Traffic arrives that never reaches a stream: an SSRC mismatch after renegotiation, or a consumer created against a producer that is already gone. |
 
-The payload carries `suspectedIssueTypes` — the specialist issues active on this peer connection at raise time — so one entry both localizes the stage and links the detailed evidence. Registered last among the peer-connection detectors for exactly that reason.
+There is no `media-pipeline-stalled` issue any more, and no `stage` / `direction` discriminator: one class raises one issue type, and the two boundaries are different enough that folding them into one payload field never helped a reader decide anything. Neither class reads any issue but its own — the predecessor annotated every payload with a `suspectedIssueTypes` list of the other issues active on the peer connection, which made one detector's output a function of every other detector's verdicts and of the order they ran in. That field is gone. Correlating issues is the server's job, where the whole session is visible and `peerConnectionId` plus a time window does the same work properly.
+
+The innocent explanations for silence on the wire — congestion, resolution adaptation, a paused sender — would all have stopped the *encoder*, so they cannot produce the send-side signature. What is refused outright: a closed peer connection, and an outbound RTP whose track is missing, muted or not live, or whose simulcast layer is inactive. On the receive side, the bitrate floor rules out RTCP and STUN explaining the arriving bytes, and without at least one inbound RTP there is no demux expectation to violate at all — a send-only transport has nothing to demux into by design.
 
 ```javascript
-mediaPipelineDetector: {
-    thresholdInMs: 4000,               // how long a broken boundary must persist
+rtpSenderStalledDetector: {
+    thresholdInMs: 4000,                  // stats time a broken boundary must persist
+},
+transportDemuxStalledDetector: {
+    thresholdInMs: 4000,                  // its own copy of the same tunable
     minTransportReceiveBitrateBps: 20000, // above this, incoming traffic must demux
 }
 ```
 
-**Use the result:** `rtp-sender` → renegotiate or replace the sender (the encoder is fine, the pipe after it is wedged); `transport-demux` → recreate the consumers / re-signal SSRCs (the network is fine, the demux is not).
+```typescript
+monitor.on('rtp-sender-stalled',      ({ ssrc })        => sender.renegotiate(ssrc));
+monitor.on('transport-demux-stalled', ({ transportId }) => sfuClient.recreateConsumersOn(transportId));
+```
 
-#### IceTupleChangeDetector
+**Use the result:** `rtp-sender-stalled` → renegotiate or replace the sender (the encoder is fine, the pipe after it is wedged); `transport-demux-stalled` → recreate the consumers / re-signal SSRCs (the network is fine, the demux is not).
 
-The low-level primitive under the path detectors: emits `'ice-tuple-changed'` whenever the set of selected `local:remote` network tuples changes. Always registered; `SelectedIcePath` classifies *what kind of* change it was, and only `IceConnectivityDetector` raises issues.
+`transport-demux-stalled` reads `transport.receivingBitrate`, derived from the `RTCTransportStats.bytesReceived` Firefox does not populate as of 153, so it sets [`inputsUnavailable`](#when-a-detector-cannot-see-its-inputs) on a tick where nothing demuxed and no receiving bitrate was reported — its silence there is "cannot see", not "nothing is wrong". `rtp-sender-stalled` compares `framesEncoded` against `packetsSent` on the same outbound RTP, both well supported everywhere, and has no such blind spot.
+
+#### IceTraversalDetector
+
+The low-level primitive under the path detectors: emits `'ice-tuple-changed'` whenever the set of selected `local:remote` network tuples changes. It raises no issue by design — needing TURN is a cost, not a fault, and no threshold on tuple changes would be defensible, so its `iceTraversalDetector` block is empty: `{}` enables it, `null` removes it. Until 4.10.0 it had no key at all and was the one detector registered unconditionally. `SelectedIcePath` classifies *what kind of* change it was and emits `'ice-path-changed'`; [`UnstableIcePathDetector`](#the-layer-5-detectors) owns the issue raised when a path keeps switching. Growing from an empty tuple set is skipped, since establishment is not a change.
 
 **Use the result:** debugging and logging — a tuple change with no `ice-path-changed` classification usually means a port change on the same interface.
 
@@ -1035,16 +1697,24 @@ The low-level primitive under the path detectors: emits `'ice-tuple-changed'` wh
 
 ### Observation detectors
 
-These four emit events and **never raise issues** — they record context that is not a fault but is the missing column in most investigations. Each has a single config option, `createEvent` (default `true`), which buffers the matching client event into samples for server-side use.
+These emit events and **never raise issues** — they record context that is not a fault but is the missing column in most investigations. Each reads a config block of its own, named after the detector, and each carries `createEvent` (default `true`), which buffers the matching client event into samples for server-side use; `statsGapDetector` adds the two thresholds that decide what counts as a gap.
+
+> These are the **Telemetry** category. The full reference — every event payload, the change-detection rules, the Session and Endpoint facts that no detector carries at all, and the recorded gaps — is [docs/TELEMETRY_DETECTORS.md](./docs/TELEMETRY_DETECTORS.md).
+
+The membership test is deliberately counterfactual: *would raising an issue here ever be the right thing to do?* If the answer is no, it belongs here. A detector never lands here because of a bug or a missing implementation.
 
 | Detector | Monitor event / client event | Use the result for |
 |---|---|---|
 | `CodecChangeDetector` | `codec-changed` / `CODEC_CHANGED` | Answering "why do all the bad calls use H264" — compares `sdpFmtpLine` too, so an H264 profile switch is caught. Fires once or twice per call. |
 | `VideoResolutionChangeDetector` | `video-resolution-changed` / `VIDEO_RESOLUTION_CHANGED` | Following the adaptation ladder. On outbound tracks the event carries `qualityLimitationReason` — the field that separates encoder adaptation from your own constraint changes. Classified `upgrade` / `downgrade` / `reshape` (orientation flip). |
 | `SimulcastLayerDetector` | `simulcast-layer-changed` / `SIMULCAST_LAYER_CHANGED` | Debugging "why is this participant blurry": a layer counts as active only if it *sent bytes*, so a layer the encoder quietly gave up on becomes visible. |
+| [`CaptureTrackMutedDetector`](#capture-detectors) | `capture-track-muted` / `CAPTURE_TRACK_MUTED` | Marking where capture stopped, so the silence and dry-track findings that follow stop looking mysterious. `track.muted` covers the deliberate system mute and the accidental device grab alike, which is why it is not an issue. Config: `captureTrackMutedDetector`. |
 | `StatsGapDetector` | `stats-collection-gap` / `STATS_COLLECTION_GAP` | Discounting the metrics right after a backgrounded-tab / sleep gap instead of reading them as a network spike. |
 
+Three connectivity detectors are telemetry too and are documented with their subject rather than here: [`IceTraversalDetector`](#icetraversaldetector), and the two in [the restart loop](#the-restart-loop). So is [`AudioPlayoutSynthesisDetector`](#audioplayoutsynthesisdetector) — though that one is the exception the rule admits: it is a perceived-quality detector with a missing issue rather than telemetry, since a listener hearing invented speech across a sustained window *is* a fault worth raising.
+
 ```javascript
+captureTrackMutedDetector: { createEvent: true },
 codecChangeDetector: { createEvent: true },
 videoResolutionChangeDetector: { createEvent: true },
 simulcastLayerDetector: { createEvent: true },
@@ -1136,7 +1806,7 @@ not this library's business: a server-side capture, an app-side listener on
 ```bash
 npm run replay -- tests/fixtures/degrading-camera.jsonl
 npm run replay -- session.jsonl --only capture-bottleneck,encoder-bottleneck
-npm run replay -- session.jsonl --config '{"outboundFrameSupplyDetector":{ ... }}'
+npm run replay -- session.jsonl --config '{"sourceCaptureBottleneckDetector":{ ... }}'
 cat session.jsonl | npm run replay -- - --pretty
 ```
 
@@ -1234,16 +1904,16 @@ The activation/saturation constants are `public static readonly` on `DefaultScor
 
 #### Track Score Calculations
 
-**Track scores measure what the user perceived, not what the network did.** Freezes, low and volatile fps, dropped frames, pixelation, concealment, time-stretch and jitter-buffer delay are all measurements of damage. Packet loss and jitter are *causes*, they are properties of the path rather than of any one track, and they are attributed once on the peer connection — so no track penalty subtracts for them. A server attributing a degradation joins a track's symptoms to its peer connection's path reasons, which arrive in the same sample.
+**Track scores measure what the user perceived, not what the network did.** Freezes, low and volatile fps, dropped frames, pixelation, invented speech, time-stretch and jitter-buffer delay are all measurements of damage. Packet loss and jitter are *causes*, they are properties of the path rather than of any one track, and they are attributed once on the peer connection — so no track penalty subtracts for them. A server attributing a degradation joins a track's symptoms to its peer connection's path reasons, which arrive in the same sample.
 
 **Inbound Audio Track Score:**
 
--   Based on normalized bitrate. **Packet loss is not subtracted here** — it belongs to the peer connection; what the loss *did* to the audio is measured directly as concealment and time-stretch below
--   When the audio detectors run, their windowed, hysteresis-guarded verdicts **gate** additional penalties, and the current per-tick metric **scales** them as a normalized `0..1` ramp starting at the detector's own configured threshold:
-    -   `audio-concealment` issue active → scaled by `concealmentRate` (detector `onThreshold` → 0.10)
+-   Based on normalized bitrate. **Packet loss is not subtracted here** — it belongs to the peer connection; what the loss *did* to the audio is measured directly as invented speech and time-stretch below
+-   When the audio detectors run, their sustained verdicts **gate** additional penalties, and the current per-tick metric **scales** them as a normalized `0..1` ramp starting at the detector's own configured threshold:
+    -   `invented-speech` issue active → scaled by `inventedSpeechRatio` (detector `allowedInventedRatio` → 0.10)
     -   `audio-jitter-buffer-stress` issue active → `high-jitter-buffer-delay`, scaled by `jitterBufferTargetDelayInMs` (detector `targetDelayThresholdInMs` → 500 ms)
-    -   `audio-desync` issue active → `audio-time-stretch`, scaled by `timeStretchRate` (detector `fractionalCorrectionAlertOnThreshold` → 0.3)
-    -   A tick where the metric dipped back under the threshold contributes no penalty even while hysteresis keeps the issue open
+    -   `audio-jitter-buffer-stress` issue active → `audio-time-stretch`, scaled by `timeStretchRate` (detector `timeStretchThreshold` → 0.3) — the same issue gates both jitter-buffer penalties, one for the depth and one for the warping
+    -   A tick where the metric dipped back under the threshold contributes no penalty even while the issue is still open
 -   Without the detectors the score falls back to the pure loss decay
 
 ```javascript
@@ -1274,7 +1944,7 @@ score = min(MAX_SCORE, 5 * normalizedBitrate) - issuePenalties;
     monitor.setInboundTrackContext(trackId, { videoTag });  // or hand over the element — re-measured every tick
     ```
 
-    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. [Full table](docs/SCORE_CALCULATIONS.md#a-large-pixelated-video-is-charged-harder-deliberately).
+    The `videoTag` route measures the element's layout box (`clientWidth`/`clientHeight` × `devicePixelRatio`) with the frame's aspect ratio fitted into it as `object-fit: contain` does; an application using `object-fit: cover` should declare the resolution itself. [Full table](docs/SCORE_CALCULATIONS.md#pixelated-video-in-full).
 
     ```typescript
     monitor.setInboundTrackContext(trackId, { presentedResolution: { width: 1280, height: 720 } });  // device pixels
@@ -1336,6 +2006,40 @@ monitor.setInboundTrackContext(trackId, { contentType: 'screenshare', motionType
 
 Both **merge**: fields omitted from the argument keep whatever was declared before, in the pending state as well as on a live monitor, so a content type declared from signaling survives a later call that only attaches the video element. Passing a field as an explicit `undefined` means "not declared here" rather than "reset"; assign the monitor's field directly to clear it.
 
+#### `InboundTrackContext` — everything the application knows and the stats do not
+
+| Field | Type | What it declares |
+|---|---|---|
+| `contentType` | `'camera' \| 'screenshare'` | Whether a received video track is a screen share. Nothing to auto-detect from: a received track exposes no `displaySurface`. |
+| `linkedVideoTrackId` | `string` | **Audio tracks only.** The inbound video track that is the other half of this participant — the pairing `AVDesyncPlayoutDetector` measures lip sync across. |
+| `motionType` | `'lowmotion' \| 'standard' \| 'highmotion'` | How much motion the content carries, which decides which `pixelated-video` band applies. |
+| `presentedResolution` | `{ width, height }` | How big the picture actually is on screen, in device pixels. |
+| `videoTag` | `HTMLVideoElement` | The element the track renders into; `presentedResolution` is then re-derived from it every tick. |
+
+`linkedVideoTrackId` is **new public API in 4.10.0, and `AVDesyncPlayoutDetector` does nothing without it.** The library cannot infer the pairing: an SFU forwards each participant's audio and video as independent streams with no signalled relationship, and `MediaStream` grouping does not survive every topology. Pairing by arrival order breaks the moment somebody joins mid-call; pairing by "the only video track" breaks in any call with three people. A wrong pairing would not fail loudly — it would produce a confidently wrong skew — so the detector reports `inputsUnavailable` until the application says which two tracks belong together.
+
+Declare it wherever your code already learns that a remote stream's two tracks belong to one participant — typically where you attach a consumer to a UI tile:
+
+```typescript
+function onParticipantTracks(participantId: string, audioTrack: MediaStreamTrack, videoTrack: MediaStreamTrack) {
+    // By id: works before either track monitor exists, and is held pending until it does.
+    monitor.setInboundTrackContext(audioTrack.id, { linkedVideoTrackId: videoTrack.id });
+
+    // Or on a live monitor, alongside anything else you know about the pair:
+    monitor.getInboundTrackMonitor(audioTrack.id)?.setContext({ linkedVideoTrackId: videoTrack.id });
+    monitor.getInboundTrackMonitor(videoTrack.id)?.setContext({ videoTag: tileFor(participantId) });
+}
+```
+
+Only the audio track carries the declaration — the link is one-directional, and declaring it on the video track does nothing. It is resolved against the **peer connection's** inbound tracks on every tick, so a re-negotiated video track needs a fresh declaration; a declared id that is absent, or that turns out to be another audio track, resolves to `undefined` and the detector reports that it cannot see rather than measuring something meaningless.
+
+```typescript
+const audio = monitor.getInboundTrackMonitor(audioTrack.id);
+
+audio?.getLinkedVideoTrack();            // the paired InboundTrackMonitor, or undefined
+audio?.linkedVideoPlayoutDiffInMs;       // signed ms of skew, positive = audio ahead; undefined if unmeasurable
+```
+
 For screen-share tracks, sharpness is the quality: fps and bitrate volatility are meaningless on mostly-static content (VBR drops to ~zero between changes), so deviation/volatility penalties are skipped entirely. Instead:
 
 -   Quality-limitation duration share penalties (same as camera)
@@ -1359,7 +2063,7 @@ monitor.on("score", ({ clientScore, currentReasons }) => {
     //   "cpu-limitation": 2.0,       // outbound video: cpu-limited >=30% of the interval
     //   "bandwidth-limitation": 1.0, // outbound video: bandwidth-limited >=50%
     //   "frozen-video": 2.0,         // inbound video: picture currently frozen
-    //   "audio-concealment": 0.5,    // inbound audio: issue active, rate midway to saturation
+    //   "invented-speech": 0.5,      // inbound audio: issue active, ratio midway to saturation
     //   "downscaled-screenshare": 2.0, // screenshare sent below 1/4 of source area
     //   "dropped-video-frames": 0.4  // inbound video: 14% frames dropped, ramp 10->20%
     // }
@@ -1370,7 +2074,7 @@ monitor.on("score", ({ clientScore, currentReasons }) => {
 
 ```typescript
 pcMonitor.scoreReasons;                              // rtt / jitter / packetloss only
-monitor.getInboundTrackMonitor(id)?.scoreReasons;    // e.g. frozen-video, audio-concealment
+monitor.getInboundTrackMonitor(id)?.scoreReasons;    // e.g. frozen-video, invented-speech
 monitor.getOutboundTrackMonitor(id)?.scoreReasons;   // e.g. cpu-limitation, downscaled-screenshare
 ```
 
@@ -1393,6 +2097,8 @@ The **client sample entry carries no reasons**, because the client score subtrac
 Set `sendScoreReasonsToServer: false` in the config to drop the reasons from the wire entirely — the scores themselves and the realtime event are unaffected.
 
 The full key set — with every threshold, ramp and what each reason means for the user experience — is documented in [docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md); the type union is exported as `DefaultScoreCalculatorSubtractionReason`.
+
+**Reasons and issues are not the same verdict, and six conditions are computed twice.** `pixelated-video`, `low-fps`, `volatile-fps`, `high-rtt`, `high-jitter` and `high-packetloss` are derived here from raw stats *and*, independently and with different thresholds, by the detectors that now own those conditions — so a session can carry a `pixelated-video` issue and no `pixelated-video` penalty, or the reverse. For pixelation the two do not even measure the same quantity: bits per pixel against a flat threshold here, a per-codec QP band there. Three audio penalties run the other way, gated on a detector's issue being active, so disabling those detectors quietly stops the score charging for audio degradation that is still happening. All of it is recorded under [known deviations](./docs/DETECTOR_TAXONOMY.md#known-deviations); until it is resolved, read a score reason as the calculator's own opinion rather than as a detector's finding.
 
 ### Custom Score Calculator
 
@@ -1852,24 +2558,35 @@ readonly activeIssues: Map<string, RaisedClientIssue>;
 
 ### The built-in detector issues
 
-Most built-in detectors raise their own stateful issue with a typed payload, emit a detector-specific named event on entry, and resolve the issue when the condition clears — enriching the resolved payload with `durationInMs`. The four *observation* detectors (`CodecChangeDetector`, `VideoResolutionChangeDetector`, `SimulcastLayerDetector`, `StatsGapDetector`) are the exception: they emit events only, because what they report is not a fault.
+Most built-in detectors raise their own stateful issue with a typed payload, emit a detector-specific named event on entry, and resolve the issue when the condition clears — enriching the resolved payload with `durationInMs`. **One class raises exactly one issue type**, so the table below is also the list of issue-raising detector classes.
+
+Ten classes are the exception and emit events only, because what they report is not a fault: `CodecChangeDetector`, `VideoResolutionChangeDetector`, `SimulcastLayerDetector`, `CaptureTrackMutedDetector`, `StatsGapDetector`, `IceTraversalDetector`, `IcePathEstablishmentDetector`, `IceRestartDetector`, `IceRestartRecommendationDetector` and `AudioPlayoutSynthesisDetector`.
 
 | `type` | Raised when | Resolved when | Detector-specific event | Payload shape |
 |---|---|---|---|---|
-| `audio-desync` | Audio sample-correction fraction crosses the on-threshold | Correction fraction falls below the off-threshold | `'audio-desync-track'` | `AudioDesyncIssuePayload` |
-| `congestion` | Per-PC bandwidth limitation + sensitivity-specific corroborator | Bandwidth limitation clears | `'congestion'` | `CongestionIssuePayload` |
+| `av-desync` | The audio track's playout ran ahead of its linked video track's by `audioAheadRaiseInMs`, or behind by `audioBehindRaiseInMs`, for `sustainForInMs` of stats time | The skew falls back inside the matching resolve threshold, or the track pauses | `'av-desync'` | `AVDesyncPlayoutIssuePayload` |
+| `uplink-congestion` | The browser reports the encoder bandwidth-limited, `availableOutgoingBitrate - sendingBitrate` is `headroomDropRatio` of the recent maximum below its own average, *and* the pacer queue is `sendDelayGrowthRatio` above its baseline | The browser stops reporting a bandwidth limitation | `'uplink-congestion'` | `UplinkCongestionIssuePayload` |
+| `downlink-congestion` | The browser reports the path bandwidth-limited, `receivingBitrate` is below `collapseRatio` of its rolling maximum, *and* the video jitter buffer is above `bufferElevationRatio` of its pre-episode baseline | The browser stops reporting a bandwidth limitation | `'downlink-congestion'` | `DownlinkCongestionIssuePayload` |
+| `transport-delay-degraded` | Smoothed RTT stayed at or above `thresholdInMs` for `durationInMs` of stats time | RTT falls below `recoveryThresholdInMs` | `'transport-delay-degraded'` | `TransportDelayIssuePayload` |
+| `transport-loss-sustained` | Mean interval loss (worse direction) stayed at or above `threshold` for `durationInMs` | Loss falls below `recoveryThreshold` | `'transport-loss-sustained'` | `TransportLossIssuePayload` |
+| `transport-delivery-unstable` | Mean inter-arrival jitter stayed at or above `thresholdInMs` for `durationInMs` | Jitter falls below `recoveryThresholdInMs` | `'transport-delivery-unstable'` | `TransportJitterIssuePayload` |
 | `cpulimitation` | CPU-tagged outbound RTP / stats-collection slowness / low inbound decoded-to-received frames ratio | Indicators normalize | `'cpulimitation'` | `CpuPerformanceIssuePayload` |
 | `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
 | `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
-| `freezed-video-track` | `freezeCount` increases | No new freezes for one tick | `'freezed-video-track'` | `FreezedVideoTrackIssuePayload` |
+| `frozen-video-track` | `freezeCount` advanced on `minConsecutiveTicks` consecutive collections | Frames render again, or the track pauses | `'frozen-video-track'` | `FrozenVideoTrackIssuePayload` |
 | `inbound-video-playout-discrepancy` | `(framesReceived - framesRendered) / framesReceived > highSkewRatio` | Ratio drops below `lowSkewRatio` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
 | `ice-disconnected` | An ICE transport stayed `disconnected` past `disconnectedThresholdInMs` | ICE reconnects, or the transport goes away | — | `IceDisconnectedIssuePayload` |
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
 | `ice-transport-stalled` | Still sending on a succeeded pair of a connected transport, but receiving nothing for `transportStallThresholdInMs` | Inbound traffic resumes | — | `IceTransportStalledIssuePayload` |
-| `unstable-ice-path` | `pathSwitchThreshold` selected-path switches within `pathSwitchWindowInMs` | The window drains | — | `UnstableIcePathIssuePayload` |
+| `unstable-ice-path` | `pathSwitchThreshold` selected-path switches within `pathSwitchWindowInMs` | A whole window passes below the threshold | — | `UnstableIcePathIssuePayload` |
+| `no-available-ice-candidate` | Gathering reported `complete` with zero local candidates on a never-connected PC — immediately if it fell to `disconnected`/`failed`, after `thresholdInMs` otherwise | A candidate appears, the connection connects, or the PC closes | `'no-available-ice-candidate'` | `NoAvailableIceCandidateIssuePayload` |
+| `ice-establishment-failed` | Local candidates existed, the PC never reached `connected`, and no pair was ever nominated, for `thresholdInMs` | The connection establishes after all, or the PC closes | — | `IceEstablishmentFailedIssuePayload` |
+| `blocked-transport` | STUN alive, media demonstrably produced, and media demonstrably not traversing, for `thresholdInMs` | Any leg of the three breaks | `'blocked-transport'` | `BlockedTransportIssuePayload` |
+| `rtp-sender-stalled` | `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` on one ssrc, for `thresholdInMs` | Packets leave again, or the ssrc goes away | `'rtp-sender-stalled'` | `RtpSenderStalledIssuePayload` |
+| `transport-demux-stalled` | Transport receiving above `minTransportReceiveBitrateBps` while every inbound RTP on it stays flat, for `thresholdInMs` | Inbound RTP receives again, or the transport goes away | `'transport-demux-stalled'` | `TransportDemuxStalledIssuePayload` |
 | `dtls-handshake-failed` | An ICE transport reached `dtlsState: 'failed'` | A later handshake connects (after an ICE restart re-keys it) | `'dtls-handshake-failed'` | `DtlsHandshakeFailedIssuePayload` |
 | `dtls-handshake-stalled` | ICE proven healthy while DTLS sat in `new`/`connecting` past `stalledThresholdInMs` | The handshake completes | `'dtls-handshake-stalled'` | `DtlsHandshakeStalledIssuePayload` |
-| `audio-concealment` | Audible concealment share (silence excluded) crosses `onThreshold` over the window | Share falls below `offThreshold` | `'audio-concealment'` | `AudioConcealmentIssuePayload` |
+| `invented-speech` | Invented audio (silence excluded) accumulates `raiseAfterInventedMs` beyond `allowedInventedRatio` | The accumulator drains back to zero | `'invented-speech'` | `InventedSpeechIssuePayload` |
 | `audio-jitter-buffer-stress` | Target delay grown **and** NetEQ time-stretching, for `minConsecutiveTicks` | Either condition clears | `'audio-jitter-buffer-stress'` | `JitterBufferStressIssuePayload` |
 | `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
 | `keyframe-storm` | Sustained PLI rate above `pliRateAlertOn` | Rate falls below `pliRateAlertOff` | `'keyframe-storm'` | `KeyframeStormIssuePayload` |
@@ -1880,8 +2597,11 @@ Most built-in detectors raise their own stateful issue with a typed payload, emi
 | `capture-track-ended` | The outbound track's device reached `ended` | — (terminal) | `'capture-track-ended'` | `CaptureTrackEndedIssuePayload` |
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
 | `stuck-decoder` | RTP bytes flowing, nothing decoding, PLIs firing, for `thresholdInMs` | Frames decode again | `'stuck-decoder'` | `StuckDecoderIssuePayload` |
+| `frame-assembly-stalled` | Packets kept arriving with `framesReceived` flat for `thresholdInMs`, past `minPacketsReceived` | A frame is assembled, packets stop arriving, or the track pauses | `'frame-assembly-stalled'` | `FrameAssemblyStalledIssuePayload` |
+| `pixelated-video` | `bitPerPixel` stayed at or below `threshold` for `durationInMs` of stats time | It rises above `recoveryThreshold`, or the track pauses | `'pixelated-video'` | `PixelatedVideoIssuePayload` |
+| `video-choppy` | `ewmaFps` below `minFramesPerSecond`, or `fpsVolatility` above `maxFpsVolatility`, for `durationInMs` | Neither leg holds any more | `'video-choppy'` | `ChoppyVideoIssuePayload` |
 
-The per-detector payload types are exported from the package root. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
+Most per-detector payload types are exported from the package root; the six newest are not yet re-exported individually (`TransportDelayIssuePayload`, `TransportLossIssuePayload`, `TransportJitterIssuePayload`, `PixelatedVideoIssuePayload`, `ChoppyVideoIssuePayload`, `FrameAssemblyStalledIssuePayload`), so reach them through the `ClientMonitorIssue` union below, which does narrow to all of them. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
 
 ### Type-safe handling: the `ClientMonitorIssue` discriminated union
 
@@ -1904,10 +2624,11 @@ monitor.on('issue', (issue) => {
     }
 
     switch (issue.type) {
-        case 'congestion':
-            // issue.payload is CongestionIssuePayload
-            console.log('congestion on PC', issue.payload.peerConnectionId,
-                'avail in', issue.payload.availableIncomingBitrate);
+        case 'uplink-congestion':
+            // issue.payload is UplinkCongestionIssuePayload
+            console.log('uplink congestion on PC', issue.payload.peerConnectionId,
+                'estimate', issue.payload.availableOutgoingBitrate,
+                'room left', issue.payload.headroomInBps);
             break;
 
         case 'cpulimitation':
@@ -1915,12 +2636,14 @@ monitor.on('issue', (issue) => {
             console.warn('cpu pressure');
             break;
 
-        case 'audio-desync':
-            // issue.payload is AudioDesyncIssuePayload
-            console.log('audio desync on track', issue.payload.trackId);
+        case 'av-desync':
+            // issue.payload is AVDesyncPlayoutIssuePayload
+            console.log('lip sync off by', issue.payload.playoutDiffInMs, 'ms',
+                '(', issue.payload.direction, ')',
+                'on', issue.payload.trackId, 'vs', issue.payload.linkedVideoTrackId);
             break;
 
-        case 'freezed-video-track':
+        case 'frozen-video-track':
             console.log('freeze on track', issue.payload.trackId);
             break;
 
@@ -1940,11 +2663,11 @@ monitor.on('issue', (issue) => {
 monitor.on('issue-resolved', (resolved) => {
     const own = resolved as ClientMonitorResolvedIssue;
     switch (own.type) {
-        case 'audio-desync':
-            console.log(`Audio desync on ${own.payload.trackId} lasted ${own.payload.durationInMs}ms`);
+        case 'av-desync':
+            console.log(`Lip sync drift on ${own.payload.trackId} lasted ${own.payload.durationInMs}ms`);
             break;
-        case 'congestion':
-            console.log(`Congestion on ${own.payload.peerConnectionId} lasted ${own.payload.durationInMs}ms`);
+        case 'uplink-congestion':
+            console.log(`Uplink congestion on ${own.payload.peerConnectionId} lasted ${own.payload.durationInMs}ms`);
             break;
         // …
     }
@@ -1955,7 +2678,9 @@ Three helpers are available:
 
 -   `ClientMonitorIssue` — discriminated union of every raised issue produced by the bundled detectors.
 -   `ClientMonitorResolvedIssue` — same, for `'issue-resolved'`.
--   `isClientMonitorIssue(issue)` / `isClientMonitorResolvedIssue(issue)` — type guards that return `true` only for the seven built-in `type` values.
+-   `isClientMonitorIssue(issue)` / `isClientMonitorResolvedIssue(issue)` — type guards that return `true` only for the 35 built-in `type` values, and `false` for anything raised by a custom detector or by application code.
+
+`ClientMonitorIssueType` is the literal union of those 35 strings, useful for exhaustive switches and for typing a server-side allow-list.
 
 ### Managing active stateful issues
 
@@ -1964,15 +2689,15 @@ Three helpers are available:
 const all = monitor.getActiveIssuesByType();
 
 // Active issues of one type:
-const congestionIssues = monitor.getActiveIssuesByType('congestion');
+const congestionIssues = monitor.getActiveIssuesByType('uplink-congestion');
 for (const issue of congestionIssues) {
-    if (issue.payload?.availableIncomingBitrate < 200_000) {
+    if (issue.payload?.availableOutgoingBitrate < 200_000) {
         ui.showLowBandwidthWarning(issue.key);
     }
 }
 
 // Is a specific issue active?
-if (monitor.isIssueActive('congestion-pc-pc-123')) { /* … */ }
+if (monitor.isIssueActive('uplink-congestion-pc-pc-123')) { /* … */ }
 
 // Iterate the raw map (advanced — prefer the helpers):
 for (const [key, issue] of monitor.activeIssues) {
@@ -1982,7 +2707,7 @@ for (const [key, issue] of monitor.activeIssues) {
 
 ### Raising your own custom issues
 
-You can raise issues from app code or your own custom detector. Pick a `key` that's unique per logical incident — the detector convention is `${type}-${scope}` (e.g. `congestion-pc-${peerConnectionId}`, `audio-desync-track-${trackId}`).
+You can raise issues from app code or your own custom detector. Pick a `key` that's unique per logical incident — the detector convention is `${type}-${scope}` (e.g. `uplink-congestion-pc-${peerConnectionId}`, `av-desync-track-${trackId}`).
 
 ```ts
 // Start: a meeting-quality watchdog notices a participant's input mic is muted unexpectedly
@@ -2096,22 +2821,24 @@ Three things to notice:
 
 ### Controlling which detectors run
 
-Each detector entry in `ClientMonitorConfig` is now `Type | null`:
+Each detector has one entry in `ClientMonitorConfig`, typed `<ClassName>Config | null` and keyed by the detector's own `name` in camelCase. **One key, one detector**, in both directions: no key constructs a second class, and no detector reads a second key — so `null` removes precisely the detector you named.
 
 ```ts
 new ClientMonitor({
     // null → don't even construct this detector. No memory, no update() ticks.
-    congestionDetector: null,
+    uplinkCongestionDetector: null,
 
     // undefined / omitted → use defaults (this is the existing behavior).
 
     // Object → enable with overrides.
-    audioDesyncDetector: {
-        fractionalCorrectionAlertOnThreshold: 0.2,
-        fractionalCorrectionAlertOffThreshold: 0.1,
+    avDesyncPlayoutDetector: {
+        audioAheadRaiseInMs: 120,
+        audioBehindRaiseInMs: 240,
     },
 });
 ```
+
+Seven keys that used to cover a group of detectors were retired in 4.10.0 — see [Detector config keys that changed](#detector-config-keys-that-changed).
 
 Already running and want to flip a detector on/off without restarting the monitor? Every built-in detector exposes a `public disabled = false` field, and every layer's `detectors` registry exposes ergonomic helpers for finding and toggling them. Issue-raising detectors additionally expose `public includeIssueInSample = true` — flip it to `false` to keep a detector running locally (events, `activeIssues`) while excluding its issues from the samples shipped to the server; see [Which issues belong in the sample](#which-issues-belong-in-the-sample).
 
@@ -2147,13 +2874,13 @@ Common patterns:
 // Kill one specific detector instance-wide.
 monitor.detectors.disable('cpu-performance-detector');
 
-// Silence congestion alerts across every existing PeerConnection.
+// Silence uplink congestion alerts across every existing PeerConnection.
 for (const pc of monitor.mappedPeerConnections.values()) {
-    pc.detectors.disable('congestion-detector');
+    pc.detectors.disable('uplink-congestion-detector');
 }
 
 // Toggle a track-level detector based on something the app knows.
-inboundTrackMonitor.detectors.disable('freezed-video-track-detector');
+inboundTrackMonitor.detectors.disable('frozen-video-track-detector');
 
 // Suspend everything during a known-noisy state, then re-enable.
 monitor.detectors.disableAll();
@@ -2166,6 +2893,76 @@ if (cpu) cpu.disabled = true;
 ```
 
 If you want a detector outright gone (not just silenced), call `detectors.remove(instance)` — or skip its construction entirely at monitor creation time by passing `null` for its config field.
+
+#### Detector names that changed
+
+`name` is the lookup key for `getByName` / `disable` / `enable` / `has` / `isEnabled`, and **lookup is exact**. There is no alias table: a retired name returns `undefined` from `getByName` and `false` from `has`, `disable` and `enable`.
+
+**An alias could only ever have pointed at one part of a split.** A name resolves to exactly one detector, so an old spelling for a class that became several would have picked one of the parts — an application toggling `ice-path-stability-detector` by its old name would have kept working while quietly governing one of the six classes it used to cover. A failed lookup is something a caller can act on; a silently narrowed one is not.
+
+The table below is migration guidance, not resolution — every name in the left column now fails the lookup:
+
+| Retired name | What it became |
+|---|---|
+| `ice-path-stability-detector` | `ice-disconnected-detector`, `ice-connection-failed-detector`, `ice-transport-stalled-detector`, `unstable-ice-path-detector`, `ice-restart-detector`, `ice-restart-recommendation-detector` |
+| `ice-connectivity-detector` | as above |
+| `dtls-handshake-detector` | `dtls-handshake-stalled-detector`, `dtls-handshake-failed-detector` |
+| `capture-failure-detector` | `capture-track-ended-detector`, `silent-audio-source-detector`, `capture-track-muted-detector` |
+| `media-pipeline-detector` | `rtp-sender-stalled-detector`, `transport-demux-stalled-detector` |
+| `ice-tuple-change-detector` | `ice-traversal-detector` (a straight rename) |
+| `no-available-ice-candidate-detector` | `ice-reachability-detector` |
+| `long-pc-connection-establishment-detector` | `ice-path-establishment-detector` |
+
+So an application that was disabling a split detector by its old name is now disabling nothing:
+
+```ts
+// Returns false and silences nothing — the name no longer exists.
+pc.detectors.disable('ice-path-stability-detector');
+
+// Name each part you meant.
+pc.detectors.disable('ice-disconnected-detector');
+pc.detectors.disable('ice-connection-failed-detector');
+
+// Or don't construct them in the first place — one key per detector.
+new ClientMonitor({
+    iceDisconnectedDetector: null,
+    iceConnectionFailedDetector: null,
+});
+```
+
+#### Detector config keys that changed
+
+Every detector reads a config block named after it — its `name` in camelCase, so `frame-assembly-stalled-detector` reads `frameAssemblyStalledDetector`. That was not always true: several keys used to construct a group of classes, which meant a `null` intended to silence one finding silently removed its neighbours. **Seven keys were retired in 4.10.0** to fix that, split where a class had already become several and renamed where the key spelled a different word from the detector:
+
+| Retired config key | What to use instead |
+|---|---|
+| `captureFailureDetector` | `captureTrackEndedDetector`, `silentAudioSourceDetector`, `captureTrackMutedDetector` |
+| `dtlsHandshakeDetector` | `dtlsHandshakeStalledDetector`, `dtlsHandshakeFailedDetector` |
+| `icePathStabilityDetector` | `iceDisconnectedDetector`, `iceConnectionFailedDetector`, `iceTransportStalledDetector`, `unstableIcePathDetector`, `iceRestartDetector`, `iceRestartRecommendationDetector` |
+| `mediaPipelineDetector` | `rtpSenderStalledDetector`, `transportDemuxStalledDetector` |
+| `videoRecoveryDetector` | `keyframeStormDetector`, `videoRecoveryFailedDetector` |
+| `videoFreezesDetector` | `frozenVideoTrackDetector` *(rename)* |
+| `syntheticSamplesDetector` | `audioPlayoutSynthesisDetector` *(rename)* |
+
+Three more keys went with them, the deprecated spellings 4.9.0 had kept alive in the normalizer:
+
+| Retired config key | Current key |
+|---|---|
+| `longPcConnectionEstablishmentDetector` | `icePathEstablishmentDetector` |
+| `iceConnectivityDetector` | `icePathStabilityDetector`, which was then split — see the table above |
+| `noAvailableIceCandidateDetector` | `iceReachabilityDetector` |
+
+**None of these ten is a member of `ClientMonitorConfig` any more**, which means a config object still using one **fails to type-check**. There is no alias and no runtime fallback: if such an object reaches the constructor anyway (plain JavaScript, or a cast), the key is ignored and the detectors that used to read it run on their defaults rather than on your settings — including a `null` meant to disable them. For a key that was *split*, there is no mechanical migration either — decide which of the new blocks you meant.
+
+Two field moves are worth checking for in an existing config. `icePathEstablishmentDetector.restartRecommendationThresholdInMs` and `.restartRecommendationCooldownInMs` now live on `iceRestartRecommendationDetector`, which holds all four recommendation conditions in one block; and `EncoderPerformanceDetector` no longer borrows `sourceCaptureBottleneckDetector.captureFpsRatioThreshold` for its source-shortfall stand-down — it reads its own `encoderPerformanceDetector.sourceSupplyRatioThreshold`, default `0.9`, the value the borrowed one had.
+
+Three detectors that had no key at all gained one, so each can now be disabled individually: `dtlsHandshakeFailedDetector`, `iceConnectionFailedDetector` and `iceTraversalDetector`. All three carry no tunables — `{}` enables, `null` disables. `IceTraversalDetector` in particular used to be registered unconditionally, silenceable only by name.
+
+Config *types* moved with the keys. Each detector file exports `<ClassName>Config`, and the package root re-exports it beside every detector class it already exported, so `import type { StuckDecoderDetectorConfig } from '@observertc/client-monitor-js'` names the block you are building.
+
+The **class** exports carry no legacy names either. `IceTupleChangeDetector`, `LongPcConnectionEstablishmentDetector`, `LongPcConnectionEstablishmentStage` and `NoAvailableIceCandidateDetector` were exported as deprecated aliases in 4.9.0 and removed in 4.10.0; import `IceTraversalDetector`, `IcePathEstablishmentDetector`, `IcePathEstablishmentStage` and `IceReachabilityDetector` instead. The classes that were *split* — the old `IcePathStabilityDetector`, `DtlsHandshakeDetector`, `CaptureFailureDetector` and `MediaPipelineDetector` — never had an alias to remove: a class that raised four issues cannot be aliased onto one that raises a single one without lying about what it does. Import the part you meant.
+
+No issue type, payload or monitor event name was renamed by any of this.
 
 ### Sample-channel behavior
 
@@ -2192,14 +2989,16 @@ monitor.on('issue-updated',  (issue)    => { /* re-raise of an existing key */ }
 monitor.on('issue-resolved', (resolved) => { /* resolveIssue or close() auto-resolve */ });
 
 // Detector-specific events (these fire alongside 'issue', once per episode).
-monitor.on('congestion',                          (e) => { /* … */ });
+monitor.on('uplink-congestion',                   (e) => { /* … */ });
+monitor.on('downlink-congestion',                 (e) => { /* … */ });
+monitor.on('congestion',                          (e) => { /* either direction; e.direction says which */ });
 monitor.on('cpulimitation',                       (e) => { /* … */ });
-monitor.on('audio-desync-track',                  (e) => { /* … */ });
-monitor.on('freezed-video-track',                 (e) => { /* … */ });
+monitor.on('av-desync',                           (e) => { /* … */ });
+monitor.on('frozen-video-track',                 (e) => { /* … */ });
 monitor.on('dry-inbound-track',                   (e) => { /* … */ });
 monitor.on('dry-outbound-track',                  (e) => { /* … */ });
 monitor.on('inbound-video-playout-discrepancy',   (e) => { /* … */ });
-monitor.on('audio-concealment',                   (e) => { /* audible concealment, not raw loss */ });
+monitor.on('invented-speech',                     (e) => { /* audio NetEQ invented, not raw loss */ });
 monitor.on('audio-jitter-buffer-stress',          (e) => { /* buffer grown AND stretching */ });
 monitor.on('video-decoder-overloaded',            (e) => { /* frames arrived, client could not decode */ });
 monitor.on('keyframe-storm',                      (e) => { /* PLIs feeding the congestion that caused them */ });
@@ -2209,8 +3008,21 @@ monitor.on('capture-bottleneck',                  (e) => { /* the camera never p
 monitor.on('decoder-bottleneck',                  (e) => { /* frames arrived; the decoder could not decode them */ });
 monitor.on('encoder-bottleneck',                  (e) => { /* the source did; the encoder could not keep up */ });
 monitor.on('capture-track-ended',                 (e) => { /* the device is gone */ });
-monitor.on('capture-track-muted',                 (e) => { /* the OS or another app took it */ });
+monitor.on('capture-track-muted',                 (e) => { /* the OS or another app took it — event only */ });
 monitor.on('silent-audio-source',                 (e) => { /* live mic producing digital silence */ });
+monitor.on('frame-assembly-stalled',              (e) => { /* packets arriving, no frame ever assembled */ });
+monitor.on('pixelated-video',                     (e) => { /* too few bits per pixel, sustained */ });
+monitor.on('video-choppy',                        (e) => { /* too slow, or too erratic — `evidence` says which */ });
+
+// Transport quality — properties of a path that is up and holding.
+monitor.on('transport-delay-degraded',    (e) => { /* round trip long enough to break turn-taking */ });
+monitor.on('transport-loss-sustained',    (e) => { /* packets vanishing — `direction` says which way */ });
+monitor.on('transport-delivery-unstable', (e) => { /* packets arrive, but not evenly */ });
+monitor.on('blocked-transport',           (e) => { /* STUN passes, media does not — the firewall signature */ });
+
+// Pipeline stage boundaries nothing else covers.
+monitor.on('rtp-sender-stalled',      (e) => { /* frames encode, no packet leaves */ });
+monitor.on('transport-demux-stalled', (e) => { /* traffic arrives, no inbound RTP accounts for it */ });
 
 // Observations — these never raise an issue.
 monitor.on('codec-changed',            (e) => { /* mime type or profile switched */ });
@@ -2226,6 +3038,9 @@ monitor.on('ice-tuple-changed',     (e) => { /* low-level: the selected tuple se
 monitor.on('dtls-handshake-failed',  (e) => { /* DTLS is terminal for this transport — config/interop, not network */ });
 monitor.on('dtls-handshake-stalled', (e) => { /* ICE fine, DTLS not completing — something eats DTLS */ });
 monitor.on('new-selected-ice-path', (e) => { /* an ICE transport selected its first path */ });
+monitor.on('no-available-ice-candidate', (e) => { /* gathering produced nothing — no usable network */ });
+monitor.on('ice-path-establishment-slow', ({ stalledStage }) => { /* and which stage it is stuck in */ });
+// `ice-establishment-failed` has no named event of its own — listen on 'issue'.
 
 // Score & stats lifecycle.
 monitor.on('score',          ({ clientScore, currentReasons }) => { /* … */ });
@@ -2274,10 +3089,11 @@ Monitors incoming media tracks with attached detectors:
 
 **Detectors:**
 
--   AudioDesyncDetector (for audio tracks)
--   FreezedVideoTrackDetector (for video tracks)
--   DryInboundTrackDetector
--   PlayoutDiscrepancyDetector (for video tracks)
+-   `DryInboundTrackDetector` and `CodecChangeDetector` (any kind)
+-   Audio: `AVDesyncPlayoutDetector`, `InventedSpeechDetector`, `JitterBufferStressDetector`
+-   Video: `FrozenVideoTrackDetector`, `KeyframeStormDetector`, `VideoRecoveryFailedDetector`, `PlayoutDiscrepancyDetector`, `DecoderBottleneckDetector`, `DecoderPerformanceDetector`, `StuckDecoderDetector`, `VideoResolutionChangeDetector`, `FrameAssemblyStalledDetector`, `PixelatedVideoDetector`, `ChoppyVideoDetector`
+
+Which of them are constructed depends on the matching config keys; see [Detectors](#detectors).
 
 #### OutboundTrackMonitor
 
@@ -2295,6 +3111,8 @@ Monitors outgoing media tracks:
 
 -   `getHighestLayer()`: Gets highest bitrate layer
 -   `getOutboundRtps()`: Gets all outbound RTP monitors
+
+**Detectors:** `DryOutboundTrackDetector`, `CaptureTrackEndedDetector`, `CaptureTrackMutedDetector`, `SilentAudioSourceDetector`, `CodecChangeDetector`, and on video tracks `SourceCaptureBottleneckDetector`, `EncoderPerformanceDetector`, `SimulcastLayerDetector`, `VideoResolutionChangeDetector`.
 
 ### RTP Monitors
 
@@ -2369,6 +3187,8 @@ ICE transport layer monitoring:
 **Properties:**
 
 -   `selectedCandidatePair`: Currently selected candidate pair
+-   `everConnected`: a latch, set the first time `iceState` reads `connected` or `completed` and never cleared. It is what separates a path that **never established** from one that **established and was then lost** — two conditions with different causes and different fixes that `iceState === 'failed'` alone conflates. [`ice-connection-failed`](#the-layer-5-detectors) carries it on its payload for exactly that reason.
+-   `deltaTime`: milliseconds between this transport's stats report and the previous one, from the reports' own timestamps. Every transport-level detector accumulates this rather than wall-clock elapsed.
 -   All standard ICE transport fields
 
 #### SelectedIcePath
@@ -2711,6 +3531,21 @@ console.log(pcMonitor.receivingVideoBitrate);  // Video receiving bitrate (bps)
 console.log(pcMonitor.outboundFractionLost);   // Outbound packet loss fraction
 console.log(pcMonitor.inboundFractionalLost);  // Inbound packet loss fraction
 
+// Means over the streams that actually carried packets this tick — `undefined`
+// rather than 0 when none did, so "nothing arrived" and "nothing was lost" do
+// not look the same to a detector. These are what TransportLossDetector and
+// TransportJitterDetector threshold; the two fields above are sums kept for
+// backwards compatibility.
+console.log(pcMonitor.avgInboundFractionLost);  // Mean interval inbound loss fraction (0..1)
+console.log(pcMonitor.avgOutboundFractionLost); // Mean loss the far end reported for what we send
+console.log(pcMonitor.avgInboundJitterInMs);    // Mean inter-arrival jitter (ms)
+
+// Stats time, not wall clock: the newest timestamp in this collection minus the
+// newest in the previous one. PC-level detectors accumulate this to measure how
+// long a condition held, so a late or skipped collection still measures the time
+// the condition actually held underneath.
+console.log(pcMonitor.deltaTime);
+
 // Delta metrics (change since last collection)
 console.log(pcMonitor.deltaInboundPacketsLost);     // Packets lost in period
 console.log(pcMonitor.deltaInboundPacketsReceived); // Packets received in period
@@ -2790,7 +3625,8 @@ console.log(inboundRtp.isFreezed);              // Boolean: video appears frozen
 
 // Audio-specific metrics
 console.log(inboundRtp.receivingAudioSamples);  // Audio samples received in period
-console.log(inboundRtp.desync);                 // Boolean: audio desync detected
+console.log(inboundRtp.timeStretchRate);        // Share of samples NetEQ stretched/compressed
+console.log(inboundRtp.estimatedPlayoutTimestamp); // Sender NTP time of the last playable sample
 
 // Delta metrics (change since last collection)
 console.log(inboundRtp.deltaPacketsLost);           // Packets lost in period
@@ -2804,7 +3640,7 @@ console.log(inboundRtp.deltaCorruptionProbability); // Frame corruption change
 console.log(inboundRtp.deltaTime);                  // Elapsed time for calculations (ms)
 
 // Audio concealment and jitter buffer (the "how did it sound" set)
-console.log(inboundRtp.concealmentRate);            // Audible concealment share — silence excluded
+console.log(inboundRtp.inventedSpeechRatio);        // Share of the interval NetEQ invented — silence excluded
 console.log(inboundRtp.concealmentEventRate);       // Concealment events per second
 console.log(inboundRtp.timeStretchRate);            // Share of samples NetEQ stretched or compressed
 console.log(inboundRtp.avgJitterBufferDelayInMs);   // Latency the buffer actually added, per sample
@@ -3092,8 +3928,9 @@ const monitor = new ClientMonitor({
     samplingPeriodInMs: 3000,
 
     // Sensitive congestion detection
-    congestionDetector: {
-        sensitivity: "high",
+    uplinkCongestionDetector: {
+        headroomDropRatio: 0.15,
+        sendDelayGrowthRatio: 2,
     },
 
     // Strict CPU monitoring
@@ -3226,8 +4063,8 @@ class MonitoringDashboard {
             this.updateScoreDisplay(clientScore, currentReasons);
         });
 
-        this.monitor.on("congestion", ({ availableIncomingBitrate, availableOutgoingBitrate }) => {
-            this.showCongestionAlert(availableIncomingBitrate, availableOutgoingBitrate);
+        this.monitor.on("uplink-congestion", ({ availableOutgoingBitrate, sendingBitrate }) => {
+            this.showCongestionAlert(availableOutgoingBitrate, sendingBitrate);
         });
 
         this.monitor.on("stats-collected", ({ durationOfCollectingStatsInMs }) => {
@@ -3248,10 +4085,10 @@ class MonitoringDashboard {
         document.getElementById("score-reasons").textContent = JSON.stringify(reasons, null, 2);
     }
 
-    showCongestionAlert(incoming, outgoing) {
+    showCongestionAlert(available, sending) {
         const alert = document.createElement("div");
         alert.className = "congestion-alert";
-        alert.textContent = `Congestion detected! Available: ${incoming}/${outgoing} kbps`;
+        alert.textContent = `Uplink congestion! Path offers ${available}, encoder sending ${sending}`;
         document.body.appendChild(alert);
     }
 
@@ -3291,8 +4128,13 @@ const dashboard = new MonitoringDashboard(monitor);
 // Limit stored scores history
 monitor.scoreCalculator.constructor.lastNScoresMaxLength = 5;
 
-// Disable unnecessary detectors
-monitor.config.audioDesyncDetector.disabled = true;
+// Disable unnecessary detectors at runtime — the flag lives on the detector
+// instance, not on its config entry.
+for (const pc of monitor.mappedPeerConnections.values()) {
+    for (const track of pc.mappedInboundTracks.values()) {
+        track.detectors.disable('av-desync-playout-detector');
+    }
+}
 
 // Reduce collection frequency
 monitor.setCollectingPeriod(5000);
@@ -3358,9 +4200,11 @@ const monitor = new ClientMonitor({
     collectingPeriodInMs: 3000, // Reduce frequency
     samplingPeriodInMs: 10000, // Less frequent sampling
 
-    // Disable resource-intensive detectors
-    cpuPerformanceDetector: { disabled: true },
-    audioDesyncDetector: { disabled: true },
+    // Never construct these detectors at all: `null`, not `{ disabled: true }`.
+    // The config entry decides whether the class exists; `disabled` is a runtime
+    // flag on the instance.
+    cpuPerformanceDetector: null,
+    avDesyncPlayoutDetector: null,
 });
 
 // Manual garbage collection
@@ -3377,6 +4221,12 @@ setInterval(() => {
 ```typescript
 // Configuration
 type ClientMonitorConfig = {
+    /* one entry per detector, `<ClassName>Config | null`, plus the basics */
+};
+
+// Each detector's config type is exported alongside its class, declared in the
+// detector's own file:
+type StuckDecoderDetectorConfig = {
     /* ... */
 };
 
@@ -3416,7 +4266,9 @@ interface ClientMonitorEvents {
     }) => void;
     score: (data: { clientScore: number; currentReasons: Record<string, number> }) => void;
     issue: (issue: ClientIssue) => void;
-    congestion: (data: CongestionEvent) => void;
+    'uplink-congestion': (data: UplinkCongestionEventPayload) => void;
+    'downlink-congestion': (data: DownlinkCongestionEventPayload) => void;
+    congestion: (data: CongestionEventPayload) => void;   // either of the two, discriminated on `direction`
     close: () => void;
     // ... detector-specific events
 }
@@ -3484,6 +4336,21 @@ trackMonitor.attachments = { mediaType: "screen-share" };
 ### Q: What's the performance impact of monitoring?
 
 **A**: The library is designed to be lightweight. Typical overhead is <1% CPU usage. The main cost is the periodic `getStats()` calls, which is why the collection period is configurable.
+
+## Reference documents
+
+This README is the guide. The reference documents under `docs/` carry the depth,
+and each one is written to be read on its own:
+
+| Document | What it covers |
+|---|---|
+| [DETECTOR_TAXONOMY.md](./docs/DETECTOR_TAXONOMY.md) | The five detector categories, the rules that decide which one a detector lands in, and a complete index of all 45 classes |
+| [CONNECTIVITY_DETECTORS.md](./docs/CONNECTIVITY_DETECTORS.md) | The five layers a connection climbs, plus the restart telemetry beside them |
+| [TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md) | Capacity, delay, delivery reliability and delivery stability on a path that already works |
+| [PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md) | The send and receive media chains, and the boundary each detector watches |
+| [PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md) | What the participant actually sees and hears, and the proxies used to judge it |
+| [TELEMETRY_DETECTORS.md](./docs/TELEMETRY_DETECTORS.md) | The facts describing a session — codec, path, layers, devices — and why none of them raises an issue |
+| [SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md) | Every score reason, threshold, ramp and formula |
 
 ## NPM Package
 

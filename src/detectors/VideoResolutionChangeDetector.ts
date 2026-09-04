@@ -6,6 +6,16 @@ import { ClientEventTypes } from "../schema/ClientEventTypes";
 /** `upgrade`/`downgrade` by pixel count; `reshape` when the pixel count holds but the aspect ratio does not. */
 export type VideoResolutionChangeDirection = 'upgrade' | 'downgrade' | 'reshape';
 
+export type VideoResolutionChangeDetectorConfig = {
+	/**
+	 * Whether to buffer a `VIDEO_RESOLUTION_CHANGED` client event into the
+	 * sample.
+	 *
+	 * DEFAULT: true
+	 */
+	createEvent?: boolean;
+}
+
 /**
  * Reports when the frame size of a video track changes, on either direction of the
  * connection. A resolution change is an observation, not a fault — the adaptation
@@ -32,6 +42,10 @@ export type VideoResolutionChangeDirection = 'upgrade' | 'downgrade' | 'reshape'
  * Monitor event: `video-resolution-changed`; client event `VIDEO_RESOLUTION_CHANGED`
  * when `createEvent` is left on.
  * Config: `videoResolutionChangeDetector`.
+ *
+ * Category: Telemetry
+ * Layer: Media
+ *
  */
 export class VideoResolutionChangeDetector implements Detector {
 	public readonly name = 'video-resolution-change-detector';

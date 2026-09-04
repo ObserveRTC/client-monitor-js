@@ -1,5 +1,5 @@
 import { Detectors } from "../detectors/Detectors";
-import { SynthesizedSamplesDetector } from "../detectors/SynthesizedSamplesDetector";
+import { AudioPlayoutSynthesisDetector } from "../detectors/AudioPlayoutSynthesisDetector";
 import { MediaPlayoutStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
@@ -23,6 +23,14 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	public deltaSynthesizedSamplesEvents?: number | undefined;
 	public deltaTotalPlayoutDelay?: number | undefined;
 	public deltaSamplesCount?: number | undefined;
+
+	/**
+	 * Milliseconds between this stats report and the previous one, from the
+	 * reports' own timestamps. Detectors accumulate this to measure how long a
+	 * condition has held, so a late or skipped collection still measures the
+	 * time the condition actually held underneath.
+	 */
+	deltaTime?: number | undefined;
 
 	/**
 	 * Average playout delay per sample in this interval, in milliseconds —
@@ -56,9 +64,9 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 		Object.assign(this, options);
 
-		if (this._peerConnection.parent.config.syntheticSamplesDetector !== null) {
+		if (this._peerConnection.parent.config.audioPlayoutSynthesisDetector !== null) {
 			this.detectors.add(
-				new SynthesizedSamplesDetector(this),
+				new AudioPlayoutSynthesisDetector(this),
 			);
 		}
 	}
@@ -71,6 +79,18 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		return result;
 	}
 
+	/**
+	 * Milliseconds of **stats time** this monitor has observed, accumulated from
+	 * `deltaTime` — the clock every window and duration in the library is measured
+	 * on, and the one thing `Date.now()` must never stand in for.
+	 *
+	 * It advances by what each collection actually cost rather than by one nominal
+	 * period, so a late or skipped collection widens a window by the time the
+	 * condition really held underneath. It never goes backwards and it is not a
+	 * timestamp: only differences between two readings of it mean anything.
+	 */
+	public statsClockTime = 0;
+
 	public getPeerConnection() {
 		return this._peerConnection;
 	}
@@ -82,6 +102,8 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 		this.deltaSynthesizedSamplesDuration = positiveDelta(stats.synthesizedSamplesDuration, this.synthesizedSamplesDuration) ?? 0;
 		this.deltaSamplesDuration = positiveDelta(stats.totalSamplesDuration, this.totalSamplesDuration) ?? 0;
 		this.deltaSynthesizedSamplesEvents = positiveDelta(stats.synthesizedSamplesEvents, this.synthesizedSamplesEvents);

@@ -25,6 +25,14 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	public deltaTotalAudioEnergy?: number | undefined;
 	public deltaSamplesDuration?: number | undefined;
 
+	/**
+	 * Milliseconds between this stats report and the previous one, from the
+	 * reports' own timestamps. Detectors accumulate this to measure how long a
+	 * condition has held, so a late or skipped collection still measures the
+	 * time the condition actually held underneath.
+	 */
+	deltaTime?: number | undefined;
+
 	/** Frames per second the capture source actually produced in this interval. */
 	public sourceFps?: number | undefined;
 
@@ -65,6 +73,18 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		return result;
 	}
 
+	/**
+	 * Milliseconds of **stats time** this monitor has observed, accumulated from
+	 * `deltaTime` — the clock every window and duration in the library is measured
+	 * on, and the one thing `Date.now()` must never stand in for.
+	 *
+	 * It advances by what each collection actually cost rather than by one nominal
+	 * period, so a late or skipped collection widens a window by the time the
+	 * condition really held underneath. It never goes backwards and it is not a
+	 * timestamp: only differences between two readings of it mean anything.
+	 */
+	public statsClockTime = 0;
+
 	public getPeerConnection() {
 		return this._peerConnection;
 	}
@@ -85,6 +105,8 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 		const elapsedInSec = elapsedInMs / 1000;
 
 		this.deltaFrames = positiveDelta(stats.frames, this.frames);

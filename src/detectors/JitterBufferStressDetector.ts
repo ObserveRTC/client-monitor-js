@@ -16,12 +16,23 @@ export type JitterBufferStressIssuePayload = {
 	durationInMs?: number;
 }
 
+export type JitterBufferStressDetectorConfig = {
+	/** Target delay above which the jitter buffer counts as stretched thin. */
+	targetDelayThresholdInMs: number;
+
+	/** Share of samples inserted or removed above which NetEQ counts as working hard. */
+	timeStretchThreshold: number;
+
+	/** Consecutive collections both conditions must hold before raising. */
+	minConsecutiveTicks: number;
+}
+
 /**
  * Watches the audio jitter buffer of an inbound track and reports when it is fighting the network
  * and losing — the user-visible failure being conversation that has gone latent and slightly warped,
- * voices sped up or dragged out, rather than the dropouts `AudioConcealmentDetector` covers. The two
- * are complements: concealment is what the buffer does when it has already run dry, this is the
- * buffer straining before it gets there.
+ * voices sped up or dragged out, rather than the fabricated audio `InventedSpeechDetector` covers. The
+ * two are complements: invention is what the buffer resorts to once it has already run dry, this is
+ * the buffer straining before it gets there.
  *
  * Both conditions are required, because either alone is benign. A high `jitterBufferTargetDelayInMs`
  * on its own means NetEQ is *succeeding*: it has bought latency to hide jitter and the user hears
@@ -38,6 +49,10 @@ export type JitterBufferStressIssuePayload = {
  *
  * Issue raised: `audio-jitter-buffer-stress`. Monitor event: `audio-jitter-buffer-stress`.
  * Config: `jitterBufferStressDetector`.
+ *
+ * Category: Perceived Quality
+ * Layer: Responsiveness
+ *
  */
 export class JitterBufferStressDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'audio-jitter-buffer-stress';

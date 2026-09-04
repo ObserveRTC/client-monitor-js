@@ -43,7 +43,7 @@ export type DefaultScoreCalculatorSubtractionReason =
 	 */
 	'pixelated-video' |
 	/** Audible audio concealment share is significant. */
-	'audio-concealment' | // we are overpenalizing it becasue the pc is already penalized
+	'invented-speech' | // we are overpenalizing it becasue the pc is already penalized
 	/** NetEQ is stretching/compressing a significant share of samples. */
 	'audio-time-stretch' |
 	/** The jitter buffer target delay adds noticeable latency. */
@@ -144,13 +144,23 @@ export class DefaultScoreCalculator {
 	public static PIXELATION_QP_SHIFT_PER_OCTAVE_UP = 0.6;
 	public static PIXELATION_QP_SHIFT_PER_OCTAVE_DOWN = 0.15;
 
-	/** Audible concealment share at which the penalty saturates (~"severely concealed"). */
-	public static readonly AUDIO_CONCEALMENT_SATURATION = 0.1;
-	/** Fallback activation when the concealment detector config is absent. */
-	public static readonly DEFAULT_AUDIO_CONCEALMENT_ACTIVATION = 0.03;
+	/** Invented-speech share at which the penalty saturates (~"severely concealed"). */
+	public static readonly INVENTED_SPEECH_SATURATION = 0.1;
+	/**
+	 * Fallback activation when `config.inventedSpeechDetector` is absent. Kept in step with that
+	 * detector's own `allowedInventedRatio` default deliberately: the penalty is meant to start where
+	 * the detector stops tolerating invention, and a fallback that disagreed with it would score a
+	 * configless monitor differently from a defaulted one.
+	 */
+	public static readonly DEFAULT_INVENTED_SPEECH_ACTIVATION = 0.05;
 	public static readonly TIME_STRETCH_SATURATION = 0.3;
-	/** Fallback activation when the desync detector config is absent. */
-	public static readonly DEFAULT_TIME_STRETCH_ACTIVATION = 0.1;
+	/**
+	 * Fallback activation when `config.jitterBufferStressDetector` is absent. Kept in step with that
+	 * detector's own `timeStretchThreshold` default deliberately, for the same reason as the
+	 * invented-speech fallback above: a fallback that disagreed with it would score a configless
+	 * monitor differently from a defaulted one.
+	 */
+	public static readonly DEFAULT_TIME_STRETCH_ACTIVATION = 0.02;
 	public static readonly JITTER_BUFFER_TARGET_DELAY_SATURATION_IN_MS = 500;
 	/** Fallback activation when the jitter-buffer-stress detector config is absent. */
 	public static readonly DEFAULT_JITTER_BUFFER_TARGET_DELAY_ACTIVATION_IN_MS = 200;
@@ -469,9 +479,12 @@ export class DefaultScoreCalculator {
 		}
 
 		// A frozen picture dominates every other quality aspect of the track.
-		// `isFreezed` is derived by FreezedVideoTrackDetector; when that
-		// detector is disabled the field stays undefined and no penalty applies.
-		if (inboundRtp.isFreezed) {
+		// `frameFlowState` is derived by InboundVideoFlowStateDetector, and is `frozen`
+		// for as long as a frozen finding is open against the track; when that detector
+		// is disabled the field stays undefined and no penalty applies. `choppy` is deliberately not
+		// penalised here — that would change every existing score — but it is the
+		// obvious place to put a smaller subtraction if one is ever wanted.
+		if (trackMonitor.frameFlowState === 'frozen') {
 			subtractions['frozen-video'] = 2.0;
 		}
 
@@ -701,16 +714,16 @@ export class DefaultScoreCalculator {
 		// the threshold (or measured nothing) contributes no penalty even
 		// while hysteresis keeps the issue open. Without the detectors, the
 		// score falls back to the pure loss decay above.
-		if (clientMonitor.isIssueActive(`audio-concealment-track-${trackId}`)) {
-			const concealmentPenalty = this._normalizedPenalty(
-				inboundRtp.concealmentRate ?? 0,
-				clientMonitor.config?.audioConcealmentDetector?.onThreshold
-					?? DefaultScoreCalculator.DEFAULT_AUDIO_CONCEALMENT_ACTIVATION,
-				DefaultScoreCalculator.AUDIO_CONCEALMENT_SATURATION,
+		if (clientMonitor.isIssueActive(`invented-speech-track-${trackId}`)) {
+			const inventedSpeechPenalty = this._normalizedPenalty(
+				inboundRtp.inventedSpeechRatio ?? 0,
+				clientMonitor.config?.inventedSpeechDetector?.allowedInventedRatio
+					?? DefaultScoreCalculator.DEFAULT_INVENTED_SPEECH_ACTIVATION,
+				DefaultScoreCalculator.INVENTED_SPEECH_SATURATION,
 			);
 
-			if (0 < concealmentPenalty) {
-				subtractions['audio-concealment'] = concealmentPenalty;
+			if (0 < inventedSpeechPenalty) {
+				subtractions['invented-speech'] = inventedSpeechPenalty;
 			}
 		}
 		if (clientMonitor.isIssueActive(`audio-jitter-buffer-stress-track-${trackId}`)) {
@@ -725,10 +738,10 @@ export class DefaultScoreCalculator {
 				subtractions['high-jitter-buffer-delay'] = jitterBufferPenalty;
 			}
 		}
-		if (clientMonitor.isIssueActive(`audio-desync-track-${trackId}`)) {
+		if (clientMonitor.isIssueActive(`audio-jitter-buffer-stress-track-${trackId}`)) {
 			const timeStretchPenalty = this._normalizedPenalty(
 				inboundRtp.timeStretchRate ?? 0,
-				clientMonitor.config?.audioDesyncDetector?.fractionalCorrectionAlertOnThreshold
+				clientMonitor.config?.jitterBufferStressDetector?.timeStretchThreshold
 					?? DefaultScoreCalculator.DEFAULT_TIME_STRETCH_ACTIVATION,
 				DefaultScoreCalculator.TIME_STRETCH_SATURATION,
 			);

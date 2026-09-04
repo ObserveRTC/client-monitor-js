@@ -80,9 +80,11 @@ describe('StatsReplayer', () => {
 		const stuck = raised.find((issue) => issue.type === 'stuck-decoder');
 
 		expect(stuck).toBeDefined();
-		// virtual time: the verdict is stamped with the CAPTURED clock, even
-		// though the replay itself took milliseconds
-		expect(stuck?.at).toBe(6000);
+		// Virtual time: the verdict is stamped with the CAPTURED clock, even though
+		// the replay itself took milliseconds. The wedge starts at the t=2000 report
+		// — the first whose decoded-frame delta is zero — and is timed by accumulating
+		// the stream's own inter-report gaps, so the 4s threshold is met at t=4000.
+		expect(stuck?.at).toBe(4000);
 
 		monitor.close();
 	});

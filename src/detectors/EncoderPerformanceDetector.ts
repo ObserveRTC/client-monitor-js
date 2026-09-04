@@ -1,5 +1,4 @@
 import { Detector } from "./Detector";
-import { OutboundFrameSupplyDetector } from "./OutboundFrameSupplyDetector";
 import type { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import type { ClientIssuePayload } from "../ClientMonitorEvents";
 
@@ -31,13 +30,21 @@ export type EncoderPerformanceDetectorConfig = {
 	cpuLimitationShareThreshold: number | null;
 	/** A tick count, not a duration: a confidence floor (two stats reads agreeing on a per-interval ratio), not a persistence bar. */
 	minConsecutiveTicks: number;
+	/**
+	 * Share of the track's configured `frameRate` the capture source must still be delivering before
+	 * the encoder is asked to answer for anything. Below it the source is not supplying, and an
+	 * encoder handed too few frames has nothing to answer for, so this detector stands down.
+	 *
+	 * Its own number, not `SourceCaptureBottleneckDetector`'s: see the class comment.
+	 */
+	sourceSupplyRatioThreshold: number;
 }
 
 /**
  * Given a capture source that is delivering, is the encoder keeping up with it? The send-side mirror
  * of `DecoderPerformanceDetector`, and one quadrant of the four video detectors that split pipeline
  * trouble along two axes: frames going *missing*, averaged over a duration
- * (`OutboundFrameSupplyDetector`, `InboundFrameSupplyDetector`), versus a stage that cannot *keep
+ * (`SourceCaptureBottleneckDetector`, `DecoderBottleneckDetector`), versus a stage that cannot *keep
  * up*, judged over consecutive ticks (this one and `DecoderPerformanceDetector`). The units are not
  * interchangeable: a duration is a persistence bar, while a tick count is a confidence floor —
  * every signal here is a per-interval ratio a single stats read can fabricate, so what is wanted is
@@ -52,17 +59,43 @@ export type EncoderPerformanceDetectorConfig = {
  *
  * Everything is judged against what the source actually delivered, never the configured capture
  * rate: an encoder handed 3fps and emitting 3fps is doing its job perfectly, and comparing that to a
- * configured 30 would call it a catastrophic failure. Whether the source itself is short is
- * `OutboundFrameSupplyDetector`'s question, and the two are mutually exclusive — while its
- * `capture-bottleneck` stands, this detector stands down, because an encoder handed too few frames
- * has nothing to answer for. The chain runs through `ClientMonitor.isIssueActive()` rather than a
- * shared field, and lands same-tick because `OutboundTrackMonitor` registers the capture detector
- * first and `Detectors.update()` preserves registration order. It also declines to judge a
- * backgrounded tab, a paused track, a track that is not live/unmuted/enabled, a track with no active
- * layer, and a source delivering nothing at all.
+ * configured 30 would call it a catastrophic failure. It also stands down entirely when the source
+ * is not delivering what it promised — `mediaSource.sourceFps` short of the `frameRate` in the
+ * track's own `getSettings()` — because an encoder handed too few frames has nothing to answer for.
+ *
+ * That comparison is made here, from the two raw readings, and deliberately not by consulting
+ * `SourceCaptureBottleneckDetector`'s `capture-bottleneck` issue, which is what this used to do. Reading
+ * another detector's conclusion made the verdict depend on things that have nothing to do with the
+ * encoder: disable the capture detector, or configure it away, and this one silently stops standing
+ * down and starts blaming the encoder for a starving camera. Worse, the two only agreed within a
+ * single tick because `OutboundTrackMonitor` happens to register the capture detector first and
+ * `Detectors.update()` preserves registration order — reorder the registrations and the same call
+ * produces a different answer, with no test able to see it. Detectors observe; they do not consume
+ * each other's verdicts. The two still reach the same judgement about the source because they read
+ * the same two numbers, and neither the order they run in nor whether the other one runs at all can
+ * change it.
+ *
+ * The threshold for that comparison is this detector's own `sourceSupplyRatioThreshold`, not
+ * `SourceCaptureBottleneckDetector`'s `captureFpsRatioThreshold`, which it used to reach across and
+ * read. The two defaults are equal and the two detectors are independently tunable, which is
+ * correct: they are asking different questions of the same measurement — *is the camera failing to
+ * deliver what it promised?* against *has the camera fallen short far enough that the encoder is
+ * excused?* — and one shared field meant that raising the bar for blaming the camera silently
+ * widened the range in which the encoder is let off, with nothing in either detector to say so.
+ *
+ * The stand-down is skipped for screen shares, whose frame rate is content-driven: a still document
+ * legitimately delivers far under its stated rate, and treating that as a capture shortfall would
+ * excuse the encoder on every static screen share for the rest of the call. That matches what the
+ * chained version did, `capture-bottleneck` never being raised for a screen share in the first place.
+ * It also declines to judge a backgrounded tab, a paused track, a track that is not
+ * live/unmuted/enabled, a track with no active layer, and a source delivering nothing at all.
  *
  * Issue raised: `encoder-bottleneck`. Monitor event: `encoder-bottleneck`.
  * Config: `encoderPerformanceDetector`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Send — frames to encoder
+ *
  */
 export class EncoderPerformanceDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'encoder-bottleneck';
@@ -72,7 +105,6 @@ export class EncoderPerformanceDetector implements Detector {
 	public includeIssueInSample = true;
 
 	private readonly _issueKey: string;
-	private readonly _captureIssueKey: string;
 	private _consecutiveTicks = 0;
 	private _on = false;
 	private _startedAt?: number;
@@ -80,10 +112,7 @@ export class EncoderPerformanceDetector implements Detector {
 	public constructor(
 		public readonly trackMonitor: OutboundTrackMonitor,
 	) {
-		const trackId = trackMonitor.track.id;
-
-		this._issueKey = `${EncoderPerformanceDetector.ISSUE_TYPE}-track-${trackId}`;
-		this._captureIssueKey = `${OutboundFrameSupplyDetector.ISSUE_TYPE}-track-${trackId}`;
+		this._issueKey = `${EncoderPerformanceDetector.ISSUE_TYPE}-track-${trackMonitor.track.id}`;
 	}
 
 	private get config(): EncoderPerformanceDetectorConfig {
@@ -103,11 +132,6 @@ export class EncoderPerformanceDetector implements Detector {
 		if (!this.peerConnection.parent.activeTab) return this._clear('tab in background');
 		if (this.trackMonitor.paused) return this._clear('track paused');
 		if (track.readyState !== 'live' || track.muted || !track.enabled) return this._clear('track not sending');
-		// Chained through `OutboundFrameSupplyDetector`'s issue rather than a shared field; it lands
-		// same-tick because `OutboundTrackMonitor` registers that detector first and `Detectors.update()` keeps the order.
-		if (this.peerConnection.parent.isIssueActive(this._captureIssueKey)) {
-			return this._clear('capture is short; not an encoder problem');
-		}
 
 		const highestLayer = this.trackMonitor.getHighestLayer();
 
@@ -118,6 +142,7 @@ export class EncoderPerformanceDetector implements Detector {
 		const sourceFps = this.trackMonitor.getMediaSource()?.sourceFps;
 
 		if (sourceFps === undefined || sourceFps <= 0) return this._clear('source delivering nothing');
+		if (this._sourceIsShort(sourceFps)) return this._clear('capture is short; not an encoder problem');
 
 		const encodedFps = highestLayer.framesPerSecond;
 		const cpuLimitationShare = highestLayer.qualityLimitationDurationShares?.cpu;
@@ -165,6 +190,36 @@ export class EncoderPerformanceDetector implements Detector {
 				consecutiveTicks: this._consecutiveTicks,
 			},
 		});
+	}
+
+	/**
+	 * Is the capture source failing to hand over the frames it said it would? Two readings the
+	 * detector is already holding — what the source produced this interval, and the `frameRate` the
+	 * track was configured for — compared the way `SourceCaptureBottleneckDetector` compares them.
+	 *
+	 * A missing or nonsensical `frameRate` answers no rather than yes: nothing was promised, so
+	 * nothing was fallen short of, and an encoder is not excused by an expectation never expressed.
+	 * A screen share answers no for the opposite reason — its frame rate follows the content, so a
+	 * shortfall against the stated rate is the normal state of a static surface and would stand the
+	 * encoder down permanently.
+	 */
+	private _sourceIsShort(sourceFps: number): boolean {
+		if (this.trackMonitor.isScreenShare) return false;
+
+		const expectedFps = this._trackSettings()?.frameRate;
+
+		if (expectedFps === undefined || expectedFps <= 0) return false;
+
+		return sourceFps < expectedFps * this.config.sourceSupplyRatioThreshold;
+	}
+
+	/** `getSettings()` throws on some platforms for a track being torn down. */
+	private _trackSettings(): MediaTrackSettings | undefined {
+		try {
+			return this.trackMonitor.track.getSettings?.();
+		} catch {
+			return undefined;
+		}
 	}
 
 	private _clear(comment: string) {

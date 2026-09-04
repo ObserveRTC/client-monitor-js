@@ -17,6 +17,16 @@ export type SimulcastLayerState = {
 	scalabilityMode?: string;
 }
 
+export type SimulcastLayerDetectorConfig = {
+	/**
+	 * Whether to buffer a `SIMULCAST_LAYER_CHANGED` client event into the
+	 * sample in addition to emitting the monitor event.
+	 *
+	 * DEFAULT: true
+	 */
+	createEvent?: boolean;
+}
+
 /**
  * Reports when the set of simulcast layers an outbound video track is actually sending
  * changes. This is an observation rather than a fault — layers are meant to come and go
@@ -41,6 +51,10 @@ export type SimulcastLayerState = {
  * Monitor event: `simulcast-layer-changed`; client event `SIMULCAST_LAYER_CHANGED` when
  * `createEvent` is left on.
  * Config: `simulcastLayerDetector`.
+ *
+ * Category: Telemetry
+ * Layer: Media
+ *
  */
 export class SimulcastLayerDetector implements Detector {
 	public readonly name = 'simulcast-layer-detector';

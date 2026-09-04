@@ -1,3 +1,646 @@
+## 4.10.0
+
+**One detector class raises exactly one issue type.** 4.9.0 organized the connectivity detectors one per *layer*; this release replaces that rule with the stricter one the whole library now follows, so a layer holds as many classes as it has distinct findings and a class that would raise two issues is two classes. Four classes became thirteen, seven more detectors are new, and the detector map is documented end to end in [docs/DETECTOR_TAXONOMY.md](docs/DETECTOR_TAXONOMY.md) with the connectivity model in [docs/CONNECTIVITY_DETECTORS.md](docs/CONNECTIVITY_DETECTORS.md).
+
+The reasons are operational rather than aesthetic. `Detectors.update()` wraps each `update()` in its own try/catch, so a class owning four findings loses all four to one malformed stats report while four classes lose one. `disabled` and `includeIssueInSample` are per detector, so an application that wants `ice-disconnected` out of its samples but keeps `ice-connection-failed` can now say so. And a single class holding four conditions accumulates shared state that couples them — untangling which fields belonged to which finding was the largest part of the split.
+
+**Issue types are unchanged by the split itself.** The issue type is the public contract that `observer-js` and dashboards consume; the detector class is an implementation unit. `IcePathStabilityDetector` became six classes and not one issue type changed. Three issue types *did* go, and none went because of the split: `media-pipeline-stalled` covered two unrelated boundaries and became two types; `audio-concealment` became `invented-speech` when the detector behind it was rewritten to measure something the old name no longer described; and `audio-desync` became `av-desync` when the detector behind it was replaced outright, having inferred lip sync from a jitter-buffer counter that frequently moved because sync was being *corrected*. All three are below.
+
+### Breaking: the `congestion` issue became `uplink-congestion` and `downlink-congestion`
+
+`CongestionDetector` is gone. Capacity is now two detectors, one per direction —
+`UplinkCongestionDetector` raising `uplink-congestion` and
+`DownlinkCongestionDetector` raising `downlink-congestion` — because the evidence for
+the two directions is not the same evidence, and one class reading one signal was
+answering for both.
+
+**An application matching on the `'congestion'` issue type will now match nothing.**
+The issue type is retired rather than renamed, and there is no alias: an old
+spelling could only ever have pointed at one of the two. The *event* of that name
+still exists — see below. `CongestionIssuePayload` and
+`CongestionEventPayload` are replaced by `UplinkCongestionIssuePayload` /
+`UplinkCongestionEventPayload` and their inbound counterparts, and the payload
+fields are not a superset of the old ones:
+
+| 4.9.0 payload field | Now |
+|---|---|
+| `availableIncomingBitrate` | **gone.** Chrome does not implement `candidate-pair.availableIncomingBitrate` at all — measured `undefined` on both nominated pairs of a call with both peers sending — so this was permanently `0` on the dominant browser. Chrome's congestion control is send-side; a receiver never computes an incoming estimate |
+| `maxAvailableIncomingBitrate` | **gone**, for the same reason |
+| `availableOutgoingBitrate` | on `uplink-congestion`, unchanged in meaning |
+| `maxAvailableOutgoingBitrate` | on `uplink-congestion`, and now the maximum over the preceding ten seconds of stats time rather than over everything since the last episode |
+| `maxSendingBitrate` | replaced by `sendingBitrate`, what was actually going out when the finding opened |
+| `maxReceivingBitrate` | on `downlink-congestion`, as the rolling maximum the arriving bitrate collapsed from |
+| — | `uplink-congestion` adds `packetSendDelayInMs`, `baselinePacketSendDelayInMs`, `rttInMs`, `qualityLimitationReason` |
+| — | `downlink-congestion` adds `jitterBufferDelayInMs`, `baselineJitterBufferDelayInMs`, `fractionLost` |
+
+`peerConnectionMonitor.congested` is now a read-only getter over two new flags,
+`uplinkCongested` and `downlinkCongested`, and reads `true` when either is — the
+same one-word answer as 4.9.0, no longer writable, because a single boolean could
+not say which direction it meant. The config key `congestionDetector` — and its only field,
+`sensitivity` — is replaced by `uplinkCongestionDetector` and
+`downlinkCongestionDetector`, each with thresholds of its own; a retired key fails to
+type-check, and a `null` that reached the constructor anyway would silently leave
+both new detectors enabled. The detector `name` strings `congestion-detector` is
+retired in favour of `uplink-congestion-detector` and
+`downlink-congestion-detector`.
+
+**Why the anchor changed.** The old detector rested on
+`qualityLimitationReason === 'bandwidth'`, which is the browser saying the encoder is
+not free to do as it likes — nearly always true on a real call. Measured against a
+loopback call throttled to 500 kbit on Chromium 141 it read `bandwidth` on all 34
+collections including all 6 healthy ones: precision 0.53. `availableOutgoingBitrate`
+falling below three quarters of its rolling maximum separated the same two
+populations with precision 1.00 and recall 0.67. The verdict is still reported, on
+the payload, as evidence for whoever reads the issue; it decides nothing.
+
+The receiving direction had to be rebuilt rather than mirrored, since there is no
+incoming estimate to read. It requires three things together: the browser reporting
+the path bandwidth-limited, a collapse in `receivingBitrate`, and a jitter buffer
+holding video frames well above its own pre-episode baseline — the last being what
+separates "the link cannot carry it" from "the sender had less to send", which a
+muted camera or a static screen share produces with the buffer perfectly normal. It
+closes the finding when the browser stops reporting a bandwidth limitation rather
+than on a bitrate threshold, because nothing at a receiver knows what the path can
+carry now: a link that settles at half its old capacity has recovered, and a ratio
+against its old maximum would hold the finding open for the rest of the call.
+
+That gate has a cost worth knowing before trending it: `qualityLimitationReason`
+describes this endpoint's encoder, so a **receive-only connection has no verdict to
+read** and the detector reports `inputsUnavailable` rather than judging. Same for an
+audio-only sender and for browsers that do not implement the field. Loss is carried on the payload and read by neither
+detector: on an unchanged throttle it ran at 39% and 47% for about six seconds and
+then read zero for the rest of it, so anything resting on it resolves in the middle
+of the episode it is reporting.
+
+Both are deliberately small. The uplink config is two ratios — how far the
+bandwidth estimate has to fall below its recent maximum to open a finding,
+`collapseRatio`, and how far back up it has to climb to close one,
+`recoveryRatio`. The downlink has `collapseRatio` over the arriving bitrate and
+`bufferElevationRatio` for the evidence it cannot do without, and no recovery ratio
+at all. Nothing else is
+configurable: the two guards that are noise floors rather than policy — a sender
+must be using 70% of what the path offers, a jitter buffer must be over 100 ms —
+are constants in the detector sources. Neither detector keeps a window or a tick
+counter of its own. An episode opens on the
+collection its condition holds and closes on the one where the bitrate is back
+above `recoveryRatio` of the maximum latched at onset; that gap is the hysteresis
+that a confidence floor would otherwise have provided.
+
+**The `congestion` event survives the split.** Both detectors emit it alongside
+their own event, discriminated on `direction` (`'uplink'` | `'downlink'`) and
+carrying the whole payload of whichever fired — so an application that only wants
+to dim a network badge keeps one listener, while one that acts on the cause reads
+the direction-specific event. `CongestionEventPayload` is now that discriminated
+union rather than the old flat shape, so an existing `monitor.on('congestion', …)`
+handler still fires but its payload fields have changed: narrow on `direction`
+first. A connection congested both ways fires it twice, once per direction. There
+is deliberately no combined *issue* type — the two directions start and end
+independently, so one issue key would have to pick a lifetime and would be wrong
+for whichever direction was still congested.
+
+**Both now report when they cannot see.** Where the browser computed no outgoing
+estimate, or reports no jitter buffer counters, the detectors set `inputsUnavailable`
+instead of staying quiet. The old detector did not, which made its permanent silence
+on Firefox indistinguishable from a healthy path — a fleet dashboard counting
+`congestion` per browser read Firefox as its best-behaved population.
+
+### Fixed: stale RTCP round trips were re-counted every collection
+
+`PeerConnectionMonitor` pushed `remote-inbound-rtp` / `remote-outbound-rtp`
+`roundTripTime` into the round-trip average on every collection, whether or not a new
+report had arrived. `getStats()` keeps serving the last report until another arrives,
+so one measurement was re-averaged for as long as it stood and `avgRttInSec` /
+`ewmaRttInSec` converged on a number nobody had measured recently — with rtcp-mux,
+for as long as a block on the media lasted. Both are now counted only on a collection
+where the report advanced, which also means the round trip appears one collection
+later than it used to at the start of a call. `TransportDelayDetector` and
+`IceRestartRecommendationDetector` read those averages.
+
+`IceCandidatePairMonitor` had a matching staleness: it assigns incoming stats with
+`Object.assign`, so a pair that stopped reporting `availableOutgoingBitrate` kept
+offering the last value it had. The two bandwidth estimates are now assigned
+explicitly, because for them absence is the fact — the specification says the field
+"must not exist" for a pair not currently in use.
+
+### Split: one class per finding
+
+| Was | Now | Raises |
+|---|---|---|
+| `IcePathStabilityDetector` | `IceDisconnectedDetector` | `ice-disconnected` |
+| | `IceConnectionFailedDetector` | `ice-connection-failed` |
+| | `IceTransportStalledDetector` | `ice-transport-stalled` |
+| | `UnstableIcePathDetector` | `unstable-ice-path` |
+| | `IceRestartDetector` | *(event `ice-restart`)* |
+| | `IceRestartRecommendationDetector` | *(event `ice-restart-recommended`)* |
+| `DtlsHandshakeDetector` | `DtlsHandshakeFailedDetector` | `dtls-handshake-failed` |
+| | `DtlsHandshakeStalledDetector` | `dtls-handshake-stalled` |
+| `CaptureFailureDetector` | `CaptureTrackEndedDetector` | `capture-track-ended` |
+| | `CaptureTrackMutedDetector` | *(event `capture-track-muted`)* |
+| | `SilentAudioSourceDetector` | `silent-audio-source` |
+| `MediaPipelineDetector` | `RtpSenderStalledDetector` | `rtp-sender-stalled` |
+| | `TransportDemuxStalledDetector` | `transport-demux-stalled` |
+
+### Breaking: retired detector `name` strings no longer resolve
+
+Detector `name` strings changed with the classes, and they are the lookup key for `Detectors.getByName()` / `disable()` / `enable()` / `has()` / `isEnabled()`. Lookup is **exact** and there is no alias table: a retired name returns `undefined` from `getByName()` and `false` from `has()`, `disable()` and `enable()`. Code still calling `detectors.disable('capture-failure-detector')` silences nothing and gets `false` back — check the return value, or move to the current names.
+
+An alias was considered and rejected, because a name resolves to exactly one detector and an old spelling for a split class could only ever have pointed at one part. An application toggling `ice-path-stability-detector` by its old name would have kept working while quietly governing one of the six classes it used to cover. Failing the lookup is an answer the caller can act on; a silently narrowed one is not.
+
+Migration — what each retired name became:
+
+| Retired name | What it became |
+|---|---|
+| `ice-path-stability-detector` | `ice-disconnected-detector`, `ice-connection-failed-detector`, `ice-transport-stalled-detector`, `unstable-ice-path-detector`, `ice-restart-detector`, `ice-restart-recommendation-detector` |
+| `ice-connectivity-detector` | as above |
+| `dtls-handshake-detector` | `dtls-handshake-stalled-detector`, `dtls-handshake-failed-detector` |
+| `capture-failure-detector` | `capture-track-ended-detector`, `silent-audio-source-detector`, `capture-track-muted-detector` |
+| `media-pipeline-detector` | `rtp-sender-stalled-detector`, `transport-demux-stalled-detector` |
+| `ice-tuple-change-detector` | `ice-traversal-detector` (a straight rename) |
+| `no-available-ice-candidate-detector` | `ice-reachability-detector` |
+| `long-pc-connection-establishment-detector` | `ice-path-establishment-detector` |
+| `audio-concealment-detector` | `invented-speech-detector` (a straight rename, of a class rewritten around it — see below) |
+| `freezed-video-track-detector` | `frozen-video-track-detector` |
+| `synthesized-samples-detector` | `audio-playout-synthesis-detector` |
+| `inbound-frame-supply-detector` | `decoder-bottleneck-detector` |
+| `outbound-frame-supply-detector` | `source-capture-bottleneck-detector` |
+
+Switching a detector off never went through names in the first place: pass `null` for its **config key**, which decides whether the class is constructed at all. Every class listed above now has a key of its own — `iceDisconnectedDetector: null`, `captureTrackMutedDetector: null` — so a group that used to be turned off with one key is turned off with each of its members' keys instead. See the next section.
+
+### Breaking: one config block per detector
+
+Every detector now reads a config block of its own, keyed by the detector's `name` in camelCase: `frame-assembly-stalled-detector` reads `frameAssemblyStalledDetector` and nothing else. No key is shared between detectors any more, and no detector reads a neighbour's block. The consequence is the point of the change: **any detector can be tuned or switched off (`null`) on its own**, without taking a neighbour with it and without silently retuning one.
+
+Eight keys were retired to get there — split where a class had already become several, renamed where the key was a different word from the detector. **This is breaking for anyone passing a config object.** A retired key is not a member of `ClientMonitorConfig`, so it **fails to type-check**; there is no alias and no runtime fallback, so a key that reaches the constructor anyway (untyped JavaScript, an `as` cast, config deserialized at runtime) is ignored and the detectors that used to read it run on their defaults — including a `null` meant to disable them. For a key that was *split*, there is no mechanical migration: a caller has to decide which of the new blocks they meant.
+
+| Retired config key | What to use instead |
+|---|---|
+| `captureFailureDetector` | `captureTrackEndedDetector`, `silentAudioSourceDetector`, `captureTrackMutedDetector` |
+| `dtlsHandshakeDetector` | `dtlsHandshakeStalledDetector`, `dtlsHandshakeFailedDetector` |
+| `icePathStabilityDetector` | `iceDisconnectedDetector`, `iceConnectionFailedDetector`, `iceTransportStalledDetector`, `unstableIcePathDetector`, `iceRestartDetector`, `iceRestartRecommendationDetector` |
+| `mediaPipelineDetector` | `rtpSenderStalledDetector`, `transportDemuxStalledDetector` |
+| `videoRecoveryDetector` | `keyframeStormDetector`, `videoRecoveryFailedDetector` |
+| `videoFreezesDetector` | `freezedVideoTrackDetector` *(rename — the key now spells the detector)* |
+| `syntheticSamplesDetector` | `synthesizedSamplesDetector` *(rename — the old spelling was a different word from `SynthesizedSamplesDetector`)* |
+| `audioConcealmentDetector` | `inventedSpeechDetector` *(rename — and a different shape; see below, none of the four old fields has an equivalent)* |
+
+Where each field went:
+
+| Was | Now |
+|---|---|
+| `captureFailureDetector.silenceThresholdInMs`, `.silenceRmsThreshold` | `silentAudioSourceDetector` |
+| `captureFailureDetector.createEvent` | `captureTrackEndedDetector.createEvent` **and** `captureTrackMutedDetector.createEvent` — one copy each |
+| `dtlsHandshakeDetector.stalledThresholdInMs` | `dtlsHandshakeStalledDetector` |
+| `icePathStabilityDetector.disconnectedThresholdInMs` | `iceDisconnectedDetector` |
+| `icePathStabilityDetector.transportStallThresholdInMs` | `iceTransportStalledDetector` |
+| `icePathStabilityDetector.pathSwitchWindowInMs`, `.pathSwitchThreshold` | `unstableIcePathDetector` |
+| `icePathStabilityDetector.iceRestartRecommendationThresholdInMs`, `.iceRestartRecommendationCooldownInMs` | `iceRestartRecommendationDetector` |
+| `icePathStabilityDetector.createEvent` | `iceRestartDetector.createEvent` **and** `iceRestartRecommendationDetector.createEvent` — one copy each |
+| `icePathEstablishmentDetector.restartRecommendationThresholdInMs`, `.restartRecommendationCooldownInMs` | `iceRestartRecommendationDetector` (`icePathEstablishmentDetector` keeps `thresholdInMs` and `createEvent`) |
+| `mediaPipelineDetector.thresholdInMs` | `rtpSenderStalledDetector.thresholdInMs` **and** `transportDemuxStalledDetector.thresholdInMs` — one copy each |
+| `mediaPipelineDetector.minTransportReceiveBitrateBps` | `transportDemuxStalledDetector` |
+| `videoRecoveryDetector.windowInMs`, `.pliRateAlertOn`, `.pliRateAlertOff` | `keyframeStormDetector` |
+| `videoRecoveryDetector.recoveryFailedThresholdInMs`, `.recoveryFailedMinPliCount` | `videoRecoveryFailedDetector` |
+
+**Where two detectors genuinely want the same tunable, each carries its own copy with its own default.** The duplication is deliberate: two detectors asking different questions of the same measurement should be able to disagree about where the line is, and one shared field means tuning one silently retunes the other. That is why `createEvent` appears twice for the capture pair and twice for the restart pair, and `thresholdInMs` twice across the two stage-boundary detectors. The defaults are equal today; they are free to move apart.
+
+**Three detectors that had no key at all gained one**, so each can now be disabled individually: `dtlsHandshakeFailedDetector`, `iceConnectionFailedDetector` and `iceTraversalDetector`. All three are typed `Record<string, never>` — `{}` enables, `null` disables, nothing to tune, because a terminal state needs no threshold and a telemetry report needs no bar. `IceTraversalDetector` in particular was previously registered unconditionally with no guard at all; the only way to silence it was by name.
+
+#### Behaviour change: `EncoderPerformanceDetector` has its own source-shortfall threshold
+
+It used to reach across and read `outboundFrameSupplyDetector.captureFpsRatioThreshold` for the stand-down that excuses an encoder handed too few frames. It now reads its own **`encoderPerformanceDetector.sourceSupplyRatioThreshold`**, default **0.9** — the same value the borrowed one had, so nothing moves on defaults. The two detectors ask different questions of the same measurement — *is the camera failing to deliver what it promised?* against *has the camera fallen short far enough that the encoder is excused?* — and under the old arrangement raising the bar for blaming the camera silently widened the range in which the encoder was let off, with nothing in either detector to say so. They are now independently tunable.
+
+#### Behaviour change: `IceRestartRecommendationDetector` is gated by one key, not two
+
+It used to read fields out of two blocks and use each as a sub-gate: `icePathEstablishmentDetector: null` suppressed its `never-established` recommendations while the path-stability key suppressed the per-transport ones. It now has one block of its own holding all five fields — `createEvent`, `iceRestartRecommendationThresholdInMs`, `iceRestartRecommendationCooldownInMs`, `restartRecommendationThresholdInMs`, `restartRecommendationCooldownInMs` — and **both halves run whenever `iceRestartRecommendationDetector` is set**. Disabling `iceDisconnectedDetector` or `icePathEstablishmentDetector` no longer silences the matching recommendation, and vice versa; `iceRestartRecommendationDetector: null` is now the one way to silence any of it. Its thresholds being its own is the point: recommending a renegotiation is a different decision from reporting a fault, and it is normal to want the recommendation to wait longer than the issue did.
+
+#### Config types live with their detectors
+
+Each detector file now exports `export type <ClassName>Config`, and `ClientMonitorConfig.ts` imports it with `import type` and declares the property as `<ClassName>Config | null`. Adding a tunable is one file's worth of edit, and a field's doc comment sits next to the logic that reads it rather than in a list of forty-five blocks; the block-level comment — what the detector is for, that `null` disables it — stays in `ClientMonitorConfig.ts`. `src/index.ts` exports each config type alongside the detector class it already exported, so an application can name the type it is building. `ClientMonitorConfig.ts` went from 1218 lines to 675.
+
+`tests/detectors/DetectorTaxonomy.spec.ts` enforces both halves of the convention against the `src/detectors/` directory listing rather than a checked-in list, so a detector added tomorrow is in scope the moment its file exists: every detector source reads only its own config block, and every config type is declared in the detector's own file, `import type`d by `ClientMonitorConfig` and used to type that detector's key. A third test sets each key to `null` in turn and asserts that **exactly one** detector disappears from the registries.
+
+### Breaking: the pre-4.9.0 config keys and the deprecated class aliases are removed
+
+4.9.0 renamed four detector classes and their config keys, and softened the change two ways: the old config keys were still read by `ClientMonitor`'s normalizer and folded onto their replacements, and the old class names were still exported as deprecated aliases. Both shims are deleted here. Nothing in the library resolves a legacy name any more — not a detector `name`, not a config key, not an export — which is the same rule the section above applies to names, applied everywhere rather than in one place.
+
+**Config keys.** `longPcConnectionEstablishmentDetector`, `iceConnectivityDetector` and `noAvailableIceCandidateDetector` are no longer members of `ClientMonitorConfig`:
+
+| Retired config key | Current key |
+|---|---|
+| `longPcConnectionEstablishmentDetector` | `icePathEstablishmentDetector` |
+| `iceConnectivityDetector` | `icePathStabilityDetector`, which this release then split — see the table above |
+| `noAvailableIceCandidateDetector` | `iceReachabilityDetector` |
+
+The consequence has two halves, and the second is the one to watch for. A TypeScript config object still using a retired key **no longer compiles** — excess property checking rejects it against `Partial<ClientMonitorConfig>`, which is the loud half. If such an object reaches the constructor anyway (untyped JavaScript, an `as` cast, config deserialized at runtime), the key is silently ignored and **the detector runs on its defaults instead of your settings** — so a tuned `thresholdInMs` reverts to the built-in one, and, worse, a `null` written against the old spelling no longer disables anything. Rename the key; there is no runtime warning to catch this for you.
+
+**Class exports.** The four deprecated aliases are gone from the package root:
+
+| Retired export | Current export |
+|---|---|
+| `IceTupleChangeDetector` | `IceTraversalDetector` |
+| `LongPcConnectionEstablishmentDetector` | `IcePathEstablishmentDetector` |
+| `LongPcConnectionEstablishmentStage` (type) | `IcePathEstablishmentStage` |
+| `NoAvailableIceCandidateDetector` | `IceReachabilityDetector` |
+
+Every alias pointed at the class in the right-hand column and nothing else, so each import is a one-line edit and no behaviour moves with it. Unlike the config keys, this half cannot fail quietly: importing a name that is not exported is a compile error, and an undefined binding at runtime.
+
+**Fixed on the way out: `null` disables these three detectors.** The removed fallback read the deprecated key through `??`, an operator that treats `null` and `undefined` alike — so `icePathEstablishmentDetector: null`, `iceReachabilityDetector: null` or a `null` on any of the keys the path-stability block was split into fell through to the (absent) old key, came back `undefined`, and was then filled in by the defaulting step. All three detectors stayed registered no matter what the caller passed, which is the shim quietly overriding the caller in the one direction that matters. With the fallback gone these keys behave like every other: `null` means the detector is never constructed.
+
+### Breaking: four detector classes renamed to say what they find
+
+The class name is what an engineer reads first, and four of them named the input, the
+mechanism, or nothing at all. None of these changes what the detector does; three of
+them touch no wire type either.
+
+| Was | Now | Detector `name` | Config key | Issue / event |
+|---|---|---|---|---|
+| `FreezedVideoTrackDetector` | `FrozenVideoTrackDetector` | `frozen-video-track-detector` | `frozenVideoTrackDetector` | **`frozen-video-track`** (changed) |
+| `SynthesizedSamplesDetector` | `AudioPlayoutSynthesisDetector` | `audio-playout-synthesis-detector` | `audioPlayoutSynthesisDetector` | `synthesized-audio` (unchanged) |
+| `InboundFrameSupplyDetector` | `DecoderBottleneckDetector` | `decoder-bottleneck-detector` | `decoderBottleneckDetector` | `decoder-bottleneck` (unchanged) |
+| `OutboundFrameSupplyDetector` | `SourceCaptureBottleneckDetector` | `source-capture-bottleneck-detector` | `sourceCaptureBottleneckDetector` | `capture-bottleneck` (unchanged) |
+
+Exported config and payload types moved with them: `FreezedVideoTrackDetectorConfig` →
+`FrozenVideoTrackDetectorConfig`, `FreezedVideoTrackEventPayload` →
+`FrozenVideoTrackEventPayload`, `FreezedVideoTrackIssuePayload` →
+`FrozenVideoTrackIssuePayload`, and likewise for the other three. The shared
+`FrameSupplyIssuePayload` keeps its name: it describes the payload's shape — frames
+expected against frames delivered — which is still exactly what it is.
+
+**`freezed-video-track` → `frozen-video-track` is the one wire change**, and it moves
+the issue type, the monitor event and the payload type together. "Freezed" is not a
+word; it has been in the public surface since the issue type was introduced, and this
+is the release to spend the break on. Anything matching `'freezed-video-track'` on a
+`ClientMonitorIssue.type`, an `on('freezed-video-track')` handler, or a server-side
+rule over shipped samples must move. There is no alias — see the reasoning under
+retired `name` strings above.
+
+Note the monitor field **`InboundRtpMonitor.isFreezed` keeps its spelling** in this
+release. It is read by `DefaultScoreCalculator` and by applications, and renaming it
+is a separate break on the monitor surface rather than part of this one.
+
+Why each rename: `InboundFrameSupplyDetector` and `OutboundFrameSupplyDetector` were
+named after the mechanism they share — averaging frame supply over a window — while
+raising `decoder-bottleneck` and `capture-bottleneck` respectively, so the symmetry the
+names promised was false in a way that mattered: inbound is the *decoder*, outbound is
+the *capture device*, not the encoder, which is `EncoderPerformanceDetector`.
+`SynthesizedSamplesDetector` read as a synonym of `InventedSpeechDetector` and is not
+one — it measures the whole audio playout device, where the other measures one inbound
+stream net of silent concealment — so the names invited a merge that would have lost
+the distinction.
+
+### Breaking: the legacy `too-long-pc-connection-establishment` event is retired
+
+`IcePathEstablishmentDetector` (renamed from `LongPcConnectionEstablishmentDetector` in
+4.9.0) still emitted the old class's event name. It is now
+**`ice-path-establishment-slow`**, matching the class and its config key, and the
+exported payload type `TooLongPcConnectionEstablishmentEventPayload` is
+`IcePathEstablishmentSlowEventPayload`. The old event name is gone rather than
+deprecated: `monitor.on('too-long-pc-connection-establishment', …)` will simply never
+fire.
+
+The name is also the more honest one. The detector's own doc is explicit that it raises
+no issue because "establishment is slow" is not yet a claim that it failed —
+`IceEstablishmentFailedDetector` makes that claim — and `-slow` says that where
+`too-long-` implied a verdict.
+
+Two things deliberately did **not** change. The client event type
+`LONG_PC_CONNECTION_ESTABLISHMENT` in `ClientEventTypes` is a schema enum shipped to the
+server, so moving it would break ingestion independently of this client release.
+And `ice-tuple-changed`, emitted by `IceTraversalDetector`, stays: it accurately names
+what that detector reports — that the selected tuple set changed — and the class name is
+the looser of the two.
+
+### Breaking: `media-pipeline-stalled` and `suspectedIssueTypes` are gone
+
+`MediaPipelineDetector` raised one issue for two unrelated boundaries and distinguished them with a `stage` / `direction` discriminator. It is now `RtpSenderStalledDetector` (frames encode and no packet leaves) and `TransportDemuxStalledDetector` (traffic arrives on the transport and no inbound RTP accounts for it), raising **`rtp-sender-stalled`** and **`transport-demux-stalled`**. Consumers matching on `type: 'media-pipeline-stalled'` must match the two new types instead; there is no alias, because one type cannot alias onto two.
+
+The `suspectedIssueTypes` field is removed from both payloads. The predecessor annotated every payload with the other issues active on the peer connection, which made one detector's output a function of every other detector's verdicts and of the order they ran in. Correlating issues is the server's job, where the whole session is visible and `peerConnectionId` plus a time window does the same work properly.
+
+### Breaking: `AudioConcealmentDetector` is now `InventedSpeechDetector`, and it measures differently
+
+The class that reported audible concealment is rewritten and renamed throughout. Everything about it that was public moved:
+
+| | Was | Now |
+|---|---|---|
+| Class | `AudioConcealmentDetector` | `InventedSpeechDetector` |
+| Detector `name` | `audio-concealment-detector` | `invented-speech-detector` |
+| Issue type | `audio-concealment` | `invented-speech` |
+| Monitor event | `audio-concealment` | `invented-speech` |
+| Config key | `audioConcealmentDetector` | `inventedSpeechDetector` |
+| Score reason | `audio-concealment` | `invented-speech` |
+| Monitor field | `InboundRtpMonitor.concealmentRate` | `InboundRtpMonitor.inventedSpeechRatio` |
+| Issue payload | `AudioConcealmentIssuePayload` | `InventedSpeechIssuePayload` |
+| Event payload | `AudioConcealmentEventPayload` | `InventedSpeechEventPayload` |
+
+This is the one issue type in the release that was renamed rather than split, and it is a real break of the public contract — a dashboard matching `type: 'audio-concealment'`, an application listening on `monitor.on('audio-concealment')` and a score consumer keyed on the `audio-concealment` reason all have to move. There is no alias for any of them. The rename was made because the old name described the browser's counter rather than the finding: `concealedSamples` is what NetEQ did, while what the detector reports is what the listener heard — audio the sender never sent.
+
+**The algorithm changed completely, so tuning does not carry over.** The old detector kept a 15-second sliding window of audible-concealed and total samples, formed a ratio over the sums, compared it against `onThreshold` (0.03) and `offThreshold` (0.01), and refused to judge a window holding fewer than `minSamplesInWindow` samples. The new one holds a single accumulator in milliseconds: each tick adds `inventedSpeechRatio × deltaTime` of invention and drains `allowedInventedRatio × deltaTime` of allowance, clamped to `[0, raiseAfterInventedMs]`. The issue opens when the accumulator is full and closes when it is empty.
+
+| Retired field | Default | Equivalent |
+|---|---|---|
+| `onThreshold` | `0.03` | **none** — `allowedInventedRatio` (0.05) is a tolerance the accumulator drains at, not a level that raises |
+| `offThreshold` | `0.01` | **none** — resolution is the accumulator reaching zero |
+| `windowInMs` | `15000` | **none** — there is no window |
+| `minSamplesInWindow` | `24000` | **none** — a tick with no samples reports `inventedSpeechRatio: undefined`, which sets `inputsUnavailable` |
+
+The two new fields are `allowedInventedRatio` (default **0.05**, the share of audio that may be invented without counting against the stream — RFC 7294's severely-concealed-second bar, applied as a rate) and `raiseAfterInventedMs` (default **400**, the invented milliseconds *beyond* the allowance that must accumulate before the issue opens). Because the allowance is also the drain rate, the second doubles as the resolve bar: a full accumulator empties after `raiseAfterInventedMs / allowedInventedRatio` — 8 s of clean audio at the defaults.
+
+Two behaviours change as a result, and both are the reason for the rewrite. **Sensitivity no longer depends on `collectingPeriodInMs`**: the old detector classified whole ticks, so a bad second inside a five-second collection was averaged down by five, while integrating a rate over elapsed time gives the same trajectory at any collection period. And **a brief pause no longer ends an episode**: a clean tick drains only the allowance, so someone who breaks up, pauses for breath and breaks up again is one issue rather than three, while genuinely recovered audio still resolves after about eight seconds.
+
+The payload changed with the algorithm: `concealmentRate` and `windowInMs` are gone, replaced by `inventedSpeechRatio` (the tick's own ratio when the issue was raised) and `excessInventedMs` (the accumulator). `peerConnectionId`, `trackId` and the `durationInMs` filled in at resolution are unchanged. The score calculator's `invented-speech` penalty is still issue-gated and still saturates at 0.10, but its activation is now the detector's `allowedInventedRatio` (0.05) rather than the old `onThreshold` (0.03), so an equal ratio scores slightly better than it did.
+
+Full reference: [docs/PERCEIVED_QUALITY_DETECTORS.md](docs/PERCEIVED_QUALITY_DETECTORS.md#audio--continuity).
+
+### Breaking: `AudioDesyncDetector` is replaced by `AVDesyncPlayoutDetector`, which measures lip sync directly
+
+The Synchronization sub-layer's detector is **deleted and replaced**, not renamed. Everything about it that was public moved:
+
+| | Was | Now |
+|---|---|---|
+| Class | `AudioDesyncDetector` | `AVDesyncPlayoutDetector` |
+| Detector `name` | `audio-desync-detector` | `av-desync-playout-detector` |
+| Issue type | `audio-desync` | `av-desync` |
+| Monitor event | `audio-desync-track` | `av-desync` |
+| Config key | `audioDesyncDetector` | `avDesyncPlayoutDetector` |
+| Issue payload | `AudioDesyncIssuePayload` | `AVDesyncPlayoutIssuePayload` |
+| Event payload | `AudioDesyncTrackEventPayload` | `AVDesyncPlayoutEventPayload` |
+
+There is no alias for any of them. `InboundRtpMonitor.desync`, the boolean the old detector published back onto the monitor, is gone as well — nothing else read it.
+
+**The measurement is entirely different, so no tuning carries over.** The old detector read `insertedSamplesForDeceleration` and `removedSamplesForAcceleration`, formed a correction fraction from them, and called the result audio desync. Those are NetEQ's accelerate and preemptive-expand counters: they measure the jitter buffer time-stretching audio to reach its target delay, which is buffer health rather than synchronization. Worse, the one real coupling between the two subjects runs the wrong way — when a browser's A/V sync logic detects drift it *raises* NetEQ's target delay and NetEQ decelerates to reach it, so sustained deceleration is frequently the sync correction working rather than the fault. The old detector fired on the repair, and reported two devices with mismatched sample clocks (a USB headset running at 47 999 Hz) as desynchronised while their lip sync was perfect.
+
+`AVDesyncPlayoutDetector` measures the thing itself: the difference between the two tracks' `estimatedPlayoutTimestamp`. Both values are already on the *sender's* NTP clock — each has been resolved through that sender's RTCP sender reports — so they subtract directly into a signed skew in milliseconds, positive meaning audio is ahead of the picture. It is the only detector in the library that compares two streams.
+
+| Retired field | Default | Equivalent |
+|---|---|---|
+| `fractionalCorrectionAlertOnThreshold` | `0.1` | **none** — the quantity is now milliseconds of skew, not a fraction of samples |
+| `fractionalCorrectionAlertOffThreshold` | `0.05` | **none** — same |
+
+The five new fields are `audioAheadRaiseInMs` (**90**), `audioAheadResolveInMs` (**45**), `audioBehindRaiseInMs` (**185**), `audioBehindResolveInMs` (**125**) and `sustainForInMs` (**3000**). The two directions get separate thresholds because they are not equally objectionable: sound arrives after light in the physical world, so a viewer forgives audio lagging far more readily than audio leading, and ITU-R BT.1359-1 puts the acceptability limits near +90 ms ahead against −185 ms behind. A single absolute threshold would be either too strict on lag or too lax on lead. The behind values are magnitudes; between resolve and raise nothing changes, so an open issue stays open and a closed one stays closed.
+
+**New required context: `InboundTrackContext.linkedVideoTrackId`.** The detector needs to know which video track pairs with an audio track, and the library cannot infer it — an SFU forwards independent streams and `MediaStream` grouping does not survive every topology. Applications that want lip-sync findings must declare the pairing:
+
+```ts
+monitor.setInboundTrackContext(audioTrack.id, { linkedVideoTrackId: videoTrack.id });
+```
+
+Until they do, the detector reports `inputsUnavailable` rather than guessing — a wrong pairing would produce a confidently wrong number. Two supporting members are new on `InboundTrackMonitor`: `getLinkedVideoTrack()`, which resolves the declared id against the peer connection's inbound tracks and returns `undefined` if it is absent or not video, and `linkedVideoPlayoutDiffInMs`, the signed skew, derived every tick before the detectors run.
+
+**Coverage is thin and the detector says so.** `estimatedPlayoutTimestamp` is populated by Firefox, exposed by Chrome only when A/V sync is enabled internally, and not reported by Safari; where it is missing, or no pairing was declared, `inputsUnavailable` is set. Applications reading fleet-wide issue counts should read that flag alongside them: the absence of `av-desync` is very often the absence of a measurement.
+
+**Score reason regating.** The `audio-time-stretch` penalty used to be gated on the `audio-desync` issue and scaled `timeStretchRate` against `audioDesyncDetector.fractionalCorrectionAlertOnThreshold` — a threshold belonging to a detector that formed a *different* normalization of the same two counters. It is now gated on `audio-jitter-buffer-stress` and scaled against `jitterBufferStressDetector.timeStretchThreshold`, which reunites the penalty with the detector that owns the signal. The practical effect is that it starts much earlier: the activation fell from 0.1 to 0.02, so a 5% stretch rate that used to cost nothing now costs about 0.11 and a 20% one costs 0.64 rather than 0.5. `av-desync` gates no score penalty at all. Nothing else about the audio score changed.
+
+Full reference: [docs/PERCEIVED_QUALITY_DETECTORS.md](docs/PERCEIVED_QUALITY_DETECTORS.md#synchronization).
+
+### New detectors
+
+Seven, each raising one new issue type, all under their own config key.
+
+| Category | Detector | Raises | Condition |
+|---|---|---|---|
+| Connectivity (L3) | `IceEstablishmentFailedDetector` | `ice-establishment-failed` | Candidates existed, nothing was ever nominated, the call never connected |
+| Transport Quality | `TransportDelayDetector` | `transport-delay-degraded` | Smoothed round trip stayed high long enough to break turn-taking |
+| Transport Quality | `TransportLossDetector` | `transport-loss-sustained` | A material share of packets is not arriving, either direction |
+| Transport Quality | `TransportJitterDetector` | `transport-delivery-unstable` | Packets arrive, but unevenly enough to force buffering |
+| Pipeline Disruption | `FrameAssemblyStalledDetector` | `frame-assembly-stalled` | Packets keep arriving and no frame is ever assembled |
+| Perceived Quality | `PixelatedVideoDetector` | `pixelated-video` | Too few bits per pixel for long enough to look blocky |
+| Perceived Quality | `ChoppyVideoDetector` | `video-choppy` | Frame rate consistently too low, or erratic enough to stutter |
+
+`IceEstablishmentFailedDetector` is what makes `IcePathEstablishmentDetector` event-only by design rather than by omission: layer 3 now has the slow claim (an event, since slow is not yet failed) and the failure claim (an issue) in two classes with two thresholds. `frame-assembly-stalled` closes the last gap on the receive side — before it existed, packets arriving while `framesReceived` never advanced surfaced as `stuck-decoder`, which points at the decoder for something that happened before the decoder ever saw a frame. `pixelated-video` and `video-choppy` are the perceptual conditions the score calculator already derived internally, now available as issues in their own right.
+
+Every new class and its payload type is exported from the package root, alongside the six split ones.
+
+### `BlockedTransportDetector` is Transport Quality; connectivity layer 6 is retired
+
+It used to be a sixth connectivity layer, "media flow", on the reasoning that the network is the subject. That was the wrong cut. Every connectivity stage completed and *holds* while it fires — the candidate pair is `succeeded`, consent checks keep passing, `iceConnectionState` reads `connected` — and the path simply is not delivering, which is the Transport Quality membership test word for word. Under the delivery-reliability heading it also sits where it belongs relative to its neighbour: `transport-loss-sustained` is a path dropping a share of what crosses it, and `blocked-transport` is a path dropping all of it for a reason that is policy rather than capacity.
+
+The connectivity model is back to **five layers**. The `blocked-transport` issue type, its payload, its `blockedTransportDetector` config key and its detector `name` are all unchanged — this is a classification, and what moved is where it is registered and documented.
+
+### `BlockedTransportDetector` rebuilt: send side only, one instance per transport
+
+The detector's first correctness pass since it was written, and it is narrower than it
+was. Everything about the **receive** direction is gone: `no-return-traffic` was the third
+`evidence` value and is removed, along with `maxReturnBitrateBps` and `minMediaBitrateBps`
+from the config block and `transportReceivingBitrate` from the payload.
+
+**Why the receive side was dropped rather than fixed.** Only on the send side does the
+client hold both halves of the proof — it produced the bytes, and it reads what the
+transport put on the wire. On the receive side it holds one half: what *should* have
+arrived is a fact about the far end that no client stat reports, so a middlebox eating
+media, an SFU that stopped forwarding, a producer the far end paused and a speaker who
+muted are the same reading in `getStats()`. Every guard that made `no-return-traffic`
+defensible was really a way of asking the application what the stats could not say. A dry
+return path is `dry-inbound-track`'s finding, and a block in the receive direction
+surfaces on the remote peer's own sending side.
+
+Applications matching on `evidence === 'no-return-traffic'` will no longer see it. The
+other two values are unchanged in meaning.
+
+**`evidence` splits the send-side fault by where it happened**, which is new. It used to
+be a single value covering two faults with opposite remedies: the operating system
+refusing the packets, and something beyond this machine eating them.
+`RTCIceCandidatePairStats.packetsDiscardedOnSend` is the specification's purpose-built
+counter for the first, so where a browser reports it advancing the issue now says
+`media-discarded-on-send`, and where it does not the finding keeps its old name and its
+old meaning. An *unreported* counter falls on the same side as a zero one — a counter the
+browser does not publish is not evidence of a local fault.
+
+**Judgeability is gated on nothing but an outbound stream existing.** A blocked transport
+is normally blocked from its first packet: the user is behind a corporate firewall,
+nothing gets out, and reloading puts them behind the same wall. Any bar of the form "it
+was carrying media and then stopped" switches the detector off in exactly the case it
+exists to explain, so `minMediaBitrateBps` is gone and the gate is simply that outbound
+RTP is attributed to the transport. The encoder produces whether or not anything escapes.
+
+**A path that has never answered is no longer treated as STUN-verified.** The freshness
+clock used to start at zero on the first tick, as though a consent response had just
+landed, giving a path that has never answered a full `stunFreshnessInMs` of being judged
+— long enough to raise a firewall verdict at the five-second threshold on a path that is
+simply dead, which is the ICE detectors' finding. The clock now stays unstarted until the
+first response arrives.
+
+**An absent consent counter is no longer conflated with a stale one.**
+`deltaResponsesReceived === undefined` (Firefox before 142) and `=== 0` (a reported fact)
+used to take the same branch, making a Firefox 141 session indistinguishable from a path
+that had stopped answering. The first now sets `inputsUnavailable` and the transport goes
+unjudged; the second ages the freshness clock as it always did.
+
+**The fallback bitrate is measured in stats time.** When `RTCTransportStats` carries no
+byte counters the detector falls back to the selected pair's `deltaBytesSent`, and it used
+to divide that by the configured `collectingPeriodInMs`. A late collection made the
+fallback read low and could invent a block on a transport sending perfectly well. It now
+divides by the transport's own `deltaTime`.
+
+`IceCandidatePairMonitor` gains `deltaPacketsDiscardedOnSend` and
+`deltaBytesDiscardedOnSend`, which are what the evidence split rests on.
+
+### RTP-to-transport attribution moved onto `IceTransportMonitor`
+
+`IceTransportMonitor` gains **`getOutboundRtps()`** and **`getInboundRtps()`**, and the
+`attributeRtpToTransport` free function in `utils/common` — plus the unused
+`PeerConnectionMonitor.attributeRtpToTransport()` wrapper introduced alongside it — is
+removed. "Which streams does this transport carry" is a question about a transport, so the
+transport answers it rather than a utility every caller has to remember to pass the right
+arguments to. `BlockedTransportDetector`, `TransportDemuxStalledDetector`,
+`IceTransportStalledDetector` and `IceRestartRecommendationDetector` all read the monitor
+now.
+
+Both readers are a plain `transportId` lookup, and deliberately nothing more. The old
+utility also carried a fallback — streams reporting no `transportId` attributed to the
+connection's sole transport — which duplicated, one layer too high, what the stats
+adapters already do: `inferTransportId()` runs in all three of them and restores the
+reference wherever a browser omits it (Firefox before 153 on every RTP report, Safari
+through 17.3 on `codec`). **Monitors read spec-conformant stats; making them conformant is
+the adapters' job.** A browser omitting a spec-required field is an adapter gap, and
+fixing it in a monitor puts the same rule at two layers, with the monitor's copy being the
+one nothing tests against real browser output.
+
+`tests/utils/attributeRtpToTransport.spec.ts` is removed with the function; the rule's
+coverage lives in the adapter specs, which exercise it against browser-shaped reports
+including the ambiguous multi-transport case.
+
+### `BlockedTransportDetector` moved to `IceTransportMonitor.detectors`
+
+`IceTransportMonitor` now has a `detectors` registry of its own, alongside the ones on
+`ClientMonitor`, `PeerConnectionMonitor`, the track monitors and `MediaPlayoutMonitor`.
+`BlockedTransportDetector` is constructed with a **transport** rather than a peer
+connection, and one instance judges one transport.
+
+`blocked-transport` is a finding about a single ICE transport, and the peer-connection
+binding forced the class to reimplement per-transport lifecycle by hand: a `Map` keyed by
+transport id, a per-tick sweep for ids that had disappeared, and an `inputsUnavailable`
+flag OR-ed across every transport so one unjudgeable transport described the whole tick.
+All three are gone. State is plain fields; a transport that is replaced gets a new monitor
+and a detector whose clocks start at zero; `inputsUnavailable` now describes the transport
+its detector is bound to.
+
+**Behaviour change: the issue is no longer resolved when a transport disappears.** It used
+to close with the comment `'ice transport is gone'`. A transport that goes away now takes
+its detector with it and leaves the issue open — in common with every other monitor-bound
+detector in the library, since dropping an unvisited monitor has never resolved its
+detectors' issues. The issue records that the path was blocked while it existed, which
+stays true.
+
+For anyone reaching into the registry, this changes where to look: `pcMonitor.detectors`
+no longer holds `blocked-transport-detector`, and
+`iceTransport.detectors.getByName('blocked-transport-detector')` does. The config key is
+unchanged and still gates construction — `blockedTransportDetector: null` leaves it
+unregistered on every transport.
+
+The gate on ICE also changed with the move: the detector reads
+`IceTransportMonitor.everConnected` rather than the live `iceState`. Its proof that the
+path is alive is the consent counter, and reading the connection state as well meant two
+liveness tests that could disagree; what it still needs from ICE is the one thing consent
+cannot say — that the path came up at all.
+
+### Detectors never infer the raw stats they need
+
+Now stated as the fifth design rule, in the `Detector` interface doc and in [docs/DETECTOR_TAXONOMY.md](docs/DETECTOR_TAXONOMY.md#the-five-design-rules): **a detector detects where the browser supplies the stats, and declines to judge where it does not.** Reading a different real measurement of the same traffic is fine — a candidate pair's byte deltas standing in for a transport's — but reconstructing a missing counter from unrelated ones, or assuming a plausible value, is not.
+
+An inferred input makes a finding mean something different depending on which browser produced it, and nothing downstream can tell the two apart: a `blocked-transport` issue raised on a real consent counter and one raised on an assumption about consent arrive at the server identically. The rule has teeth mostly where a load-bearing stat is not universal, and several are not — `RTCTransportStats` byte counters (absent on Firefox through 153), `responsesReceived` (Firefox 142+), `estimatedPlayoutTimestamp` (Firefox only), `packetsDiscardedOnSend`. `inputsUnavailable` is what makes the resulting silence legible.
+
+### Condition duration is measured in stats time
+
+A detector measuring how long something has held now accumulates the monitored object's **`deltaTime`** — the difference between consecutive stats reports' `timestamp`s — rather than wall-clock elapsed. `Date.now()` survives for the issue lifecycle only (`raisedAt`, the `durationInMs` computed at resolution, `resolvedAt`) and for emission rate limiting, which is about how often to speak rather than how long a condition held.
+
+This matters most in exactly the conditions these detectors fire under. A saturated main thread, a backgrounded tab or a throttled timer makes collections run late or be skipped: measured against the wall clock, a tab hidden for a minute has "watched" a minute of failing gathering, a minute of blocked media, a minute of stalled handshake, and every duration threshold crosses at once on the tick the tab comes back, on evidence nobody observed. It cuts the other way too — a collection that ran late means the condition held longer than one nominal period, and `deltaTime` credits it with that. `IceReachabilityDetector`, `IcePathEstablishmentDetector` and the `never-established` branch of `IceRestartRecommendationDetector` were the last wall-clock holdouts and now accumulate `PeerConnectionMonitor.deltaTime`; `IceReachabilityDetector`'s payload ships the `sustainedForInMs` its type always declared.
+
+### `inputsUnavailable`
+
+New public field, set per tick, on the ten detector classes that can compute it: `BlockedTransportDetector` and `TransportDemuxStalledDetector` (transport bitrates — the Firefox case below), `TransportDelayDetector`, `TransportLossDetector`, `TransportJitterDetector`, `PixelatedVideoDetector`, `ChoppyVideoDetector`, `FrameAssemblyStalledDetector`, `InventedSpeechDetector` (a browser omitting `silentConcealedSamples` used to silence it permanently and invisibly) and `AVDesyncPlayoutDetector`, for which being unable to see is the ordinary state rather than the exception — it needs an application-declared track pairing *and* an `estimatedPlayoutTimestamp` most browsers do not reliably report.
+
+A detector that stays quiet is saying one of two completely different things — *nothing is wrong*, or *the browser did not report the stats I need, so I cannot see whether anything is wrong* — and from the outside those look identical. The case is not hypothetical: Firefox still does not populate `bytesSent` / `bytesReceived` on `RTCTransportStats` as of 153, so a detector reading a transport bitrate is permanently silent there, correctly and invisibly.
+
+**It is not on the `Detector` interface.** That contract carries only what the registry needs to run a detector and what an application needs to toggle one, and nothing in the library reads the flag yet; it moves onto the interface if and when something actually decides on it. Reading it means naming the class:
+
+```ts
+const delay = pcMonitor.detectors
+    .getByName<TransportDelayDetector>('transport-delay-detector');
+
+if (delay?.inputsUnavailable) { /* … */ }
+```
+
+It is set only for missing **evidence**: a detector standing down because a track is paused, a tab is backgrounded or a sender is muted is *not applicable*, which is a different statement, and does not set the flag. No detector's verdict changes with it — without evidence they still raise nothing.
+
+### `IceTransportMonitor.everConnected`
+
+A latch: `true` once a transport has reached `connected` or `completed`, and never false again. `iceState === 'failed'` on its own conflates two faults that share a state and share nothing else — a path that never worked (candidate or firewall problem, the client never got a call at all) and a path that worked and was lost (something changed underneath it). `ice-connection-failed` carries `everConnected` in its payload so the two are separable in a dashboard, and `IceReachabilityDetector` uses the same fact to stop judging gathering on a connection that demonstrably connected.
+
+### New config blocks
+
+Seven, each accepting `null` to leave the detector unregistered, all defaulted by the normalizer:
+
+-   **`iceEstablishmentFailedDetector`** — `thresholdInMs`.
+-   **`transportDelayDetector`** — `thresholdInMs`, `recoveryThresholdInMs`, `durationInMs`.
+-   **`transportLossDetector`** — `threshold`, `recoveryThreshold`, `durationInMs`.
+-   **`transportJitterDetector`** — `thresholdInMs`, `recoveryThresholdInMs`, `durationInMs`.
+-   **`pixelatedVideoDetector`** — `threshold`, `recoveryThreshold`, `durationInMs`.
+-   **`choppyVideoDetector`** — `minFramesPerSecond`, `maxFpsVolatility`, `durationInMs`.
+-   **`frameAssemblyStalledDetector`** — `thresholdInMs`, `minPacketsReceived`.
+
+An eighth key, **`avDesyncPlayoutDetector`**, is new in the same sense but arrives as a replacement rather than an addition — see [the `AVDesyncPlayoutDetector` section above](#breaking-audiodesyncdetector-is-replaced-by-avdesyncdetector-which-measures-lip-sync-directly) for its five fields and for the `audioDesyncDetector` key it retires.
+
+Every quality detector separates its raise threshold from its recovery threshold, so a call sitting exactly on the line cannot flap the issue open and shut, and every duration is in stats time.
+
+## 4.9.0
+
+The connectivity detectors are now **one detector per layer**. A WebRTC connection climbs six layers before media flows — reachability, traversal, path establishment, secure transport, path stability, media flow — and every issue now belongs to the *first* layer whose proof fails. Full reference: [docs/CONNECTIVITY_DETECTORS.md](docs/CONNECTIVITY_DETECTORS.md).
+
+**No issue type, event type or payload type changed.** The reorganization is entirely at the class and config level; anything consuming `type` strings on the wire is unaffected.
+
+### Fixed: one-way media no longer reads as a fault
+
+Two connectivity detectors assumed a peer connection carries media in both directions. An SFU publish transport does not, and both were raising on healthy mediasoup calls.
+
+**`blocked-transport` / `no-return-traffic` fired on every send-only transport.** All of its gates pass on a healthy publish transport: ICE connected, pair succeeded, STUN answering, the application demonstrably producing — and the only thing coming back is STUN consent plus RTCP, a few hundred bps, permanently under the 2000 bps `maxReturnBitrateBps` floor. The issue was raised five seconds in and never resolved, because nothing about the condition ever changes. `no-return-traffic` now additionally requires that return media was expected at all: at least one inbound RTP stream attributed to the transport. The send-side evidence (`media-not-leaving-transport`) is unguarded and unchanged — both halves of its proof exist on a send-only transport.
+
+**`ice-transport-stalled` had the same exposure**, less reliably. It is protected by STUN consent inflating the pair's `bytesReceived`, but consent runs about every five seconds against a five-second stall threshold, so a send-only transport could cross it on timing alone. It now also requires inbound RTP on the transport. Nothing is lost: if a send-only path really dies, consent stops and `ice-disconnected` owns it.
+
+Both guards go through the shared `attributeRtpToTransport` rule, so they respect BUNDLE and multi-transport connections. Note that the existing tests for both detectors were written with send-only mocks — they had encoded the false positive as expected behaviour; the mocks are now bidirectional and the send-only shape has explicit regression tests.
+
+### Renamed and merged
+
+| Was | Now | Layer |
+|---|---|---|
+| `NoAvailableIceCandidateDetector` | `IceReachabilityDetector` | 1 |
+| `IceTupleChangeDetector` | `IceTraversalDetector` | 2 |
+| `LongPcConnectionEstablishmentDetector` | `IcePathEstablishmentDetector` | 3 |
+| `IceConnectivityDetector` | `IcePathStabilityDetector` | 5 |
+
+Config keys followed where the detector was renamed: `noAvailableIceCandidateDetector` → `iceReachabilityDetector`, `longPcConnectionEstablishmentDetector` → `icePathEstablishmentDetector`, `iceConnectivityDetector` → `icePathStabilityDetector`. Every old key is still read (including an explicit `null` to disable) and the old class names are exported as deprecated aliases, both marked for removal in 5.0.0. The old detector `name` strings were accepted by `Detectors` in this release.
+
+**Everything in the paragraph above describes 4.9.0 only; none of it survived into 4.10.0.** That release retired all three shims — the `name` strings, the config keys and the class aliases — and the last two went **ahead of the 5.0.0 this release promised them until**. `icePathStabilityDetector`, the key the right-hand column points at, was itself split into six in 4.10.0. The window was cut short deliberately rather than by oversight: a library that resolves legacy names in three separate places is harder to reason about than one clean break taken while the names are still weeks old, and the `name` strings had to break anyway, since a split class cannot be aliased. See [Breaking: retired detector `name` strings no longer resolve](#breaking-retired-detector-name-strings-no-longer-resolve) and [Breaking: the pre-4.9.0 config keys and the deprecated class aliases are removed](#breaking-the-pre-490-config-keys-and-the-deprecated-class-aliases-are-removed).
+
+**Layer 6 keeps two classes, and is the documented exception to the rule.** `BlockedTransportDetector` and `MediaPipelineDetector` answer different questions with independent state, so a class each buys real fault isolation — `Detectors.update()` wraps every detector in its own try/catch, so a throw costs one verdict rather than the layer's — and lets either finding be disabled through its own config key. Their config keys and registration order are unchanged; `blocked-transport` is still registered first, because `MediaPipelineDetector`'s `suspectedIssueTypes` reads the specialist issues raised earlier in the same tick and that is one of them.
+
+### Moved: `never-established` belongs to path establishment
+
+The `never-established` ICE restart recommendation moved out of the path-stability detector into `IcePathEstablishmentDetector`, where it belongs — a connection that never established is layer 3, not layer 5. The event, its `reason` value and its payload are unchanged.
+
+The coordination between the two changed, though: layer 3 now stands down when any transport is `failed` or `disconnected` — states layer 5 owns, and for which it makes the more specific recommendation. Previously the pc-level recommendation asked whether the per-transport one had fired *this tick*, which coupled the two detectors to their registration order. Reading the transports' states directly makes them independent, and slightly quieter: a connection whose transport is already `failed` gets one recommendation, not two.
+
+`IcePathEstablishmentDetector` also absorbed the whole prolonged-establishment event, so the layer's two findings — "setup is slow, and here is the stage it is stuck in" and "setup is not going to finish on its own" — now live in one class with one config block.
+
+### Registration is layer order
+
+`PeerConnectionMonitor` registers the connectivity detectors from layer 1 to layer 6. `Detectors.update()` runs in insertion order, so a lower layer's verdict is recorded before the layers above it read the same tick — the ordering that earlier had to be coordinated between classes is now structural. `CongestionDetector` moved to the end of the constructor with the other quality-axis detectors; it is not part of the connectivity model.
+
+### Detectors are organized into five categories
+
+New: [docs/DETECTOR_TAXONOMY.md](docs/DETECTOR_TAXONOMY.md). Every detector now belongs to exactly one of **Connectivity**, **Transport Quality**, **Pipeline Disruption**, **Perceived Quality** or **Telemetry** — and what decides the category is the *shape of the detection*, not the place in the stack: a stage that never completed, a continuously-measured path property that is bad, a counter that went flat or two components that disagree, or a perceptual value that degraded and stayed degraded. That discriminator is mechanically checkable, so a new detector sorts itself instead of needing a cause-versus-symptom judgement call every time.
+
+**The overlap rule.** Some conditions are discrepancies where the network is one of the two disagreeing components. If one side of the disagreement is the network it is Connectivity; if both sides are inside this endpoint's media chain it is Pipeline Disruption. `blocked-transport` stays Connectivity (the fix is a network fix); `media-pipeline-stalled` and the dry-track detectors become Pipeline Disruption (the fix is local or signaling).
+
+**Telemetry is a category, not a leftover.** The four issue categories are ordered — read a failed session from the lowest that fired — and Telemetry sits beside them, raising nothing. Membership is by design rather than by omission: the test is *would raising an issue here ever be right?*, which puts `IceTraversalDetector` there (needing TURN is a cost, not a fault) while leaving `IcePathEstablishmentDetector` in Connectivity, where its missing issue is a recorded gap rather than a reclassification.
+
+Applying the overlap rule removed the exception connectivity layer 6 previously needed: **every layer now has exactly one detector class**, with no carve-out.
+
+No issue type, event type, payload or config key changed — this is a classification, and the code changes are the taxonomy test, the doc, and comments.
+
+### The rule, and the test that enforces it
+
+**One detector class per layer per monitor level**, with layer 6 as the documented exception described above. A layer that has nothing to say at a level gets no class there; where a layer genuinely differs by direction, the difference lands either on a different monitor level (inbound vs outbound track) or as a payload discriminator (`media-pipeline-stalled`'s `stage`/`direction`), never as a new layer. `tests/detectors/DetectorTaxonomy.spec.ts` asserts the category of every registered detector, the invariant, the registration order and how detector names resolve, so the model stays true when a detector is added later.
+
 ## 4.8.0
 
 Transport observability. Three themes: **the RTP → transport → candidate-pair graph is fully traversable and attributed by one rule**, **DTLS handshake failure finally has an owner**, and **samples stop repeating constants** (sample schema **3.7.0**).
@@ -14,7 +657,7 @@ Transport observability. Three themes: **the RTP → transport → candidate-pai
 
 ### New: `DtlsHandshakeDetector`
 
-Separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all presented as a generically slow `connecting`. `dtlsState: 'failed'` raises `dtls-handshake-failed` immediately; ICE proven healthy while DTLS sits in `new`/`connecting` past `stalledThresholdInMs` (default 6000) raises `dtls-handshake-stalled`. ICE health comes from the transport's `iceState` where the browser reports one, and from the selected pair being `succeeded` where it does not (Safari, and the transport reconstructed for Firefox < 153) — the payload's `iceEvidence` names which proof was used. Never judges a transport on its first observed tick (Firefox 153/154 report pre-negotiation values that only 155 makes trustworthy), never treats `closed` as a failure, and restarts its stall timer when the ufrag changes. Config: `dtlsHandshakeDetector`, `null` to disable.
+Separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all presented as a generically slow `connecting`. `dtlsState: 'failed'` raises `dtls-handshake-failed` immediately; ICE proven healthy while DTLS sits in `new`/`connecting` past `stalledThresholdInMs` (default 6000) raises `dtls-handshake-stalled`. ICE health comes from the transport's `iceState` where the browser reports one, and from the selected pair being `succeeded` where it does not (Safari, and the transport reconstructed for Firefox < 153) — the payload's `iceEvidence` names which proof was used. Never judges a transport on its first observed tick (Firefox 153/154 report pre-negotiation values that only 155 makes trustworthy), never treats `closed` as a failure, and restarts its stall timer when the ufrag changes. Config: `dtlsHandshakeDetector`, `null` to disable. *(4.10.0 split this class in two and retired that key; the two detectors now read `dtlsHandshakeFailedDetector` and `dtlsHandshakeStalledDetector`.)*
 
 ### One attribution rule for RTP → transport
 

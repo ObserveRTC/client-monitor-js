@@ -18,15 +18,22 @@ import { RemoteOutboundRtpMonitor } from "./monitors/RemoteOutboundRtpMonitor";
 import { ClientSample } from "./schema/ClientSample"
 import { RtcStats } from "./schema/W3cStatsIdentifiers";
 import { IcePathEvidence, IcePathTransition, SelectedIcePath } from "./monitors/SelectedIcePath";
-import { IceRestartOutcome, IceRestartRecommendedEventPayload as IceRestartRecommendationPayload } from "./detectors/IceConnectivityDetector";
+import { IceRestartOutcome } from "./detectors/IceRestartDetector";
+import { IceRestartRecommendedEventPayload as IceRestartRecommendationPayload } from "./detectors/IceRestartRecommendationDetector";
 import { SimulcastLayerState } from "./detectors/SimulcastLayerDetector";
 import { VideoResolutionChangeDirection } from "./detectors/VideoResolutionChangeDetector";
 import { StuckDecoderVariant } from "./detectors/StuckDecoderDetector";
-import { BlockedTransportIssuePayload } from "./detectors/BlockedTransportDetector";
-import { DtlsHandshakeFailedIssuePayload, DtlsHandshakeStalledIssuePayload } from "./detectors/DtlsHandshakeDetector";
-import { LongPcConnectionEstablishmentStage } from "./detectors/LongPcConnectionEstablishment";
-import { NoAvailableIceCandidateIssuePayload } from "./detectors/NoAvailableIceCandidateDetector";
-import { MediaPipelineStalledIssuePayload } from "./detectors/MediaPipelineDetector";
+import { AVDesyncDirection } from "./detectors/AVDesyncPlayoutDetector";
+import { VideoFlowIssuePayload } from "./detectors/InboundVideoFlowStateDetector";
+import { BlockedTransportIssuePayload } from "./detectors/BlockedStunRequestsDetector";
+import { BlockedOutboundMediaIssuePayload } from "./detectors/BlockedOutboundMediaDetector";
+import { BlockedInboundMediaIssuePayload } from "./detectors/BlockedInboundMediaDetector";
+import { DtlsHandshakeFailedIssuePayload } from "./detectors/DtlsHandshakeFailedDetector";
+import { DtlsHandshakeStalledIssuePayload } from "./detectors/DtlsHandshakeStalledDetector";
+import { IcePathEstablishmentStage } from "./detectors/IcePathEstablishmentDetector";
+import { NoAvailableIceCandidateIssuePayload } from "./detectors/IceReachabilityDetector";
+import { RtpSenderStalledIssuePayload } from "./detectors/RtpSenderStalledDetector";
+import { TransportDemuxStalledIssuePayload } from "./detectors/TransportDemuxStalledDetector";
 
 /**
  * The shape every sampled payload must have — client events, client issues,
@@ -127,26 +134,65 @@ export type StatsCollectedEventPayload = ClientMonitorBaseEvent & {
 	collectedStats: [string, RtcStats[]][],
 }
 
-export type CongestionEventPayload = ClientMonitorBaseEvent & {
+export type UplinkCongestionEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
-	availableIncomingBitrate: number;
 	availableOutgoingBitrate: number;
-	maxAvailableIncomingBitrate: number;
-	maxAvailableOutgoingBitrate: number;
-	maxReceivingBitrate: number;
-	maxSendingBitrate: number;
+	sendingBitrate: number;
+	headroomInBps: number;
+	baselineHeadroomInBps: number;
+	maxAvailableOutgoingBitrate?: number;
+	/** How sure the detector was, `0..1`, with the two halves it came from. */
+	confidence: number;
+	narrowing: number;
+	queueing: number;
+	packetSendDelayInMs: number;
+	baselinePacketSendDelayInMs: number;
+	rttInMs?: number;
 }
 
-export type AudioDesyncTrackEventPayload = ClientMonitorBaseEvent & {
+export type DownlinkCongestionEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	receivingBitrate: number;
+	maxReceivingBitrate: number;
+	jitterBufferDelayInMs: number;
+	baselineJitterBufferDelayInMs: number;
+	fractionLost?: number;
+}
+
+/** Which of a connection's two paths a congestion event is about. */
+export type CongestionDirection = 'uplink' | 'downlink';
+
+/**
+ * The direction-agnostic feed: emitted alongside `uplink-congestion` or
+ * `downlink-congestion` whenever either of them fires, for an application that
+ * only wants to know this connection is capacity-limited *somewhere* — a
+ * network-quality badge, a "your connection is unstable" banner.
+ *
+ * It carries the whole payload of whichever detector fired, discriminated on
+ * `direction`, because the evidence for the two directions is genuinely
+ * different and flattening it into shared field names would mean calling a
+ * bandwidth estimate and an arriving bitrate the same thing. Narrow on
+ * `direction` to read the rest.
+ *
+ * A connection congested both ways fires it twice, once per direction, as the
+ * two findings open. Neither detector consults the other to decide, so two
+ * arrivals mean two independent verdicts rather than one restated.
+ */
+export type CongestionEventPayload =
+	| (UplinkCongestionEventPayload & { direction: 'uplink' })
+	| (DownlinkCongestionEventPayload & { direction: 'downlink' });
+
+export type AVDesyncPlayoutEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
+	/** The video track this audio track was compared against. */
+	linkedVideoTrackId: string,
+	/** Signed skew in milliseconds: positive means audio is ahead of video. */
+	playoutDiffInMs: number,
+	direction: AVDesyncDirection,
 }
 
 export type SynthesizedAudioEventPayload = ClientMonitorBaseEvent & {
 	mediaPlayoutMonitor: MediaPlayoutMonitor,
-}
-
-export type FreezedVideoTrackEventPayload = ClientMonitorBaseEvent & {
-	trackMonitor: InboundTrackMonitor,
 }
 
 export type DryInboundTrackEventPayload = ClientMonitorBaseEvent & {
@@ -157,10 +203,17 @@ export type DryOutboundTrackEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: OutboundTrackMonitor,
 }
 
-export type TooLongPcConnectionEstablishmentEventPayload = ClientMonitorBaseEvent & {
+export type IcePathEstablishmentSlowEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
 	/** Which stage of establishment the connection is actually stuck in. */
-	stalledStage: LongPcConnectionEstablishmentStage,
+	stalledStage: IcePathEstablishmentStage,
+	/**
+	 * How much observed `connecting` this attempt had accumulated when the threshold was crossed,
+	 * summed from the peer connection's `deltaTime`. Deliberately not the wall-clock elapsed since
+	 * the attempt began: the two diverge the moment collection runs late, and this is the figure the
+	 * verdict was actually reached on.
+	 */
+	sustainedForInMs: number,
 }
 
 export type IceTupleChangedEventPayload = ClientMonitorBaseEvent & {
@@ -189,6 +242,14 @@ export type BlockedTransportEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& BlockedTransportIssuePayload;
 
+export type BlockedOutboundMediaEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& BlockedOutboundMediaIssuePayload;
+
+export type BlockedInboundMediaEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& BlockedInboundMediaIssuePayload;
+
 export type NoAvailableIceCandidateEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& NoAvailableIceCandidateIssuePayload;
@@ -201,9 +262,13 @@ export type DtlsHandshakeStalledEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
 	& DtlsHandshakeStalledIssuePayload;
 
-export type MediaPipelineStalledEventPayload = ClientMonitorBaseEvent
+export type RtpSenderStalledEventPayload = ClientMonitorBaseEvent
 	& { peerConnectionMonitor: PeerConnectionMonitor }
-	& MediaPipelineStalledIssuePayload;
+	& RtpSenderStalledIssuePayload;
+
+export type TransportDemuxStalledEventPayload = ClientMonitorBaseEvent
+	& { peerConnectionMonitor: PeerConnectionMonitor }
+	& TransportDemuxStalledIssuePayload;
 
 export type IceRestartEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
@@ -216,16 +281,48 @@ export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent 
 	trackMonitor: InboundTrackMonitor,
 }
 
-export type AudioConcealmentEventPayload = ClientMonitorBaseEvent & {
+export type InventedSpeechEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
-	/** Audible concealment share over the evaluation window, in `0..1`. */
-	concealmentRate: number,
+	/** Share of the interval's audio that was invented rather than transmitted, in `0..1`. */
+	inventedSpeechRatio: number,
 }
 
 export type AudioJitterBufferStressEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 	targetDelayInMs: number,
 	timeStretchRate: number,
+}
+
+export type TransportDelayDegradedEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	rttInMs: number,
+}
+
+export type TransportLossSustainedEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	fractionLost: number,
+	direction: 'inbound' | 'outbound',
+}
+
+export type TransportDeliveryUnstableEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	jitterInMs: number,
+}
+
+export type PixelatedVideoEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	bitPerPixel: number,
+}
+
+/** Experimental. See `InboundVideoFlowStateDetector`. */
+export type VideoFlowIssueEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+} & VideoFlowIssuePayload
+
+export type FrameAssemblyStalledEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	packetsSinceLastFrame: number,
+	stalledForInMs: number,
 }
 
 export type VideoDecoderOverloadedEventPayload = ClientMonitorBaseEvent & {
@@ -267,7 +364,7 @@ export type EncoderBottleneckEventPayload = ClientMonitorBaseEvent & {
 	encodedFps?: number,
 }
 
-export type CaptureTrackEndedEventPayload = ClientMonitorBaseEvent & {
+export type CaptureSourceLostEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: OutboundTrackMonitor,
 }
 
@@ -410,26 +507,36 @@ export type ClientMonitorEvents = {
 	'extension-stats': [ExtensionStat],
 
 	// detector events
+	'uplink-congestion': [UplinkCongestionEventPayload],
+	'downlink-congestion': [DownlinkCongestionEventPayload],
 	'congestion': [CongestionEventPayload],
 	'cpulimitation': [ClientMonitorBaseEvent],
-	'audio-desync-track': [AudioDesyncTrackEventPayload],
+	'av-desync': [AVDesyncPlayoutEventPayload],
 	'synthesized-audio': [SynthesizedAudioEventPayload],
-	'freezed-video-track': [FreezedVideoTrackEventPayload],
 	'dry-inbound-track': [DryInboundTrackEventPayload],
 	'dry-outbound-track': [DryOutboundTrackEventPayload],
 	'ice-tuple-changed': [IceTupleChangedEventPayload],
 	'ice-path-changed': [IcePathChangedEventPayload],
-	'too-long-pc-connection-establishment': [TooLongPcConnectionEstablishmentEventPayload],
+	'ice-path-establishment-slow': [IcePathEstablishmentSlowEventPayload],
 	'inbound-video-playout-discrepancy': [InboundVideoPlayoutDiscrepancyEventPayload],
 	'ice-restart': [IceRestartEventPayload],
 	'ice-restart-recommended': [IceRestartRecommendedEventPayload],
 	'blocked-transport': [BlockedTransportEventPayload],
+	'blocked-outbound-media-transport': [BlockedOutboundMediaEventPayload],
+	'blocked-inbound-media-transport': [BlockedInboundMediaEventPayload],
 	'dtls-handshake-failed': [DtlsHandshakeFailedEventPayload],
 	'dtls-handshake-stalled': [DtlsHandshakeStalledEventPayload],
 	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
-	'media-pipeline-stalled': [MediaPipelineStalledEventPayload],
-	'audio-concealment': [AudioConcealmentEventPayload],
+	'rtp-sender-stalled': [RtpSenderStalledEventPayload],
+	'transport-demux-stalled': [TransportDemuxStalledEventPayload],
+	'invented-speech': [InventedSpeechEventPayload],
 	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
+	'transport-delay-degraded': [TransportDelayDegradedEventPayload],
+	'transport-loss-sustained': [TransportLossSustainedEventPayload],
+	'transport-delivery-unstable': [TransportDeliveryUnstableEventPayload],
+	'pixelated-video': [PixelatedVideoEventPayload],
+	'video-flow-disrupted': [VideoFlowIssueEventPayload],
+	'frame-assembly-stalled': [FrameAssemblyStalledEventPayload],
 	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],
 	'keyframe-storm': [KeyframeStormEventPayload],
 	'video-recovery-failed': [VideoRecoveryFailedEventPayload],
@@ -437,7 +544,7 @@ export type ClientMonitorEvents = {
 	'capture-bottleneck': [CaptureBottleneckEventPayload],
 	'decoder-bottleneck': [DecoderBottleneckEventPayload],
 	'encoder-bottleneck': [EncoderBottleneckEventPayload],
-	'capture-track-ended': [CaptureTrackEndedEventPayload],
+	'capture-source-lost': [CaptureSourceLostEventPayload],
 	'capture-track-muted': [CaptureTrackMutedEventPayload],
 	'silent-audio-source': [SilentAudioSourceEventPayload],
 	'simulcast-layer-changed': [SimulcastLayerChangedEventPayload],

@@ -19,7 +19,7 @@ function mockPeerConnection() {
 		mappedOutboundTracks: new Map(),
 		outboundRtps: [],
 		parent: {
-			config: { syntheticSamplesDetector: null },
+			config: { audioPlayoutSynthesisDetector: null },
 		},
 	} as any;
 }
@@ -121,7 +121,7 @@ describe('InboundRtpMonitor derived fields', () => {
 
 	// Silence inflates `concealedSamples`; without the subtraction every quiet
 	// call would read as badly degraded.
-	it('excludes silent concealment from the concealment rate', () => {
+	it('excludes silent concealment from the invented speech ratio', () => {
 		const monitor = inbound('audio', {
 			totalSamplesReceived: 0,
 			concealedSamples: 0,
@@ -141,7 +141,7 @@ describe('InboundRtpMonitor derived fields', () => {
 			concealmentEvents: 4,
 		} as any);
 
-		expect(monitor.concealmentRate).toBeCloseTo(2000 / 96000);
+		expect(monitor.inventedSpeechRatio).toBeCloseTo(2000 / 96000);
 		expect(monitor.concealmentEventRate).toBeCloseTo(2);
 	});
 
@@ -429,5 +429,47 @@ describe('MediaPlayoutMonitor derived fields', () => {
 
 		expect(monitor.playoutDelayPerSampleInMs).toBeCloseTo(50);
 		expect(monitor.synthesizedSamplesRatio).toBeCloseTo(0.05);
+	});
+});
+
+/**
+ * The clock every window and duration in the library is measured on. It is a fact
+ * about the stream — how much stats time this monitor has actually observed — so
+ * it lives on the monitor, and the detectors that need a timeline read it instead
+ * of each keeping an accumulator of their own.
+ */
+describe('statsClockTime', () => {
+	const monitorAt = (timestamp: number) => new InboundRtpMonitor(mockPeerConnection(), {
+		id: 'in-1', timestamp, ssrc: 1, kind: 'video', trackIdentifier: 'track-1',
+	} as any);
+
+	const accept = (monitor: InboundRtpMonitor, timestamp: number) => monitor.accept({
+		id: 'in-1', timestamp, ssrc: 1, kind: 'video', trackIdentifier: 'track-1',
+	} as any);
+
+	it('starts at zero and accumulates the measured gaps', () => {
+		const monitor = monitorAt(1000);
+
+		expect(monitor.statsClockTime).toBe(0);
+
+		accept(monitor, 2000);
+		expect(monitor.statsClockTime).toBe(1000);
+
+		// A late collection: four seconds passed underneath, and the clock says so
+		// rather than crediting one nominal period.
+		accept(monitor, 6000);
+		expect(monitor.statsClockTime).toBe(5000);
+	});
+
+	it('does not advance on a report that did not move', () => {
+		const monitor = monitorAt(1000);
+
+		accept(monitor, 2000);
+		accept(monitor, 2000);
+		accept(monitor, 2000);
+
+		// No interval passed, so no time did either — a clock that ticked here would
+		// age a window on collections that measured nothing.
+		expect(monitor.statsClockTime).toBe(1000);
 	});
 });
