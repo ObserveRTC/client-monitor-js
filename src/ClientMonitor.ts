@@ -37,6 +37,13 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const MODULE_NAME = 'ClientMonitor';
 
+/**
+ * How often, at most, a full sample buffer reports the entries it dropped.
+ * Overflow happens once per added entry, so an unthrottled error per drop
+ * would itself become the flood it is warning about.
+ */
+const DROPPED_SAMPLE_ITEMS_LOG_COOLDOWN_MS = 10_000;
+
 export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
@@ -106,6 +113,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _clientMetaItems: ClientSampleClientMetaData[] = [];
     private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
+    /** How many `createSample()` calls were skipped for want of a consumer. */
+    private _deferredSampleRequests = 0;
+    /** Latched by the first `'sample-created'` listener, never cleared. */
+    private _hadSampleConsumer = false;
+    /** Per buffer: entries dropped on overflow, and when that was last logged. */
+    private readonly _droppedSampleItems = new Map<string, { count: number, lastLoggedAt: number }>();
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
 
@@ -281,6 +294,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 iceRestartRecommendationCooldownInMs: 15000,
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
+            maxBufferedSampleItems: Math.max(1, monitorConfig.maxBufferedSampleItems ?? 1000),
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
@@ -396,18 +410,40 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             this.createSample();
         }
 
+        // Sampling was deferred for this monitor's whole lifetime, so the
+        // buffers go with it. Nobody ever subscribed to receive them, but the
+        // silence is worth one line in the log.
+        if (!this._hadSampleConsumer && 0 < this._deferredSampleRequests) {
+            const buffered = this._clientEvents.length
+                + this._clientMetaItems.length
+                + this._clientIssues.length
+                + this._extensionStats.length;
+
+            this.logger.warn(
+                `[${MODULE_NAME}]:`,
+                `Closing without ever having a 'sample-created' consumer: ${this._deferredSampleRequests} sampling(s) were deferred and ${buffered} buffered entries are discarded.`,
+            );
+        }
+
         this.closed = true;
         this.emit('close');
     }
 
     public on<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
         super.on(event, listener);
+        this._onListenerAdded(event);
 
         return this;
     }
 
+    /** `EventEmitter.addListener` is an alias of `on`, and must stay one here. */
+    public addListener<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
+        return this.on(event, listener);
+    }
+
     public once<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
         super.once(event, listener);
+        this._onListenerAdded(event);
 
         return this;
     }
@@ -517,6 +553,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public createSample(): ClientSample | undefined {
         if (this.closed) return;
+        if (this._shouldDeferSampling()) {
+            ++this._deferredSampleRequests;
+
+            return;
+        }
 
         const clientSample: ClientSample = {
             clientId: this.clientId,
@@ -548,8 +589,124 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             sample: clientSample
         });
         this.lastSampledAt = timestamp;
+        this._reportDroppedSampleItems();
 
         return clientSample;
+    }
+
+    /**
+     * True while no `'sample-created'` consumer has ever subscribed.
+     *
+     * Creating a sample drains the four buffers into it, so a sample built
+     * before anyone listens throws away everything reported since the previous
+     * one — including the `USER_AGENT_DATA` the constructor itself collects.
+     * Rather than sample into the void, hold off entirely and let the buffers
+     * accumulate; the first sample created once a consumer exists carries
+     * everything since construction.
+     *
+     * The cost, and it is a real one: that first sample's `timestamp` no longer
+     * bounds its contents. The timestamp marks when the sample was built, while
+     * the events, meta items, issues and extension stats inside it reach all the
+     * way back to construction. Each entry carries its own `timestamp`, so a
+     * consumer that needs the time of an entry must read the entry's; the
+     * sample-level fields (score, peer connection stats) remain a snapshot of
+     * the moment the sample was built. Nothing describes the deferred period as
+     * a series of samples either: one sample arrives where an
+     * always-subscribed consumer would have seen several.
+     *
+     * The latch is deliberately one-way. It answers "has this monitor ever had
+     * a consumer", which is the window the loss happens in; an application that
+     * detaches its consumer later is back to the ordinary behaviour of samples
+     * being created and reaching nobody, rather than silently hoarding.
+     */
+    private _shouldDeferSampling(): boolean {
+        if (this._hadSampleConsumer) return false;
+        if (0 < this.listenerCount('sample-created')) {
+            this._hadSampleConsumer = true;
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * The first `'sample-created'` consumer takes over the backlog: if sampling
+     * was asked for while nobody was listening, one sample is created here and
+     * now, synchronously, so a consumer that subscribes late does not wait a
+     * whole sampling period for data already sitting in the buffers.
+     *
+     * Nothing happens for a consumer that was there from the start — no
+     * sampling was deferred, so there is nothing to hand over.
+     */
+    private _onListenerAdded(event: keyof ClientMonitorEvents): void {
+        if (event !== 'sample-created') return;
+        if (this._hadSampleConsumer || this.closed) return;
+
+        this._hadSampleConsumer = true;
+
+        if (this._deferredSampleRequests < 1) return;
+
+        this._deferredSampleRequests = 0;
+        this.createSample();
+    }
+
+    /**
+     * Appends an entry to one of the four sample buffers, dropping the oldest
+     * entries of that buffer once it is full.
+     *
+     * The cap is per buffer rather than a single budget shared by the four,
+     * because they fill at wildly different rates: extension stats arrive on
+     * every collecting tick, meta items a handful per session. Under one shared
+     * budget the fastest producer would evict every other kind, starting with
+     * the oldest entry of all — the constructor's `USER_AGENT_DATA`, which is
+     * precisely what deferring sampling exists to preserve. Per buffer bounds
+     * memory just as tightly (four times the cap) and leaves each kind its own
+     * most recent entries.
+     */
+    private _pushSampleItem<T>(buffer: T[], item: T, bufferName: string): void {
+        buffer.push(item);
+
+        const cap = this.config.maxBufferedSampleItems;
+
+        if (buffer.length <= cap) return;
+
+        const dropped = buffer.splice(0, buffer.length - cap).length;
+        const state = this._droppedSampleItems.get(bufferName) ?? { count: 0, lastLoggedAt: 0 };
+
+        state.count += dropped;
+        this._droppedSampleItems.set(bufferName, state);
+
+        const now = Date.now();
+
+        if (state.lastLoggedAt !== 0 && now - state.lastLoggedAt < DROPPED_SAMPLE_ITEMS_LOG_COOLDOWN_MS) return;
+
+        state.lastLoggedAt = now;
+        this.logger.error(
+            `[${MODULE_NAME}]:`,
+            `The ${bufferName} buffer is full at ${cap} entries and dropped ${state.count} of the oldest so far. ` +
+            'Nothing is sampled until a `sample-created` consumer subscribes; subscribe one, or raise `maxBufferedSampleItems`.',
+        );
+    }
+
+    /**
+     * Names everything the caps dropped since the previous sample, on the
+     * sample that is missing it. The throttled overflow errors above report
+     * whatever the total stood at when they were allowed to speak; this one
+     * closes the account, so the totals are never left understated.
+     */
+    private _reportDroppedSampleItems(): void {
+        if (this._droppedSampleItems.size < 1) return;
+
+        const summary = [...this._droppedSampleItems.entries()]
+            .map(([bufferName, { count }]) => `${count} from ${bufferName}`)
+            .join(', ');
+
+        this._droppedSampleItems.clear();
+        this.logger.error(
+            `[${MODULE_NAME}]:`,
+            `This sample is incomplete: the buffer caps dropped ${summary} while it was waiting to be sampled.`,
+        );
     }
 
     public addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor): void {
@@ -601,11 +758,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         const timestamp = event.timestamp ?? Date.now();
 
         // Schema 3.5.0 carries payloads as records — nothing to serialise.
-        this._clientEvents.push({
+        this._pushSampleItem(this._clientEvents, {
             ...event,
             payload: event.payload as ClientSampleClientEvent['payload'],
             timestamp,
-        });
+        }, 'clientEvents');
 
         this.emit('client-event', {
             ...event,
@@ -786,12 +943,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         // is unconditional. Listeners always see the issue.
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
-        this._clientIssues.push({
+        this._pushSampleItem(this._clientIssues, {
             type,
             key,
             payload: payload as ClientSampleClientIssue['payload'],
             timestamp,
-        });
+        }, 'clientIssues');
     }
 
     public addMetaData(metaData: PartialBy<ClientMetaData, 'timestamp'>): void {
@@ -800,11 +957,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         const timestamp = metaData.timestamp ?? Date.now();
 
-        this._clientMetaItems.push({
+        this._pushSampleItem(this._clientMetaItems, {
             type: metaData.type,
             payload: metaData.payload as ClientSampleClientMetaData['payload'],
             timestamp,
-        });
+        }, 'clientMetaItems');
 
         this.emit('meta', {
             ...metaData,
@@ -818,10 +975,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         // Schema 3.5.0 carries payloads as records — nothing to serialise.
-        this._extensionStats.push({
+        this._pushSampleItem(this._extensionStats, {
             type: stats.type,
             payload: stats.payload as ExtensionStat['payload'],
-        });
+        }, 'extensionStats');
 
         this.emit('extension-stats', {
             ...stats,

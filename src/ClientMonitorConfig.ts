@@ -802,6 +802,20 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     sendIceTransportMetadataOnChangeOnly?: boolean;
 
     /**
+     * The largest number of entries each of the four sample buffers (client
+     * events, meta items, issues, extension stats) keeps while it waits to be
+     * sampled. Once a buffer is full its oldest entries are dropped and an
+     * error is logged naming how many were lost.
+     *
+     * The cap matters because no sample is created before the first
+     * `'sample-created'` consumer subscribes, so an application that never
+     * subscribes would otherwise buffer for the lifetime of the page.
+     *
+     * DEFAULT: 1000 (per buffer, so at most 4000 entries in total)
+     */
+    maxBufferedSampleItems: number;
+
+    /**
      * Additional metadata to be included in the client monitor.
      *
      * OPTIONAL

@@ -61,7 +61,7 @@ function collect(monitor: ClientMonitor) {
 }
 
 describe('data reported before the first `sample-created` subscriber', () => {
-	xit('reaches a consumer that subscribes afterwards', () => {
+	it('reaches a consumer that subscribes afterwards', () => {
 		const monitor = createMonitor();
 
 		addTag(monitor, 'first');
@@ -74,7 +74,7 @@ describe('data reported before the first `sample-created` subscriber', () => {
 		monitor.close();
 	});
 
-	xit('includes client events, not only meta data', () => {
+	it('includes client events, not only meta data', () => {
 		const monitor = createMonitor();
 
 		monitor.addEvent({ type: 'EARLY_EVENT' });
@@ -87,7 +87,7 @@ describe('data reported before the first `sample-created` subscriber', () => {
 		monitor.close();
 	});
 
-	xit('includes the user agent data the constructor collects', () => {
+	it('includes the user agent data the constructor collects', () => {
 		// The clearest case: no caller is involved at all. The constructor calls
 		// `fetchUserAgentData()`, so a consumer subscribing after the first
 		// sampling tick never learns the browser it is running in.
@@ -102,7 +102,7 @@ describe('data reported before the first `sample-created` subscriber', () => {
 		monitor.close();
 	});
 
-	xit('keeps the order it was reported in', () => {
+	it('keeps the order it was reported in', () => {
 		const monitor = createMonitor();
 
 		addTag(monitor, 'first');
@@ -120,7 +120,7 @@ describe('data reported before the first `sample-created` subscriber', () => {
 		monitor.close();
 	});
 
-	xit('is delivered once, however many consumers subscribe', () => {
+	it('is delivered once, however many consumers subscribe', () => {
 		const monitor = createMonitor();
 
 		addTag(monitor, 'first');
@@ -137,7 +137,7 @@ describe('data reported before the first `sample-created` subscriber', () => {
 		monitor.close();
 	});
 
-	xit('reaches a consumer that subscribes through `once`', () => {
+	it('reaches a consumer that subscribes through `once`', () => {
 		const monitor = createMonitor();
 
 		addTag(monitor, 'first');
@@ -152,7 +152,7 @@ describe('data reported before the first `sample-created` subscriber', () => {
 		monitor.close();
 	});
 
-	xit('reaches a consumer that subscribes through the `onsamplecreated` setter', () => {
+	it('reaches a consumer that subscribes through the `onsamplecreated` setter', () => {
 		const monitor = createMonitor();
 
 		addTag(monitor, 'first');

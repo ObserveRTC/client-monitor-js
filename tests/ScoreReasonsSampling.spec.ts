@@ -6,13 +6,20 @@ import { InboundTrackMonitor } from "../src/monitors/InboundTrackMonitor";
 const silentLogger = { trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 function createMonitor(config: Record<string, unknown> = {}) {
-	return new ClientMonitor({
+	const monitor = new ClientMonitor({
 		logger: silentLogger,
 		integrateNavigatorMediaDevices: false,
 		addClientJointEventOnCreated: false,
 		addClientLeftEventOnClose: false,
 		...config,
 	});
+
+	// Sampling is deferred until a `sample-created` consumer exists, so a monitor
+	// nobody subscribes to returns nothing from `createSample()`. These tests read
+	// the returned sample, so they need a consumer even though they ignore it.
+	monitor.on('sample-created', () => { /* the consumer these tests sample for */ });
+
+	return monitor;
 }
 
 function addPcWithReasons(monitor: ClientMonitor) {

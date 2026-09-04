@@ -209,6 +209,7 @@ const monitor = new ClientMonitor({
     addClientJointEventOnCreated: true, // Default: true
     addClientLeftEventOnClose: true, // Default: true
     bufferingEventsForSamples: false, // Default: false
+    maxBufferedSampleItems: 1000, // Default: 1000, per buffer
 
     // Detector configurations (all optional).
     //
@@ -1660,12 +1661,28 @@ const monitor = new ClientMonitor({
     bufferingEventsForSamples: true, // Required for manual sampling
 });
 
+// Required: no sample is created while nothing consumes them
+monitor.on("sample-created", ({ sample }) => console.log("Sample:", sample));
+
 // Create sample manually
 const sample = monitor.createSample();
 if (sample) {
     console.log("Manual sample:", sample);
 }
 ```
+
+`createSample()` returns `undefined` until a `sample-created` consumer has
+subscribed. Creating a sample drains the client events, meta items, issues and
+extension stats buffered since the previous one, so sampling before anything
+consumes the result would throw that data away — including the `USER_AGENT_DATA`
+the constructor collects. The monitor therefore keeps the buffers instead, and
+the first sample created once a consumer exists carries everything reported
+since construction. That first sample's `timestamp` marks when it was built, not
+the span it covers; each entry inside it carries its own `timestamp`.
+
+A monitor that never gets a consumer keeps at most `maxBufferedSampleItems`
+entries in each buffer (1000 by default), dropping the oldest and logging an
+error naming how many were lost.
 
 ### Sample Compression
 
