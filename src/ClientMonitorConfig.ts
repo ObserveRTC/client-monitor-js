@@ -29,6 +29,32 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     bufferingEventsForSamples?: boolean,
 
     /**
+     * How many created samples are held back while there is no
+     * `'sample-created'` listener, and replayed in order to the first one that
+     * subscribes.
+     *
+     * Sampling starts with the monitor, not with the consumer: every sample
+     * created before a listener exists used to be emitted to an empty listener
+     * list with its buffers already drained, so client events, meta items,
+     * issues and extension stats reported in that window were lost — including
+     * the user agent data the constructor itself collects. Retained samples
+     * each keep their own `timestamp`, so replaying them preserves the time
+     * windows they bound; nothing is merged into an oversized first sample.
+     *
+     * The queue is bounded and drops the oldest sample beyond the limit,
+     * logging an error naming the total dropped — with a sensibly sized queue
+     * that should never happen, and when it does it means no consumer ever
+     * subscribed, or subscribed far too late. At the default sampling period
+     * the default limit covers a little over four minutes.
+     *
+     * Set to `0` to disable retention entirely and restore the previous
+     * behaviour (samples created before the first subscriber are discarded).
+     *
+     * DEFAULT: 32
+     */
+    maxRetainedSamplesBeforeFirstSubscriber?: number,
+
+    /**
      * Specifies the interval (in milliseconds) at which the observer calls
      * the added statsCollectors and pulls the stats.
      *

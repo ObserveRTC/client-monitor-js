@@ -209,6 +209,7 @@ const monitor = new ClientMonitor({
     addClientJointEventOnCreated: true, // Default: true
     addClientLeftEventOnClose: true, // Default: true
     bufferingEventsForSamples: false, // Default: false
+    maxRetainedSamplesBeforeFirstSubscriber: 32, // Default: 32
 
     // Detector configurations (all optional).
     //
@@ -1649,6 +1650,35 @@ monitor.on("sample-created", (sample) => {
     sendToAnalytics(sample);
 });
 ```
+
+### Subscribing Late
+
+Sampling starts with the monitor, not with the consumer. A `'sample-created'`
+listener that subscribes some time after construction — after an async import,
+after a signaling handshake — would otherwise miss every sample created before
+it existed, including the one carrying the user agent data the constructor
+collects.
+
+Samples created while nothing is listening are therefore retained and replayed,
+in creation order, to the first listener that subscribes:
+
+```javascript
+const monitor = new ClientMonitor({ samplingPeriodInMs: 4000 });
+
+// ...minutes later, once the analytics transport is ready
+monitor.on("sample-created", ({ sample }) => sendToAnalytics(sample));
+// every sample created before this line arrives here first, oldest first
+```
+
+Each retained sample keeps its own `timestamp` and still bounds its own time
+window — nothing is merged into an oversized first sample. The queue holds
+`maxRetainedSamplesBeforeFirstSubscriber` samples (default 32, a little over
+four minutes at the default sampling period) and drops the oldest beyond that,
+logging an error naming how many were lost. Set it to `0` to discard
+unconsumed samples instead of retaining them.
+
+A consumer that subscribes immediately after construction is unaffected: the
+queue is always empty and each sample is emitted exactly once, as before.
 
 ### Manual Sampling
 
