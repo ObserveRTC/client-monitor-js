@@ -159,10 +159,18 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
+		// Weighted by how large the picture is actually being shown: blown up, the coded blocks are
+		// what the viewer complains about; in a thumbnail nobody can see them.
 		const qpScore = this._inboundQpSeverity(trackMonitor);
 
 		if (qpScore) {
-			subtractions['blocky-video'] = qpScore;
+			subtractions['blocky-video'] = qpScore * this._pixelationWeight(trackMonitor.displayMagnification);
+		}
+
+		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
+
+		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
+			trackMonitor.calculatedScore.reasons = subtractions;
 		}
 	}
 
