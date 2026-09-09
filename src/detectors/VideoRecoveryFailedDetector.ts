@@ -1,66 +1,41 @@
 import { Detector } from "./Detector";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
-import { ClientIssuePayload } from "../ClientMonitorEvents";
 
-/**
- * `pliCountSinceStalled` is how many keyframe requests went out since the current unrecovered
- * stretch began, and `stalledForInMs` how long the picture has been stuck with `keyFramesDecoded`
- * not advancing — the two together are the finding: repair was asked for repeatedly and nothing came
- * back.
- */
 export type VideoRecoveryFailedIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
+	/** Keyframe requests sent since the current unrecovered stretch began. */
 	pliCountSinceStalled: number;
+	/** How long the picture has been stuck with `keyFramesDecoded` not advancing. */
 	stalledForInMs: number;
 	freezeCount?: number;
+	/** Filled in when the finding closes. */
 	durationInMs?: number;
 }
 
 export type VideoRecoveryFailedDetectorConfig = {
-	/**
-	 * How long the picture must stay frozen with keyframes not advancing
-	 * before `video-recovery-failed` is raised.
-	 */
+	/** How long the stall must last before the issue is raised. */
 	recoveryFailedThresholdInMs: number;
 
-	/**
-	 * PLIs that must have been sent during the stall — the issue's claim is
-	 * "we asked and nothing came back", so it requires evidence of asking.
-	 */
+	/** PLIs that must have been sent during the stall — evidence that repair was asked for. */
 	recoveryFailedMinPliCount: number;
 }
 
 /**
- * Reports the failure that is worth waking an SFU operator for: keyframes were requested, repeatedly,
- * over a sustained stretch, and none arrived. `video-flow-disrupted` says a viewer is looking at a
- * still picture; this says the repair mechanism that exists to end it is not working, which is a
- * different fault with a different owner. A freeze that repairs itself in a second is a lossy first
- * hop; a freeze where PLI after PLI leaves the client and `keyFramesDecoded` never moves points past
- * the first hop — at forwarding, at a consumer wired to a producer that is gone, at an encoder on the
- * far side that stopped producing keyframes.
+ * Reports a frozen inbound video where keyframes were requested repeatedly and none arrived. Use it
+ * to tell a broken repair loop apart from an ordinary freeze: `video-flow-disrupted` says a viewer
+ * is looking at a still picture, this says the mechanism that exists to end it is not working —
+ * a different fault with a different owner, somewhere past the first hop.
  *
- * The stall condition is derived here from the raw counters, deliberately not from
- * `frameFlowState`: that state is `InboundVideoFlowStateDetector`'s conclusion, and a detector whose
- * verdict depends on another detector's output dies silently the moment that one is disabled, and
- * inherits its judgement calls besides. What this detector actually needs is narrower than "frozen"
- * anyway — frames not rendering *and* `deltaKeyFramesDecoded === 0`, which is the precise statement
- * that the repair did not land. `deltaFramesRendered` missing from the stats counts as rendering: a
- * claim that frames are not arriving needs the counter that says so, not its absence.
- *
- * The clock only starts once a keyframe has actually been asked for. A frozen picture with no PLI in
- * sight is a real problem, but it is a different one — nothing was requested, so nothing failed to
- * come back — and it belongs to the freeze and decoder detectors. Both the stall clock and the PLI
- * count are compared against `recoveryFailedThresholdInMs` and `recoveryFailedMinPliCount`, so the
- * issue's claim ("we asked and nothing came back") always has both halves of its evidence.
- *
- * The clock accumulates each tick's `deltaTime` rather than wall-clock elapsed, so it measures media
- * time: a throttled or backgrounded tab whose collections stall does not silently age a stall into an
- * issue. Backgrounded tabs and paused tracks stand the detector down for the tick without resetting
- * the counters — the stall neither advances nor is forgotten while nobody is watching.
+ * The stall is derived from the raw counters rather than another detector's verdict: frames not
+ * rendering *and* `deltaKeyFramesDecoded === 0`. The clock only starts once a PLI has actually gone
+ * out, and both the stall duration and the PLI count must clear their thresholds, so the claim
+ * always has both halves of its evidence. Time accumulates from each tick's `deltaTime`, so a
+ * throttled tab cannot age a stall into an issue.
  *
  * Issue raised: `video-recovery-failed`. Monitor event: `video-recovery-failed`.
  * Config: `videoRecoveryFailedDetector`.
+ * Track attribute: `InboundTrackMonitor.failedVideoRecovery`.
  *
  * Category: Pipeline Disruption
  * Layer: Beside the receive chain — the repair loop
@@ -95,23 +70,32 @@ export class VideoRecoveryFailedDetector implements Detector {
 	}
 
 	public update() {
-		if (this.disabled) return;
+		if (this.disabled) {
+			this.trackMonitor.failedVideoRecovery = undefined;
+
+			return;
+		}
 
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
-		if (!inboundRtp) return;
-		if (!this.peerConnection.parent.activeTab) return;
-		if (this.trackMonitor.paused) return;
-		if (this.trackMonitor.remoteOutboundTrackPaused) return;
+		// Nothing to read, or an end that is not watching: no recovery to judge.
+		if (!inboundRtp ||
+			!this.peerConnection.parent.activeTab ||
+			this.trackMonitor.paused ||
+			this.trackMonitor.remoteOutboundTrackPaused
+		) {
+			this.trackMonitor.failedVideoRecovery = undefined;
+
+			return;
+		}
 
 		const deltaPli = inboundRtp.deltaPliCount ?? 0;
 		const deltaKeyFrames = inboundRtp.deltaKeyFramesDecoded ?? 0;
-		// Derived from the raw counters, never from `frameFlowState`: no picture is
-		// reaching the renderer and no keyframe landed to make one, which is the
-		// exact shape of a repair that did not arrive.
+		// Raw counters, never `frameFlowState`: no picture reaching the renderer and no keyframe to make one.
 		const stalled = inboundRtp.deltaFramesRendered === 0 && deltaKeyFrames === 0;
 
 		if (!stalled) {
+			this.trackMonitor.failedVideoRecovery = false;
 			this._stalled = false;
 			this._stalledForInMs = 0;
 			this._pliCountSinceStalled = 0;
@@ -121,11 +105,14 @@ export class VideoRecoveryFailedDetector implements Detector {
 			return;
 		}
 
-		// The clock only starts once a keyframe has actually been asked for; a stall with no PLI is a different problem.
+		// Stalled, but recovery has not yet had long enough to be called failed.
+		this.trackMonitor.failedVideoRecovery = false;
+
+		// The clock only starts once a keyframe has actually been asked for.
 		if (deltaPli < 1 && !this._stalled) return;
 
 		if (this._stalled) {
-			// stats time, not wall-clock: a throttled tab must not age a stall into an issue
+			// Stats time, not wall-clock: a throttled tab must not age a stall into an issue.
 			this._stalledForInMs += inboundRtp.deltaTime ?? 0;
 		} else {
 			this._stalled = true;
@@ -139,6 +126,8 @@ export class VideoRecoveryFailedDetector implements Detector {
 		if (this._pliCountSinceStalled < this.config.recoveryFailedMinPliCount) return;
 
 		this._startedAt = Date.now();
+		// Set here, not at the call sites, so the flag and the finding cannot drift.
+		this.trackMonitor.failedVideoRecovery = true;
 
 		const clientMonitor = this.peerConnection.parent;
 
@@ -149,7 +138,8 @@ export class VideoRecoveryFailedDetector implements Detector {
 			stalledForInMs: this._stalledForInMs,
 		});
 
-		clientMonitor.raiseIssue<VideoRecoveryFailedIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: VideoRecoveryFailedDetector.ISSUE_TYPE,
 			payload: {
@@ -163,18 +153,18 @@ export class VideoRecoveryFailedDetector implements Detector {
 	}
 
 	private _resolve(comment: string) {
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
-		let payload: ClientIssuePayload | undefined;
+		const issue = this.trackMonitor.issues.get(this.issueKey);
+		let payload: VideoRecoveryFailedIssuePayload | undefined;
 
 		if (issue) {
 			payload = {
-				...issue.payload,
+				...(issue.payload as VideoRecoveryFailedIssuePayload),
 				durationInMs: this._startedAt ? Date.now() - this._startedAt : undefined,
 			};
 		}
 
-		clientMonitor.resolveIssue(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

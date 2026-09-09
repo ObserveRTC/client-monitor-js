@@ -1,16 +1,11 @@
 import type { IcePathKind } from "../monitors/IceCandidatePairMonitor";
-// Type-only: the monitor imports this detector, so a value import would close that
-// cycle at runtime.
+// Type-only: the monitor imports this detector, so a value import would close the cycle at runtime.
 import type { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import type { Detector } from "./Detector";
 
 export type BlockedOutboundMediaIssuePayload = {
 	peerConnectionId: string;
-	/**
-	 * The path kind of the connection's selected pair — `direct`, `turn-udp`,
-	 * `turn-tcp`, `turn-tls` or `turn-unknown`. With BUNDLE there is one, which is
-	 * the ordinary case; without it, the first selected pair is reported.
-	 */
+	/** The selected pair's path kind. Without BUNDLE, the first selected pair is reported. */
 	pathKind?: IcePathKind;
 	/** How long no receiver report had come back when the issue was raised, in stats time. */
 	blockedForMs: number;
@@ -24,58 +19,29 @@ const ISSUE_TYPE = 'blocked-outbound-media-transport';
 
 export type BlockedOutboundMediaDetectorConfig = {
 	/**
-	 * How long our senders may put packets on a path that STUN says is fine with no
-	 * receiver report coming back, in milliseconds of stats time, before the issue is
-	 * raised. It has to comfortably outlast one RTCP reporting interval — receiver
-	 * reports arrive every few seconds, and browsers space them out further on low
-	 * bitrates — or an ordinary quiet gap between reports reads as a block.
+	 * How long senders may put packets on a STUN-answering path with no receiver report, in ms of
+	 * stats time. Must outlast one RTCP reporting interval, or an ordinary quiet gap reads as a block.
 	 */
 	thresholdInMs: number;
 }
 
 /**
  * Our media leaves and nothing ever comes back about it: senders keep putting packets on a path
- * whose STUN keeps being answered, and no receiver report arrives for `thresholdInMs`.
+ * whose STUN keeps being answered, and no receiver report arrives for `thresholdInMs`. Use it to
+ * name the selective block in the send direction — a middlebox that passes STUN and drops RTP —
+ * as against a total block, which takes STUN with it and belongs to `BlockedStunRequestsDetector`.
  *
- * This is the selective block in the send direction — a middlebox that passes the small,
- * well-known STUN packets and drops RTP. A *total* block takes STUN with it, and
- * `BlockedStunRequestsDetector` owns that; this detector stands down while
- * `PeerConnectionMonitor.blockedTransport` is set, since a path that answers nothing carries
- * nothing and the finding belongs there.
+ * The evidence is the far end's silence rather than its numbers: with `rtcp-mux`, whatever drops
+ * our media drops the reports about it, so a zero packet count is never observed. `remote-inbound-rtp`
+ * carries the three-way reading — a positive `deltaTime` means a report just arrived, `0` a frozen
+ * one served again, `undefined` that none ever came — and only the first clears the window. Idle
+ * senders are not evidence, STUN must have answered somewhere in the window, and every clock is the
+ * connection's own `deltaTime` so a delayed collection is not counted as far-end silence.
  *
- * **The evidence is the far end's silence, not the far end's numbers.** The obvious test —
- * `remote-inbound-rtp` reporting zero packets received — cannot be observed in practice.
- * `rtcp-mux` is on for every WebRTC connection worth monitoring, so RTCP shares the RTP
- * five-tuple: whatever drops our media drops the reports about our media with it. What a blocked
- * sender actually sees is the receiver reports stopping, or never starting at all. Testing the
- * counter instead would be the same class of mistake as gating on media having flowed before — a
- * condition that switches the detector off in exactly the case it exists for.
+ * `inputsUnavailable` is set only where our own send counters are missing: silence is a finding.
  *
- * That makes the reading a three-way one, and the monitors carry it: `remote-inbound-rtp` advances
- * only when a report arrives, so its `deltaTime` is positive on a collection where the far end just
- * spoke, `0` where `getStats()` served the same frozen report again, and `undefined` before a
- * second report has ever been seen. Only a positive value clears the window. A sender whose report
- * has never appeared counts as silent rather than unreadable — a path blocked from its first packet
- * never produces one, and that is the case worth catching.
- *
- * **Only senders that are actually sending are considered.** A sender idle this interval says
- * nothing about the path, and its missing report is not evidence; nor does its report, arriving or
- * not, vouch for the senders that are sending.
- *
- * STUN must have answered at least once during the window, on any of the connection's selected
- * pairs — otherwise this is the path going away rather than a media block, and the ICE detectors
- * own it. "During the window" rather than "this tick": consent runs every 4–6 s against a shorter
- * collecting period, so most ticks carry no response at all.
- *
- * Every clock is the connection's own `deltaTime`, never wall clock: a saturated main thread delays
- * collections, and that delay must not be counted as time the far end spent silent.
- *
- * One instance judges one peer connection. Media flow is a property of the connection rather than
- * of a transport: the far end's reports are per stream, the streams are the connection's, and under
- * BUNDLE every one of them rides the same transport anyway.
- *
- * `inputsUnavailable` is set only where the browser reports no send counters of our own, so we
- * cannot even establish that we are sending. The far end's silence is a finding, never a blindness.
+ * Issue raised: `blocked-outbound-media-transport`. Monitor event:
+ * `blocked-outbound-media-transport`. Config: `blockedOutboundMediaDetector`.
  *
  * Category: Transport Quality
  * Layer: Delivery reliability
@@ -120,8 +86,7 @@ export class BlockedOutboundMediaDetector implements Detector {
 			return this._blockedForInMs !== undefined ? this._clear('ice has not verified any path') : undefined;
 		}
 
-		// A path that has stopped answering STUN is not carrying anything, and the reason
-		// is the path rather than the media.
+		// A path that answers no STUN carries nothing: the fault is the path, not the media.
 		if (this.peerConnection.blockedTransport) {
 			return this._blockedForInMs !== undefined ? this._clear('the transport is blocked') : undefined;
 		}
@@ -140,21 +105,18 @@ export class BlockedOutboundMediaDetector implements Detector {
 
 			packetsSent += sent;
 
-			// A report that just arrived, rather than the last one served again: the
-			// entry's own clock is what separates the two.
+			// A report that just arrived, not the last one served again: only its own clock says which.
 			if (0 < (outboundRtp.getRemoteInboundRtp()?.deltaTime ?? 0)) reportArrived = true;
 		}
 
-		// Not one sender exposes a packet count, so we cannot establish that we are
-		// sending at all. That is blindness, not a verdict.
+		// Nothing exposes a packet count, so we cannot establish we are sending. Blind, not a verdict.
 		if (!sendersReporting) {
 			this.inputsUnavailable = true;
 
 			return this._blockedForInMs !== undefined ? this._clear('our own send counters are not reported') : undefined;
 		}
 
-		// Nothing going out is nothing to judge — a receive-only connection, or senders
-		// that are paused. Not applicable, so the flag stays false.
+		// Nothing going out is nothing to judge — receive-only, or paused senders.
 		if (packetsSent < 1) {
 			return this._blockedForInMs !== undefined ? this._clear('no media is going out') : undefined;
 		}
@@ -187,18 +149,15 @@ export class BlockedOutboundMediaDetector implements Detector {
 			...payload,
 		});
 
-		clientMonitor.raiseIssue<BlockedOutboundMediaIssuePayload>(this._issueKey, {
+		this.peerConnection.issues.raise({
+			key: this._issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: ISSUE_TYPE,
 			payload,
 		});
 	}
 
-	/**
-	 * Ends the window, resolving the issue if one was raised. Every call site tests
-	 * `_blockedForInMs` first: most ticks on a healthy connection have no window open,
-	 * and there is nothing to end.
-	 */
+	/** Ends the window, resolving any raised issue. Call sites test `_blockedForInMs` first. */
 	private _clear(comment: string) {
 		this._blockedForInMs = undefined;
 		this._packetsSent = 0;
@@ -206,13 +165,13 @@ export class BlockedOutboundMediaDetector implements Detector {
 
 		if (this._raisedAt === undefined) return;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this._issueKey);
+		const issue = this.peerConnection.issues.get(this._issueKey);
 
 		if (issue) {
-			clientMonitor.resolveIssue(this._issueKey, {
+			this.peerConnection.issues.resolve({
+				key: this._issueKey,
 				comment,
-				payload: { ...issue.payload, durationInMs: Date.now() - this._raisedAt },
+				payload: { ...issue.payload, durationInMs: Date.now() - this._raisedAt } as BlockedOutboundMediaIssuePayload,
 				resolvedAt: Date.now(),
 			});
 		}

@@ -1,3 +1,4 @@
+import { IssueRegistry, IssueRegistrySink } from "../../src/utils/IssueRegistry";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
@@ -136,6 +137,17 @@ export class MockClientMonitor {
 	public getIssuesByType(type: string) {
 		return this.getIssues().filter((issue) => issue.type === type);
 	}
+	/**
+	 * What a per-monitor `IssueRegistry` forwards into. It routes back through this mock's own
+	 * `raiseIssue` / `resolveIssue`, so assertions on `activeIssues` read exactly as before.
+	 */
+	public readonly issueUplink: IssueRegistrySink = {
+		notify: (issue: any) => { this.raiseIssue(issue.type, issue); },
+		raise: (issue: any) => { this.raiseIssue(issue.key, issue); },
+		update: (issue: any) => { this.raiseIssue(issue.key, issue); },
+		resolve: (issue: any) => { this.resolveIssue(issue.key, issue); },
+	};
+
 }
 
 export class MockCandidatePair {
@@ -164,6 +176,12 @@ export class MockCandidatePair {
 }
 
 export class MockIceTransport {
+	/**
+	 * The transport's own registry. In the real object it uplinks into its peer connection, which
+	 * uplinks into the client — three layers. Here it goes straight to the client's uplink,
+	 * because the mock connection is not always attached when a transport is built.
+	 */
+	public issues!: IssueRegistry;
 	public dtlsState: string | undefined = 'connected';
 	public selectedCandidatePairId: string | undefined = 'pair-1';
 	public iceLocalUsernameFragment: string | undefined = 'ufrag-1';
@@ -219,6 +237,8 @@ export class MockIceTransport {
 export class MockPeerConnectionMonitor {
 	public peerConnectionId = 'test-pc-id';
 	public parent = new MockClientMonitor();
+	/** This connection's own active issues, uplinked into the client monitor. */
+	public readonly issues: IssueRegistry = new IssueRegistry(this.parent.issueUplink);
 	public closed = false;
 	public connectionState: string | undefined = 'connected';
 	public connectingStartedAt: number | undefined = undefined;
@@ -234,7 +254,12 @@ export class MockPeerConnectionMonitor {
 	public set iceTransports(transports: MockIceTransport[]) {
 		this._iceTransports = transports;
 
-		for (const transport of transports) transport.peerConnection = this;
+		for (const transport of transports) {
+			transport.peerConnection = this;
+			// Three layers in the real object; the mock collapses the middle one, because a
+			// transport is often built before any connection is attached to it.
+			transport.issues = new IssueRegistry(this.parent.issueUplink);
+		}
 	}
 	public iceCandidatePairs: MockCandidatePair[] = [];
 	public iceCandidates: { direction: 'local' | 'remote', candidateType?: string }[] = [];

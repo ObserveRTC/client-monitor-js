@@ -2,20 +2,16 @@ import { IceTransportMonitor } from "../monitors/IceTransportMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
-/**
- * `everConnected` is the transport's own latch, not a guess: `true` means this transport reached
- * `connected` or `completed` at some point before it failed. `iceGeneration` counts the ICE restarts
- * observed on this transport so far, and `durationInMs` is filled in when the failure is resolved by
- * a recovery or a restart.
- */
 export type IceConnectionFailedIssuePayload = {
 	peerConnectionId: string;
 	transportId: string;
 	dtlsState?: string;
 	selectedCandidatePairId?: string;
-	/** Whether this transport had ever reached `connected`/`completed` before it failed. */
+	/** The transport's own latch: had it ever reached `connected`/`completed` before failing. */
 	everConnected: boolean;
+	/** ICE restarts observed on this transport so far. */
 	iceGeneration: number;
+	/** Filled in when the failure is resolved. */
 	durationInMs?: number;
 };
 
@@ -28,42 +24,25 @@ type TransportState = {
 
 const ISSUE_TYPE = 'ice-connection-failed';
 
-/**
- * `IceConnectionFailedDetector` has no tunables — a terminal state needs no threshold, so there is
- * nothing to move. The type exists so the detector can be disabled on its own: `{}` enables it,
- * `null` disables it.
- */
+/** No tunables — a terminal state needs no threshold. `{}` enables the detector, `null` disables it. */
 export type IceConnectionFailedDetectorConfig = Record<string, never>;
 
 /**
- * Reports an ICE transport the browser has given up on. Unlike `disconnected`, `failed` is terminal
- * for the ICE generation — the browser will not retry candidates on its own — so there is nothing to
- * wait out and the issue is raised on the first tick that reports it. Waiting would only delay the
- * report of something that has already finished happening.
+ * Reports an ICE transport the browser has given up on. Use `everConnected` in the payload to
+ * tell apart the two faults that share the `failed` state and share nothing else: a path that
+ * **never worked** (no candidate pair ever won — symmetric NAT with no TURN, a firewall eating
+ * the checks, a credential that never arrived) and a path that **worked and was lost** (the
+ * interface changed, the NAT binding expired, the route died).
  *
- * The payload carries `everConnected`, read from the transport's own latch, because `failed` on its
- * own conflates two faults that share a state and share nothing else. `everConnected: false` is a
- * path that **never worked**: no candidate pair ever won, which points at what was tried and what
- * was reachable — symmetric NAT with no TURN, a firewall eating the checks, a TURN credential the
- * client never got. `everConnected: true` is a path that **worked and was lost**: connectivity that
- * existed and then stopped, which points at the network underneath — the interface changed, the NAT
- * binding expired, the route died. The evidence to gather and the fix are different in each case,
- * and a reader with only `failed` cannot tell which one they are looking at.
+ * `failed` is terminal for the ICE generation, so the issue is raised on the first tick that
+ * reports it rather than waited out. A changed ICE local username fragment means a new
+ * generation: the standing issue is resolved so the next failure raises again with the
+ * generation counter incremented.
  *
- * A changed ICE local username fragment means a new ICE generation, whose failure is a fresh
- * finding: the standing issue is resolved so the next `failed` under the new generation raises again
- * with the generation counter incremented. The fragment is read here rather than asked of
- * `IceRestartDetector`, so neither detector depends on the other or on the order they run in.
- *
- * What it deliberately does not claim: a cause. `failed` says candidate checking ended without a
- * usable pair; it does not say whether that was the network, the TURN configuration or the far end,
- * and this detector reports the fact plus the one distinction — `everConnected` — that the stats can
- * actually support.
+ * It does not claim a cause — only the fact, plus the one distinction the stats can support.
  *
  * Issue raised: `ice-connection-failed`, resolved when ICE comes back, when an ICE restart is
- * inferred, or when the transport goes away. Config: `iceConnectionFailedDetector` — `{}` registers
- * the detector, `null` leaves it unregistered. The block holds no values, since a terminal state has
- * no threshold to wait out.
+ * inferred, or when the transport goes away. Config: `iceConnectionFailedDetector`.
  *
  * Category: Connectivity
  * Layer: 5 — Path continuity
@@ -128,9 +107,8 @@ export class IceConnectionFailedDetector implements Detector {
 
 		state.raisedAt = Date.now();
 
-		this.peerConnection.parent.raiseIssue<IceConnectionFailedIssuePayload>(
-			this._issueKey(transport.id),
-			{
+		this.peerConnection.issues.raise({
+				key: this._issueKey(transport.id),
 				includeInSample: this.includeIssueInSample,
 				type: ISSUE_TYPE,
 				payload: {
@@ -173,13 +151,13 @@ export class IceConnectionFailedDetector implements Detector {
 
 		state.raisedAt = undefined;
 
-		const clientMonitor = this.peerConnection.parent;
 		const key = this._issueKey(transportId);
-		const issue = clientMonitor.activeIssues.get(key);
+		const issue = this.peerConnection.issues.get(key);
 
 		if (!issue) return;
 
-		clientMonitor.resolveIssue<IceConnectionFailedIssuePayload>(key, {
+		this.peerConnection.issues.resolve({
+			key: key,
 			comment,
 			payload: {
 				...(issue.payload as IceConnectionFailedIssuePayload),

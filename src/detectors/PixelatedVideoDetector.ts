@@ -11,6 +11,7 @@ export type PixelatedVideoIssuePayload = {
 	framesPerSecond?: number;
 	/** How long the picture stayed this coarse before raising, from stats timestamps. */
 	sustainedForInMs: number;
+	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 }
 
@@ -26,25 +27,21 @@ export type PixelatedVideoDetectorConfig = {
 }
 
 /**
- * Reports video the viewer would call blocky or smeared — a picture being drawn with too few bits
- * for its size, for long enough to be worth complaining about. Nothing has stalled: frames arrive,
- * decode and render on time, and the experience is still bad. That is the whole of Perceived
- * Quality, and it is why this cannot be inferred from any pipeline detector.
+ * Reports video the viewer would call blocky or smeared: a picture drawn with too few bits for
+ * its size, long enough to be worth complaining about. Use it for the case no pipeline detector
+ * can reach — nothing has stalled, frames arrive, decode and render on time, and the experience
+ * is still bad.
  *
- * The judgement is `bitPerPixel` — bitrate divided by width × height × frame rate — which the
- * inbound RTP monitor already computes every tick and which, until now, nothing read. Putting the
- * arithmetic on the monitored object and leaving only the comparison here is deliberate: the derived
- * value is a fact about the stream that anything may want, while the threshold is an opinion that
- * belongs to whoever is judging.
+ * The judgement is `bitPerPixel` — bitrate over width × height × frame rate — which the inbound
+ * RTP monitor already computes each tick; only the comparison lives here. It is preferred to
+ * quantizer parameters because `qpSum` is optional and its scale differs between codecs.
  *
- * `bitPerPixel` was chosen over quantizer parameters for a plain reason: `qpSum` is optional, absent
- * on some codecs, and its scale differs between them, so a QP threshold is really a per-codec table
- * that silently produces nothing where it has no entry. Bits per pixel is derived from three fields
- * every browser reports, and it means the same thing everywhere.
+ * A finding means the sender is encoding this stream at too low a bitrate for its size: their
+ * uplink is limited, an SFU is forwarding a low simulcast layer, or the encoder was configured for
+ * less than the resolution needs.
  *
- * It is not a precise perceptual model and does not pretend to be — a static screen share legitimately
- * spends very few bits per pixel and looks perfect, which is why screen shares are excluded rather
- * than special-cased with a second threshold.
+ * It is not a perceptual model. A static screen share legitimately spends very few bits per pixel
+ * and looks perfect, so screen shares are excluded rather than given a second threshold.
  *
  * Issue raised: `pixelated-video`. Monitor event: `pixelated-video`.
  * Config: `pixelatedVideoDetector`.
@@ -94,8 +91,7 @@ export class PixelatedVideoDetector implements Detector {
 			return;
 		}
 
-		// A static slide spends almost nothing per pixel and looks perfect. Judging
-		// screen shares by this measure would report every one of them.
+		// A static slide spends almost nothing per pixel and looks perfect.
 		if (this.trackMonitor.isScreenShare) {
 			this._sustainedForInMs = 0;
 
@@ -107,9 +103,7 @@ export class PixelatedVideoDetector implements Detector {
 		const bitPerPixel = inboundRtp.bitPerPixel;
 
 		if (bitPerPixel === undefined) {
-			// No bitrate, no frame size, or no frame rate this tick — nothing has
-			// been observed about picture quality, which is not the same as the
-			// picture being fine.
+			// Missing bitrate, frame size or frame rate. Blind, not healthy.
 			this.inputsUnavailable = true;
 
 			return;
@@ -143,7 +137,8 @@ export class PixelatedVideoDetector implements Detector {
 			bitPerPixel,
 		});
 
-		clientMonitor.raiseIssue<PixelatedVideoIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: PixelatedVideoDetector.ISSUE_TYPE,
 			payload: {
@@ -161,8 +156,7 @@ export class PixelatedVideoDetector implements Detector {
 	private _resolve(comment: string) {
 		this._raised = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: PixelatedVideoIssuePayload | undefined;
 
 		if (issue) {
@@ -172,7 +166,8 @@ export class PixelatedVideoDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<PixelatedVideoIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

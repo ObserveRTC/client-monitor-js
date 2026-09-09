@@ -28,6 +28,8 @@ import { VideoFlowIssuePayload } from "./detectors/InboundVideoFlowStateDetector
 import { BlockedTransportIssuePayload } from "./detectors/BlockedStunRequestsDetector";
 import { BlockedOutboundMediaIssuePayload } from "./detectors/BlockedOutboundMediaDetector";
 import { BlockedInboundMediaIssuePayload } from "./detectors/BlockedInboundMediaDetector";
+import { UplinkCongestionIssuePayload } from "./detectors/UplinkCongestionDetector";
+import { DownlinkCongestionIssuePayload } from "./detectors/DownlinkCongestionDetector";
 import { DtlsHandshakeFailedIssuePayload } from "./detectors/DtlsHandshakeFailedDetector";
 import { DtlsHandshakeStalledIssuePayload } from "./detectors/DtlsHandshakeStalledDetector";
 import { IcePathEstablishmentStage } from "./detectors/IcePathEstablishmentDetector";
@@ -36,12 +38,9 @@ import { RtpSenderStalledIssuePayload } from "./detectors/RtpSenderStalledDetect
 import { TransportDemuxStalledIssuePayload } from "./detectors/TransportDemuxStalledDetector";
 
 /**
- * The shape every sampled payload must have — client events, client issues,
- * meta items and extension stats all carry this. Since schema 3.7.0 payloads
- * may carry nested structures, not only flat records of primitives; they are
- * records on the wire, never pre-serialised JSON strings. `undefined` and
- * `null` entries are legal on the API (DOM types produce them); `undefined`
- * keys disappear when the sample serialises.
+ * The shape every sampled payload has — client events, issues, meta items and
+ * extension stats alike. Nested structures are allowed; payloads are records on
+ * the wire, never pre-serialised JSON. `undefined` keys drop on serialisation.
  */
 export type ClientPayload = Record<string, unknown>;
 
@@ -50,20 +49,24 @@ export type ClientIssuePayload = ClientPayload;
 /**
  * One-shot issue, produced by `ClientMonitor.addIssue`. Emitted as `'issue'`
  * and buffered into the next sample, but never enters the active store and
- * cannot be resolved. Severity should be inferred by the application from
- * `type`.
+ * cannot be resolved.
  */
 export type AddedClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = {
 	type: string;
 	payload?: T;
 	timestamp: number;
+	/**
+	 * Whether this is buffered into the next ClientSample; `undefined` reads as true. Present on
+	 * the one-shot issue as well as the stateful one, so a detector's `includeIssueInSample`
+	 * survives the trip up the registry chain instead of being dropped at the first hop.
+	 */
+	includeInSample?: boolean;
 }
 
 /**
- * Stateful issue, produced by `ClientMonitor.raiseIssue`. `key` is mandatory
- * and is the global identity within this monitor — it's also the handle used
- * to resolve. Re-raising with the same `key` updates the existing entry in
- * place (payload refreshed, `updatedAt` bumped) and emits `'issue-updated'`.
+ * Stateful issue, produced by `ClientMonitor.raiseIssue`. `key` is its identity
+ * within the monitor and the handle used to resolve it; re-raising the same key
+ * updates the entry in place and emits `'issue-updated'`.
  */
 export type RaisedClientIssue<T extends ClientIssuePayload = ClientIssuePayload> = {
 	key: string;
@@ -74,12 +77,9 @@ export type RaisedClientIssue<T extends ClientIssuePayload = ClientIssuePayload>
 	/** Wall-clock time of the most recent raise/update call. */
 	updatedAt: number;
 	/**
-	 * Whether this issue is buffered into the `ClientSample` shipped to the
-	 * server. Set from `raiseIssue`'s `includeInSample` option — the built-in
-	 * detectors populate it from their public `includeIssueInSample` field.
-	 * When `false`, neither the raise entry nor the matching resolution entry
-	 * reaches the sample; the local lifecycle (events, `activeIssues`) is
-	 * unaffected. Defaults to true when omitted.
+	 * Whether this issue is buffered into the `ClientSample`. When `false`,
+	 * neither the raise nor the resolution entry reaches the sample; the local
+	 * lifecycle is unaffected. Defaults to true.
 	 */
 	includeInSample?: boolean;
 }
@@ -134,53 +134,43 @@ export type StatsCollectedEventPayload = ClientMonitorBaseEvent & {
 	collectedStats: [string, RtcStats[]][],
 }
 
+/** Derived from the issue payload, so the event and the issue cannot drift apart. */
 export type UplinkCongestionEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
-	availableOutgoingBitrate: number;
-	sendingBitrate: number;
-	headroomInBps: number;
-	baselineHeadroomInBps: number;
-	maxAvailableOutgoingBitrate?: number;
-	/** How sure the detector was, `0..1`, with the two halves it came from. */
-	confidence: number;
-	narrowing: number;
-	queueing: number;
-	packetSendDelayInMs: number;
-	baselinePacketSendDelayInMs: number;
-	rttInMs?: number;
-}
+} & UplinkCongestionIssuePayload;
 
+/** Derived from the issue payload, so the event and the issue cannot drift apart. */
 export type DownlinkCongestionEventPayload = ClientMonitorBaseEvent & {
 	peerConnectionMonitor: PeerConnectionMonitor,
-	receivingBitrate: number;
-	maxReceivingBitrate: number;
-	jitterBufferDelayInMs: number;
-	baselineJitterBufferDelayInMs: number;
-	fractionLost?: number;
-}
+} & DownlinkCongestionIssuePayload;
 
 /** Which of a connection's two paths a congestion event is about. */
 export type CongestionDirection = 'uplink' | 'downlink';
 
 /**
  * The direction-agnostic feed: emitted alongside `uplink-congestion` or
- * `downlink-congestion` whenever either of them fires, for an application that
- * only wants to know this connection is capacity-limited *somewhere* — a
- * network-quality badge, a "your connection is unstable" banner.
- *
- * It carries the whole payload of whichever detector fired, discriminated on
- * `direction`, because the evidence for the two directions is genuinely
- * different and flattening it into shared field names would mean calling a
- * bandwidth estimate and an arriving bitrate the same thing. Narrow on
- * `direction` to read the rest.
- *
- * A connection congested both ways fires it twice, once per direction, as the
- * two findings open. Neither detector consults the other to decide, so two
- * arrivals mean two independent verdicts rather than one restated.
+ * `downlink-congestion` whenever either fires, for applications that only need
+ * to know the connection is capacity-limited somewhere. Carries whichever
+ * detector's payload fired, discriminated on `direction`; a connection
+ * congested both ways fires it once per direction.
  */
-export type CongestionEventPayload =
-	| (UplinkCongestionEventPayload & { direction: 'uplink' })
-	| (DownlinkCongestionEventPayload & { direction: 'downlink' });
+/**
+ * **Deprecated**, and dedicated to `CongestionDetector`: one verdict for the whole connection, with
+ * the headroom that preceded the episode. Nothing else emits on this event — the detectors that
+ * replaced it report on `uplink-congestion` and `downlink-congestion`, each on its own evidence and
+ * with a graded severity.
+ *
+ * @deprecated Listen for `uplink-congestion` / `downlink-congestion`.
+ */
+export type CongestionEventPayload = ClientMonitorBaseEvent & {
+	peerConnectionMonitor: PeerConnectionMonitor,
+	availableIncomingBitrate: number;
+	availableOutgoingBitrate: number;
+	maxAvailableIncomingBitrate: number;
+	maxAvailableOutgoingBitrate: number;
+	maxReceivingBitrate: number;
+	maxSendingBitrate: number;
+}
 
 export type AVDesyncPlayoutEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
@@ -193,6 +183,8 @@ export type AVDesyncPlayoutEventPayload = ClientMonitorBaseEvent & {
 
 export type SynthesizedAudioEventPayload = ClientMonitorBaseEvent & {
 	mediaPlayoutMonitor: MediaPlayoutMonitor,
+	/** The inbound audio track that reported it; several can share one playout device. */
+	trackMonitor: InboundTrackMonitor,
 }
 
 export type DryInboundTrackEventPayload = ClientMonitorBaseEvent & {
@@ -208,10 +200,8 @@ export type IcePathEstablishmentSlowEventPayload = ClientMonitorBaseEvent & {
 	/** Which stage of establishment the connection is actually stuck in. */
 	stalledStage: IcePathEstablishmentStage,
 	/**
-	 * How much observed `connecting` this attempt had accumulated when the threshold was crossed,
-	 * summed from the peer connection's `deltaTime`. Deliberately not the wall-clock elapsed since
-	 * the attempt began: the two diverge the moment collection runs late, and this is the figure the
-	 * verdict was actually reached on.
+	 * Observed `connecting` time accumulated when the threshold was crossed,
+	 * summed from `deltaTime` rather than measured against the wall clock.
 	 */
 	sustainedForInMs: number,
 }
@@ -304,11 +294,6 @@ export type TransportLossSustainedEventPayload = ClientMonitorBaseEvent & {
 	direction: 'inbound' | 'outbound',
 }
 
-export type TransportDeliveryUnstableEventPayload = ClientMonitorBaseEvent & {
-	peerConnectionMonitor: PeerConnectionMonitor,
-	jitterInMs: number,
-}
-
 export type PixelatedVideoEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
 	bitPerPixel: number,
@@ -330,11 +315,6 @@ export type VideoDecoderOverloadedEventPayload = ClientMonitorBaseEvent & {
 	decodeTimePerFrameInMs?: number,
 	/** The per-frame budget the decode time was compared against. */
 	frameBudgetInMs?: number,
-}
-
-export type KeyframeStormEventPayload = ClientMonitorBaseEvent & {
-	trackMonitor: InboundTrackMonitor,
-	pliRate: number,
 }
 
 export type VideoRecoveryFailedEventPayload = ClientMonitorBaseEvent & {
@@ -416,10 +396,8 @@ export type StatsCollectionGapEventPayload = ClientMonitorBaseEvent & {
 export type ScoreEventPayload = ClientMonitorBaseEvent & {
 	clientScore: number,
 	/**
-	 * Every component's score reasons summed by key — each peer connection's own
-	 * plus each track's. This is the aggregated view, for reacting live to a
-	 * drop; the per-entity attribution is on each monitor's `scoreReasons` and in
-	 * the sample.
+	 * Every component's score reasons summed by key. Per-entity attribution is
+	 * on each monitor's own `scoreReasons` and in the sample.
 	 */
 	currentReasons: Record<string, number>,
 }
@@ -533,12 +511,10 @@ export type ClientMonitorEvents = {
 	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
 	'transport-delay-degraded': [TransportDelayDegradedEventPayload],
 	'transport-loss-sustained': [TransportLossSustainedEventPayload],
-	'transport-delivery-unstable': [TransportDeliveryUnstableEventPayload],
 	'pixelated-video': [PixelatedVideoEventPayload],
 	'video-flow-disrupted': [VideoFlowIssueEventPayload],
 	'frame-assembly-stalled': [FrameAssemblyStalledEventPayload],
 	'video-decoder-overloaded': [VideoDecoderOverloadedEventPayload],
-	'keyframe-storm': [KeyframeStormEventPayload],
 	'video-recovery-failed': [VideoRecoveryFailedEventPayload],
 	'stuck-decoder': [StuckDecoderEventPayload],
 	'capture-bottleneck': [CaptureBottleneckEventPayload],

@@ -14,71 +14,36 @@ export type InventedSpeechIssuePayload = {
 }
 
 export type InventedSpeechDetectorConfig = {
-	/**
-	 * Share of audio (`0..1`) that may be invented without counting against the
-	 * stream. NetEQ always fabricates a little and a little is inaudible; this is
-	 * the line above which fabrication starts accumulating, and below which it
-	 * drains away again. RFC 7294 puts severe concealment at 5% of a second,
-	 * which is where the default comes from.
-	 */
+	/** Share of audio (`0..1`) that may be invented for free. Also the drain rate. */
 	allowedInventedRatio: number;
 
 	/**
-	 * Invented milliseconds *beyond* the allowance that must accumulate before the
-	 * issue is raised. Because the allowance is also the drain rate, this doubles
-	 * as the resolve bar: a full accumulator empties after
-	 * `raiseAfterInventedMs / allowedInventedRatio` milliseconds of clean audio.
-	 * At the defaults that is 0.4s of excess invention to open and 8s of clean
-	 * audio to close.
+	 * Invented milliseconds beyond the allowance needed to raise. Doubles as the resolve bar: a full
+	 * accumulator empties after `raiseAfterInventedMs / allowedInventedRatio` ms of clean audio.
 	 */
 	raiseAfterInventedMs: number;
 }
 
 /**
- * Reports a listener being fed audio the sender never sent — sustained enough to be the thing
- * behind a "they were breaking up" complaint.
+ * Reports a listener being fed audio the sender never sent. Use it to answer how a call actually
+ * sounded, which packet loss cannot: NetEQ hides a great deal of loss inaudibly, and audio falls
+ * apart without dramatic loss when the jitter buffer misbehaves. What a listener hears is the
+ * fabrication, so that is what is measured — `inboundRtp.inventedSpeechRatio`, which excludes
+ * concealment during talker silence because nobody can hear the difference there.
  *
- * When packets are missing or late, NetEQ does not fall silent; it fabricates audio from what came
- * before so playout never stops. That is usually the right trade and usually inaudible, which is why
- * packet loss is a poor proxy for how a call sounded: Opus and NetEQ hide a great deal of loss
- * perfectly, and audio falls apart without dramatic loss when the jitter buffer misbehaves. What the
- * listener actually hears is the fabrication, so that is what this measures.
+ * Each tick contributes `ratio × deltaTime` of invention against `allowedInventedRatio × deltaTime`
+ * of tolerance, moving one accumulator clamped to `raiseAfterInventedMs`. The issue opens when it
+ * is full and closes when it is empty. Integrating a rate makes the verdict independent of the
+ * collection period, and a clean tick drains only the allowance, so a breath between two bad
+ * stretches does not end the episode.
  *
- * The measurement is `inboundRtp.inventedSpeechRatio`, computed on the monitor: concealed samples
- * with the silent ones subtracted, over the samples that arrived. Concealment during talker silence
- * produces silence or comfort noise that nobody can distinguish from the real thing, so counting it
- * would make every quiet moment of every call read as a fault.
+ * A finding means this listener heard fabricated audio for a sustained stretch: loss or jitter on
+ * the path from that talker, or a jitter buffer that could not keep up with it. It is per stream, so
+ * one talker firing points at their uplink and every talker firing points at this listener's
+ * downlink.
  *
- * **The accumulator.** Each tick contributes `ratio × deltaTime` milliseconds of invention and is
- * credited `allowedInventedRatio × deltaTime` of tolerance; the difference moves one accumulator,
- * clamped between zero and `raiseAfterInventedMs`. Above the allowance it fills, below it drains.
- * The issue opens when the accumulator is full and closes when it is empty.
- *
- * Two properties follow from that shape, and both are the point of it:
- *
- * *It does not care how often you poll.* An earlier design classified each tick as bad or good
- * against a threshold and then added the whole tick duration, which meant a bad second inside a
- * five-second collection got averaged down by five and the detector's sensitivity depended on
- * `collectingPeriodInMs`. Integrating a rate over elapsed time has no such artefact — the same audio
- * produces the same accumulator trajectory at any collection period.
- *
- * *Brief pauses do not end an episode.* A clean tick drains only the allowance, so at the defaults a
- * two-second gap costs a quarter of a full accumulator. Someone who breaks up, pauses for breath and
- * breaks up again keeps accumulating, while genuinely recovered audio still closes the issue after
- * about eight seconds. A long silence does drain it to empty and resolve — which is right, since
- * there is no ongoing problem to report while nobody is speaking, and it reopens within seconds if
- * they resume badly.
- *
- * What it cannot do is distinguish one second at 25% from five seconds at 5%; both are 200ms of
- * excess. That is the price of poll-independence and the right trade for an issue with raise and
- * resolve semantics. Note also that resolving takes `raiseAfterInventedMs / allowedInventedRatio` of
- * stats time — 8s at the defaults — so a collection period longer than that would let a single clean
- * tick drain a full accumulator.
- *
- * This is not RFC 7294's per-second classifier and does not claim to be. It keeps the RFC's 5%
- * meaning the same thing — the share of audio that was invented — but applies it as a sustained rate
- * rather than a per-second verdict, because a cumulative counter sampled every few seconds cannot
- * see inside a tick.
+ * It cannot tell one second at 25% from five at 5%, and it is not RFC 7294's per-second classifier:
+ * the same 5% applied as a sustained rate rather than a verdict on each second.
  *
  * Issue raised: `invented-speech`. Monitor event: `invented-speech`.
  * Config: `inventedSpeechDetector`.
@@ -121,8 +86,7 @@ export class InventedSpeechDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 
-		// Nothing is being sent, so there is nothing to invent. The accumulator is
-		// discarded rather than drained, so a pause cannot leak into the next episode.
+		// Discarded rather than drained, so a pause cannot leak into the next episode.
 		if (this.trackMonitor.paused) {
 			this._bucketInMs = 0;
 
@@ -137,9 +101,7 @@ export class InventedSpeechDetector implements Detector {
 		const ratio = inboundRtp.inventedSpeechRatio;
 
 		if (ratio === undefined) {
-			// The browser reported no concealment counters, or no samples arrived.
-			// Either way nothing was observed about how this sounded, which is not
-			// the same as it having sounded fine.
+			// No concealment counters, or no samples arrived. Blind, not fine.
 			this.inputsUnavailable = true;
 
 			return;
@@ -147,9 +109,7 @@ export class InventedSpeechDetector implements Detector {
 
 		this.inputsUnavailable = false;
 
-		// How much of this interval was invented, against how much invention is
-		// tolerated over the same span. One expression covers both directions: above
-		// the allowance it fills, below it drains.
+		// One expression covers both directions: above the allowance it fills, below it drains.
 		const elapsedInMs = inboundRtp.deltaTime ?? 0;
 		const inventedInMs = ratio * elapsedInMs;
 		const allowedInMs = this.config.allowedInventedRatio * elapsedInMs;
@@ -160,15 +120,21 @@ export class InventedSpeechDetector implements Detector {
 		);
 
 		if (this._raised) {
-			if (this._bucketInMs <= 0) this._clear('audio recovered');
+			if (this._bucketInMs <= 0) return this._clear('audio recovered');
 
-			return;
+			return this.trackMonitor.issues.update({
+				key: this.issueKey,
+				payload: {
+					excessInventedMs: this._bucketInMs,
+					inventedSpeechRatio: ratio,
+				},
+			});
 		}
 
 		if (this._bucketInMs < this.config.raiseAfterInventedMs) return;
 
 		this._raised = true;
-		// wall clock, deliberately: only ever read to report how long the issue stood
+		// Wall clock, and only for the resolved issue's `durationInMs`.
 		this._startedAt = Date.now();
 
 		const clientMonitor = this.peerConnection.parent;
@@ -179,7 +145,8 @@ export class InventedSpeechDetector implements Detector {
 			inventedSpeechRatio: ratio,
 		});
 
-		clientMonitor.raiseIssue<InventedSpeechIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: InventedSpeechDetector.ISSUE_TYPE,
 			payload: {
@@ -194,8 +161,7 @@ export class InventedSpeechDetector implements Detector {
 	private _clear(comment: string) {
 		this._raised = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: InventedSpeechIssuePayload | undefined;
 
 		if (issue) {
@@ -205,7 +171,8 @@ export class InventedSpeechDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<InventedSpeechIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

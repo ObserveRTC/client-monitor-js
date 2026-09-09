@@ -1,5 +1,4 @@
 import { Detectors } from "../detectors/Detectors";
-import { AudioPlayoutSynthesisDetector } from "../detectors/AudioPlayoutSynthesisDetector";
 import { MediaPlayoutStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
@@ -7,6 +6,11 @@ import { positiveDelta } from "../utils/common";
 
 export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	private _visited = true;
+	/**
+	 * Empty as it stands: `AudioPlayoutSynthesisDetector` moved to the inbound tracks that feed this
+	 * device, where it can be judged per track. Kept as the registration point for any detector that
+	 * belongs to the device itself rather than to a stream playing through it.
+	 */
 	public readonly detectors = new Detectors();
 
 	timestamp: number;
@@ -24,34 +28,18 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	public deltaTotalPlayoutDelay?: number | undefined;
 	public deltaSamplesCount?: number | undefined;
 
-	/**
-	 * Milliseconds between this stats report and the previous one, from the
-	 * reports' own timestamps. Detectors accumulate this to measure how long a
-	 * condition has held, so a late or skipped collection still measures the
-	 * time the condition actually held underneath.
-	 */
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
 	deltaTime?: number | undefined;
 
-	/**
-	 * Average playout delay per sample in this interval, in milliseconds —
-	 * `totalPlayoutDelay` alone grows forever and cannot be compared to a
-	 * threshold.
-	 */
+
+	/** Average playout delay per sample in this interval, in milliseconds. */
 	public playoutDelayPerSampleInMs?: number | undefined;
 
-	/**
-	 * Share of the playout duration in this interval that was synthesized
-	 * (concealment / stretching) rather than real received audio, in `0..1`.
-	 */
+	/** Share of this interval's playout that was synthesized rather than received audio, `0..1`. */
 	public synthesizedSamplesRatio?: number | undefined;
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -64,11 +52,6 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 		Object.assign(this, options);
 
-		if (this._peerConnection.parent.config.audioPlayoutSynthesisDetector !== null) {
-			this.detectors.add(
-				new AudioPlayoutSynthesisDetector(this),
-			);
-		}
 	}
 
 	public get visited(): boolean {
@@ -79,16 +62,7 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		return result;
 	}
 
-	/**
-	 * Milliseconds of **stats time** this monitor has observed, accumulated from
-	 * `deltaTime` — the clock every window and duration in the library is measured
-	 * on, and the one thing `Date.now()` must never stand in for.
-	 *
-	 * It advances by what each collection actually cost rather than by one nominal
-	 * period, so a late or skipped collection widens a window by the time the
-	 * condition really held underneath. It never goes backwards and it is not a
-	 * timestamp: only differences between two readings of it mean anything.
-	 */
+	/** Accumulated stats time. Only differences between two readings mean anything. */
 	public statsClockTime = 0;
 
 	public getPeerConnection() {

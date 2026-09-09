@@ -1,24 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { IssueRegistry } from "../../src/utils/IssueRegistry";
 import { CpuPerformanceDetector } from "../../src/detectors/CpuPerformanceDetector";
 
 // ---------------------------------------------------------------------------
 // Test types & mocks
 // ---------------------------------------------------------------------------
 
-interface IncomingDecodedFramesRatioThresholds {
-    alertOn: number;
-    alertOff: number;
-    minReceivedFrames: number;
-    frameArrivalBurstFactor?: number;
-}
-
-interface DurationOfCollectingStatsThreshold {
-    lowWatermark: number;
-    highWatermark: number;
-}
-
 interface CpuConfig {
-    incomingDecodedFramesRatioThresholds?: IncomingDecodedFramesRatioThresholds;
-    durationOfCollectingStatsThreshold?: DurationOfCollectingStatsThreshold;
+    utilizationThreshold: number;
 }
 
 interface TestIssue {
@@ -33,38 +22,46 @@ interface EventHandler {
 }
 
 interface MockOutboundRtp {
-    qualityLimitationReason?: string;
+    kind: 'audio' | 'video';
+    deltaEncodeTime?: number;
+    deltaTime?: number;
+    encoderImplementation?: string;
+    powerEfficientEncoder?: boolean;
 }
 
 interface MockInboundRtp {
     kind: 'audio' | 'video';
-    ssrc?: number;
-    deltaFramesReceived?: number;
-    deltaFramesDecoded?: number;
+    deltaTotalDecodeTime?: number;
+    deltaTime?: number;
+    decoderImplementation?: string;
+    powerEfficientDecoder?: boolean;
 }
 
 class MockClientMonitor {
     public config: { cpuPerformanceDetector: CpuConfig | null } = {
         cpuPerformanceDetector: {
-            incomingDecodedFramesRatioThresholds: {
-                alertOn: 0.7,
-                alertOff: 0.85,
-                minReceivedFrames: 10,
-            },
-            durationOfCollectingStatsThreshold: {
-                lowWatermark: 5000,
-                highWatermark: 10000,
-            },
+            utilizationThreshold: 0.15,
         },
     };
 
     public cpuPerformanceAlertOn = false;
     public activeTab = true;
-    public durationOfCollectingStatsInMs = 0;
     public outboundRtps: MockOutboundRtp[] = [];
     public inboundRtps: MockInboundRtp[] = [];
 
-    public readonly activeIssues = new Map<string, TestIssue>();
+    /**
+     * The store the assertions read. `activeIssues` below is the real registry the detector
+     * writes through; this map is what its sink lands in, so `getIssues()` keeps working.
+     */
+    private readonly _store = new Map<string, TestIssue>();
+
+    /** The terminal registry, as `ClientMonitor` owns it. */
+    public readonly activeIssues = new IssueRegistry({
+        notify: (issue: any) => { this.raiseIssue(issue.type, issue); },
+        raise: (issue: any) => { this.raiseIssue(issue.key, issue); },
+        update: (issue: any) => { this.raiseIssue(issue.key, issue); },
+        resolve: (issue: any) => { this.resolveIssue(issue.key, issue); },
+    });
     private eventHandlers: { [key: string]: EventHandler[] } = {};
     private nextId = 0;
 
@@ -77,7 +74,7 @@ class MockClientMonitor {
     }
 
     raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
-        const existing = this.activeIssues.get(key);
+        const existing = this._store.get(key);
         if (existing) {
             existing.payload = input.payload ?? {};
             existing.type = input.type;
@@ -90,15 +87,15 @@ class MockClientMonitor {
             key,
             payload: input.payload ?? {},
         };
-        this.activeIssues.set(key, issue);
+        this._store.set(key, issue);
         this.emit('issue', issue as unknown as Record<string, unknown>);
         return issue;
     }
 
     resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
-        const found = this.activeIssues.get(key);
+        const found = this._store.get(key);
         if (!found) return undefined;
-        this.activeIssues.delete(key);
+        this._store.delete(key);
         const resolved = {
             ...found,
             payload: opts?.payload ?? found.payload,
@@ -110,22 +107,38 @@ class MockClientMonitor {
     }
 
     getIssues() {
-        return [...this.activeIssues.values()];
+        return [...this._store.values()];
     }
 }
 
 // Convenience helpers ------------------------------------------------------
 
-function videoInbound(received: number, decoded: number): MockInboundRtp {
-    return { kind: 'video', deltaFramesReceived: received, deltaFramesDecoded: decoded };
+/** Codec times are seconds in the stats, elapsed time is milliseconds. One second of stats time by default. */
+const COLLECTION_IN_MS = 1000;
+
+/**
+ * A sending video stream at the given utilization: `0.2` spends a fifth of the interval encoding.
+ * Software by default — the captured session was `libvpx` on every one of 4811 samples.
+ */
+function encoding(utilization: number, elapsedInMs = COLLECTION_IN_MS): MockOutboundRtp {
+    return {
+        kind: 'video',
+        deltaEncodeTime: (utilization * elapsedInMs) / 1000,
+        deltaTime: elapsedInMs,
+        encoderImplementation: 'libvpx',
+        powerEfficientEncoder: false,
+    };
 }
 
-function audioInbound(received: number, decoded: number): MockInboundRtp {
-    return { kind: 'audio', deltaFramesReceived: received, deltaFramesDecoded: decoded };
-}
-
-function videoInboundWithSsrc(ssrc: number, received: number, decoded: number): MockInboundRtp {
-    return { kind: 'video', ssrc, deltaFramesReceived: received, deltaFramesDecoded: decoded };
+/** A receiving video stream at the given utilization, software by default. */
+function decoding(utilization: number, elapsedInMs = COLLECTION_IN_MS): MockInboundRtp {
+    return {
+        kind: 'video',
+        deltaTotalDecodeTime: (utilization * elapsedInMs) / 1000,
+        deltaTime: elapsedInMs,
+        decoderImplementation: 'libvpx',
+        powerEfficientDecoder: false,
+    };
 }
 
 describe('CpuPerformanceDetector', () => {
@@ -137,6 +150,14 @@ describe('CpuPerformanceDetector', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         detector = new CpuPerformanceDetector(monitor as any);
     });
+
+    /** Puts the detector in the alerting state, so a test can watch it come back out. */
+    function raiseAlert() {
+        monitor.outboundRtps = [encoding(0.6)];
+        monitor.inboundRtps = [decoding(0.5)];
+        detector.update();
+        expect(monitor.cpuPerformanceAlertOn).toBe(true);
+    }
 
     describe('Constructor', () => {
         it('has the correct name', () => {
@@ -153,13 +174,13 @@ describe('CpuPerformanceDetector', () => {
     });
 
     describe('disabled', () => {
-        it('does nothing while disabled, even with a clear CPU signal', () => {
+        it('does nothing while disabled, even with both codecs saturated', () => {
             const eventSpy = jest.fn();
             monitor.on('cpulimitation', eventSpy);
             detector.disabled = true;
 
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
-            monitor.inboundRtps = [videoInbound(100, 10)];
+            monitor.outboundRtps = [encoding(0.9)];
+            monitor.inboundRtps = [decoding(0.9)];
 
             detector.update();
 
@@ -170,383 +191,400 @@ describe('CpuPerformanceDetector', () => {
     });
 
     describe('background tab', () => {
-        it('does not alert while the tab is in the background, even with a clear CPU signal', () => {
+        it('does not alert while the tab is in the background', () => {
             const eventSpy = jest.fn();
             monitor.on('cpulimitation', eventSpy);
             monitor.activeTab = false;
 
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            monitor.outboundRtps = [encoding(0.9)];
+            monitor.inboundRtps = [decoding(0.9)];
+
             detector.update();
 
             expect(monitor.cpuPerformanceAlertOn).toBe(false);
             expect(eventSpy).not.toHaveBeenCalled();
-            expect(monitor.getIssues()).toHaveLength(0);
         });
 
-        it('resolves an active alert when the tab goes to the background', () => {
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+        /**
+         * Throttled timers stretch the interval without stretching the codec work, so a
+         * backgrounded tab reads as idle anyway. Resolving is about not leaving a stale
+         * alert open across a tab switch.
+         */
+        it('resolves an open alert when the tab goes to the background', () => {
+            raiseAlert();
+
+            const resolvedSpy = jest.fn();
+            monitor.on('issue-resolved', resolvedSpy);
+            monitor.activeTab = false;
+
             detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(resolvedSpy).toHaveBeenCalledTimes(1);
+            expect(resolvedSpy.mock.calls[0][0].comment).toBe('tab in background');
+        });
+    });
+
+    /**
+     * The number beside `cpuPerformanceAlertOn`: how occupied the machine was, published on every
+     * collection it could be measured rather than only the ones that alert.
+     */
+    describe('the continuous measurement', () => {
+        it('is published well below the threshold', () => {
+            monitor.outboundRtps = [encoding(0.10)];
+            monitor.inboundRtps = [decoding(0.08)];
+
+            detector.update();
+
+            // The lower of the two, and no alert at all at this level.
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect((monitor as any).cpuUtilization).toBeCloseTo(0.08, 6);
+        });
+
+        it('is published while the alert is on too', () => {
+            monitor.outboundRtps = [encoding(0.6)];
+            monitor.inboundRtps = [decoding(0.5)];
+
+            detector.update();
+
             expect(monitor.cpuPerformanceAlertOn).toBe(true);
-            expect(monitor.getIssues()).toHaveLength(1);
+            expect((monitor as any).cpuUtilization).toBeCloseTo(0.5, 6);
+        });
+
+        it('is blanked in a background tab, where nothing was measured', () => {
+            monitor.outboundRtps = [encoding(0.6)];
+            monitor.inboundRtps = [decoding(0.5)];
+            detector.update();
+            expect((monitor as any).cpuUtilization).toBeGreaterThan(0);
 
             monitor.activeTab = false;
             detector.update();
 
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(monitor.getIssues()).toHaveLength(0);
+            expect((monitor as any).cpuUtilization).toBeUndefined();
         });
 
-        it('alerts again once the tab is active and the CPU signal persists', () => {
-            monitor.activeTab = false;
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-
-            monitor.activeTab = true;
+        it('is blanked when no video is encoded or decoded on the cpu', () => {
+            monitor.outboundRtps = [encoding(0.6)];
+            monitor.inboundRtps = [decoding(0.5)];
             detector.update();
 
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-            expect(monitor.getIssues()).toHaveLength(1);
-        });
-    });
-
-    describe('Outbound RTP quality limitation', () => {
-        it('alerts when an outbound stream is CPU limited', () => {
-            const eventSpy = jest.fn();
-            monitor.on('cpulimitation', eventSpy);
-
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-            expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({ clientMonitor: monitor }));
-            expect(monitor.getIssues()).toHaveLength(1);
-            expect(monitor.getIssues()[0]).toMatchObject({ type: 'cpulimitation' });
-        });
-
-        it('does not alert for bandwidth or none limitation reasons', () => {
-            monitor.outboundRtps = [
-                { qualityLimitationReason: 'bandwidth' },
-                { qualityLimitationReason: 'none' },
-                { qualityLimitationReason: 'other' },
-            ];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('alerts if any one of several outbound streams is CPU limited', () => {
-            monitor.outboundRtps = [
-                { qualityLimitationReason: 'none' },
-                { qualityLimitationReason: 'bandwidth' },
-                { qualityLimitationReason: 'cpu' },
-            ];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-    });
-
-    describe('Inbound decoded/received frames ratio', () => {
-        it('alerts when the decoded ratio is at or below alertOn (decoder falling behind)', () => {
-            // 50 / 100 = 0.5 <= 0.7
-            monitor.inboundRtps = [videoInbound(100, 50)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-            expect(monitor.getIssues()).toHaveLength(1);
-        });
-
-        it('does not alert when the decoder keeps up (ratio above alertOn)', () => {
-            // 90 / 100 = 0.9 > 0.7
-            monitor.inboundRtps = [videoInbound(100, 90)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('treats the alertOn boundary as triggering (ratio === alertOn)', () => {
-            // 70 / 100 = 0.7, and the check is `<= alertOn`
-            monitor.inboundRtps = [videoInbound(100, 70)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-
-        it('ignores audio tracks even with a terrible ratio', () => {
-            monitor.inboundRtps = [audioInbound(100, 0)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-        });
-
-        it('clamps the ratio to 1.0 when decoded exceeds received (counter timing)', () => {
-            // decoded > received would be ratio 1.2 -> clamped to 1.0 -> no alert
-            monitor.inboundRtps = [videoInbound(100, 120)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-        });
-
-        it('alerts if any one of several video tracks is decode-limited', () => {
-            monitor.inboundRtps = [
-                videoInbound(100, 95),
-                videoInbound(100, 30), // 0.3 <= 0.7
-            ];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-    });
-
-    describe('minReceivedFrames guard (screen-share regression)', () => {
-        it('skips intervals with fewer than minReceivedFrames received frames', () => {
-            // Only 5 frames received this interval, 0 decoded -> ratio 0 but below the
-            // 10-frame guard, so it must NOT alert.
-            monitor.inboundRtps = [videoInbound(5, 0)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('does not raise a false CPU alert when screen-share fps legitimately collapses 15 -> 1', () => {
-            const eventSpy = jest.fn();
-            monitor.on('cpulimitation', eventSpy);
-
-            // Simulate a screen share whose frame rate swings as content goes
-            // static. Received and decoded stay equal each interval (decoder keeps
-            // up); low-frame intervals fall under the guard. None should alert.
-            const intervals: Array<[number, number]> = [
-                [15, 15], [12, 12], [3, 3], [1, 1], [1, 1], [2, 2], [8, 8], [1, 1],
-            ];
-            for (const [received, decoded] of intervals) {
-                monitor.inboundRtps = [videoInbound(received, decoded)];
-                detector.update();
-            }
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(eventSpy).not.toHaveBeenCalled();
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('treats minReceivedFrames as 0 when omitted (still evaluates the ratio)', () => {
-            monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = {
-                alertOn: 0.7,
-                alertOff: 0.85,
-                // @ts-expect-error intentionally omitted to test the `?? 0` fallback
-                minReceivedFrames: undefined,
-            };
-            monitor.inboundRtps = [videoInbound(4, 1)]; // 0.25, would be skipped if min was 10
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-    });
-
-    describe('frame-arrival burst guard (bursty frames regression)', () => {
-        beforeEach(() => {
-            monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = {
-                alertOn: 0.7,
-                alertOff: 0.85,
-                minReceivedFrames: 10,
-                frameArrivalBurstFactor: 2.5,
-            };
-        });
-
-        it('skips the ratio on a track\'s first interval (no arrival baseline yet)', () => {
-            // A fresh consumer's first interval routinely carries a keyframe
-            // burst; 100/50 would alert if judged.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 50)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('does not alert when a one-interval arrival burst outpaces the decoder', () => {
-            const eventSpy = jest.fn();
-            monitor.on('cpulimitation', eventSpy);
-
-            // Steady ~30 frames/interval baseline, decoder keeping up...
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
-            detector.update();
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
-            detector.update();
-
-            // ...then a layer-switch style flush: 100 frames arrive at once
-            // (100 > 2.5 * 30), the decoder trails for exactly this interval.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 45)];
-            detector.update();
-
-            // ...and the very next interval is ordinary again.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(eventSpy).not.toHaveBeenCalled();
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('still alerts on decoder starvation at an ordinary arrival rate', () => {
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
-            detector.update(); // establishes the baseline (first sight is skipped)
-
-            // Same arrival rate, decoder falling behind: 12/30 = 0.4 <= 0.7.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 12)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-            expect(monitor.getIssues()).toHaveLength(1);
-        });
-
-        it('judges a sustained higher arrival rate again once the baseline adapts', () => {
-            // Baseline at 30 frames/interval.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
-            detector.update();
-
-            // First 100-frame interval is a burst (100 > 2.5 * 30) -> skipped,
-            // but it pulls the EWMA baseline up (30 -> 51).
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 40)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-
-            // Second 100-frame interval is within 2.5 * 51 -> judged, and the
-            // decoder is genuinely starved (0.4 <= 0.7).
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 40)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-
-        it('tracks arrival baselines per ssrc: a bursting track does not shadow a starved one', () => {
-            monitor.inboundRtps = [
-                videoInboundWithSsrc(1, 30, 30),
-                videoInboundWithSsrc(2, 30, 30),
-            ];
-            detector.update();
-
-            monitor.inboundRtps = [
-                videoInboundWithSsrc(1, 100, 50), // burst -> skipped
-                videoInboundWithSsrc(2, 30, 9),   // ordinary arrival, 0.3 <= 0.7 -> alert
-            ];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-
-        it('a burst interval does not keep an open alert alive by itself', () => {
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 30)];
-            detector.update();
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 30, 12)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-
-            // The next interval is a burst; its (low) ratio is skipped rather
-            // than judged, and with no other signal active the alert resolves.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 40)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-            expect(monitor.getIssues()).toHaveLength(0);
-        });
-
-        it('judges every interval when frameArrivalBurstFactor is not configured', () => {
-            monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = {
-                alertOn: 0.7,
-                alertOff: 0.85,
-                minReceivedFrames: 10,
-            };
-
-            // Even a first-sight interval alerts without the guard.
-            monitor.inboundRtps = [videoInboundWithSsrc(1, 100, 50)];
-            detector.update();
-
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-    });
-
-    describe('Hysteresis', () => {
-        it('stays alerting while the ratio is between alertOff and alertOn', () => {
-            // Trigger first.
-            monitor.inboundRtps = [videoInbound(100, 50)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-
-            // 0.8 is below alertOff (0.85) but above alertOn (0.7): stay alerting.
-            monitor.inboundRtps = [videoInbound(100, 80)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-
-        it('clears only once the ratio recovers to alertOff or above', () => {
-            monitor.inboundRtps = [videoInbound(100, 50)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-
-            // 0.9 >= 0.85 -> recovered.
-            monitor.inboundRtps = [videoInbound(100, 90)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-        });
-
-        it('does not flap: a single mid-band reading keeps the alert on', () => {
-            monitor.inboundRtps = [videoInbound(100, 40)];
-            detector.update();
-            // 0.84 < alertOff -> still limited
-            monitor.inboundRtps = [videoInbound(100, 84)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-    });
-
-    describe('Stats collection duration', () => {
-        beforeEach(() => {
-            // Isolate this signal: no inbound/outbound contributions.
             monitor.outboundRtps = [];
             monitor.inboundRtps = [];
-        });
-
-        it('alerts when collection duration exceeds the high watermark', () => {
-            monitor.durationOfCollectingStatsInMs = 12000; // > 10000
             detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
 
-        it('does not alert below the high watermark', () => {
-            monitor.durationOfCollectingStatsInMs = 8000; // < 10000
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-        });
-
-        it('keeps the alert while duration stays above the low watermark (hysteresis)', () => {
-            monitor.durationOfCollectingStatsInMs = 12000;
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-
-            monitor.durationOfCollectingStatsInMs = 7000; // between low (5000) and high (10000)
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-        });
-
-        it('clears once duration drops below the low watermark', () => {
-            monitor.durationOfCollectingStatsInMs = 12000;
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-
-            monitor.durationOfCollectingStatsInMs = 4000; // < 5000
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect((monitor as any).cpuUtilization).toBeUndefined();
         });
     });
 
-    describe('Issue lifecycle', () => {
-        it('raises the issue and emits the event only once per episode', () => {
+    describe('the two utilizations', () => {
+        it('alerts when both halves of the pipeline are past the threshold', () => {
             const eventSpy = jest.fn();
             monitor.on('cpulimitation', eventSpy);
 
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            monitor.outboundRtps = [encoding(0.4)];
+            monitor.inboundRtps = [decoding(0.3)];
+
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(eventSpy).toHaveBeenCalledTimes(1);
+        });
+
+        /**
+         * The whole point of `min()`: an encoder working hard on an otherwise idle machine
+         * is a busy stream, not a busy CPU. Only both at once says the machine is the problem.
+         */
+        it('stays quiet when only the encoder is busy', () => {
+            monitor.outboundRtps = [encoding(0.9)];
+            monitor.inboundRtps = [decoding(0.02)];
+
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+        });
+
+        it('stays quiet when only the decoder is busy', () => {
+            monitor.outboundRtps = [encoding(0.02)];
+            monitor.inboundRtps = [decoding(0.9)];
+
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+        });
+
+        it('scores the lower of the two', () => {
+            monitor.outboundRtps = [encoding(0.4)];
+            monitor.inboundRtps = [decoding(0.25)];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.encoderUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.decoderUtilization).toBeCloseTo(0.25, 6);
+            expect(payload.minUtilization).toBeCloseTo(0.25, 6);
+        });
+
+        it('alerts at the threshold and not a hair under it', () => {
+            monitor.outboundRtps = [encoding(0.2)];
+            monitor.inboundRtps = [decoding(0.1499)];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+
+            monitor.inboundRtps = [decoding(0.15)];
+            detector.update();
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+        });
+    });
+
+    describe('summing across streams', () => {
+        /**
+         * Three simulcast layers at a fifth of the interval each cost the machine the same
+         * as one stream at three fifths, so the utilizations add rather than average.
+         */
+        it('adds the encoders together', () => {
+            monitor.outboundRtps = [encoding(0.2), encoding(0.2), encoding(0.2)];
+            monitor.inboundRtps = [decoding(0.5)];
+
+            detector.update();
+
+            expect(monitor.getIssues()[0].payload.encoderUtilization).toBeCloseTo(0.6, 6);
+        });
+
+        it('adds the decoders together', () => {
+            monitor.outboundRtps = [encoding(0.9)];
+            monitor.inboundRtps = [decoding(0.1), decoding(0.1), decoding(0.1)];
+
+            detector.update();
+
+            expect(monitor.getIssues()[0].payload.decoderUtilization).toBeCloseTo(0.3, 6);
+        });
+
+        it('ignores audio streams on both sides', () => {
+            monitor.outboundRtps = [
+                encoding(0.4),
+                { kind: 'audio', deltaEncodeTime: 0.9, deltaTime: COLLECTION_IN_MS },
+            ];
+            monitor.inboundRtps = [
+                decoding(0.3),
+                { kind: 'audio', deltaTotalDecodeTime: 0.9, deltaTime: COLLECTION_IN_MS },
+            ];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.encoderUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.decoderUtilization).toBeCloseTo(0.3, 6);
+        });
+
+        it('measures each stream against its own elapsed time', () => {
+            // Half a second of stats time, a fifth of a second of encoding: 40%.
+            monitor.outboundRtps = [encoding(0.4, 500)];
+            monitor.inboundRtps = [decoding(0.3, 2000)];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.encoderUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.decoderUtilization).toBeCloseTo(0.3, 6);
+        });
+
+        it('skips streams with no elapsed time rather than dividing by zero', () => {
+            monitor.outboundRtps = [encoding(0.4), { kind: 'video', deltaEncodeTime: 0.5, deltaTime: 0 }];
+            monitor.inboundRtps = [decoding(0.3)];
+
+            detector.update();
+
+            expect(monitor.getIssues()[0].payload.encoderUtilization).toBeCloseTo(0.4, 6);
+        });
+
+        it('skips streams that reported no codec time', () => {
+            monitor.outboundRtps = [encoding(0.4), { kind: 'video', deltaTime: COLLECTION_IN_MS }];
+            monitor.inboundRtps = [decoding(0.3)];
+
+            detector.update();
+
+            expect(monitor.getIssues()[0].payload.encoderUtilization).toBeCloseTo(0.4, 6);
+        });
+    });
+
+    /**
+     * `totalEncodeTime` and `totalDecodeTime` measure elapsed time inside the codec call, not CPU
+     * time, so a hardware codec waiting on the GPU would read as a busy processor. This is the
+     * gate that keeps a detector named for the CPU from reporting on silicon that isn't it.
+     */
+    describe('hardware acceleration', () => {
+        const hardwareEncoding = (utilization: number, implementation: string): MockOutboundRtp =>
+            ({ ...encoding(utilization), encoderImplementation: implementation });
+        const hardwareDecoding = (utilization: number, implementation: string): MockInboundRtp =>
+            ({ ...decoding(utilization), decoderImplementation: implementation });
+
+        it.each([
+            ['MediaFoundationVideoEncodeAccelerator'],
+            ['VaapiVideoEncodeAccelerator'],
+            ['V4L2VideoEncodeAccelerator'],
+            ['ExternalEncoder'],
+            ['VideoToolbox'],
+            // Matched case-insensitively, so casing drift in a vendor string cannot slip through.
+            ['nvenc h264'],
+        ])('leaves a %s encoder out of the sum', (implementation) => {
+            monitor.outboundRtps = [encoding(0.4), hardwareEncoding(0.9, implementation)];
+            monitor.inboundRtps = [decoding(0.3)];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.encoderUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.hardwareAcceleratedEncoders).toBe(1);
+        });
+
+        it('leaves a hardware decoder out of the sum', () => {
+            monitor.outboundRtps = [encoding(0.4)];
+            monitor.inboundRtps = [decoding(0.3), hardwareDecoding(0.9, 'VaapiVideoDecodeAccelerator')];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.decoderUtilization).toBeCloseTo(0.3, 6);
+            expect(payload.hardwareAcceleratedDecoders).toBe(1);
+        });
+
+        /** The name is a blocklist and cannot be complete; the browser's own hint covers the rest. */
+        it('leaves out a stream the browser calls power efficient whatever its name', () => {
+            monitor.outboundRtps = [
+                encoding(0.4),
+                { ...encoding(0.9), encoderImplementation: 'SomeUncataloguedEncoder', powerEfficientEncoder: true },
+            ];
+            monitor.inboundRtps = [decoding(0.3)];
+
+            detector.update();
+
+            expect(monitor.getIssues()[0].payload.encoderUtilization).toBeCloseTo(0.4, 6);
+        });
+
+        /**
+         * The deliberate direction to fail in: an implementation we do not recognise keeps
+         * contributing, rather than silencing the detector on every browser we have not catalogued.
+         */
+        it('counts an unrecognised implementation as cpu work', () => {
+            monitor.outboundRtps = [{ ...encoding(0.4), encoderImplementation: 'SomeNewSoftwareCodec' }];
+            monitor.inboundRtps = [{ ...decoding(0.3), decoderImplementation: undefined }];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.encoderUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.decoderUtilization).toBeCloseTo(0.3, 6);
+            expect(payload.hardwareAcceleratedEncoders).toBe(0);
+        });
+
+        /**
+         * A wholly hardware client is not a healthy one — it is one whose CPU cost we cannot see.
+         * Saying so through `inputsUnavailable` keeps it out of any "machines that were fine" count.
+         */
+        it('goes blind rather than healthy when the whole pipeline is hardware', () => {
+            monitor.outboundRtps = [hardwareEncoding(0.9, 'MediaFoundationVideoEncodeAccelerator')];
+            monitor.inboundRtps = [hardwareDecoding(0.9, 'VaapiVideoDecodeAccelerator')];
+
+            detector.update();
+
+            expect(detector.inputsUnavailable).toBe(true);
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+        });
+
+        it('resolves an open alert with the hardware reason when the codecs switch', () => {
+            raiseAlert();
+
+            const resolvedSpy = jest.fn();
+            monitor.on('issue-resolved', resolvedSpy);
+            monitor.outboundRtps = [hardwareEncoding(0.9, 'ExternalEncoder')];
+            monitor.inboundRtps = [hardwareDecoding(0.9, 'ExternalDecoder')];
+
+            detector.update();
+
+            expect(resolvedSpy.mock.calls[0][0].comment).toBe('all video is encoded and decoded off the cpu');
+        });
+
+        /** A hardware encoder alongside a software decoder still leaves one usable clue. */
+        it('judges the remaining side when only one half is hardware', () => {
+            monitor.outboundRtps = [hardwareEncoding(0.9, 'VideoToolbox')];
+            monitor.inboundRtps = [decoding(0.4)];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.minUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.encoderUtilization).toBe(0);
+            expect(payload.hardwareAcceleratedEncoders).toBe(1);
+        });
+    });
+
+    describe('one-sided clients', () => {
+        /** A presenter with nothing on screen has no decoder clue, so the encoder stands alone. */
+        it('judges a send-only client on the encoder alone', () => {
+            monitor.outboundRtps = [encoding(0.4)];
+            monitor.inboundRtps = [];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.minUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.decoderUtilization).toBeUndefined();
+        });
+
+        it('judges a receive-only client on the decoder alone', () => {
+            monitor.outboundRtps = [];
+            monitor.inboundRtps = [decoding(0.4)];
+
+            detector.update();
+
+            const payload = monitor.getIssues()[0].payload;
+
+            expect(payload.minUtilization).toBeCloseTo(0.4, 6);
+            expect(payload.encoderUtilization).toBe(0);
+        });
+
+        /** Audio-only streams on both sides leave nothing to measure, which is not the same as idle. */
+        it('reports inputs unavailable with no video at all', () => {
+            monitor.outboundRtps = [{ kind: 'audio', deltaEncodeTime: 0.5, deltaTime: COLLECTION_IN_MS }];
+            monitor.inboundRtps = [{ kind: 'audio', deltaTotalDecodeTime: 0.5, deltaTime: COLLECTION_IN_MS }];
+
+            detector.update();
+
+            expect(detector.inputsUnavailable).toBe(true);
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+        });
+
+        it('resolves an open alert when the video goes away', () => {
+            raiseAlert();
+
+            const resolvedSpy = jest.fn();
+            monitor.on('issue-resolved', resolvedSpy);
+            monitor.outboundRtps = [];
+            monitor.inboundRtps = [];
+
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(resolvedSpy.mock.calls[0][0].comment).toBe('no video is being encoded or decoded');
+        });
+    });
+
+    describe('the alert lifecycle', () => {
+        it('raises one issue and one event for a stretch of limitation', () => {
+            const eventSpy = jest.fn();
+            monitor.on('cpulimitation', eventSpy);
+
+            monitor.outboundRtps = [encoding(0.5)];
+            monitor.inboundRtps = [decoding(0.4)];
+
             detector.update();
             detector.update();
             detector.update();
@@ -555,99 +593,91 @@ describe('CpuPerformanceDetector', () => {
             expect(monitor.getIssues()).toHaveLength(1);
         });
 
-        it('resolves the issue and emits issue-resolved when the limitation clears', () => {
+        it('resolves once the load drops back under the threshold', () => {
+            raiseAlert();
+
             const resolvedSpy = jest.fn();
             monitor.on('issue-resolved', resolvedSpy);
+            monitor.outboundRtps = [encoding(0.05)];
+            monitor.inboundRtps = [decoding(0.05)];
 
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
-            detector.update();
-            expect(monitor.getIssues()).toHaveLength(1);
-
-            monitor.outboundRtps = [{ qualityLimitationReason: 'none' }];
             detector.update();
 
             expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            expect(resolvedSpy.mock.calls[0][0].comment).toBe('cpu limitation ended');
             expect(monitor.getIssues()).toHaveLength(0);
-            expect(resolvedSpy).toHaveBeenCalledTimes(1);
-            expect(resolvedSpy.mock.calls[0][0]).toMatchObject({
-                type: 'cpulimitation',
-                comment: 'cpu limitation ended',
-            });
         });
 
-        it('includes a non-negative durationInMs in the resolved payload', () => {
+        it('does not resolve repeatedly on a machine that was never loaded', () => {
             const resolvedSpy = jest.fn();
             monitor.on('issue-resolved', resolvedSpy);
 
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
+            monitor.outboundRtps = [encoding(0.05)];
+            monitor.inboundRtps = [decoding(0.05)];
+
+            detector.update();
             detector.update();
 
-            monitor.outboundRtps = [{ qualityLimitationReason: 'none' }];
+            expect(resolvedSpy).not.toHaveBeenCalled();
+        });
+
+        it('can alert again after resolving', () => {
+            const eventSpy = jest.fn();
+            monitor.on('cpulimitation', eventSpy);
+
+            raiseAlert();
+
+            monitor.outboundRtps = [encoding(0.05)];
+            monitor.inboundRtps = [decoding(0.05)];
             detector.update();
 
-            const payload = resolvedSpy.mock.calls[0][0].payload as { durationInMs?: number };
-            expect(typeof payload.durationInMs).toBe('number');
+            monitor.outboundRtps = [encoding(0.6)];
+            monitor.inboundRtps = [decoding(0.5)];
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
+            expect(eventSpy).toHaveBeenCalledTimes(2);
+        });
+
+        it('carries the utilizations and a duration onto the resolved issue', () => {
+            const resolvedSpy = jest.fn();
+            monitor.on('issue-resolved', resolvedSpy);
+
+            raiseAlert();
+
+            monitor.outboundRtps = [encoding(0.05)];
+            monitor.inboundRtps = [decoding(0.05)];
+            detector.update();
+
+            const payload = resolvedSpy.mock.calls[0][0].payload;
+
+            expect(payload.encoderUtilization).toBeCloseTo(0.6, 6);
+            expect(payload.decoderUtilization).toBeCloseTo(0.5, 6);
             expect(payload.durationInMs).toBeGreaterThanOrEqual(0);
         });
-
-        it('does nothing when already clear and still clear', () => {
-            const eventSpy = jest.fn();
-            const resolvedSpy = jest.fn();
-            monitor.on('cpulimitation', eventSpy);
-            monitor.on('issue-resolved', resolvedSpy);
-
-            monitor.outboundRtps = [{ qualityLimitationReason: 'none' }];
-            detector.update();
-
-            expect(eventSpy).not.toHaveBeenCalled();
-            expect(resolvedSpy).not.toHaveBeenCalled();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-        });
     });
 
-    describe('Combined signals', () => {
-        it('a recovered inbound ratio does not clear the alert while outbound is still CPU limited', () => {
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
-            monitor.inboundRtps = [videoInbound(100, 95)];
+    describe('the config', () => {
+        it('honours a raised threshold', () => {
+            monitor.config.cpuPerformanceDetector = { utilizationThreshold: 0.5 };
+
+            monitor.outboundRtps = [encoding(0.4)];
+            monitor.inboundRtps = [decoding(0.3)];
+
             detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
 
-            // Inbound is fine now, but outbound remains CPU-limited.
-            monitor.inboundRtps = [videoInbound(100, 99)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-            expect(monitor.getIssues()).toHaveLength(1);
-        });
-
-        it('clears only when every signal is healthy', () => {
-            monitor.outboundRtps = [{ qualityLimitationReason: 'cpu' }];
-            monitor.durationOfCollectingStatsInMs = 12000;
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(true);
-
-            monitor.outboundRtps = [{ qualityLimitationReason: 'none' }];
-            monitor.durationOfCollectingStatsInMs = 1000;
-            monitor.inboundRtps = [videoInbound(100, 100)];
-            detector.update();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
-        });
-    });
-
-    describe('Config edge cases', () => {
-        it('skips the inbound ratio analysis when thresholds are not configured', () => {
-            monitor.config.cpuPerformanceDetector!.incomingDecodedFramesRatioThresholds = undefined;
-            monitor.inboundRtps = [videoInbound(100, 0)]; // would alert if evaluated
-
-            expect(() => detector.update()).not.toThrow();
             expect(monitor.cpuPerformanceAlertOn).toBe(false);
         });
 
-        it('skips the duration analysis when the threshold is not configured', () => {
-            monitor.config.cpuPerformanceDetector!.durationOfCollectingStatsThreshold = undefined;
-            monitor.durationOfCollectingStatsInMs = 999999;
+        it('honours a lowered threshold', () => {
+            monitor.config.cpuPerformanceDetector = { utilizationThreshold: 0.02 };
 
-            expect(() => detector.update()).not.toThrow();
-            expect(monitor.cpuPerformanceAlertOn).toBe(false);
+            monitor.outboundRtps = [encoding(0.05)];
+            monitor.inboundRtps = [decoding(0.03)];
+
+            detector.update();
+
+            expect(monitor.cpuPerformanceAlertOn).toBe(true);
         });
     });
 });

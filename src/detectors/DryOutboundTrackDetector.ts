@@ -8,44 +8,38 @@ export type DryOutboundTrackIssuePayload = {
 	/** How long the episode lasted; filled in when the issue is resolved. */
 	durationInMs?: number;
 }
+export type DryOutboundTrackIssueType = 'dry-outbound-track';
 
 export type DryOutboundTrackDetectorConfig = {
-	/**
-	 * The time threshold (in milliseconds) to determine if an outbound track
-	 * is considered stalled.
-	 */
+	/** How long (ms of stats time) an outbound track must be dry before it counts as stalled. */
 	thresholdInMs: number;
 }
 
 /**
- * The sending-side counterpart: watches one outbound track for zero bytes sent tick after tick,
- * which is this client failing to put anything on the wire — a stalled encoder, a capture source
- * that quietly stopped feeding it, or a sender that never really started. It is the one failure
- * the local user cannot see for themselves, since their own preview keeps rendering.
+ * The sending-side counterpart: reports one outbound track sending zero bytes tick after tick — a
+ * stalled encoder, a capture source that quietly stopped feeding it, or a sender that never really
+ * started. Use it for the one failure the local user cannot see for themselves, since their own
+ * preview keeps rendering.
  *
- * The track's own state supplies the explanations that make silence legitimate: a paused sender
- * (a paused producer, say), a muted track, or a track no longer in the `live` state. Any of them
- * discards the timer and resolves an open issue rather than leaving it hanging, because the
- * silence is now accounted for. A stall must last `thresholdInMs` before it is raised, once per
- * episode rather than once per tick.
- *
- * The threshold is counted in the sender's own time: each dry tick adds the outbound RTP's
- * `deltaTime`, the interval between the two stats reports that showed no bytes, not wall-clock
- * elapsed. A stalled encoder and a main thread too busy to collect on schedule tend to arrive
- * together, and on wall-clock elapsed the second would be counted as evidence for the first.
+ * A paused sender, a muted track or a track no longer `live` explains the silence: any of them
+ * discards the timer and resolves an open issue. A stall must last `thresholdInMs` of the sender's
+ * own stats time — a busy main thread that collects late would otherwise be counted as evidence for
+ * a stalled encoder — and is raised once per episode, not once per tick.
  *
  * Raises `dry-outbound-track`. Emits `dry-outbound-track`. Config: `dryOutboundTrackDetector`.
+ * Track attribute: `OutboundTrackMonitor.dry`.
  *
  * Category: Pipeline Disruption
  * Layer: Send — RTP sender to the wire
  *
  */
 export class DryOutboundTrackDetector implements Detector {
-	public static readonly ISSUE_TYPE = 'dry-outbound-track';
+	public static readonly ISSUE_TYPE: DryOutboundTrackIssueType = 'dry-outbound-track';
+
 	public readonly name = 'dry-outbound-track-detector';
 	public disabled = false;
 	public includeIssueInSample = true;
-	
+
 	private readonly issueKey: string;
 
 	public constructor(
@@ -68,8 +62,15 @@ export class DryOutboundTrackDetector implements Detector {
 	private _dryForInMs = 0;
 
 	public update() {
-		if (this.disabled) return;
+		if (this.disabled) {
+			this.trackMonitor.dry = undefined;
+
+			return;
+		}
+
+		// A paused, muted or dead track legitimately sends nothing.
 		if (this.trackMonitor.paused || this.trackMonitor.track.muted || this.trackMonitor.track.readyState !== 'live') {
+			this.trackMonitor.dry = undefined;
 			this._dryForInMs = 0;
 			if (this._startedDryAt !== undefined) {
 				this._resolve('track paused, muted or not live');
@@ -79,13 +80,22 @@ export class DryOutboundTrackDetector implements Detector {
 
 		const outboundRtp = this.trackMonitor.getOutboundRtps()?.[0];
 
+		// No counter at all is blind; a non-zero one is bytes leaving, which is health.
+		if (outboundRtp?.deltaBytesSent === undefined) {
+			this.trackMonitor.dry = undefined;
+		}
+
 		if (outboundRtp?.deltaBytesSent !== 0) {
+			if (outboundRtp?.deltaBytesSent !== undefined) this.trackMonitor.dry = false;
 			this._dryForInMs = 0;
 			if (this._startedDryAt !== undefined) {
 				this._resolve('dry outbound track recovered');
 			}
 			return;
 		}
+
+		// Zero bytes, but not yet long enough to be a fault: judged, and not yet wrong.
+		this.trackMonitor.dry = false;
 
 		this._dryForInMs += outboundRtp.deltaTime ?? 0;
 
@@ -110,18 +120,22 @@ export class DryOutboundTrackDetector implements Detector {
 	}
 
 	private _raise(payload: DryOutboundTrackIssuePayload) {
+		// Set here, not at the call site, so the flag and the finding cannot drift.
+		this.trackMonitor.dry = true;
 		this._startedDryAt = Date.now();
 
-		this.peerConnection.parent.raiseIssue<DryOutboundTrackIssuePayload>(this.issueKey, {
-				includeInSample: this.includeIssueInSample,
+		// The track's own registry, never the client's: it forwards up, and resolving anywhere
+		// else would leave this copy standing for the rest of the call.
+		this.trackMonitor.issues.raise({
+			key: this.issueKey,
+			includeInSample: this.includeIssueInSample,
 			type: DryOutboundTrackDetector.ISSUE_TYPE,
 			payload,
 		});
 	}
 
 	private _resolve(comment?: string) {
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: DryOutboundTrackIssuePayload | undefined;
 
 		if (issue) {
@@ -131,7 +145,9 @@ export class DryOutboundTrackDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<DryOutboundTrackIssuePayload>(this.issueKey, {
+		// Same registry the raise went to, so both copies close together.
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

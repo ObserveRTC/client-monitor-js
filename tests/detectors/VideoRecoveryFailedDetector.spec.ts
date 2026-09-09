@@ -13,9 +13,8 @@ function setup() {
 	const trackMonitor = new MockInboundTrackMonitor('video');
 	const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-	// Only this detector's own block is set: it must never need the freeze
-	// detector's config, the keyframe-storm detector's config, or either one's
-	// verdict, to do its job.
+	// Only this detector's own block is set: it must never need the freeze detector's
+	// config, or its verdict, to do its job.
 	clientMonitor.config.videoRecoveryFailedDetector = { ...RECOVERY_CONFIG };
 
 	const detector = new VideoRecoveryFailedDetector(trackMonitor as any);

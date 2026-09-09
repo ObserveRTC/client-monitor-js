@@ -1,49 +1,62 @@
 import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 
+/** Which round trip a reading came from: they span different paths and are never blended. */
+export type TransportDelayRttSource = 'rtcp' | 'ice';
+
 export type TransportDelayIssuePayload = {
 	peerConnectionId: string;
-	/** Smoothed round trip in milliseconds at the moment the issue was raised. */
+	/** Mean round trip in milliseconds over the detection window, at the moment the issue was raised. */
 	rttInMs: number;
-	/** How long the round trip stayed above the threshold before raising, from stats timestamps. */
+	/**
+	 * Which measurement `rttInMs` came from. `rtcp` is the media round trip, out to the far
+	 * endpoint; `ice` is the connectivity-check round trip, which in an SFU topology reaches only
+	 * the SFU. A reading that changes source mid-call is describing a different path, not a
+	 * changed one.
+	 */
+	rttSource: TransportDelayRttSource;
+	/** The stretch of stats time `rttInMs` is the mean over. */
 	sustainedForInMs: number;
 	durationInMs?: number;
 }
 
 export type TransportDelayDetectorConfig = {
-	/** Smoothed round trip (ms) at or above which the path counts as slow. */
+	/** Mean round trip (ms) at or above which the path counts as slow. */
 	thresholdInMs: number;
 
-	/**
-	 * Round trip (ms) below which the issue resolves. Keep it under
-	 * `thresholdInMs`: the gap is what stops a call sitting on the line from
-	 * flapping the issue open and shut.
-	 */
+	/** Round trip (ms) below which the issue resolves. Keep it under `thresholdInMs` to stop flapping. */
 	recoveryThresholdInMs: number;
-
-	/** How long (ms of stats time) the round trip must stay high before raising. */
-	durationInMs: number;
 }
 
 /**
- * Reports a network path that works but takes too long — the round trip stays high enough, for long
- * enough, that conversation stops being conversation and becomes turn-taking. Every connectivity
- * stage completed and the path holds; delay is simply the property of it that makes the call bad.
+ * Reports a network path that works but takes too long — the round trip high enough, for long
+ * enough, that conversation becomes turn-taking. Use it to tell a slow path (a long route, a relay
+ * on the wrong continent) apart from a congested one: the congestion detectors answer "is the path
+ * out of room", a different fault with a different fix. Both can be true at once, and none of them
+ * reads the others.
  *
- * This is deliberately not congestion. `UplinkCongestionDetector` and `DownlinkCongestionDetector`
- * answer "is this path narrower than what is being put on it", which is about capacity and is a
- * different fault with a different fix. A path can be uncongested and slow (a long physical route, a
- * relay on the wrong continent) or congested and short. They will co-fire when both are true, and
- * none of them reads another to decide.
+ * **It reads the mean round trip over `PeerConnectionMonitor.detectionRecoveryWindow`**, which is
+ * `totalRoundTripTime` divided by the number of measurements that produced it, across a span the
+ * window states in milliseconds. That is deliberately not the EWMA this detector used to read: an
+ * EWMA at a fixed smoothing factor has a memory set by how often stats are collected — roughly a
+ * minute at a five-second period, under half that at two — so the same configuration meant
+ * different things in different deployments. The window's span is the same everywhere, which is
+ * also why the detector no longer counts a `durationInMs` of its own: the sustain *is* the
+ * detection window, and `peerConnectionDetectionRecoveryWindow` is where its length now lives.
  *
- * `ewmaRttInSec` is already smoothed on the peer connection, which is the right input: a single
- * inflated RTT sample is common and means nothing. What this adds on top is duration — the round
- * trip must stay above `thresholdInMs` for `durationInMs` of *stats time* before anything is raised,
- * and must fall below `recoveryThresholdInMs` to clear. The gap between the two thresholds is what
- * stops a call sitting exactly on the line from flapping the issue open and shut.
+ * **RTCP is preferred over ICE, per reading rather than once per call.** RTCP measures out to the
+ * far endpoint and ICE only as far as the peer this connection talks to, so they answer different
+ * questions and are never averaged together. The preference is re-decided from the window each
+ * time: an RTCP total that stops advancing produces no reading at all and the detector falls back,
+ * where reading a latched `rtcpRttInSec` would have kept thresholding a number that had stopped
+ * moving while reporting that it could see. The source travels with the issue as `rttSource`.
  *
- * Note that RTT to an SFU is a half-path measurement and never sees the far leg, so this is evidence
- * about *this endpoint's* path and must not be presented as end-to-end latency.
+ * A finding clears when the *recovery* window — the stretch behind the detection window — also
+ * reads below `recoveryThresholdInMs`, so a path has to have been good for both spans, not merely
+ * for the most recent one.
+ *
+ * RTT to an SFU is a half-path measurement, so this is evidence about *this endpoint's* path and is
+ * not end-to-end latency.
  *
  * Issue raised: `transport-delay-degraded`. Monitor event: `transport-delay-degraded`.
  * Config: `transportDelayDetector`.
@@ -60,7 +73,6 @@ export class TransportDelayDetector implements Detector {
 	public inputsUnavailable = false;
 
 	private readonly issueKey: string;
-	private _sustainedForInMs = 0;
 	private _raised = false;
 	private _startedAt?: number;
 
@@ -77,9 +89,15 @@ export class TransportDelayDetector implements Detector {
 	public update() {
 		if (this.disabled) return;
 
-		const rttInSec = this.peerConnection.ewmaRttInSec;
+		const window = this.peerConnection.detectionRecoveryWindow;
 
-		if (rttInSec === undefined) {
+		// Not enough stats time yet is not a verdict either way, and it is not blindness: the
+		// window is filling and will have an answer shortly.
+		if (!window.detectionWindowIsReady) return;
+
+		const detection = this._readRtt(window.detectionDelta);
+
+		if (detection === undefined) {
 			this.inputsUnavailable = true;
 
 			return;
@@ -87,22 +105,69 @@ export class TransportDelayDetector implements Detector {
 
 		this.inputsUnavailable = false;
 
-		const rttInMs = rttInSec * 1000;
-
-		if (rttInMs < this.config.recoveryThresholdInMs) {
-			this._sustainedForInMs = 0;
-
-			if (this._raised) this._resolve('round trip recovered');
-
-			return;
+		if (this.config.thresholdInMs <= detection.rttInMs) {
+			return this._raise(detection, window.detectionDurationInMs);
 		}
 
-		if (rttInMs < this.config.thresholdInMs) return;
+		if (!this._raised) return;
 
-		this._sustainedForInMs += this.peerConnection.deltaTime ?? 0;
+		// Below the raise threshold with a finding open: the recovery window decides whether it
+		// ends, so a path has to have been good for the stretch behind this one as well.
+		if (!window.recoveryWindowIsReady) return;
 
-		if (this._raised) return;
-		if (this._sustainedForInMs < this.config.durationInMs) return;
+		const recovery = this._readRtt(window.recoveryDelta);
+
+		if (recovery === undefined) return;
+		if (this.config.recoveryThresholdInMs <= recovery.rttInMs) return;
+
+		this._resolve('round trip recovered');
+	}
+
+	/**
+	 * The mean round trip across one window's deltas, or `undefined` when neither measurement
+	 * moved far enough to produce one.
+	 *
+	 * A count delta of zero is the case that matters: the totals are still being reported, but no
+	 * new measurement landed in this window, so dividing would resurrect the last mean instead of
+	 * saying there is nothing new to read.
+	 */
+	private _readRtt(deltas: {
+		totalRtcpRoundTripTimeInMs: number | null;
+		totalRtcpRoundTripMeasurements: number | null;
+		totalIceRoundTripTimeInMs: number | null;
+		totalIceResponsesReceived: number | null;
+	}): { rttInMs: number, source: TransportDelayRttSource } | undefined {
+		const mean = (
+			timeInMs: number | null,
+			count: number | null,
+			source: TransportDelayRttSource,
+		) => timeInMs !== null && count !== null && 0 < count
+			? { rttInMs: timeInMs / count, source }
+			: undefined;
+
+		return mean(deltas.totalRtcpRoundTripTimeInMs, deltas.totalRtcpRoundTripMeasurements, 'rtcp')
+			?? mean(deltas.totalIceRoundTripTimeInMs, deltas.totalIceResponsesReceived, 'ice');
+	}
+
+	private _raise(
+		reading: { rttInMs: number, source: TransportDelayRttSource },
+		windowInMs: number,
+	) {
+		const payload: TransportDelayIssuePayload = {
+			peerConnectionId: this.peerConnection.peerConnectionId,
+			rttInMs: reading.rttInMs,
+			rttSource: reading.source,
+			sustainedForInMs: windowInMs,
+		};
+
+		// Already open: refresh the measurement rather than raising a second time, so the payload
+		// an operator reads is the current round trip and not the one that opened the episode.
+		if (this._raised) {
+			return void this.peerConnection.issues.update({
+				key: this.issueKey,
+				payload,
+			});
+		}
 
 		this._raised = true;
 		this._startedAt = Date.now();
@@ -112,25 +177,21 @@ export class TransportDelayDetector implements Detector {
 		clientMonitor.emit('transport-delay-degraded', {
 			clientMonitor,
 			peerConnectionMonitor: this.peerConnection,
-			rttInMs,
+			rttInMs: reading.rttInMs,
 		});
 
-		clientMonitor.raiseIssue<TransportDelayIssuePayload>(this.issueKey, {
+		this.peerConnection.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: TransportDelayDetector.ISSUE_TYPE,
-			payload: {
-				peerConnectionId: this.peerConnection.peerConnectionId,
-				rttInMs,
-				sustainedForInMs: this._sustainedForInMs,
-			},
+			payload,
 		});
 	}
 
 	private _resolve(comment: string) {
 		this._raised = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.peerConnection.issues.get(this.issueKey);
 		let payload: TransportDelayIssuePayload | undefined;
 
 		if (issue) {
@@ -140,7 +201,8 @@ export class TransportDelayDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<TransportDelayIssuePayload>(this.issueKey, {
+		this.peerConnection.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

@@ -261,7 +261,7 @@ describe('OutboundRtpMonitor derived fields', () => {
 			qpSum: 1800,
 		} as any);
 
-		expect(monitor.encodeTimePerFrameInMs).toBeCloseTo(15);
+		expect(monitor.avgEncodeTimePerFrameInMs).toBeCloseTo(15);
 		expect(monitor.retransmissionRatio).toBeCloseTo(0.05);
 		expect(monitor.retransmittedPacketRatio).toBeCloseTo(0.05);
 		expect(monitor.avgQpPerFrame).toBeCloseTo(30);
@@ -399,7 +399,7 @@ describe('MediaSourceMonitor derived fields', () => {
 		} as any);
 
 		expect(monitor.deltaFrames).toBe(60);
-		expect(monitor.sourceFps).toBeCloseTo(30);
+		expect(monitor.producedFps).toBeCloseTo(30);
 		expect(monitor.rmsAudioLevel).toBeCloseTo(0.2);
 	});
 });

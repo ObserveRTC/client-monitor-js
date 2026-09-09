@@ -70,8 +70,9 @@ test each category actually states. Every connectivity stage completed and
 the path is still the reason the call is bad" is Transport Quality word for
 word. See
 [DETECTOR_TAXONOMY.md](./DETECTOR_TAXONOMY.md#category-2--transport-quality);
-the `blocked-transport` issue type, its payload and its `blockedTransportDetector`
-config key are unchanged.
+that finding is now three classes — `BlockedStunRequestsDetector`,
+`BlockedOutboundMediaDetector` and `BlockedInboundMediaDetector` — with a config
+key each, and the `blocked-transport` *event* is emitted by the first of them.
 
 ## The rule: one class per issue, not one class per layer
 

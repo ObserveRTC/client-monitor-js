@@ -1,17 +1,16 @@
 import { Detector } from "./Detector";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 
-/**
- * `targetDelayInMs` is what NetEQ is currently aiming for; `actualDelayInMs` is what it really added
- * per emitted sample; `timeStretchRate` is the share of samples (`0..1`) stretched or compressed to
- * keep up. `consecutiveTicks` is how many collections in a row agreed before the issue was raised.
- */
 export type JitterBufferStressIssuePayload = {
 	peerConnectionId: string;
 	trackId: string;
+	/** What NetEQ is aiming for. */
 	targetDelayInMs: number;
+	/** What it really added per emitted sample. */
 	actualDelayInMs?: number;
+	/** Share of samples (`0..1`) stretched or compressed to keep up. */
 	timeStretchRate: number;
+	/** Collections in a row that agreed before raising. */
 	consecutiveTicks: number;
 	durationInMs?: number;
 }
@@ -25,30 +24,45 @@ export type JitterBufferStressDetectorConfig = {
 
 	/** Consecutive collections both conditions must hold before raising. */
 	minConsecutiveTicks: number;
+
+	/**
+	 * The target delay at which the buffer counts as unbearable — the top of the severity scale,
+	 * not a trigger. Only affects the published severity, never whether the issue is raised.
+	 */
+	unbearableTargetDelayInMs: number;
+
+	/**
+	 * The share of samples stretched or compressed that counts as unbearable — the top of the
+	 * severity scale, not a trigger. Only affects the published severity, never the raise.
+	 */
+	unbearableTimeStretchRate: number;
 }
 
 /**
- * Watches the audio jitter buffer of an inbound track and reports when it is fighting the network
- * and losing — the user-visible failure being conversation that has gone latent and slightly warped,
- * voices sped up or dragged out, rather than the fabricated audio `InventedSpeechDetector` covers. The
- * two are complements: invention is what the buffer resorts to once it has already run dry, this is
- * the buffer straining before it gets there.
+ * Reports an inbound track's audio jitter buffer fighting the network and losing — conversation gone
+ * latent and slightly warped, voices sped up or dragged out. Use it to tell straining apart from a
+ * buffer that has already run dry and is fabricating audio, which `InventedSpeechDetector` covers.
  *
- * Both conditions are required, because either alone is benign. A high `jitterBufferTargetDelayInMs`
- * on its own means NetEQ is *succeeding*: it has bought latency to hide jitter and the user hears
- * nothing wrong. A raised `timeStretchRate` on its own is ordinary clock-drift correction between
- * two devices whose sample clocks disagree. It is the two together — the buffer already deep and
- * still having to warp audio to keep up — that the user actually hears, so a detector reading either
- * signal alone would spend its time reporting a healthy buffer doing its job. Half the evidence is
- * worse than none, so a tick missing either field is skipped rather than guessed at.
+ * A finding means the path is delivering unevenly enough that the buffer has to grow and warp
+ * audio to cover it — congestion, a wireless link, or a route with variable queuing. The listener
+ * hears added delay and slightly distorted voices before they hear anything break.
  *
- * The condition must hold for `minConsecutiveTicks` collections before raising, so one noisy stats
- * read cannot open an issue. Nothing is judged while the consumer or the remote sender is paused:
- * both stand the detector down and reset the tick count, since a buffer with no inbound audio to
- * hold has no meaningful target delay.
+ * Both a deep `jitterBufferTargetDelayInMs` and a raised `timeStretchRate` are required, for
+ * `minConsecutiveTicks` collections: deep alone means NetEQ is succeeding, and stretching alone is
+ * ordinary clock-drift correction. A tick missing either field is skipped rather than guessed at,
+ * and a paused consumer or remote sender stands the detector down and resets the tick count.
+ *
+ * Beside the finding it publishes `InboundTrackMonitor.jitterBufferStressSeverity`, the geometric
+ * mean of the same two witnesses measured against the levels that count as unbearable. It is an
+ * absolute scale rather than a threshold-relative one: `0` is a buffer doing nothing and `1` is one
+ * nobody could converse through, so the raise point sits well down the range — around `0.16` with
+ * the shipped defaults — and most of the scale is left to say how much worse things got. Written on
+ * every collection the detector could judge, below the threshold as well as above it, so a score
+ * can fall off gradually instead of only when a finding opens. It never decides the raise.
  *
  * Issue raised: `audio-jitter-buffer-stress`. Monitor event: `audio-jitter-buffer-stress`.
  * Config: `jitterBufferStressDetector`.
+ * Track attribute: `InboundTrackMonitor.jitterBufferStressSeverity`.
  *
  * Category: Perceived Quality
  * Layer: Responsiveness
@@ -87,11 +101,13 @@ export class JitterBufferStressDetector implements Detector {
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 		if (this.trackMonitor.paused) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.jitterBufferStressSeverity = undefined;
 
 			return this._alertOn ? this._clear('consumer paused') : undefined;
 		}
 		if (this.trackMonitor.remoteOutboundTrackPaused) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.jitterBufferStressSeverity = undefined;
 
 			return this._alertOn ? this._clear('remote track paused') : undefined;
 		}
@@ -99,7 +115,15 @@ export class JitterBufferStressDetector implements Detector {
 		const targetDelayInMs = inboundRtp.jitterBufferTargetDelayInMs;
 		const timeStretchRate = inboundRtp.timeStretchRate;
 
-		if (targetDelayInMs === undefined || timeStretchRate === undefined) return;
+		// A collection missing either witness is not judged at all, so the severity says nothing
+		// rather than reporting the half it happens to have.
+		if (targetDelayInMs === undefined || timeStretchRate === undefined) {
+			this.trackMonitor.jitterBufferStressSeverity = undefined;
+
+			return;
+		}
+
+		this.trackMonitor.jitterBufferStressSeverity = this._severity(targetDelayInMs, timeStretchRate);
 
 		const stressed = this.config.targetDelayThresholdInMs < targetDelayInMs &&
 			this.config.timeStretchThreshold < timeStretchRate;
@@ -131,7 +155,8 @@ export class JitterBufferStressDetector implements Detector {
 			timeStretchRate,
 		});
 
-		clientMonitor.raiseIssue<JitterBufferStressIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+				key: this.issueKey,
 				includeInSample: this.includeIssueInSample,
 			type: JitterBufferStressDetector.ISSUE_TYPE,
 			payload: {
@@ -145,11 +170,37 @@ export class JitterBufferStressDetector implements Detector {
 		});
 	}
 
+	/**
+	 * How bad the buffer's behaviour is on an absolute scale, `0..1`, from the two witnesses the
+	 * raise tests.
+	 *
+	 * Each witness is its value against the level that counts as unbearable, so `0` is a buffer
+	 * doing nothing at all and `1` is one nobody could hold a conversation through. The scale is
+	 * anchored on that, not on the thresholds, which is what puts the raise point well down the
+	 * range rather than at zero: with the shipped defaults the issue opens around `0.16`, leaving
+	 * most of the scale to describe how much worse it got afterwards.
+	 *
+	 * The two are combined with a geometric mean, so a witness at zero takes the whole thing to
+	 * zero — the same "deep alone means NetEQ is succeeding, stretching alone is clock drift" that
+	 * decides the finding. Undefined when an unbearable level is not positive, which leaves nothing
+	 * to scale against.
+	 */
+	private _severity(targetDelayInMs: number, timeStretchRate: number): number | undefined {
+		const witness = (value: number, unbearable: number) =>
+			0 < unbearable ? Math.min(1, Math.max(0, value / unbearable)) : undefined;
+
+		const delay = witness(targetDelayInMs, this.config.unbearableTargetDelayInMs);
+		const stretch = witness(timeStretchRate, this.config.unbearableTimeStretchRate);
+
+		if (delay === undefined || stretch === undefined) return undefined;
+
+		return Math.sqrt(delay * stretch);
+	}
+
 	private _clear(comment: string) {
 		this._alertOn = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: JitterBufferStressIssuePayload | undefined;
 
 		if (issue) {
@@ -159,7 +210,8 @@ export class JitterBufferStressDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<JitterBufferStressIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

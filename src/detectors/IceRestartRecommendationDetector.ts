@@ -3,10 +3,7 @@ import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 import { Detector } from "./Detector";
 
-/**
- * Why an ICE restart is warranted. Every reason describes a condition the browser will not recover
- * from on its own within the configured window.
- */
+/** Why a restart is warranted: a condition the browser will not recover from within the window. */
 export type IceRestartRecommendationReason =
 	/** ICE gave up on this generation; only a restart can revive it. */
 	| 'ice-failed'
@@ -18,11 +15,8 @@ export type IceRestartRecommendationReason =
 	| 'never-established';
 
 /**
- * `transportId` is absent for a `never-established` recommendation, which is per peer connection
- * rather than per transport. `conditionDurationInMs` is how long the triggering condition had
- * persisted when the recommendation went out, `iceGeneration` how many restarts have already been
- * observed, and `recommendationCount` how many times a restart has been recommended for this
- * transport — a rising count with a flat generation means the application is not acting on them.
+ * `transportId` is absent for `never-established`, which is per peer connection. A rising
+ * `recommendationCount` against a flat `iceGeneration` means the recommendations are not being acted on.
  */
 export type IceRestartRecommendedEventPayload = {
 	peerConnectionId: string;
@@ -51,96 +45,40 @@ type TransportState = {
 };
 
 export type IceRestartRecommendationDetectorConfig = {
-	/**
-	 * Flag to indicate if the detector should create the
-	 * `ICE_RESTART_RECOMMENDED` client event in addition to emitting the
-	 * monitor event.
-	 *
-	 * DEFAULT: true
-	 */
+	/** Also add the `ICE_RESTART_RECOMMENDED` client event. DEFAULT: true */
 	createEvent?: boolean;
 
-	/**
-	 * How long (in milliseconds) a `disconnected` or stalled transport must
-	 * persist before an ICE restart is recommended. ICE `failed` recommends
-	 * immediately, since it never self-heals.
-	 *
-	 * Performing the restart is the application's responsibility — the
-	 * library only reports that one is warranted.
-	 */
+	/** How long a `disconnected` or stalled transport must persist, in ms. `failed` recommends on sight. */
 	iceRestartRecommendationThresholdInMs: number;
 
-	/**
-	 * Minimum time (in milliseconds) between repeated restart
-	 * recommendations for the same ICE transport, so a persisting condition
-	 * does not produce one recommendation per stats tick.
-	 */
+	/** Minimum time between repeated recommendations for the same transport, in ms. */
 	iceRestartRecommendationCooldownInMs: number;
 
-	/**
-	 * How long (in milliseconds) the peer connection must have been
-	 * establishing before a `never-established` restart is recommended. This
-	 * is the per-peer-connection condition, which has no failing transport to
-	 * point at.
-	 */
+	/** How long the peer connection must have been establishing before `never-established`, in ms. */
 	restartRecommendationThresholdInMs: number;
 
-	/**
-	 * Minimum time (in milliseconds) between repeated `never-established`
-	 * recommendations, so a persisting condition does not produce one
-	 * recommendation per stats tick.
-	 */
+	/** Minimum time between repeated `never-established` recommendations, in ms. */
 	restartRecommendationCooldownInMs: number;
 }
 
 /**
- * The one place that says "restart ICE". It recommends and never performs: only the application
- * knows whether renegotiation is safe at this moment, whether the signalling channel is even up, and
- * what an SFU on the other end expects. Listen for `'ice-restart-recommended'` and call
- * `pc.restartIce()`, or the transport-level equivalent.
+ * The one place that says "restart ICE". Use it to answer "is this connection worth restarting right
+ * now" — it recommends and never performs, since only the application knows whether renegotiation is
+ * safe. Listen for `'ice-restart-recommended'` and call `pc.restartIce()`.
  *
- * Four conditions warrant one, and they are together in one class because they answer one question —
- * *would starting ICE over help?* — and because the rate limiting only means anything if it is
- * shared. Two detectors each politely waiting out their own cooldown produce twice the nagging.
+ * Four conditions warrant one, kept in one class so the rate limiting is shared. Three are per
+ * transport — `failed` on sight, `disconnected` and a connected-but-not-receiving path once they
+ * outlast `iceRestartRecommendationThresholdInMs` — and `never-established` is per peer connection,
+ * where nothing ever got far enough to have a failing transport. Each verdict is read from raw
+ * transport and connection state, so this runs in any order and no other detector can silence it.
+ * Condition clocks are stats time; the cooldowns are wall clock, since they throttle notifications.
+ * A restart already in flight, inferred from a changed username fragment, suppresses the rest.
  *
- * Three of the conditions are per transport. `failed` recommends on sight, since ICE never
- * self-heals from it. `disconnected` and a connected-but-not-receiving path each have to outlast
- * `iceRestartRecommendationThresholdInMs` first, because both recover on their own often enough that
- * recommending immediately would ask for a renegotiation the connection did not need. The fourth is
- * per peer connection: an establishment that never finished at all, past
- * `restartRecommendationThresholdInMs`, where there is no failing transport to point at because
- * nothing ever got far enough to have one.
+ * It does not claim a restart will help, only that it is the standard remedy for the condition.
  *
- * Every one of those verdicts is reached from raw transport and connection state, never by asking
- * another detector what it concluded. That is what lets this run in any order relative to the
- * detectors that raise the corresponding issues, lets any of them be disabled without silencing the
- * recommendation, and keeps a recommendation defensible on its own evidence rather than on a
- * conclusion reached elsewhere. The cost is that the stall condition and its guards are written out
- * here a second time, which is the right trade: twenty lines of duplicated bookkeeping in exchange
- * for two detectors that cannot break each other.
- *
- * Condition clocks are stats time, accumulated from each monitor's own `deltaTime` — the transport's
- * for the three per-transport reasons, the peer connection's for `never-established` — so a
- * collection that ran late does not shorten the window a condition had to survive. The cooldowns are
- * the deliberate exception and stay on the wall clock: they throttle how often the application is
- * told, which is a fact about the application's time rather than about the connection's. A restart
- * already in flight
- * — inferred here from a changed ICE local username fragment — suppresses recommendations until it
- * resolves, since asking for a second restart while the first is still negotiating is how an
- * application ends up in a restart loop.
- *
- * What it deliberately does not claim: that a restart will help. It reports that the condition is
- * one a restart is the standard remedy for; a path that has no route to the far end at all will fail
- * again on the new generation, and the rising `recommendationCount` against a flat `iceGeneration`
- * is what tells a reader the advice is not being taken — or is not working.
- *
- * Raises no issue. Monitor event: `ice-restart-recommended`. Client event:
- * `ICE_RESTART_RECOMMENDED`, when `createEvent`. Config: `iceRestartRecommendationDetector`, which
- * holds the thresholds and cooldowns for all four conditions. They are its own rather than borrowed
- * from the detectors that raise the corresponding issues: recommending a renegotiation is a
- * different decision from reporting a fault, and it is normal to want the recommendation to wait
- * longer than the issue did. Disabling `iceDisconnectedDetector` or `icePathEstablishmentDetector`
- * therefore no longer silences the matching recommendation, and vice versa.
+ * Raises no issue. Monitor event: `ice-restart-recommended`.
+ * Client event: `ICE_RESTART_RECOMMENDED`, when `createEvent`.
+ * Config: `iceRestartRecommendationDetector`.
  *
  * Category: Telemetry
  * Layer: Transport
@@ -155,11 +93,7 @@ export class IceRestartRecommendationDetector implements Detector {
 	/** `never-established` is per peer connection, so its rate limiting cannot live in the map. */
 	private _neverEstablishedRecommendedAt?: number;
 	private _neverEstablishedRecommendations = 0;
-	/**
-	 * Stats time this peer connection has spent in `connecting`, accumulated from its own
-	 * `deltaTime` exactly as the three per-transport clocks accumulate the transport's. The
-	 * condition being timed is the connection's, so the clock is the connection's.
-	 */
+	/** Stats time spent in `connecting`, from the connection's own `deltaTime`. */
 	private _connectingForInMs = 0;
 
 	public constructor(
@@ -209,8 +143,7 @@ export class IceRestartRecommendationDetector implements Detector {
 		}
 		if (usernameFragment !== undefined) state.usernameFragment = usernameFragment;
 
-		// A pending restart has resolved once the transport reaches a terminal verdict
-		// for the new generation, either way.
+		// A pending restart has resolved once the new generation reaches a terminal verdict.
 		if (state.restartPending
 			&& (iceState === 'connected' || iceState === 'completed' || iceState === 'failed')) {
 			state.restartPending = false;
@@ -235,9 +168,7 @@ export class IceRestartRecommendationDetector implements Detector {
 		}
 
 		if (reason === undefined) {
-			// Rearmed rather than merely quiet: the next incident on this transport
-			// should be recommended promptly instead of serving out a cooldown that
-			// belongs to a condition which has since cleared.
+			// Rearmed, so the next incident is not made to serve out a cleared condition's cooldown.
 			state.recommendedAt = undefined;
 
 			return;
@@ -245,13 +176,7 @@ export class IceRestartRecommendationDetector implements Detector {
 
 		const now = Date.now();
 
-		// Wall clock, deliberately, and unlike the condition clocks in `_accumulate()`:
-		// the cooldown rate-limits *notifications* rather than measuring how long
-		// anything held, and the thing being throttled is how often the application is
-		// told, in the time the application lives in. The known consequence is that a
-		// backgrounded tab burns cooldown it never observed and may recommend again on
-		// its first tick back — which is the right behaviour for a rate limit: the
-		// condition is still true, and real time has passed for it to be acted on.
+		// Wall clock, unlike the condition clocks: this throttles notifications, not measurement.
 		if (state.recommendedAt !== undefined
 			&& now - state.recommendedAt < config.iceRestartRecommendationCooldownInMs) {
 			return;
@@ -274,12 +199,8 @@ export class IceRestartRecommendationDetector implements Detector {
 	}
 
 	/**
-	 * Advances the three per-transport condition clocks from raw state, each one zeroed the moment
-	 * its condition stops holding. The stall condition is spelled out here in full — connected on a
-	 * succeeded pair, still sending, receiving nothing, having received something before, and
-	 * carrying inbound RTP at all — rather than borrowed from the detector that raises the stall
-	 * issue, so that neither depends on the other. A send-only publish transport legitimately
-	 * receives nothing between consent bursts, which is why the last guard is not optional.
+	 * Advances the three per-transport condition clocks, each zeroed the moment its condition stops
+	 * holding. The last stall guard is not optional: a send-only transport legitimately receives nothing.
 	 */
 	private _accumulate(transport: IceTransportMonitor, state: TransportState) {
 		const iceState = transport.iceState;
@@ -318,26 +239,15 @@ export class IceRestartRecommendationDetector implements Detector {
 	}
 
 	/**
-	 * Recommends a restart for a peer connection that never finished establishing. Unlike the three
-	 * per-transport conditions this one is measured on the peer connection itself, because the fault
-	 * is the absence of a working transport — there may be no transport in a reportable state, or no
-	 * transport at all, and `connecting` covers the DTLS handshake as well as ICE. What it is *not*
-	 * is a different kind of clock: it accumulates the connection's `deltaTime` just as the
-	 * per-transport clocks accumulate the transport's, so all four reasons ship a
-	 * `conditionDurationInMs` that means the same thing and can be compared with each other.
-	 *
-	 * It yields to `ice-failed` and `ice-disconnected`: a transport in either state names what went
-	 * wrong, where "it never connected" only names what did not happen. Because both reasons now
-	 * live in one class this is precedence between two verdicts rather than coordination between two
-	 * detectors, and it is still decided from the transports' own states.
+	 * Recommends for a peer connection that never finished establishing. Yields to `ice-failed` and
+	 * `ice-disconnected`, which name what went wrong rather than only what did not happen.
 	 */
 	private _checkEstablishment() {
 		const config = this.config;
 
 		if (this.peerConnection.connectionState !== 'connecting') {
 			this._neverEstablishedRecommendedAt = undefined;
-			// The condition has broken — established, failed or closed — so the next
-			// attempt is timed from its own start rather than from this one's.
+			// The condition has broken, so the next attempt is timed from its own start.
 			this._connectingForInMs = 0;
 
 			return;
@@ -355,13 +265,7 @@ export class IceRestartRecommendationDetector implements Detector {
 
 		const now = Date.now();
 
-		// Wall clock, deliberately, and unlike the condition clock above: the cooldown
-		// rate-limits *notifications* rather than measuring how long anything held, and
-		// what a listener wants throttled is how often it is told, in the time it lives
-		// in. The known consequence is that a backgrounded tab burns cooldown it never
-		// observed and may recommend again on its first tick back — which is the right
-		// behaviour for a rate limit: the condition is still true, and the application
-		// has had real time to act on the previous recommendation.
+		// Wall clock, unlike the condition clock above: this throttles notifications.
 		if (this._neverEstablishedRecommendedAt !== undefined
 			&& now - this._neverEstablishedRecommendedAt < config.restartRecommendationCooldownInMs) {
 			return;
@@ -383,11 +287,7 @@ export class IceRestartRecommendationDetector implements Detector {
 		});
 	}
 
-	/**
-	 * Severity used to pick the transport that best explains a stalled establishment. A connection
-	 * without BUNDLE has several transports, and the failing one is the story — not whichever
-	 * healthy sibling was listed first.
-	 */
+	/** Picks the transport that best explains a stalled establishment, not whichever was listed first. */
 	private static readonly ICE_STATE_SEVERITY: Record<string, number> = {
 		failed: 6, disconnected: 5, checking: 4, new: 3, connected: 2, completed: 1, closed: 0,
 	};

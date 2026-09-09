@@ -100,12 +100,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaFractionLost?: number;
 	deltaFramesDecoded?: number;
 	deltaQpSum?: number | undefined;
-	/**
-	 * Mean quantizer of the frames decoded in this interval — how coarsely the
-	 * picture the viewer actually saw was compressed. `undefined` when the
-	 * browser does not report `qpSum` for this codec, in which case no picture
-	 * quality judgement is made at all.
-	 */
+	/** Mean quantizer of the frames decoded in this interval; `undefined` when `qpSum` is absent. */
 	avgQpPerFrame?: number | undefined;
 	deltaFramesReceived?: number;
 	deltaFramesRendered?: number;
@@ -122,20 +117,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	public deltaJitterBufferEmittedCount?: number;
 	public deltaJitterBufferTargetDelay?: number;
 	/**
-	 * The share of this interval's audio (`0..1`) the listener heard as invention
-	 * rather than as anything the sender actually transmitted.
-	 *
-	 * When packets are missing or late, NetEQ does not play silence; it fabricates
-	 * audio from what came before, so playout never stops. Some of that fabrication
-	 * is inaudible: while the talker was silent there was nothing to reproduce, and
-	 * the invented samples come out as silence or comfort noise nobody could
-	 * distinguish from the real thing. The browser reports those separately as
-	 * `silentConcealedSamples` and they are subtracted here, so what is left is
-	 * fabrication the listener could actually hear — the robotic or watery artefact
-	 * behind a "they were breaking up" complaint.
-	 *
-	 * `undefined` when the browser reports no concealment counters, or when no
-	 * samples arrived this interval, which is not the same as zero.
+	 * Share of this interval's audio (`0..1`) the listener heard as concealment rather than
+	 * transmitted audio. Silent concealment is excluded, so what is left is audible invention.
+	 * `undefined` when the counters are absent or no samples arrived, which is not zero.
 	 */
 	public inventedSpeechRatio?: number;
 	public concealmentEventRate?: number;
@@ -150,88 +134,31 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	public deltaKeyFramesDecoded?: number;
 	public deltaTotalDecodeTime?: number;
 	public deltaTotalFreezesDuration?: number;
-	/**
-	 * Freezes that *started* in this interval. The specification counts one when the
-	 * gap between two rendered frames reaches `max(3 × average duration, average +
-	 * 150ms)`, so the bar scales with the stream's own frame rate — roughly 100ms at
-	 * 30fps and 600ms at 5fps — and a slow but evenly-paced picture never trips it.
-	 *
-	 * A counter accumulated frame by frame, which is what makes it readable at any
-	 * collecting period: unlike `framesPerSecond`, which is the rate sampled at the
-	 * moment of collection, nothing here is lost between collections.
-	 */
+	/** Freezes that started in this interval. */
 	public deltaFreezeCount?: number;
 	/**
-	 * Share of this interval the picture spent frozen — `totalFreezesDuration` over
-	 * the interval, both taken in seconds.
-	 *
-	 * The companion to {@link deltaFreezeCount}, and what it cannot say on its own:
-	 * the counter reports how many times the picture stopped, this reports how much
-	 * of the viewer's time those stops took. Two brief interruptions and two that
-	 * left the picture off for most of the interval score the same count and read
-	 * very differently here.
-	 *
-	 * Needs nothing declared by the application, which is what makes it usable on a
-	 * whole fleet: it says how much of the viewer's time was lost without anyone
-	 * having to state what the stream was supposed to deliver.
-	 *
-	 * **Can exceed `1`.** A freeze is credited entirely to the interval containing
-	 * the frame that ends it, so a stop spanning several collections lands in one of
-	 * them whole — the intervals it covered report nothing at all, and the one that
-	 * catches the recovery can report more frozen time than it lasted. Read above
-	 * `1` as "the picture was stopped for longer than this collection", which is
-	 * exactly what it means, rather than as a broken ratio.
+	 * Share of this interval the picture spent frozen. Can exceed `1`: a stop spanning
+	 * several collections is credited whole to the one that catches the recovery.
 	 */
 	public frozenTimeRatio?: number;
 	/**
-	 * Pauses that ended in this interval, and how long they lasted in total.
-	 *
-	 * The other half of {@link deltaFreezeCount}, and not optional to read. The
-	 * specification splits a stopped picture in two by duration — "video is
-	 * considered to be paused if time passed since last rendered frame exceeds 5
-	 * seconds" — and the split is exclusive: past that bar `freezeCount` and
-	 * `totalFreezesDuration` do not move at all, and these two carry the outage
-	 * instead. Verified on Chromium 141, which reports a 5.5s stop as a freeze and
-	 * a 6s stop as a pause, with the other pair flat.
-	 *
-	 * So anything reading only the freeze counters is blind to exactly the longest
-	 * interruptions. Both pairs are credited on the collection containing the frame
-	 * that ends the stop, and both count one per contiguous stop.
+	 * Pauses that ended in this interval, and their total duration. A stopped picture past
+	 * five seconds counts here and not as a freeze, so the freeze counters alone miss the
+	 * longest interruptions.
 	 */
 	public deltaPauseCount?: number;
 	public deltaTotalPausesDuration?: number;
-	/**
-	 * Share of this interval the picture spent paused — the pause counterpart of
-	 * {@link frozenTimeRatio}, and subject to the same caveat: it can exceed `1`,
-	 * because a stop spanning collections is credited whole to the one that catches
-	 * the recovery.
-	 */
+	/** Pause counterpart of {@link frozenTimeRatio}, with the same "can exceed `1`" caveat. */
 	public pausedTimeRatio?: number;
 	public deltaTotalInterFrameDelay?: number;
 	public deltaTotalSquaredInterFrameDelay?: number;
 	/** Mean gap between the frames rendered in this interval, in milliseconds. */
 	public avgInterFrameDelayInMs?: number;
 	/**
-	 * How unevenly those frames arrived: the standard deviation of the gap between
-	 * them over its mean, taken from the two interval sums the browser accumulates
-	 * per frame.
-	 *
-	 * Unitless. An evenly-paced picture sits near zero whether it runs at 30fps or at 8 —
-	 * slow is not uneven — and any interruption lifts it, so it reads well as a
-	 * direction: this interval was more ragged than that one, on the same stream.
-	 *
-	 * It does not read as a threshold, and this is worth knowing before anyone
-	 * gates on it. One freeze of length `D` against a normal gap `d`, among `N`
-	 * frames, moves the value by roughly `(D - d) / (d * sqrt(N))` — so the same
-	 * interruption measures differently at a different frame rate or a different
-	 * collecting period, both of which change `N`. Two freezes at exactly the
-	 * spec's own freeze threshold land near 0.86 at 30fps over a second and near
-	 * 0.34 at 15fps over five, which is the same event and a two-and-a-half-fold
-	 * spread. Anything needing a fixed line wants a normalised quantity instead,
-	 * such as `InboundTrackMonitor.deliveredFrameRatio`.
-	 *
-	 * `undefined` until two frames have been rendered in an interval, which is the
-	 * least that can carry a spread.
+	 * How unevenly those frames arrived: standard deviation of the inter-frame gap over its
+	 * mean, unitless. Comparable across intervals of one stream, but not a threshold — the
+	 * same interruption scores differently at another frame rate or collecting period.
+	 * `undefined` until two frames have been rendered in an interval.
 	 */
 	public interFrameDelayVariation?: number;
 	public deltaPliCount?: number;
@@ -249,14 +176,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	public firRate?: number;
 	public nackRate?: number;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -273,20 +195,8 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	}
 
 	/**
-	 * Copies the report onto this monitor, field by field.
-	 *
-	 * Deliberately not `Object.assign`, which copies only the members a report
-	 * happens to carry and silently leaves every other one at its previous value.
-	 * `getStats()` omits what it has nothing to say about — `framesPerSecond` once
-	 * frames stop being decoded, `qpSum` on a codec that does not expose it — and
-	 * under `Object.assign` those fields kept describing an interval that had
-	 * already passed. Anything reading them then saw a healthy last measurement for
-	 * as long as the condition lasted, which is exactly backwards: the moment the
-	 * browser stops measuring is the moment worth noticing.
-	 *
-	 * Assigning every field means an omitted member arrives as `undefined`, which is
-	 * what it means. The identity fields are assigned too, from a report that is
-	 * required to carry them.
+	 * Copies the report field by field rather than with `Object.assign`, so a member the
+	 * browser omitted becomes `undefined` instead of keeping a stale earlier value.
 	 */
 	private _updateStats(stats: Omit<InboundRtpStats, 'appData'>): void {
 		this.timestamp = stats.timestamp;
@@ -371,14 +281,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	}
 
 	/**
-	 * Milliseconds of **stats time** this monitor has observed, accumulated from
-	 * `deltaTime` — the clock every window and duration in the library is measured
-	 * on, and the one thing `Date.now()` must never stand in for.
-	 *
-	 * It advances by what each collection actually cost rather than by one nominal
-	 * period, so a late or skipped collection widens a window by the time the
-	 * condition really held underneath. It never goes backwards and it is not a
-	 * timestamp: only differences between two readings of it mean anything.
+	 * Milliseconds of stats time this monitor has observed, accumulated from `deltaTime`.
+	 * Every window and duration in the library is measured on this clock, never on `Date.now()`;
+	 * it is not a timestamp, so only differences between two readings mean anything.
 	 */
 	public statsClockTime = 0;
 
@@ -392,24 +297,22 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		const elapsedInMs = stats.timestamp - this.timestamp;
 
 		if (elapsedInMs <= 0) {
-			// The same report served again: no interval passed, so nothing derived
-			// from one can be recomputed. The fields still take the report, so what
-			// this monitor holds is always the latest one seen.
+			// No interval passed, so nothing derived can be recomputed — but still take the
+			// report, so this monitor always holds the latest one seen.
 			this._updateStats(stats);
 
 			return; // logger?
 		}
 		const elapsedInSec = elapsedInMs / 1000;
 
-		// before we assign let's update delta fields
+		// Deltas first: they compare the incoming report against the fields still holding the previous one.
 		this.deltaTotalSamplesReceived = positiveDelta(stats.totalSamplesReceived, this.totalSamplesReceived);
 		if (this.deltaTotalSamplesReceived !== undefined) {
 			this.receivingAudioSamples = this.deltaTotalSamplesReceived;
 		}
 		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
 			this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived);
-			// a counter reset leaves the delta undefined; carrying the previous
-			// bitrate forward would describe traffic this interval did not see
+			// A counter reset leaves the delta undefined; no bitrate rather than a stale one.
 			this.bitrate = this.deltaBytesReceived === undefined
 				? undefined
 				: Math.max(0, this.deltaBytesReceived * 8 / elapsedInSec);
@@ -434,7 +337,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.deltaJitterBufferEmittedCount = positiveDelta(stats.jitterBufferEmittedCount, this.jitterBufferEmittedCount);
 
 		if (this.deltaConcealedSamples !== undefined && 0 < (this.deltaTotalSamplesReceived ?? 0)) {
-			// silent concealment is subtracted: `concealedSamples` also rises during ordinary silence
+			// Silent concealment is subtracted: `concealedSamples` also rises during ordinary silence.
 			const invented = Math.max(0, this.deltaConcealedSamples - (this.deltaSilentConcealedSamples ?? 0));
 
 			this.inventedSpeechRatio = invented / (this.deltaTotalSamplesReceived as number);
@@ -481,16 +384,11 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		if (this.deltaQpSum !== undefined && this.deltaFramesDecoded !== undefined && 0 < this.deltaFramesDecoded) {
 			this.avgQpPerFrame = this.deltaQpSum / this.deltaFramesDecoded;
 		} else {
-			// No frames decoded this interval, or the browser does not report
-			// qpSum: carrying the previous average forward would describe media
-			// that is no longer being shown.
 			this.avgQpPerFrame = undefined;
 		}
 		this.deltaTotalDecodeTime = positiveDelta(stats.totalDecodeTime, this.totalDecodeTime);
 		this.deltaTotalFreezesDuration = positiveDelta(stats.totalFreezesDuration, this.totalFreezesDuration);
 		this.deltaFreezeCount = positiveDelta(stats.freezeCount, this.freezeCount);
-		// Both sides are seconds — `totalFreezesDuration` by specification, `elapsedInSec`
-		// by construction — so the ratio needs no conversion and carries no unit.
 		this.frozenTimeRatio = this.deltaTotalFreezesDuration !== undefined && 0 < elapsedInSec
 			? this.deltaTotalFreezesDuration / elapsedInSec
 			: undefined;
@@ -502,11 +400,8 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.deltaTotalInterFrameDelay = positiveDelta(stats.totalInterFrameDelay, this.totalInterFrameDelay);
 		this.deltaTotalSquaredInterFrameDelay = positiveDelta(stats.totalSquaredInterFrameDelay, this.totalSquaredInterFrameDelay);
 
-		// The first two moments of the gap between the frames rendered in this
-		// interval. `totalInterFrameDelay` and its squared counterpart are sums the
-		// browser accumulates one frame at a time, so the mean and the spread they
-		// give describe every frame in the interval rather than the instant the
-		// collection happened to land on.
+		// Mean and spread of the inter-frame gap, from the browser's per-frame sums, so they
+		// describe every frame in the interval rather than the instant of collection.
 		if (
 			this.deltaTotalInterFrameDelay !== undefined &&
 			this.deltaTotalSquaredInterFrameDelay !== undefined &&
@@ -514,8 +409,8 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		) {
 			const frames = this.deltaFramesDecoded as number;
 			const mean = this.deltaTotalInterFrameDelay / frames;
-			// Clamped: the two sums are floats accumulated independently, so a
-			// perfectly even stream can land a hair below zero here.
+			// Clamped: the two sums are independently accumulated floats, so an even stream
+			// can land a hair below zero.
 			const variance = Math.max(0, this.deltaTotalSquaredInterFrameDelay / frames - mean * mean);
 
 			this.avgInterFrameDelayInMs = mean * 1000;

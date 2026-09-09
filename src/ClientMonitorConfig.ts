@@ -7,6 +7,7 @@ import type { BlockedInboundMediaDetectorConfig } from "./detectors/BlockedInbou
 import type { CaptureSourceLostDetectorConfig } from "./detectors/CaptureSourceLostDetector";
 import type { CaptureTrackMutedDetectorConfig } from "./detectors/CaptureTrackMutedDetector";
 import type { CodecChangeDetectorConfig } from "./detectors/CodecChangeDetector";
+import type { CongestionDetectorConfig } from "./detectors/CongestionDetector";
 import type { UplinkCongestionDetectorConfig } from "./detectors/UplinkCongestionDetector";
 import type { DownlinkCongestionDetectorConfig } from "./detectors/DownlinkCongestionDetector";
 import type { CpuPerformanceDetectorConfig } from "./detectors/CpuPerformanceDetector";
@@ -15,7 +16,7 @@ import type { DryInboundTrackDetectorConfig } from "./detectors/DryInboundTrackD
 import type { DryOutboundTrackDetectorConfig } from "./detectors/DryOutboundTrackDetector";
 import type { DtlsHandshakeFailedDetectorConfig } from "./detectors/DtlsHandshakeFailedDetector";
 import type { DtlsHandshakeStalledDetectorConfig } from "./detectors/DtlsHandshakeStalledDetector";
-import type { EncoderPerformanceDetectorConfig } from "./detectors/EncoderPerformanceDetector";
+import type { EncoderBottleneckDetectorConfig } from "./detectors/EncoderBottleneckDetector";
 import type { FrameAssemblyStalledDetectorConfig } from "./detectors/FrameAssemblyStalledDetector";
 import type { InboundVideoFlowStateDetectorConfig } from "./detectors/InboundVideoFlowStateDetector";
 import type { IceConnectionFailedDetectorConfig } from "./detectors/IceConnectionFailedDetector";
@@ -29,8 +30,7 @@ import type { IceTransportStalledDetectorConfig } from "./detectors/IceTransport
 import type { IceTraversalDetectorConfig } from "./detectors/IceTraversalDetector";
 import type { DecoderBottleneckDetectorConfig } from "./detectors/DecoderBottleneckDetector";
 import type { JitterBufferStressDetectorConfig } from "./detectors/JitterBufferStressDetector";
-import type { KeyframeStormDetectorConfig } from "./detectors/KeyframeStormDetector";
-import type { SourceCaptureBottleneckDetectorConfig } from "./detectors/SourceCaptureBottleneckDetector";
+import type { VideoCaptureBottleneckDetectorConfig } from "./detectors/VideoCaptureBottleneckDetector";
 import type { PixelatedVideoDetectorConfig } from "./detectors/PixelatedVideoDetector";
 import type { PlayoutDiscrepancyDetectorConfig } from "./detectors/PlayoutDiscrepancyDetector";
 import type { RtpSenderStalledDetectorConfig } from "./detectors/RtpSenderStalledDetector";
@@ -41,11 +41,11 @@ import type { StuckDecoderDetectorConfig } from "./detectors/StuckDecoderDetecto
 import type { AudioPlayoutSynthesisDetectorConfig } from "./detectors/AudioPlayoutSynthesisDetector";
 import type { TransportDelayDetectorConfig } from "./detectors/TransportDelayDetector";
 import type { TransportDemuxStalledDetectorConfig } from "./detectors/TransportDemuxStalledDetector";
-import type { TransportJitterDetectorConfig } from "./detectors/TransportJitterDetector";
 import type { TransportLossDetectorConfig } from "./detectors/TransportLossDetector";
 import type { UnstableIcePathDetectorConfig } from "./detectors/UnstableIcePathDetector";
 import type { VideoRecoveryFailedDetectorConfig } from "./detectors/VideoRecoveryFailedDetector";
 import type { VideoResolutionChangeDetectorConfig } from "./detectors/VideoResolutionChangeDetector";
+import { DetectionRecoveryWindowConfig } from "./utils/DetectionRecoveryWindow";
 
 export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
@@ -97,14 +97,9 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     integrateNavigatorMediaDevices: boolean | MediaDevices;
 
     /**
-     * If true, the monitor subscribes to `document.visibilitychange` and keeps
-     * `ClientMonitor.activeTab` up to date. A background tab is throttled by
-     * the browser (timers, rendering, sometimes decoding), so detectors that
-     * would read the throttling as a quality problem stand down while the tab
-     * is hidden, and a `TAB_VISIBILITY_CHANGED` client event marks each
-     * transition in the sample stream. When the watcher is disabled — or no
-     * `document` is available (SSR, tests, workers, react-native) —
-     * `activeTab` simply stays `true`.
+     * If true, keeps `ClientMonitor.activeTab` up to date from
+     * `document.visibilitychange`, so detectors stand down while the tab is
+     * hidden and throttled. Off, or with no `document`, `activeTab` stays `true`.
      *
      * DEFAULT: true
      */
@@ -124,25 +119,45 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      */
     addClientLeftEventOnClose?: boolean;
 
+    /**
+     * Detection and recovery window configuration shared by multiple outbound track detectors.
+     *
+     * Many detectors require values to be held across two separate time windows.
+     * The detection window provides recent values for detecting and raising issues,
+     * while the recovery window preserves preceding values for determining when
+     * those issues can be cleared.
+     *
+     * DEFAULT: {
+     *   detectionWindowMs: 2 * collectingPeriodInMs + 1000,
+     *   recoveryWindowMs: 2 * collectingPeriodInMs
+     * }
+     */
+    outboundTrackDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
+
+    /**
+     * Window sizes for `InboundTrackMonitor.detectionRecoveryWindow`, shared by every detector on
+     * an inbound track. Detectors judging the same track judge the same stretch of time.
+     */
+    inboundTrackDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
+
+    /**
+     * Window sizes for `PeerConnectionMonitor.detectionRecoveryWindow`, shared by every detector
+     * bound to the connection rather than to a track.
+     *
+     * The path-level measurements are ratios of running totals — round trip is
+     * `totalRoundTripTime` over the number of measurements, loss is packets lost over packets
+     * expected — so a window gives each detector the true mean over a span it states in
+     * milliseconds, rather than an EWMA whose memory depends on how often stats are collected.
+     *
+     * DEFAULT: { detectionWindowMs: 6000, recoveryWindowMs: 6000 }
+     */
+    peerConnectionDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
+
     // =========================================================================
-    // Detector configuration.
-    //
-    // One block per detector, keyed by the detector's own `name` in camelCase —
-    // `frame-assembly-stalled-detector` reads `frameAssemblyStalledDetector` and
-    // nothing else. That is the config counterpart of one-detector-one-issue:
-    // every detector can be tuned or switched off (`null`) on its own without
-    // touching a neighbour, and no detector's behaviour can be changed by
-    // editing a block it does not own.
-    //
-    // Where two detectors genuinely want the same tunable, each carries its own
-    // copy with its own default. The duplication is the point: two detectors
-    // asking different questions of the same measurement should be able to
-    // disagree about where the line is, and sharing one field means tuning one
-    // silently retunes the other.
-    //
-    // The blocks are grouped by detector category (docs/DETECTOR_TAXONOMY.md):
-    // connectivity, transport quality, pipeline disruption, perceived quality,
-    // telemetry.
+    // Detector configuration. One block per detector, keyed by the detector's
+    // own `name` in camelCase; each is tuned or switched off (`null`) on its
+    // own. Shared tunables are deliberately duplicated per detector so tuning
+    // one never retunes another. Grouped by category
     // =========================================================================
 
     // ---- Connectivity — layer 1: reachability -------------------------------
@@ -161,12 +176,10 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `IceTraversalDetector` — reports which kind of path the
-     * connection settled on (direct, server-reflexive, relayed) as the selected
-     * candidate pair changes. Telemetry: needing TURN is a cost, not a fault, so
-     * nothing is ever raised.
+     * connection settled on (direct, server-reflexive, relayed). Telemetry only;
+     * nothing is raised.
      *
-     * It has no tunables. The block exists so the detector can be switched off on
-     * its own: `{}` enables it, `null` disables it.
+     * No tunables: `{}` enables it, `null` disables it.
      */
     iceTraversalDetector: IceTraversalDetectorConfig | null;
 
@@ -174,24 +187,17 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `IcePathEstablishmentDetector` — a peer connection that
-     * is taking a long time to finish connecting. It reports slowness and stops
-     * there; "establishment demonstrably did not work" belongs to
-     * `iceEstablishmentFailedDetector`, and "a restart would help" to
-     * `iceRestartRecommendationDetector`. See docs/CONNECTIVITY_DETECTORS.md.
-     *
-     * This is what the pre-4.9.0 `longPcConnectionEstablishmentDetector` key
-     * became. That key was retired in 4.10.0 and is no longer read.
+     * is taking a long time to finish connecting. Slowness only; failure belongs
+     * to `iceEstablishmentFailedDetector`.
      *
      * Pass `null` to disable the detector entirely.
      */
     icePathEstablishmentDetector: IcePathEstablishmentDetectorConfig | null;
 
     /**
-     * Configuration for `IceEstablishmentFailedDetector` — the other half of
-     * layer 3: establishment that has not merely been slow but has demonstrably
-     * not worked (local candidates were gathered, the peer connection never
-     * reached `connected`, and no candidate pair was ever nominated). This is the
-     * "the call never connected" issue. See docs/CONNECTIVITY_DETECTORS.md.
+     * Configuration for `IceEstablishmentFailedDetector` — candidates were
+     * gathered, but the connection never reached `connected` and no pair was
+     * ever nominated: the "call never connected" issue.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -201,14 +207,10 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `DtlsHandshakeFailedDetector` — a `dtlsState` of
-     * `failed`, which is terminal for the handshake and raises on sight. What
-     * separates a secure-media-transport negotiation failure (certificate
-     * fingerprint mismatch, DTLS version intolerance) from a network
-     * connectivity failure, which the ICE detectors own.
+     * `failed`, which is terminal and raises on sight. Separates a DTLS
+     * negotiation failure from the network failures the ICE detectors own.
      *
-     * It has no tunables — a terminal state needs no threshold. The block exists
-     * so the detector can be switched off on its own: `{}` enables it, `null`
-     * disables it.
+     * No tunables: `{}` enables it, `null` disables it.
      */
     dtlsHandshakeFailedDetector: DtlsHandshakeFailedDetectorConfig | null;
 
@@ -216,10 +218,6 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Configuration for `DtlsHandshakeStalledDetector` — a transport whose ICE
      * side is proven healthy while DTLS sits in `new`/`connecting`, the
      * signature of a middlebox that passes STUN but eats DTLS.
-     *
-     * Where the browser reports no transport `iceState` (Safari, and the
-     * transport reconstructed for Firefox < 153), ICE health is proven by the
-     * selected candidate pair being `succeeded` instead.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -239,9 +237,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Configuration for `IceConnectionFailedDetector` — an ICE transport in
      * `failed`, which ICE never self-heals from.
      *
-     * It has no tunables — a terminal state needs no threshold. The block exists
-     * so the detector can be switched off on its own: `{}` enables it, `null`
-     * disables it.
+     * No tunables: `{}` enables it, `null` disables it.
      */
     iceConnectionFailedDetector: IceConnectionFailedDetectorConfig | null;
 
@@ -267,8 +263,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `IceRestartDetector` — reports that an ICE restart
-     * happened, inferred from the local username fragment changing. Telemetry: a
-     * restart is a fact about the connection, not a fault, so nothing is raised.
+     * happened, inferred from the local username fragment changing. Telemetry
+     * only; nothing is raised.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -278,14 +274,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Configuration for `IceRestartRecommendationDetector` — the one place that
      * says "restart ICE", for any of four conditions: ICE `failed`, `disconnected`
      * outlasting its window, a connected-but-not-delivering path, and a peer
-     * connection that never finished establishing at all.
-     *
-     * Its thresholds are its own rather than borrowed from the detectors that
-     * raise the corresponding issues: recommending a renegotiation is a different
-     * decision from reporting a fault, and it is normal to want the recommendation
-     * to wait longer than the issue did. Disabling `iceDisconnectedDetector` or
-     * `icePathEstablishmentDetector` no longer silences the matching
-     * recommendation, and vice versa.
+     * connection that never finished establishing at all. Its thresholds are its
+     * own, so disabling a related detector does not silence the recommendation.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -294,21 +284,25 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     // ---- Transport Quality --------------------------------------------------
 
     /**
-     * Configuration for `UplinkCongestionDetector` — the capacity property of a
-     * working path in the sending direction. Two ratios: how far the bandwidth
-     * estimate has to fall below its recent maximum to open a finding, and how far
-     * back up it has to climb to close one.
+     * Configuration for `UplinkCongestionDetector` — the sending path running
+     * out of capacity.
      *
      * Pass `null` to disable the detector entirely.
      */
+    /**
+     * Configuration for the deprecated `CongestionDetector`. Set to `null` to switch it off once
+     * nothing depends on the `congestion` event or issue any more.
+     *
+     * @deprecated Use `uplinkCongestionDetector` / `downlinkCongestionDetector`.
+     */
+    congestionDetector: CongestionDetectorConfig | null;
+
     uplinkCongestionDetector: UplinkCongestionDetectorConfig | null;
 
     /**
-     * Configuration for `DownlinkCongestionDetector` — the same property in the
-     * receiving direction, which is a separate detector because a receiver has no
-     * bandwidth estimate to read and has to reach the verdict from other evidence.
-     * The same two ratios over the arriving bitrate, plus the one that evidence
-     * needs: how far above its own baseline the video jitter buffer has to climb.
+     * Configuration for `DownlinkCongestionDetector` — the same in the receiving
+     * direction, a separate detector because a receiver has no bandwidth
+     * estimate and must infer the verdict from arriving bitrate and jitter buffer.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -350,36 +344,11 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Configuration for `BlockedInboundMediaDetector` — a path that keeps
      * answering STUN while the media the far end sends never reaches us.
      *
-     * **The one detector that is off unless you ask for it.** It proves the block
-     * by contradiction: the far end's sender reports keep arriving and claiming
-     * traffic while our receivers see none. That requires RTCP to survive whatever
-     * killed the media — and with `rtcp-mux` RTCP shares the RTP five-tuple, so
-     * anything dropping the media drops the reports with it and there is nothing
-     * left to contradict. Browsers give no way out: Chrome has defaulted
-     * `rtcpMuxPolicy` to `"require"` since Chrome 57 and removed `"negotiate"`,
-     * and Firefox never allowed the option to be set. So on ordinary browser
-     * WebRTC this detector cannot reach a verdict, and running it by default would
-     * cost a pass per collection to conclude nothing.
-     *
-     * Set the key to opt in — `{}` takes the defaults, or pass a threshold. That
-     * is worth doing where RTCP genuinely rides its own path: a non-browser or
-     * patched endpoint, an SDP negotiation of your own that leaves `a=rtcp-mux`
-     * out, or a middlebox known to tell RTCP from RTP on the same port and pass
-     * only the former. Everywhere else the send direction is where the client
-     * holds both halves of the proof — see `blockedOutboundMediaDetector` — and a
-     * dry receive path with no live remote claim belongs to
-     * `dryInboundTrackDetector`.
+     * Off unless you opt in (`{}` takes the defaults): the proof needs RTCP to
+     * survive whatever killed the media, which `rtcp-mux` — mandatory on browser
+     * WebRTC — rules out. Only worth enabling where RTCP rides its own path.
      */
     blockedInboundMediaDetector: BlockedInboundMediaDetectorConfig | null;
-
-    /**
-     * Configuration for `TransportJitterDetector` — packets that arrive, but
-     * unevenly enough to force the receiver to buffer. The network-side cause
-     * whose perceived counterpart is `jitterBufferStressDetector`.
-     *
-     * Pass `null` to disable the detector entirely.
-     */
-    transportJitterDetector: TransportJitterDetectorConfig | null;
 
     // ---- Pipeline Disruption — the send chain -------------------------------
 
@@ -401,27 +370,24 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     silentAudioSourceDetector: SilentAudioSourceDetectorConfig | null;
 
     /**
-     * Thresholds for `SourceCaptureBottleneckDetector` — the capture device falling
-     * short of the frame rate it promised. The type lives with the detector; the
-     * defaults are in `ClientMonitor`, with every other detector's.
+     * Thresholds for `VideoCaptureBottleneckDetector` — the capture device falling
+     * short of the frame rate it promised.
      *
      * Pass `null` to disable the detector entirely.
      */
-    sourceCaptureBottleneckDetector: SourceCaptureBottleneckDetectorConfig | null;
+    videoCaptureBottleneckDetector: VideoCaptureBottleneckDetectorConfig | null;
 
     /**
-     * Thresholds for `EncoderPerformanceDetector` — the encoder behind that
-     * capture device. The type lives with the detector; the defaults are in
-     * `ClientMonitor`, with every other detector's.
+     * Thresholds for `EncoderBottleneckDetector` — the encoder behind that
+     * capture device.
      *
      * Pass `null` to disable the detector entirely.
      */
-    encoderPerformanceDetector: EncoderPerformanceDetectorConfig | null;
+    encoderBottleneckDetector: EncoderBottleneckDetectorConfig | null;
 
     /**
      * Configuration for `RtpSenderStalledDetector` — frames encoding while no
-     * packet leaves the RTP sender. One of the two stage boundaries that no
-     * specialist detector covers.
+     * packet leaves the RTP sender.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -439,8 +405,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `TransportDemuxStalledDetector` — the ICE transport
-     * receiving at a media-level rate while no inbound RTP accounts for it. The
-     * receive-side counterpart of `rtpSenderStalledDetector`.
+     * receiving at a media-level rate while no inbound RTP accounts for it.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -456,8 +421,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `FrameAssemblyStalledDetector` — RTP that arrives while
-     * no complete frame is ever assembled from it: the receive-side boundary
-     * between the network and the depacketizer, which nothing else watches.
+     * no complete frame is ever assembled from it.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -465,8 +429,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Thresholds for `DecoderBottleneckDetector` — frames going missing on the
-     * way to the decoder. The type lives with the detector; the defaults are in
-     * `ClientMonitor`, with every other detector's.
+     * way to the decoder.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -482,9 +445,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `StuckDecoderDetector` — RTP bytes keep arriving but no
-     * frame decodes for a sustained stretch, while the browser keeps sending
-     * PLIs. The specific condition under which recreating the consumer is the
-     * right mitigation — listen for the `stuck-decoder` event.
+     * frame decodes, while the browser keeps sending PLIs. Listen for the
+     * `stuck-decoder` event to recreate the consumer.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -499,14 +461,6 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     playoutDiscrepancyDetector: PlayoutDiscrepancyDetectorConfig | null;
 
     // ---- Pipeline Disruption — the repair loop and the machine --------------
-
-    /**
-     * Configuration for `KeyframeStormDetector` — the receiver asking for
-     * keyframes far more often than a healthy stream ever needs to.
-     *
-     * Pass `null` to disable the detector entirely.
-     */
-    keyframeStormDetector: KeyframeStormDetectorConfig | null;
 
     /**
      * Configuration for `VideoRecoveryFailedDetector` — repair requests that go
@@ -529,45 +483,33 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `PixelatedVideoDetector` — video drawn with too few bits
-     * for its size, a picture the viewer would call blocky. Judged on
-     * `bitPerPixel`, which the inbound RTP monitor computes; screen shares are
-     * excluded, since a static slide legitimately spends almost nothing per pixel.
+     * for its size. Judged on `bitPerPixel`; screen shares are excluded.
      *
      * Pass `null` to disable the detector entirely.
      */
     pixelatedVideoDetector: PixelatedVideoDetectorConfig | null;
 
     /**
-     * Configuration for `InboundVideoFlowStateDetector` — both ways an inbound picture stops being
-     * continuous, judged by one rule with one threshold between them.
+     * Configuration for `InboundVideoFlowStateDetector` — an inbound picture that
+     * stops being continuous, reported as `video-flow-disrupted` with a `state` of
+     * `choppy` or `frozen` (mutually exclusive).
      *
-     * A freeze is a stretch where the picture was not moving — the same word the
-     * specification uses for it. Short ones repeated are stuttering; one long one is a
-     * freeze proper; the detector reports either as `video-flow-disrupted` with a
-     * `state` of `choppy` or `frozen`, and the two are mutually exclusive by
-     * construction. It replaces the former `choppyVideoDetector` and
-     * `frozenVideoTrackDetector`, which read the same counters and could both fire on
-     * the same interruption.
+     * `frozenAfterInMs` (2000): how long one uninterrupted freeze lasts before it
+     * counts as frozen rather than choppy. `minFreezeCountForChoppy` (2, floored
+     * there): freezes inside `observationWindowInMs` (5000) needed to call it
+     * choppy. `continuousDurationInMs` (30000): how long the picture must run
+     * continuous before a choppy finding closes; a frozen one closes on the next
+     * rendered frame.
      *
-     * `frozenAfterInMs` (2000) is the whole boundary — how long one uninterrupted freeze
-     * has to last before the picture counts as frozen rather than choppy.
-     * `minFreezeCountForChoppy` (2, and floored there) is how many freezes inside
-     * `observationWindowInMs` (5000) make it choppy: one contiguous freeze scores exactly
-     * one however long it lasts, so two is the least that can only mean the picture
-     * resumed and stopped again. `continuousDurationInMs` (30000) is how long the picture
-     * must run continuous before a choppy finding closes; a frozen one closes the moment
-     * frames render.
-     *
-     * Pass `null` to disable the detector entirely. Note that doing so also leaves
-     * `InboundTrackMonitor.frameFlowState` undefined, which this detector derives and
-     * the score reads — with it off, a frozen picture stops being penalised.
+     * Pass `null` to disable the detector entirely — that also leaves
+     * `InboundTrackMonitor.frameFlowState` undefined, so the score stops
+     * penalising a frozen picture.
      */
     inboundVideoFlowStateDetector: InboundVideoFlowStateDetectorConfig | null;
 
     /**
      * Configuration for `InventedSpeechDetector` — audio the listener heard as
-     * NetEQ's fabrication rather than as anything the sender transmitted. How the
-     * audio actually sounded, as opposed to how much of it was lost in transit.
+     * NetEQ's fabrication rather than as anything the sender transmitted.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -604,25 +546,23 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     /**
      * Configuration for `CaptureTrackMutedDetector` — the OS or the browser
      * taking a capture device away, reported as `track.muted` going true.
-     * Telemetry: it is a fact about the device, not a fault in the call.
+     * Telemetry only.
      *
      * Pass `null` to disable the detector entirely.
      */
     captureTrackMutedDetector: CaptureTrackMutedDetectorConfig | null;
 
     /**
-     * Configuration for `CodecChangeDetector` — observation only: a codec change
-     * is not a fault, but it is the missing column in most aggregate quality
-     * questions.
+     * Configuration for `CodecChangeDetector` — a codec change on a stream.
+     * Observation only.
      *
      * Pass `null` to disable the detector entirely.
      */
     codecChangeDetector: CodecChangeDetectorConfig | null;
 
     /**
-     * Configuration for `VideoResolutionChangeDetector` — observation only: the
-     * adaptation ladder moving is the system working. On outbound tracks the
-     * event carries `qualityLimitationReason`, which is what separates
+     * Configuration for `VideoResolutionChangeDetector` — observation only. On
+     * outbound tracks the event carries `qualityLimitationReason`, which tells
      * adaptation from an application-driven constraint change.
      *
      * Pass `null` to disable the detector entirely.
@@ -631,8 +571,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `SimulcastLayerDetector` — changes in the set of
-     * simulcast layers actually being sent. Observation only — no issue is
-     * raised.
+     * simulcast layers actually being sent. Observation only.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -640,9 +579,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
 
     /**
      * Configuration for `StatsGapDetector` — gaps in stats collection
-     * (backgrounded tab, sleeping device, blocked main thread). Every rate this
-     * library reports assumes collection happened on schedule; this says when it
-     * did not.
+     * (backgrounded tab, sleeping device, blocked main thread), which every rate
+     * this library reports assumes did not happen.
      *
      * Pass `null` to disable the detector entirely.
      */
@@ -653,51 +591,23 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     // =========================================================================
 
     /**
-     * Ships the full issue *lifecycle* to the server instead of only the fact
-     * that issues started.
+     * Ships the full issue *lifecycle* to the server instead of only the raises,
+     * so the server can mirror each client's active issues live.
      *
-     * **Purpose.** With this on, the server can maintain an on-the-fly mirror
-     * of every client's currently active issues — opening on the raise entry,
-     * closing on the matching `-resolved` entry — and use that live state for
-     * correlation (is this one client, one SFU, one region?) and for immediate
-     * action (recreate a consumer, recommend a rejoin, page someone) without
-     * waiting for post-hoc analysis.
-     *
-     * **What it changes on the wire.** Both entries of a stateful issue carry
-     * the schema-level `key` field, which is the identity the two sides join
-     * on:
-     *
-     * - the raise entry: `{ type, key, payload, timestamp: raisedAt }`
-     * - the resolution: `{ type: '<type>-resolved', key, timestamp: resolvedAt,
-     *   payload: { raisedAt, comment, ...resolutionPayload } }` — where
-     *   `resolutionPayload` is only what was explicitly passed to
-     *   `resolveIssue` (the built-in detectors pass their final payload, so
-     *   e.g. `durationInMs` appears here; a bare resolve carries just
-     *   `raisedAt` and `comment`). The raise-time payload is NOT repeated —
-     *   the server already has it from the raise entry. `raisedAt` equals the
-     *   raise entry's timestamp, a secondary join for consumers that do not
-     *   store keys.
-     *
-     * **Implications.** Issue volume in samples at most doubles (one
-     * resolution per raise). Servers switching on issue `type` must ignore or
-     * handle the `-resolved` suffix. One-shot issues (`addIssue`) have no
-     * lifecycle and are unaffected. Issues still active when the monitor
-     * closes are auto-resolved (comment: monitor closed) and reach the final
-     * sample. Re-raises still do not produce entries, so the server's copy of
-     * a long-lived issue holds the raise-time payload until the resolution
-     * arrives with the final one. With this off, the wire format is identical
-     * to previous releases: raise entries only, no `key`.
+     * Both entries of a stateful issue carry the schema-level `key` they join
+     * on: the raise, and a `<type>-resolved` entry whose payload holds
+     * `raisedAt`, `comment` and whatever was passed to `resolveIssue`. Issue
+     * volume at most doubles, and servers switching on issue `type` must handle
+     * the `-resolved` suffix. Off, the wire format is raises only, with no `key`.
      *
      * DEFAULT: true
      */
     sendResolvedIssuesToServer?: boolean;
 
     /**
-     * Whether the encoded score reasons (the per-penalty breakdown the score
-     * calculator produces) are shipped with the samples on the peer connection
-     * and track entries. Set to `false` to drop them from the wire — the
-     * scores themselves are always shipped, and the realtime `'score'` event
-     * with its reasons is unaffected.
+     * Whether the encoded score reasons (the per-penalty breakdown) are shipped
+     * on the peer connection and track sample entries. `false` drops them from
+     * the wire; the scores themselves and the `'score'` event are unaffected.
      *
      * DEFAULT: true (only an explicit `false` disables shipping)
      */
@@ -706,12 +616,9 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     /**
      * Whether the mostly-static ICE transport metadata (`iceRole`, `dtlsRole`,
      * `iceLocalUsernameFragment`, `tlsVersion`, `dtlsCipher`, `srtpCipher` and
-     * the certificate references) is shipped only in the first sample of a
-     * transport and again when one of the values changes, instead of being
-     * repeated in every sample. The values are constant after the DTLS
-     * handshake, so on-change emission removes pure redundancy from the wire;
-     * the ufrag changing is exactly an ICE restart, which is a change worth
-     * shipping. Set to `false` to restore the legacy every-sample emission.
+     * the certificate references) is shipped only in a transport's first sample
+     * and on change, rather than in every sample. `false` restores the legacy
+     * every-sample emission.
      *
      * DEFAULT: true (only an explicit `false` disables on-change emission)
      */

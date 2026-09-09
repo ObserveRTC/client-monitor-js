@@ -9,44 +9,33 @@ export type FrameAssemblyStalledIssuePayload = {
 	packetsSinceLastFrame: number;
 	/** How long packets kept arriving with no frame assembled, from stats timestamps. */
 	stalledForInMs: number;
+	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 }
 
 export type FrameAssemblyStalledDetectorConfig = {
-	/**
-	 * How long (ms of stats time) packets must keep arriving with no frame
-	 * completed before the issue is raised.
-	 */
+	/** Stats time packets must keep arriving with no frame completed before raising, in ms. */
 	thresholdInMs: number;
 
-	/**
-	 * How many packets must have arrived over that time before the silence
-	 * counts as a stall rather than a trickle.
-	 */
+	/** How many packets must have arrived over that time to count as a stall, not a trickle. */
 	minPacketsReceived: number;
 }
 
 /**
- * Watches the one boundary in the receive chain that nothing else watches: packets arriving from the
- * network and frames coming out of reassembly. When `packetsReceived` keeps advancing and
- * `framesReceived` does not, RTP is being delivered and no complete picture is being made from it —
- * every frame is missing pieces, or the depacketizer has lost the stream.
- *
- * The value of naming this boundary is that today the same condition surfaces as `stuck-decoder`,
- * which points at the decoder for something that happened before the decoder ever saw a frame.
- * `StuckDecoderDetector` already half-admits this with its `assembly` variant; this detector is the
- * other half, stated directly.
- *
- * Deliberately narrow. It says nothing about *why* frames are not assembling — sustained loss inside
- * every frame and a codec mismatch look identical from here, and both are real. Attribution is what
- * co-firing with `transport-loss-sustained` is for, and that comparison belongs to whoever reads the
- * issues, not to this class.
+ * Reports RTP arriving from the network with no complete frame coming out of reassembly —
+ * `packetsReceived` advancing while `framesReceived` stays flat. Use it to place the break before
+ * the decoder rather than in it: every frame is missing pieces, or the depacketizer has lost the
+ * stream, which is a different fix from a decoder that is genuinely stuck.
  *
  * A sender that has simply stopped sending is not this: no packets arrive, so nothing accumulates.
- * Pause, mute and a backgrounded tab each reset the stall rather than counting toward it.
+ * Pause, mute and a backgrounded tab reset the stall rather than counting toward it.
+ *
+ * It does not claim *why* frames are not assembling — sustained loss and a codec mismatch look
+ * identical from here, and attribution belongs to whoever reads the issues alongside each other.
  *
  * Issue raised: `frame-assembly-stalled`. Monitor event: `frame-assembly-stalled`.
  * Config: `frameAssemblyStalledDetector`.
+ * Track attribute: `InboundTrackMonitor.stalledFrameAssembly`.
  *
  * Category: Pipeline Disruption
  * Layer: Receive — packets to frames
@@ -80,27 +69,38 @@ export class FrameAssemblyStalledDetector implements Detector {
 	}
 
 	public update() {
-		if (this.disabled) return;
+		if (this.disabled) {
+			this.trackMonitor.stalledFrameAssembly = undefined;
+
+			return;
+		}
 
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
-		if (!inboundRtp || inboundRtp.kind !== 'video') return;
+		// An audio track has no frames to assemble; there is nothing here to be right or wrong about.
+		if (!inboundRtp || inboundRtp.kind !== 'video') {
+			this.trackMonitor.stalledFrameAssembly = undefined;
+
+			return;
+		}
 
 		if (
 			this.trackMonitor.paused ||
 			this.trackMonitor.remoteOutboundTrackPaused ||
 			!this.peerConnection.parent.activeTab
 		) {
+			this.trackMonitor.stalledFrameAssembly = undefined;
+
 			return this._reset('not watching this track right now');
 		}
 
 		const deltaPacketsReceived = inboundRtp.deltaPacketsReceived;
 		const deltaFramesReceived = inboundRtp.deltaFramesReceived;
 
-		// `framesReceived` is the whole point of this detector; a browser that does
-		// not report it cannot be asked this question at all.
+		// Without `framesReceived` the question cannot be asked at all. Blind, not healthy.
 		if (deltaPacketsReceived === undefined || deltaFramesReceived === undefined) {
 			this.inputsUnavailable = true;
+			this.trackMonitor.stalledFrameAssembly = undefined;
 
 			return;
 		}
@@ -108,14 +108,21 @@ export class FrameAssemblyStalledDetector implements Detector {
 		this.inputsUnavailable = false;
 
 		if (0 < deltaFramesReceived) {
+			this.trackMonitor.stalledFrameAssembly = false;
+
 			return this._reset('a frame was assembled');
 		}
 
-		// Nothing arriving is a silent sender, not a stalled assembler. That is
-		// `DryInboundTrackDetector`'s question and this detector must not answer it.
+		// Nothing arriving is a silent sender, not a stalled assembler — a different detector's
+		// question, and one this detector cannot answer either way.
 		if (deltaPacketsReceived <= 0) {
+			this.trackMonitor.stalledFrameAssembly = undefined;
+
 			return this._reset('no packets arriving');
 		}
+
+		// Packets arriving with no frame out of them, but not yet for long enough to be a fault.
+		this.trackMonitor.stalledFrameAssembly = false;
 
 		this._packetsSinceLastFrame += deltaPacketsReceived;
 		this._stalledForInMs += inboundRtp.deltaTime ?? 0;
@@ -126,6 +133,8 @@ export class FrameAssemblyStalledDetector implements Detector {
 
 		this._raised = true;
 		this._startedAt = Date.now();
+		// Set here, not at the call sites, so the flag and the finding cannot drift.
+		this.trackMonitor.stalledFrameAssembly = true;
 
 		const clientMonitor = this.peerConnection.parent;
 
@@ -136,7 +145,8 @@ export class FrameAssemblyStalledDetector implements Detector {
 			stalledForInMs: this._stalledForInMs,
 		});
 
-		clientMonitor.raiseIssue<FrameAssemblyStalledIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: FrameAssemblyStalledDetector.ISSUE_TYPE,
 			payload: {
@@ -157,8 +167,7 @@ export class FrameAssemblyStalledDetector implements Detector {
 
 		this._raised = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: FrameAssemblyStalledIssuePayload | undefined;
 
 		if (issue) {
@@ -168,7 +177,8 @@ export class FrameAssemblyStalledDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<FrameAssemblyStalledIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

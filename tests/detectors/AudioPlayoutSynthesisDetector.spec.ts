@@ -1,247 +1,461 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { AudioPlayoutSynthesisDetector } from "../../src/detectors/AudioPlayoutSynthesisDetector";
+import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { IssueRegistry } from "../../src/utils/IssueRegistry";
 
-// Types for test mocks
-interface SyntheticSamplesConfig {
-    disabled: boolean;
-    createEvent: boolean;
-    minSynthesizedSamplesDuration: number;
-}
+/**
+ * The detector against a real `DetectionRecoveryWindow`, fed the way `InboundTrackMonitor.update()`
+ * feeds it: the playout device's running totals, one entry per collection, carried on the track that
+ * plays through it.
+ *
+ * Ticks are milliseconds of audio per collection. A 5s collecting period playing continuously
+ * delivers 5000ms of samples, some number of which were synthesized rather than received.
+ */
+const TICK_MS = 5000;
+const DETECTION_MS = 15_000;
+const RECOVERY_MS = 10_000;
+const PLAYED = 5000;
 
-interface TestEvent {
-    type: string;
-    payload: Record<string, unknown>;
-}
+type Issue = { type: string; payload: Record<string, unknown> };
 
-interface EventHandler {
-    (event: Record<string, unknown>): void;
-}
+function createHarness(configOverrides: Partial<{
+	synthesizedRatioThreshold: number,
+	createEvent: boolean,
+}> = {}) {
+	const raised: Issue[] = [];
+	const resolved: { key: string, comment?: string, payload?: Record<string, unknown> }[] = [];
+	const warnings: string[] = [];
+	const emitted: { name: string, payload: any }[] = [];
+	const clientEvents: { type: string, payload?: Record<string, unknown> }[] = [];
 
-// Mock dependencies
-class MockClientMonitor {
-    public config = {
-        audioPlayoutSynthesisDetector: {
-            disabled: false,
-            createEvent: true,
-            minSynthesizedSamplesDuration: 100
-        } as SyntheticSamplesConfig
-    };
-    
-    private eventHandlers: { [key: string]: EventHandler[] } = {};
-    private events: TestEvent[] = [];
+	const track = { id: 'audio-in-1', kind: 'audio' };
+	const mediaPlayout = { id: 'playout-1' };
 
-    emit(eventName: string, eventData: Record<string, unknown>) {
-        const handlers = this.eventHandlers[eventName] || [];
-        handlers.forEach(handler => handler(eventData));
-    }
+	const clientMonitor = {
+		logger: {
+			trace() { /* quiet */ },
+			debug() { /* quiet */ },
+			info() { /* quiet */ },
+			warn(...args: unknown[]) { warnings.push(args.join(' ')); },
+			error() { /* quiet */ },
+		},
+		config: {
+			collectingPeriodInMs: TICK_MS,
+			audioPlayoutSynthesisDetector: {
+				synthesizedRatioThreshold: 0.05,
+				createEvent: true,
+				...configOverrides,
+			},
+		},
+		activeTab: true,
+		emit(name: string, payload: any) { emitted.push({ name, payload }); },
+		addEvent(event: { type: string, payload?: Record<string, unknown> }) { clientEvents.push(event); },
+	};
 
-    on(eventName: string, handler: EventHandler) {
-        if (!this.eventHandlers[eventName]) {
-            this.eventHandlers[eventName] = [];
-        }
-        this.eventHandlers[eventName].push(handler);
-    }
+	const detectionRecoveryWindow = new DetectionRecoveryWindow<{
+		totalPlayoutSynthesizedDurationInMs: number | null;
+		totalPlayoutSamplesDurationInMs: number | null;
+		totalPlayoutSynthesisEvents: number | null;
+		totalPlayoutDelayInMs: number | null;
+		totalPlayoutSamplesCount: number | null;
+	}>({ detectionWindowMs: DETECTION_MS, recoveryWindowMs: RECOVERY_MS });
 
-    addEvent(event: TestEvent) {
-        this.events.push(event);
-    }
+	const trackMonitor = {
+		direction: 'inbound' as const,
+		kind: 'audio',
+		track,
+		detectionRecoveryWindow,
+		getInboundRtp: () => ({ getMediaPlayout: () => mediaPlayout }),
+		issues: new IssueRegistry({
+			notify: () => { /* one-shots are not this detector's business */ },
+			raise: (input: any) => {
+				raised.push({ type: input.type, payload: input.payload });
 
-    getEvents() {
-        return this.events;
-    }
+				return true;
+			},
+			update: () => true,
+			resolve: (input: any) => {
+				resolved.push({ key: input.key, comment: input.comment, payload: input.payload });
 
-    clearEvents() {
-        this.events = [];
-    }
-}
+				return undefined;
+			},
+		}),
+		getPeerConnection: () => ({ peerConnectionId: 'pc-1', parent: clientMonitor }),
+	};
 
-class MockPeerConnectionMonitor {
-    public peerConnectionId = 'test-pc-id';
-    public parent = new MockClientMonitor();
+	const detector = new AudioPlayoutSynthesisDetector(trackMonitor as any);
 
-    getPeerConnection() {
-        return this;
-    }
-}
+	let statsClockTime = 0;
+	let synthesizedTotal = 0;
+	let playedTotal = 0;
+	let eventsTotal = 0;
+	let delayTotal = 0;
+	let samplesTotal = 0;
 
-class MockMediaPlayoutMonitor {
-    private peerConnection = new MockPeerConnectionMonitor();
-    public deltaSynthesizedSamplesDuration = 0;
+	return {
+		detector, raised, resolved, warnings, emitted, clientEvents, trackMonitor, clientMonitor,
+		detectionRecoveryWindow,
+		config: clientMonitor.config.audioPlayoutSynthesisDetector,
+		/**
+		 * One collection: the device played `played` ms of audio, `synthesized` of which the browser
+		 * fabricated, across `events` separate stretches of concealment.
+		 */
+		tick(options: {
+			synthesized: number,
+			played?: number,
+			events?: number,
+			elapsedMs?: number,
+			reportPlayout?: boolean,
+		}) {
+			const {
+				synthesized, played = PLAYED, events = 1, elapsedMs = TICK_MS, reportPlayout = true,
+			} = options;
 
-    getPeerConnection() {
-        return this.peerConnection;
-    }
+			statsClockTime += elapsedMs;
+			synthesizedTotal += synthesized;
+			playedTotal += played;
+			eventsTotal += events;
+			// 48kHz, and a tenth of a millisecond of delay per sample.
+			samplesTotal += played * 48;
+			delayTotal += played * 48 * 0.1;
 
-    setDeltaSynthesizedSamplesDuration(duration: number) {
-        this.deltaSynthesizedSamplesDuration = duration;
-    }
+			detectionRecoveryWindow.add({
+				timestamp: statsClockTime,
+				value: reportPlayout ? {
+					totalPlayoutSynthesizedDurationInMs: synthesizedTotal,
+					totalPlayoutSamplesDurationInMs: playedTotal,
+					totalPlayoutSynthesisEvents: eventsTotal,
+					totalPlayoutDelayInMs: delayTotal,
+					totalPlayoutSamplesCount: samplesTotal,
+				} : {
+					// A browser that produces no `media-playout` report at all.
+					totalPlayoutSynthesizedDurationInMs: null,
+					totalPlayoutSamplesDurationInMs: null,
+					totalPlayoutSynthesisEvents: null,
+					totalPlayoutDelayInMs: null,
+					totalPlayoutSamplesCount: null,
+				},
+			});
+
+			detector.update();
+		},
+		/** Enough collections to fill both windows, at the given rate throughout. */
+		warmUp(synthesized: number, options: { played?: number, events?: number } = {}) {
+			const ticks = Math.ceil((DETECTION_MS + RECOVERY_MS) / TICK_MS) + 1;
+
+			for (let i = 0; i < ticks; ++i) this.tick({ synthesized, ...options });
+		},
+		issues() { return raised.filter(i => i.type === 'synthesized-audio'); },
+	};
 }
 
 describe('AudioPlayoutSynthesisDetector', () => {
-    let detector: AudioPlayoutSynthesisDetector;
-    let mockMediaPlayout: MockMediaPlayoutMonitor;
-    let mockClientMonitor: MockClientMonitor;
+	describe('the finding', () => {
+		it('stays silent while concealment is below the threshold', () => {
+			const h = createHarness();
 
-    beforeEach(() => {
-        mockMediaPlayout = new MockMediaPlayoutMonitor();
-        mockClientMonitor = mockMediaPlayout.getPeerConnection().parent as MockClientMonitor;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        detector = new AudioPlayoutSynthesisDetector(mockMediaPlayout as any);
-    });
+			// 2% of playout fabricated: every real call conceals a little.
+			h.warmUp(PLAYED * 0.02);
 
-    describe('Constructor', () => {
-        it('should create detector with correct name', () => {
-            expect(detector.name).toBe('audio-playout-synthesis-detector');
-        });
+			expect(h.issues()).toHaveLength(0);
+		});
 
-        it('should store media playout reference', () => {
-            expect(detector.mediaPlayout).toBe(mockMediaPlayout);
-        });
-    });
+		it('raises once concealment passes the threshold', () => {
+			const h = createHarness();
 
-    describe('update() - Basic validation', () => {
-        it('should return early if detector is disabled', () => {
-            detector.disabled = true;
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(200); // Above threshold
+			h.warmUp(PLAYED * 0.2);
 
-            detector.update();
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
-        });
+			expect(h.issues()).toHaveLength(1);
+		});
 
-        it('should return early if synthesized samples duration is below threshold', () => {
-            mockClientMonitor.config.audioPlayoutSynthesisDetector.minSynthesizedSamplesDuration = 100;
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(50); // Below threshold
+		it('does not raise a second issue while the first is open', () => {
+			const h = createHarness();
 
-            detector.update();
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
-        });
+			h.warmUp(PLAYED * 0.2);
+			h.tick({ synthesized: PLAYED * 0.2 });
+			h.tick({ synthesized: PLAYED * 0.2 });
 
-        it('should return early if synthesized samples duration equals threshold', () => {
-            mockClientMonitor.config.audioPlayoutSynthesisDetector.minSynthesizedSamplesDuration = 100;
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(100); // Equal to threshold
+			expect(h.issues()).toHaveLength(1);
+		});
 
-            detector.update();
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
-        });
-    });
+		it('sits exactly on the threshold without raising', () => {
+			const h = createHarness({ synthesizedRatioThreshold: 0.2 });
 
-    describe('update() - Detection logic', () => {
-        beforeEach(() => {
-            detector.disabled = false;
-            mockClientMonitor.config.audioPlayoutSynthesisDetector.minSynthesizedSamplesDuration = 100;
-        });
+			h.warmUp(PLAYED * 0.2);
 
-        it('should detect synthesized samples when duration exceeds threshold', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('synthesized-audio', eventSpy);
+			expect(h.issues()).toHaveLength(0);
+		});
 
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(150); // Above threshold
+		it('does not judge before the detection window says it is ready', () => {
+			const h = createHarness();
 
-            detector.update();
+			h.tick({ synthesized: PLAYED });
+			h.tick({ synthesized: PLAYED });
 
-            expect(eventSpy).toHaveBeenCalledWith({
-                mediaPlayoutMonitor: mockMediaPlayout,
-                clientMonitor: mockClientMonitor
-            });
-            expect(mockClientMonitor.getEvents()).toHaveLength(1);
-            expect(mockClientMonitor.getEvents()[0]).toEqual({
-                type: 'EXCESSIVE_SYNTHESIZED_AUDIO',
-                payload: {
-                    deltaSynthesizedSamplesDuration: 150
-                }
-            });
-        });
+			expect(h.detectionRecoveryWindow.detectionWindowIsReady).toBe(false);
+			expect(h.issues()).toHaveLength(0);
+		});
 
-        it('should detect synthesized samples with custom threshold', () => {
-            mockClientMonitor.config.audioPlayoutSynthesisDetector.minSynthesizedSamplesDuration = 200;
-            
-            // Should not trigger at 150ms (below 200ms threshold)
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(150);
-            detector.update();
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
+		it('says nothing on a video track', () => {
+			const h = createHarness();
 
-            // Should trigger at 250ms (above 200ms threshold)
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(250);
-            detector.update();
-            expect(mockClientMonitor.getEvents()).toHaveLength(1);
-        });
+			(h.trackMonitor as any).kind = 'video';
+			h.warmUp(PLAYED);
 
-        it('should trigger multiple times for consecutive detections', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('synthesized-audio', eventSpy);
+			expect(h.issues()).toHaveLength(0);
+		});
+	});
 
-            // First detection
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(150);
-            detector.update();
-            expect(eventSpy).toHaveBeenCalledTimes(1);
+	/**
+	 * The reason for the rewrite: the same audio judged on a different collecting period used to
+	 * produce a different verdict, because the threshold was an absolute duration per tick.
+	 */
+	describe('judging a share rather than a duration', () => {
+		it('reaches the same verdict whatever the collecting period', () => {
+			const slow = createHarness();
+			const fast = createHarness();
 
-            // Second detection
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(200);
-            detector.update();
-            expect(eventSpy).toHaveBeenCalledTimes(2);
+			// Identical audio — a tenth of it fabricated — collected at 5s and at 1s.
+			slow.warmUp(PLAYED * 0.1);
+			for (let i = 0; i < 40; ++i) fast.tick({ synthesized: 100, played: 1000, elapsedMs: 1000 });
 
-            expect(mockClientMonitor.getEvents()).toHaveLength(2);
-        });
-    });
+			expect(slow.issues()).toHaveLength(1);
+			expect(fast.issues()).toHaveLength(1);
+			expect((slow.issues()[0].payload as any).synthesizedRatio)
+				.toBeCloseTo((fast.issues()[0].payload as any).synthesizedRatio, 6);
+		});
 
-    describe('update() - Event creation', () => {
-        beforeEach(() => {
-            detector.disabled = false;
-            mockClientMonitor.config.audioPlayoutSynthesisDetector.minSynthesizedSamplesDuration = 100;
-        });
+		it('is unmoved by one bad collection in an otherwise clean window', () => {
+			const h = createHarness();
 
-        it('should not create event when createEvent is false', () => {
-            mockClientMonitor.config.audioPlayoutSynthesisDetector.createEvent = false;
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('synthesized-audio', eventSpy);
+			h.warmUp(0);
+			// A single 400ms burst. Over the window that is well under the threshold, though as a
+			// per-tick duration it would have reported.
+			h.tick({ synthesized: 400 });
 
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(150);
-            detector.update();
+			expect(h.issues()).toHaveLength(0);
+		});
+	});
 
-            // Event should still be emitted
-            expect(eventSpy).toHaveBeenCalled();
-            // But no record event should be created
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
-        });
+	describe('the measurement', () => {
+		it('carries what it measured into the payload', () => {
+			const h = createHarness();
 
-        it('should create event with correct payload', () => {
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(275);
-            detector.update();
+			h.warmUp(PLAYED * 0.2, { events: 3 });
 
-            expect(mockClientMonitor.getEvents()).toHaveLength(1);
-            expect(mockClientMonitor.getEvents()[0]).toEqual({
-                type: 'EXCESSIVE_SYNTHESIZED_AUDIO',
-                payload: {
-                    deltaSynthesizedSamplesDuration: 275
-                }
-            });
-        });
-    });
+			const payload = h.issues()[0].payload as Record<string, number | string>;
 
-    describe('Edge cases', () => {
-        it('should handle zero synthesized samples duration', () => {
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(0);
+			expect(payload.peerConnectionId).toBe('pc-1');
+			expect(payload.trackId).toBe('audio-in-1');
+			expect(payload.synthesizedRatio).toBeCloseTo(0.2, 6);
+			expect(payload.detectionWindowInMs).toBe(DETECTION_MS);
+			expect(payload.playedOutForDetectionInMs).toBe(DETECTION_MS);
+			expect(payload.synthesizedForDetectionInMs).toBeCloseTo(DETECTION_MS * 0.2, 6);
+		});
 
-            expect(() => detector.update()).not.toThrow();
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
-        });
+		it('counts the separate stretches of concealment, which say what it sounded like', () => {
+			const bursts = createHarness();
+			const constant = createHarness();
 
-        it('should handle negative synthesized samples duration', () => {
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(-50);
+			// The same share of fabricated audio, as a few long dropouts and as constant chatter.
+			bursts.warmUp(PLAYED * 0.2, { events: 2 });
+			constant.warmUp(PLAYED * 0.2, { events: 200 });
 
-            expect(() => detector.update()).not.toThrow();
-            expect(mockClientMonitor.getEvents()).toHaveLength(0);
-        });
+			expect((bursts.issues()[0].payload as any).synthesisEvents).toBe(6);
+			expect((constant.issues()[0].payload as any).synthesisEvents).toBe(600);
+		});
 
-        it('should handle very large synthesized samples duration', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('synthesized-audio', eventSpy);
+		it('carries the average playout delay per sample', () => {
+			const h = createHarness();
 
-            mockMediaPlayout.setDeltaSynthesizedSamplesDuration(999999);
+			h.warmUp(PLAYED * 0.2);
 
-            expect(() => detector.update()).not.toThrow();
-            expect(eventSpy).toHaveBeenCalled();
-            expect(mockClientMonitor.getEvents()).toHaveLength(1);
-            expect(mockClientMonitor.getEvents()[0].payload.deltaSynthesizedSamplesDuration).toBe(999999);
-        });
-    });
-}); 
+			expect((h.issues()[0].payload as any).playoutDelayPerSampleInMs).toBeCloseTo(0.1, 6);
+		});
+	});
+
+	describe('recovery', () => {
+		it('holds the finding open while only the detection window has recovered', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+			expect(h.issues()).toHaveLength(1);
+
+			h.tick({ synthesized: 0 });
+			h.tick({ synthesized: 0 });
+
+			expect(h.resolved).toHaveLength(0);
+		});
+
+		it('resolves once the recovery window is clear too', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+
+			for (let i = 0; i < 10; ++i) h.tick({ synthesized: 0 });
+
+			expect(h.resolved).toHaveLength(1);
+			expect(h.resolved[0].comment).toBe('playout recovered');
+		});
+
+		it('writes what the recovery window measured into the resolution', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+
+			for (let i = 0; i < 10; ++i) h.tick({ synthesized: 0 });
+
+			const payload = h.resolved[0].payload as Record<string, number>;
+
+			expect(payload.synthesizedRatioForRecovery).toBeCloseTo(0, 6);
+			expect(payload.recoveryWindowInMs).toBeGreaterThan(0);
+		});
+
+		it('does not turn one bad stretch into a stream of short reports', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+
+			// Alternating good and bad collections: the recovery window never comes clean.
+			for (let i = 0; i < 8; ++i) h.tick({ synthesized: i % 2 === 0 ? 0 : PLAYED * 0.2 });
+
+			expect(h.issues()).toHaveLength(1);
+			expect(h.resolved).toHaveLength(0);
+		});
+
+		it('can raise again after a resolution', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+			for (let i = 0; i < 10; ++i) h.tick({ synthesized: 0 });
+			for (let i = 0; i < 10; ++i) h.tick({ synthesized: PLAYED * 0.2 });
+
+			expect(h.issues()).toHaveLength(2);
+		});
+	});
+
+	describe('standing down', () => {
+		it('makes no judgement where the browser reports no playout at all', () => {
+			const h = createHarness();
+
+			// Firefox and WebKit produce no `media-playout` reports.
+			for (let i = 0; i < 8; ++i) h.tick({ synthesized: 0, reportPlayout: false });
+
+			expect(h.issues()).toHaveLength(0);
+		});
+
+		it('resolves an open finding when the playout measurement goes away', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+			expect(h.issues()).toHaveLength(1);
+
+			h.tick({ synthesized: 0, reportPlayout: false });
+
+			expect(h.resolved).toHaveLength(1);
+			expect(h.resolved[0].comment).toBe('no playout measurement');
+		});
+
+		it('does not read a device that played nothing as a device playing fabrications', () => {
+			const h = createHarness();
+
+			h.warmUp(0, { played: 0 });
+
+			expect(h.issues()).toHaveLength(0);
+		});
+
+		it('says nothing at all while disabled', () => {
+			const h = createHarness();
+
+			h.detector.disabled = true;
+			h.warmUp(PLAYED);
+
+			expect(h.issues()).toHaveLength(0);
+		});
+	});
+
+	describe('the events', () => {
+		it('emits the monitor event once, at the raise, naming the track and the device', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+			h.tick({ synthesized: PLAYED * 0.2 });
+
+			const fired = h.emitted.filter(e => e.name === 'synthesized-audio');
+
+			expect(fired).toHaveLength(1);
+			expect(fired[0].payload.trackMonitor).toBe(h.trackMonitor);
+			expect(fired[0].payload.mediaPlayoutMonitor).toBeDefined();
+		});
+
+		it('adds the client event alongside it', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+
+			expect(h.clientEvents).toHaveLength(1);
+			expect(h.clientEvents[0].type).toBe('EXCESSIVE_SYNTHESIZED_AUDIO');
+			expect((h.clientEvents[0].payload as any).synthesizedRatio).toBeCloseTo(0.2, 6);
+		});
+
+		it('leaves the client event out when createEvent is off, but still raises', () => {
+			const h = createHarness({ createEvent: false });
+
+			h.warmUp(PLAYED * 0.2);
+
+			expect(h.clientEvents).toHaveLength(0);
+			expect(h.issues()).toHaveLength(1);
+		});
+	});
+
+	/**
+	 * The number beside the issue, on every collection that was judged rather than only the ones
+	 * that crossed the threshold — which is what lets a score fall off gradually.
+	 */
+	describe('the continuous measurement', () => {
+		it('carries the measured share while concealment is below the threshold', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.02);
+
+			expect(h.issues()).toHaveLength(0);
+			expect(h.trackMonitor.synthesizedAudioRatio).toBeCloseTo(0.02, 6);
+		});
+
+		it('carries it while a finding is open too', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+
+			expect(h.trackMonitor.synthesizedAudioRatio).toBeCloseTo(0.2, 6);
+		});
+
+		it('is blanked where the browser reports no playout at all', () => {
+			const h = createHarness();
+
+			h.warmUp(PLAYED * 0.2);
+			expect(h.trackMonitor.synthesizedAudioRatio).toBeGreaterThan(0);
+
+			h.tick({ synthesized: 0, reportPlayout: false });
+
+			expect(h.trackMonitor.synthesizedAudioRatio).toBeUndefined();
+		});
+	});
+
+	describe('configuration', () => {
+		it('warns and clamps a threshold below zero', () => {
+			const h = createHarness({ synthesizedRatioThreshold: -0.5 });
+
+			expect(h.warnings.join(' ')).toContain('synthesizedRatioThreshold');
+			expect(h.config.synthesizedRatioThreshold).toBe(0);
+		});
+
+		it('raises on any concealment at all with the threshold clamped to zero', () => {
+			const h = createHarness({ synthesizedRatioThreshold: 0 });
+
+			h.warmUp(1);
+
+			expect(h.issues()).toHaveLength(1);
+		});
+	});
+});

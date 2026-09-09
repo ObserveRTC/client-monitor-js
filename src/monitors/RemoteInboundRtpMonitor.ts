@@ -33,38 +33,21 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	deltaFractionLost?: number;
 
 	/**
-	 * The RTT the far end measured for the stream we send, averaged over this
-	 * interval from `totalRoundTripTime` / `roundTripTimeMeasurements` —
-	 * `roundTripTime` alone is a single noisy measurement. `undefined` when no
-	 * new measurement arrived.
+	 * RTT the far end measured for the stream we send, averaged over this interval rather than
+	 * the single noisy `roundTripTime`. `undefined` when no new measurement arrived.
 	 */
 	avgRoundTripTimeInSec?: number;
 
 	deltaTotalRoundTripTime?: number;
 	deltaRoundTripTimeMeasurements?: number;
 
-	/**
-	 * Milliseconds between this stats report and the previous one, from the
-	 * reports' own timestamps. Detectors accumulate this to measure how long a
-	 * condition has held, so a late or skipped collection still measures the
-	 * time the condition actually held underneath.
-	 *
-	 * `remote-inbound-rtp` advances only when a receiver report arrives, and
-	 * `getStats()` keeps serving the last one in between — so **`0` means no new
-	 * report this collection**, and every interval field below is `undefined`
-	 * alongside it. `undefined` means no second report has been seen yet. A
-	 * positive value is the only reading that says the far end just spoke.
-	 */
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
 	deltaTime?: number | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -88,16 +71,7 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		return result;
 	}
 
-	/**
-	 * Milliseconds of **stats time** this monitor has observed, accumulated from
-	 * `deltaTime` — the clock every window and duration in the library is measured
-	 * on, and the one thing `Date.now()` must never stand in for.
-	 *
-	 * It advances by what each collection actually cost rather than by one nominal
-	 * period, so a late or skipped collection widens a window by the time the
-	 * condition really held underneath. It never goes backwards and it is not a
-	 * timestamp: only differences between two readings of it mean anything.
-	 */
+	/** Accumulated stats time. Only differences between two readings mean anything. */
 	public statsClockTime = 0;
 
 	public getPeerConnection() {
@@ -126,13 +100,8 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		const elapsedInMs = stats.timestamp - this.timestamp;
 
 		if (elapsedInMs <= 0) {
-			// The same receiver report came back. Every field below measures the gap
-			// between two reports, so with no new report there is no measurement, and
-			// carrying the previous one forward would hand a detector a stale number as
-			// a current one — which is how a path whose RTCP has stopped keeps reading
-			// as healthy. With rtcp-mux that is the norm rather than an edge case: RTCP
-			// shares the RTP five-tuple, so anything that drops the media drops the
-			// reports about it too.
+			// The same receiver report came back, so there is no measurement. Carrying the
+			// previous one forward would make a path whose RTCP stopped keep reading as healthy.
 			this.deltaTime = 0;
 			this.deltaPacketsReceived = undefined;
 			this.deltaPacketsLost = undefined;

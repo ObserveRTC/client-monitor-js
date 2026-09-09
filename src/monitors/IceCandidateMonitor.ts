@@ -2,10 +2,8 @@ import { IceCandidateStats } from "../schema/ClientSample";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 /**
- * How the endpoint reaches the TURN server, as reported by `relayProtocol`.
- * This is a different concept from the candidate's own `protocol`:
- * `relayProtocol` describes the leg between this endpoint and the TURN server,
- * `protocol` describes the candidate's ICE transport.
+ * How the endpoint reaches the TURN server (`relayProtocol`) — the leg between this endpoint
+ * and TURN, not the candidate's own ICE transport `protocol`.
  */
 export type IceRelayProtocol = 'udp' | 'tcp' | 'tls';
 
@@ -30,22 +28,12 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	usernameFragment?: string | undefined;
 	tcpType?: string | undefined;
 
-	/**
-	 * Whether this candidate came from a `local-candidate` or a
-	 * `remote-candidate` stats entry. Set by the peer connection monitor when
-	 * the stats are accepted; not part of the shipped sample (the server can
-	 * derive it from the candidate pair references).
-	 */
+	/** Which stats entry this candidate came from. Set on accept; not part of the shipped sample. */
 	public direction?: 'local' | 'remote';
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -86,24 +74,14 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	}
 
 	/**
-	 * True when this candidate was obtained from a TURN server.
-	 *
-	 * Read from `candidateType` and nothing else. Relay candidates are only ever
-	 * obtained from TURN, and `candidateType` — not the candidate `url` — is the
-	 * signal, because a srflx candidate discovered through a TURN server's STUN
-	 * function also carries a `turn:` url. A browser omitting `candidateType`,
-	 * which the specification requires, is an adapter's problem to fix before the
-	 * monitors see the report; it is not something to second-guess here.
+	 * True when this candidate was obtained from a TURN server. Read from `candidateType`
+	 * rather than the `url`, which a srflx candidate discovered through TURN also carries.
 	 */
 	public get isRelay(): boolean {
 		return this.candidateType === 'relay';
 	}
 
-	/**
-	 * How this endpoint reaches the TURN server, normalized to the values the
-	 * spec defines. `undefined` when this is not a relay candidate or the
-	 * browser does not expose `relayProtocol`.
-	 */
+	/** Normalized `relayProtocol`; `undefined` when absent or not a recognized value. */
 	public get turnTransport(): IceRelayProtocol | undefined {
 		switch (this.relayProtocol) {
 			case 'udp':
@@ -116,9 +94,8 @@ export class IceCandidateMonitor implements IceCandidateStats {
 	}
 
 	/**
-	 * The ICE server this candidate was obtained from, without the query part,
-	 * so `turn:example.org:3478?transport=udp` and `...?transport=tcp` resolve to
-	 * the same server identity. Only set for relay candidates.
+	 * The TURN server this relay candidate came from, without the query part, so the same
+	 * server reached over different transports resolves to one identity.
 	 */
 	public get turnServer(): string | undefined {
 		if (!this.isRelay) return undefined;
@@ -127,10 +104,7 @@ export class IceCandidateMonitor implements IceCandidateStats {
 		return this.url.split('?')[0];
 	}
 
-	/**
-	 * IP version of this candidate's address. `undefined` when the address is
-	 * absent or hidden behind an mDNS name (`<uuid>.local`).
-	 */
+	/** IP version of this candidate's address; `undefined` when absent or an mDNS name. */
 	public get addressFamily(): IceAddressFamily | undefined {
 		const address = this.address;
 

@@ -14,41 +14,22 @@ export type DtlsHandshakeFailedIssuePayload = {
 
 const ISSUE_TYPE = 'dtls-handshake-failed';
 
-/**
- * `DtlsHandshakeFailedDetector` has no tunables — a terminal state needs no threshold, so there is
- * nothing to move. The type exists so the detector can be disabled on its own: `{}` enables it,
- * `null` disables it.
- */
+/** No tunables — a terminal state needs no threshold. `{}` enables the detector, `null` disables it. */
 export type DtlsHandshakeFailedDetectorConfig = Record<string, never>;
 
 /**
- * Reports the secure transport itself refusing to come up: `dtlsState` reads
- * `failed`. The ICE detectors own "the network path failed"; this owns the
- * failure one layer above it, where a path that works carries a handshake that
- * does not — a certificate fingerprint that does not match what was signalled,
- * a peer that will not speak a DTLS version this one offers, or a middlebox
- * that lets the small well-known STUN packets through and drops the handshake
- * records. Without this the whole class presents as a peer connection that is
- * generically slow to leave `connecting`, and every one of those causes points
- * at a different fix.
+ * Reports `dtlsState` reading `failed`: the secure transport refusing to come up over a network
+ * path that works. Use it to separate this from an ICE failure one layer below — a mismatched
+ * certificate fingerprint, a peer that speaks no offered DTLS version, a middlebox that passes
+ * STUN and drops handshake records — where the whole class would otherwise present as a peer
+ * connection generically slow to leave `connecting`.
  *
- * There is nothing to wait for and nothing to average: `failed` is the
- * browser's terminal verdict on this key exchange, so the issue is raised on
- * the first tick that reports it, with no maturity guard and no duration
- * threshold. It is raised once per transport rather than once per tick, since
- * the state stays `failed` until something re-keys the transport.
- *
- * Only a later `connected` resolves it, which in practice means an ICE restart
- * re-ran the handshake and the new generation succeeded. A transport that drops
- * back to `new`/`connecting` after the restart is not yet evidence of anything —
- * the second handshake may fail exactly like the first — so the issue stays open
- * until one actually completes, or until the transport disappears.
+ * `failed` is terminal, so the issue is raised on the first tick that reports it, once per
+ * transport. Only a later `connected` resolves it — in practice an ICE restart that re-keyed the
+ * transport; a drop back to `new`/`connecting` is not yet evidence of anything.
  *
  * Raises `dtls-handshake-failed`. Emits `dtls-handshake-failed`.
- * Config: `dtlsHandshakeFailedDetector` — `{}` registers this detector, `null`
- * leaves it unregistered. The block holds no values: `failed` is not a matter of
- * degree, so there is nothing here to tune. `DtlsHandshakeStalledDetector` has
- * its own key and its own `stalledThresholdInMs`.
+ * Config: `dtlsHandshakeFailedDetector`.
  *
  * Category: Connectivity
  * Layer: 4 — Secure transport
@@ -61,7 +42,7 @@ export class DtlsHandshakeFailedDetector implements Detector {
 	public disabled = false;
 	public includeIssueInSample = true;
 
-	/** Transport id → when this detector raised the issue for it. Only raised transports are in here. */
+	/** Transport id → raise time. Only raised transports are in here. */
 	private readonly _raisedAt = new Map<string, number>();
 
 	public constructor(
@@ -88,8 +69,7 @@ export class DtlsHandshakeFailedDetector implements Detector {
 		const dtlsState = transport.dtlsState;
 
 		if (dtlsState === 'connected') {
-			// A handshake that completed: the only way out of `failed`, and it takes an
-			// ICE restart re-keying the transport to get here.
+			// The only way out of `failed`: an ICE restart re-keyed the transport.
 			return this._resolve(transport.id, 'dtls handshake completed');
 		}
 
@@ -114,9 +94,8 @@ export class DtlsHandshakeFailedDetector implements Detector {
 			...payload,
 		});
 
-		clientMonitor.raiseIssue<DtlsHandshakeFailedIssuePayload>(
-			this._issueKey(transport.id),
-			{
+		this.peerConnection.issues.raise({
+				key: this._issueKey(transport.id),
 				includeInSample: this.includeIssueInSample,
 				type: ISSUE_TYPE,
 				payload,
@@ -131,13 +110,13 @@ export class DtlsHandshakeFailedDetector implements Detector {
 
 		this._raisedAt.delete(transportId);
 
-		const clientMonitor = this.peerConnection.parent;
 		const key = this._issueKey(transportId);
-		const issue = clientMonitor.activeIssues.get(key);
+		const issue = this.peerConnection.issues.get(key);
 
 		if (!issue) return;
 
-		clientMonitor.resolveIssue<DtlsHandshakeFailedIssuePayload>(key, {
+		this.peerConnection.issues.resolve({
+			key: key,
 			comment,
 			payload: {
 				...(issue.payload as DtlsHandshakeFailedIssuePayload),

@@ -47,6 +47,8 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     'ice-transport-stalled-detector': 'connectivity',
     'unstable-ice-path-detector': 'connectivity',
     // 2 — Transport Quality
+    // Deprecated, superseded by the two below.
+    'congestion-detector': 'transport-quality',
     'uplink-congestion-detector': 'transport-quality',
     'downlink-congestion-detector': 'transport-quality',
     'transport-delay-detector': 'transport-quality',
@@ -59,17 +61,15 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     'blocked-stun-requests-detector': 'transport-quality',
     'blocked-outbound-media-detector': 'transport-quality',
     'blocked-inbound-media-detector': 'transport-quality',
-    'transport-jitter-detector': 'transport-quality',
     // 3 — Pipeline Disruption
     'rtp-sender-stalled-detector': 'pipeline-disruption',
     'transport-demux-stalled-detector': 'pipeline-disruption',
-    'keyframe-storm-detector': 'pipeline-disruption',
     'video-recovery-failed-detector': 'pipeline-disruption',
     'cpu-performance-detector': 'pipeline-disruption',
     'capture-source-lost-detector': 'pipeline-disruption',
     'silent-audio-source-detector': 'pipeline-disruption',
-    'source-capture-bottleneck-detector': 'pipeline-disruption',
-    'encoder-performance-detector': 'pipeline-disruption',
+    'video-capture-bottleneck-detector': 'pipeline-disruption',
+    'encoder-bottleneck-detector': 'pipeline-disruption',
     'dry-outbound-track-detector': 'pipeline-disruption',
     'dry-inbound-track-detector': 'pipeline-disruption',
     'frame-assembly-stalled-detector': 'pipeline-disruption',
@@ -78,7 +78,7 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     'stuck-decoder-detector': 'pipeline-disruption',
     'playout-discrepancy-detector': 'pipeline-disruption',
     // 4 — Perceived Quality
-    // (the repair loop around a freeze — keyframe-storm and video-recovery-failed —
+    // (the repair loop around a freeze — video-recovery-failed —
     //  is pipeline-disruption and lives in its own two detectors, listed above)
     'pixelated-video-detector': 'perceived-quality',
     'inbound-video-flow-state-detector': 'perceived-quality',
@@ -131,6 +131,7 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     'ice-transport-stalled-detector': '5 — Path continuity',
     'unstable-ice-path-detector': '5 — Path continuity',
     // 2 — Transport Quality (docs/TRANSPORT_QUALITY_DETECTORS.md)
+    'congestion-detector': 'Capacity',
     'uplink-congestion-detector': 'Capacity',
     'downlink-congestion-detector': 'Capacity',
     'transport-delay-detector': 'Delay',
@@ -138,14 +139,13 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     'blocked-stun-requests-detector': 'Delivery reliability',
     'blocked-outbound-media-detector': 'Delivery reliability',
     'blocked-inbound-media-detector': 'Delivery reliability',
-    'transport-jitter-detector': 'Delivery stability',
     // 3 — Pipeline Disruption (docs/PIPELINE_DISRUPTION_DETECTORS.md), in chain
     // order: the send chain, then the receive chain, then the two boundaries
     // that belong to neither.
     'capture-source-lost-detector': 'Send — the source',
     'silent-audio-source-detector': 'Send — the source',
-    'source-capture-bottleneck-detector': 'Send — capture to frame supply',
-    'encoder-performance-detector': 'Send — frames to encoder',
+    'video-capture-bottleneck-detector': 'Send — capture to frame supply',
+    'encoder-bottleneck-detector': 'Send — frames to encoder',
     'rtp-sender-stalled-detector': 'Send — encoder to RTP sender',
     'dry-outbound-track-detector': 'Send — RTP sender to the wire',
     'transport-demux-stalled-detector': 'Receive — transport to RTP streams',
@@ -155,7 +155,6 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     'decoder-performance-detector': 'Receive — frames to decoder',
     'stuck-decoder-detector': 'Receive — frames to decoder',
     'playout-discrepancy-detector': 'Receive — decoder to renderer',
-    'keyframe-storm-detector': 'Beside the receive chain — the repair loop',
     'video-recovery-failed-detector': 'Beside the receive chain — the repair loop',
     'cpu-performance-detector': 'Across both chains — the machine',
     // 4 — Perceived Quality (docs/PERCEIVED_QUALITY_DETECTORS.md)

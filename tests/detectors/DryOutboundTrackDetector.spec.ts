@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { IssueRegistry, IssueRegistrySink } from "../../src/utils/IssueRegistry";
 import { DryOutboundTrackDetector } from "../../src/detectors/DryOutboundTrackDetector";
 
 // Types for test mocks
@@ -87,6 +89,18 @@ class MockClientMonitor {
         return resolved;
     }
 
+    /**
+     * What a per-monitor registry forwards into. Routing it back through `raiseIssue` /
+     * `resolveIssue` keeps every assertion below reading the same `activeIssues` map — the
+     * registry sits above them rather than replacing them.
+     */
+    public readonly issueUplink: IssueRegistrySink = {
+        notify: (issue: any) => { this.addIssue(issue); },
+        raise: (input: any) => { this.raiseIssue(input.key, input); return true; },
+        update: (input: any) => { this.raiseIssue(input.key, input); return true; },
+        resolve: (input: any) => this.resolveIssue(input.key, input) as any,
+    };
+
     // Compatibility helpers used by the assertions below.
     getIssues() {
         return [...this.activeIssues.values()];
@@ -103,6 +117,8 @@ class MockPeerConnectionMonitor {
 }
 
 class MockOutboundTrackMonitor {
+    /** This track's own active issues, uplinked into the client monitor. */
+    public issues!: IssueRegistry;
     public track = {
         id: 'test-track-id',
         muted: false,
@@ -111,6 +127,10 @@ class MockOutboundTrackMonitor {
     public paused = false;
     private peerConnection = new MockPeerConnectionMonitor();
     private outboundRtps: OutboundRtpStats[] = [];
+
+    public constructor() {
+        this.issues = new IssueRegistry(this.peerConnection.parent.issueUplink);
+    }
 
     getPeerConnection() {
         return this.peerConnection;

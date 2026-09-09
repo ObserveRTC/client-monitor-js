@@ -5,7 +5,7 @@ import { positiveDelta } from "../utils/common";
 
 export class MediaSourceMonitor implements MediaSourceStats {
 	private _visited = true;
-	
+
 	timestamp: number;
 	id: string;
 	kind: MediaKind;
@@ -25,32 +25,22 @@ export class MediaSourceMonitor implements MediaSourceStats {
 	public deltaTotalAudioEnergy?: number | undefined;
 	public deltaSamplesDuration?: number | undefined;
 
-	/**
-	 * Milliseconds between this stats report and the previous one, from the
-	 * reports' own timestamps. Detectors accumulate this to measure how long a
-	 * condition has held, so a late or skipped collection still measures the
-	 * time the condition actually held underneath.
-	 */
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
 	deltaTime?: number | undefined;
 
+
 	/** Frames per second the capture source actually produced in this interval. */
-	public sourceFps?: number | undefined;
+	public producedFps?: number | undefined;
 
 	/**
-	 * RMS audio level over this interval, from `totalAudioEnergy`. Unlike the
-	 * instantaneous `audioLevel` it does not read zero between speech bursts,
-	 * so it is the value to compare against a silence threshold.
+	 * RMS audio level over this interval. Unlike the instantaneous `audioLevel` it does not
+	 * read zero between speech bursts, so it is what a silence threshold should compare against.
 	 */
 	public rmsAudioLevel?: number | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -63,26 +53,17 @@ export class MediaSourceMonitor implements MediaSourceStats {
 
 		Object.assign(this, options);
 	}
-	
+
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
 	}
 
-	/**
-	 * Milliseconds of **stats time** this monitor has observed, accumulated from
-	 * `deltaTime` — the clock every window and duration in the library is measured
-	 * on, and the one thing `Date.now()` must never stand in for.
-	 *
-	 * It advances by what each collection actually cost rather than by one nominal
-	 * period, so a late or skipped collection widens a window by the time the
-	 * condition really held underneath. It never goes backwards and it is not a
-	 * timestamp: only differences between two readings of it mean anything.
-	 */
+	/** Accumulated stats time. Only differences between two readings mean anything. */
 	public statsClockTime = 0;
 
 	public getPeerConnection() {
@@ -113,16 +94,13 @@ export class MediaSourceMonitor implements MediaSourceStats {
 		this.deltaTotalAudioEnergy = positiveDelta(stats.totalAudioEnergy, this.totalAudioEnergy);
 		this.deltaSamplesDuration = positiveDelta(stats.totalSamplesDuration, this.totalSamplesDuration);
 
-		// Deliberately NOT `deltaFrames / elapsed`. `positiveDelta` clamps a
-		// counter that went backwards to 0, and a source whose counter restarted
-		// — a replaced track, a re-acquired device — would then read as 0 fps,
-		// which is indistinguishable from a camera that has died. A restart is
-		// not a measurement, so the interval yields no frame rate at all.
+		// Not `deltaFrames`: that clamps a restarted counter to 0, which would read as 0 fps
+		// and be indistinguishable from a dead camera. A restart yields no frame rate at all.
 		const framesDelta = stats.frames !== undefined && this.frames !== undefined
 			? stats.frames - this.frames
 			: undefined;
 
-		this.sourceFps = framesDelta !== undefined && 0 <= framesDelta
+		this.producedFps = framesDelta !== undefined && 0 <= framesDelta
 			? framesDelta / elapsedInSec
 			: undefined;
 

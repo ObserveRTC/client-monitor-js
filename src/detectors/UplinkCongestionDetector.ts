@@ -1,171 +1,92 @@
 import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { DecayingMaxEstimator } from "../utils/DecayingMaxEstimator";
+import { FrugalQuantileEstimator } from "../utils/FrugalQuantileEstimator";
 
-/**
- * Floor under the pacer queue comparison, in milliseconds. A queue of 0.2 ms
- * doubling to 0.4 ms is noise, and a ratio alone cannot say so.
- *
- * A constant rather than a config field: it is a noise floor, not a policy. What
- * an operator tunes is how far above its own baseline the queue has to climb, and
- * that is `sendDelayGrowthRatio`.
- *
- * It was 10 ms, which is above the whole normal range of real traffic: replayed
- * over two captured sessions the mean pacer time ran 0-7 ms and reached 10 ms only
- * in bursts, so this floor alone cost four of the ten congestion episodes in one of
- * them. Set where it filters arithmetic noise and nothing else.
- */
+/** Noise floor: a 0.2ms queue doubling to 0.4ms is arithmetic, not congestion. */
 const MIN_PACKET_SEND_DELAY_IN_MS = 1;
 
-/**
- * How fast the memory of what this path recently carried fades, per second of
- * stats time. At 0.996 a peak is worth half as much after about three minutes,
- * which is long enough to hold the healthy stretch before a collapse and short
- * enough that a link which has genuinely settled narrower stops being measured
- * against what it used to be. Replayed over two captured sessions, anything from a
- * one-minute to a six-minute half-life gave the same findings — the rate is a
- * plateau rather than a knife-edge.
- *
- * A decay rather than a window: one number of state, no array to walk, and no way
- * for it to quietly become two samples the way a ten-second window did against an
- * application collecting every five. Per *second* rather than per collection, so
- * two applications on different collecting periods forget at the same rate.
- */
+/** Half-life of the recent-maximum memory, ~3 minutes. Per second, not per collection. */
 const AVAILABLE_BITRATE_DECAY_PER_SECOND = 0.996;
+
+/**
+ * How much the maximum's decay is multiplied by while an episode is still recent: this the
+ * moment the episode closes, easing back to 1 across the window below. A path rarely gives
+ * back all of what an episode took, and without it a second dip arriving inside that window
+ * is scored against a capacity the path no longer reaches.
+ */
+const POST_EPISODE_DECAY_BOOST = 0.85;
+const POST_EPISODE_FADE_WINDOW_IN_MS = 30_000;
+
 
 export type UplinkCongestionIssuePayload = {
 	peerConnectionId: string;
-	/** The estimate at the moment the finding opened, in bps. */
+
+	/**
+	 * The two witnesses, each a fraction in `0..1` where `0` is healthy. `undershoot`
+	 * of 0.75 means the path is carrying a quarter of what it recently did;
+	 * `pacerBloating` of 1 means the pacer is at least four times its usual depth.
+	 */
+	undershoot: number;
+	pacerBloating: number;
+
+	/** How deep the trouble is, `0..1` — the geometric mean of the two witnesses. */
+	severity: number;
+
+	/** The measurements the ratios were taken from, in their own units. */
 	availableOutgoingBitrate: number;
-	/** What this endpoint was actually putting on the wire then, in bps. */
+	recentMaxAvailableBitrate: number;
 	sendingBitrate: number;
-	/**
-	 * What was left of the path at that moment — the estimate minus what was being
-	 * sent, in bps. Negative where the encoder had not yet followed the estimate
-	 * down, which is what the onset of a narrowing path looks like.
-	 */
-	headroomInBps: number;
-	/** The average headroom this call had been running with, in bps. */
-	baselineHeadroomInBps: number;
-	/** The highest estimate of the recent past, faded, in bps. */
-	maxAvailableOutgoingBitrate?: number;
-	/**
-	 * How sure this is, `0..1` — see the class doc. Both halves are carried beside it
-	 * so a reader can see which one carried it.
-	 */
-	confidence: number;
-	/** How far the path has narrowed against its own recent maximum, `0..1`. */
-	narrowing: number;
-	/** How far the pacer has backed up against its own usual level, `0..1`. */
-	queueing: number;
-	/** Mean pacer queue time per packet when the finding opened, in ms. */
-	packetSendDelayInMs: number;
-	/** The median estimate it was compared against, in ms. */
-	baselinePacketSendDelayInMs: number;
-	/**
-	 * Smoothed round trip in ms, where one was available. Support only: a climbing
-	 * round trip confirms a queue is building, but it is far too noisy to gate on
-	 * and there is none at all until the first RTCP report arrives.
-	 */
-	rttInMs?: number;
+	avgPacketSendDelayInMs: number;
+	estimatedMedianPacketSendDelayInMs: number;
+
 	/** Filled in when the finding closes. */
 	durationInMs?: number;
 }
 
 export type UplinkCongestionDetectorConfig = {
+	/** How deep the trouble has to be before reporting it, `0..1`. */
+	minSeverity: number;
+
 	/**
-	 * How sure the detector has to be before it reports congestion, `0..1`. See the
-	 * class doc for what the number means.
+	 * Where `pacerBloating` reaches the top of its scale, as a multiple of the connection's own
+	 * median pacer delay. The library default is `4`: a pacer sitting at four times its usual
+	 * depth scores `1`, and one at twice the median scores a third of the way up.
 	 *
-	 * One knob where there were two, and a forgiving one: replayed over two captured
-	 * sessions, everything from 0.45 to 0.70 produced exactly the same findings. Below
-	 * 0.45 a marginal narrowing starts being admitted on the strength of a deep queue
-	 * alone, and the first thing that lets in is a false finding.
+	 * Raise it to make the witness harder to satisfy on a connection whose pacer is naturally
+	 * spiky; lower it to make a mild bloat count for more. Values at or below `1` make any
+	 * excess over the median score `1` outright.
 	 */
-	minConfidence: number;
+	pacerBloatingSaturatesAt: number;
 }
 
 /**
- * Reports this endpoint's **sending** path no longer carrying what the encoder wants to produce.
- * Three things say so together: the browser reports the encoder as bandwidth-limited, the room left
- * on the path collapses, and packets start queueing in the pacer on their way out.
+ * Reports this endpoint's **sending** path running out of room — the cause behind collapsing
+ * outgoing resolution and the far end saying you are breaking up. Use it to tell "this user's
+ * upload is the problem" apart from a decoder, a camera or the far end's own link.
  *
- * **It reports a confidence rather than a verdict on each signal.** Two ratios against the
- * connection's own recent behaviour, each `0..1`, combined by their geometric mean:
+ * A finding means the path itself ran short, not the endpoints: an uplink shared with something
+ * else, a wireless link that degraded, a shaper or a cellular cell that narrowed. It is about this
+ * user's own upload, so it explains why *everyone else* sees them badly while their own preview
+ * looks perfect.
  *
- * - `narrowing` = `1 - available / recentMax` — 0 while the estimate is at its recent best,
- *   approaching 1 as it collapses toward nothing.
- * - `queueing` = `1 - baseline / pacer` — 0 while the pacer sits where it usually does, 0.5 at twice
- *   that, approaching 1 as it runs away.
+ * The browser reporting the encoder bandwidth limited decides *whether* this is congestion.
+ * Two witnesses decide how deep it is, each a fraction of this connection's own normal:
  *
- * The geometric mean is what makes the pair mean something neither does alone: it is zero unless
- * *both* are moving, so no amount of one can carry a finding, and a moderate reading on both
- * outranks an extreme reading on either. A path narrowing while packets back up behind it is
- * congestion; a path narrowing on its own is an encoder that has been asked for less, and a pacer
- * backing up on its own is a hiccup.
+ * - `undershoot` — how far the bandwidth estimate has fallen below the highest it recently
+ *   reached.
+ * - `pacerBloating` — how far pacer time per packet sits above its own running median, with
+ *   `pacerBloatingSaturatesAt` times the median as the top of the scale, `4` by default.
  *
- * That replaced a pair of hard thresholds — one on each signal — with a single `minConfidence`.
- * Measured over two captured sessions it reaches exactly the same findings, so the gain is not
- * accuracy: it is one knob instead of two, a much broader plateau of values that behave identically,
- * and a number in the payload that says how sure the detector was rather than only that it was sure
- * enough.
+ * Their geometric mean rides on the finding as `severity` in `0..1`, opening at `minSeverity`.
+ * Being a geometric mean, a witness at its healthy level takes the severity to zero: a narrowing
+ * path with the pacer empty is an encoder asked for less, and a filling pacer on an unchanged path
+ * is a hiccup. Where the browser reports no estimate or no verdict it sets `inputsUnavailable`
+ * rather than reading as healthy.
  *
- * **The path narrowing** is measured against the largest estimate of the recent past, kept as a
- * decaying maximum rather than a window — one number, and no way for it to silently shrink to two
- * samples the way a ten-second window did against an application collecting every five seconds.
- *
- * **The queue behind it** — mean pacer time per packet, Δ`totalPacketSendDelay` over Δ`packetsSent`.
- * The specification is explicit that the total is "added to totalPacketSendDelay when packetsSent is
- * incremented", so the quotient of the two deltas is the only reading that describes now. It is what
- * separates a path that narrowed from a sender that simply changed its mind.
- *
- * It is judged against its own running median rather than an absolute level, because it has no
- * meaningful absolute scale: pacer time sits an order of magnitude apart between an SFU uplink and a
- * loopback. A median and not a mean, because it is spiky and a mean of a spiky quantity sits far
- * above where the quantity usually is — over a captured session the pacer's median was 0.37 ms while
- * an EWMA of it settled at 6.02 ms, which would put "twice the baseline" at a bar the signal reached
- * eleven times in sixteen hundred collections. That one change is what made this witness usable: it
- * fires on a third of the collections the browser calls bandwidth-limited, where the version
- * calibrated against a loopback shaper fired on almost none.
- *
- * **The browser's verdict** — `qualityLimitationReason === 'bandwidth'` — gates both. Alone it is
- * worth almost nothing: over a throttled run it read `bandwidth` on all 34 collections including all
- * 6 healthy ones, precision 0.53. As one of three it is a filter rather than a claim, which is the
- * only honest use of a signal that eager. And its *absence* is worth a great deal, which is what
- * closes the finding: a verdict that is nearly always true under congestion says little when it goes
- * true and a lot when it goes false. There is no recovery threshold on any bitrate here — nothing
- * knows what the path can carry after it narrows, so a link that settles at half its old capacity
- * has recovered and a ratio against its old maximum would never say so.
- *
- * **What it deliberately does not claim, and what it stopped asking for.** Not that packets were
- * lost: a congestion controller doing its job backs off before the queue overflows, and across
- * 3449 collections of two real sessions outbound loss was zero at the 90th percentile whether
- * congested or not — a rule wanting 5% of it, which the detector this replaces had, never fired
- * once. Not that the round trip is long: the same sessions put RTT within 7% of its healthy median
- * during congestion, and the ICE round trip within 3%, so it is carried in the payload as context
- * and gates nothing. Not where the narrow part of the path is or whose it is. Nothing about the receiving direction, which has its own detector
- * and its own evidence. And nothing about what the far end sees: this is a statement about a link,
- * not about a picture.
- *
- * **What it does not need to guard against.** A muted camera, a replaced track or a screen share of
- * a still slide all lower what the encoder asks for while the path keeps offering what it did, so
- * the estimate does not move and neither queue fills. The innocent conditions that look like a
- * congested sender are ruled out by the shape rather than by a guard: none of them narrows the
- * path, and the browser is not calling any of them a bandwidth limitation either.
- *
- * **Where it cannot see.** `availableOutgoingBitrate` "only exists when the underlying congestion
- * control calculated either a send-side bandwidth estimation … or received a receive-side estimation
- * via RTCP", and `qualityLimitationReason` "must not exist for audio" and is unimplemented on some
- * browsers. Missing either is reported as `inputsUnavailable` rather than as a healthy path — the
- * difference between "nothing is wrong" and "we cannot see whether anything is wrong", and the one
- * thing the old detector got wrong badly enough to make a whole browser population read as the best
- * behaved on a fleet.
- *
- * Issue raised: `uplink-congestion`. Monitor events: `uplink-congestion`, and `congestion`
- * with `direction: 'uplink'` — the direction-agnostic feed both capacity detectors emit on,
- * for an application that only wants to know the connection is capacity-limited somewhere.
- * Connection attribute: `PeerConnectionMonitor.uplinkCongested`, and `congested` for either
- * direction. Config: `uplinkCongestionDetector`.
+ * Issue raised: `uplink-congestion`. Monitor events: `uplink-congestion`, and `congestion` with
+ * `direction: 'uplink'`. Connection attribute: `PeerConnectionMonitor.uplinkCongested`.
+ * Config: `uplinkCongestionDetector`.
  *
  * Category: Transport Quality
  * Layer: Capacity
@@ -178,15 +99,19 @@ export class UplinkCongestionDetector implements Detector {
 	public includeIssueInSample = true;
 	public inputsUnavailable = false;
 
+	/**
+	 * The two baselines each witness is measured against — how they are fed is at the call
+	 * site in `update()`.
+	 */
+	public readonly recentMaxAvailableBitrateEstimator = new DecayingMaxEstimator(AVAILABLE_BITRATE_DECAY_PER_SECOND);
+	public readonly medianPacketSendDelayEstimator = new FrugalQuantileEstimator(0.5);
+
 	private readonly _issueKey: string;
 	private _raised = false;
-	/**
-	 * The largest outgoing bandwidth estimate of the recent past, fading. Kept here
-	 * rather than on the connection because nothing else has a use for it: it is the
-	 * yardstick this detector measures a collapse with, not a fact about the stream.
-	 */
-	private readonly _recentMaxAvailableOutgoingBitrate =
-		new DecayingMaxEstimator(AVAILABLE_BITRATE_DECAY_PER_SECOND);
+
+	/** When the last episode closed, while the faster fade that follows it is still running. */
+	private _boostedDecayAt?: number;
+
 
 	/** Wall clock, and only for the resolved finding's `durationInMs`. */
 	private _raisedAt?: number;
@@ -203,122 +128,130 @@ export class UplinkCongestionDetector implements Detector {
 
 	public update() {
 		if (this.disabled) return;
-		if (this.peerConnection.availableOutgoingBitrate === undefined) {
-			return;
-		}
-		if (this.peerConnection.deltaTime === undefined) {
-			return;
-		}
 
-		const recentMax = this._recentMaxAvailableOutgoingBitrate.update(this.peerConnection.availableOutgoingBitrate, this.peerConnection.deltaTime);
 		const sendingBitrate = this.peerConnection.sendingBitrate;
 
-		// Nothing left this endpoint at all in this collection, so there is no
-		// sending path to judge. A receive-only connection lives here permanently,
-		// and so does one whose senders are all paused.
+		// No sending path to judge — a receive-only connection lives here permanently.
 		if (sendingBitrate <= 0) {
 			return this._standDown('nothing is being sent over this connection');
 		}
 
+		const availableOutgoingBitrate = this.peerConnection.totalAvailableOutgoingBitrate;
+		const avgPacketSendDelayInMs = this.peerConnection.avgPacketSendDelayInMs;
 		const qualityLimitationReason = this.peerConnection.qualityLimitationReason;
-		const headroomInBps = this.peerConnection.outgoingBitrateHeadroom;
-		const baselineHeadroomInBps = this.peerConnection.ewmaOutgoingBitrateHeadroom;
 
-		// No verdict, or no estimate to take the headroom from. Blind, not healthy.
+		// No estimate or no verdict. Blind, not healthy.
 		if (
-			qualityLimitationReason === undefined ||
-			headroomInBps === undefined ||
-			baselineHeadroomInBps === undefined
+			availableOutgoingBitrate === undefined ||
+			avgPacketSendDelayInMs === undefined ||
+			qualityLimitationReason === undefined
 		) {
 			this.inputsUnavailable = true;
+			this.peerConnection.uplinkVideoCongestionSeverity = undefined;
 
 			return;
 		}
 
 		this.inputsUnavailable = false;
 
-		const bandwidthLimited = qualityLimitationReason === 'bandwidth';
+		const recentMaxAvailableBitrate = this.recentMaxAvailableBitrateEstimator.estimate;
+		const estimatedMedianPacketSendDelayInMs = this.medianPacketSendDelayEstimator.estimate;
 
-		// While a finding is open there is one question, and no bitrate can answer
-		// it: nothing knows what the path can carry after it narrows, so a recovery
-		// threshold would ask a link that settled at half its old capacity to prove a
-		// recovery it has already made. The browser dropping the limitation is the
-		// one recovery signal that is actually a measurement.
-		if (this._raised) {
-			if (!bandwidthLimited) {
-				this._resolve('the browser no longer reports the encoder as bandwidth limited');
-			}
+		this._easePostEpisodeDecay();
 
-			return;
+		// Fed after the reads above, so a collection cannot move the baseline it is judged
+		// against. The maximum takes every collection, an open episode included: a congested
+		// sample is lower so it cannot inflate it, and feeding it is the only way it fades.
+		this.recentMaxAvailableBitrateEstimator.update(availableOutgoingBitrate, this.peerConnection.deltaTime ?? 0);
+
+		// The median takes only collections with no finding open, or a sustained bloat would
+		// drag it up and talk the episode out of existence.
+		if (!this._raised) this.medianPacketSendDelayEstimator.update(avgPacketSendDelayInMs);
+
+		// The verdict decides whether this is congestion; the witnesses below decide how deep.
+		// It is also the only thing that closes an open finding.
+		if (qualityLimitationReason !== 'bandwidth') {
+			return this._standDown('the browser no longer reports the encoder as bandwidth limited');
 		}
 
-		const availableOutgoingBitrate = this.peerConnection.availableOutgoingBitrate as number;
+		// One observation is enough for both baselines: the maximum starts as that sample and
+		// the quantile as its own estimate, so a witness reads 0 rather than wrong.
+		if (
+			recentMaxAvailableBitrate === undefined ||
+			estimatedMedianPacketSendDelayInMs === undefined ||
+			recentMaxAvailableBitrate <= 0 ||
+			availableOutgoingBitrate <= 0
+		) {
+			return this._standDown('not enough history to judge congestion');
+		}
 
-		// `recentMax` is the yardstick the collapse is measured with, and without it
-		// there is nothing to measure against. It is `undefined` only for the first
-		// collection of a connection, where the estimate is still ramping up anyway.
-		if (recentMax === undefined) return;
+		// Checked rather than defaulted: an absent scale makes the bloating `NaN`, and every
+		// comparison below reads false against `NaN` — the finding would raise on everything.
+		if (this.config.pacerBloatingSaturatesAt === undefined) return;
 
-		if (!bandwidthLimited || recentMax <= 0) return;
+		// Clamped: a rising estimate can overtake a maximum seeded from lower samples.
+		const undershoot = Math.max(0, 1 - (availableOutgoingBitrate / recentMaxAvailableBitrate));
+		const pacerBaselineInMs = Math.max(estimatedMedianPacketSendDelayInMs, MIN_PACKET_SEND_DELAY_IN_MS);
+		// Never zero, so a `saturatesAt` of 1 or less saturates on any excess instead of dividing by it.
+		const pacerBloatingSpan = Math.max(this.config.pacerBloatingSaturatesAt - 1, Number.EPSILON);
+		const pacerBloating = Math.min(1, Math.max(0,
+			(avgPacketSendDelayInMs - pacerBaselineInMs) / (pacerBaselineInMs * pacerBloatingSpan),
+		));
 
-		const packetSendDelayInMs = this.peerConnection.avgPacketSendDelayInMs;
-		const baselinePacketSendDelayInMs = this.peerConnection.estimatedMedianPacketSendDelayInMs;
+		// Geometric mean: a witness at its healthy level takes the whole thing to zero.
+		const severity = Math.sqrt(undershoot * pacerBloating);
 
-		// The pacer is the other half of the evidence, so a collection without it is
-		// not one to judge from.
-		if (packetSendDelayInMs === undefined || baselinePacketSendDelayInMs === undefined) return;
+		// Kept current on every judged collection, an open episode included, so an application
+		// reading it sees the trouble deepening rather than the value that opened the finding.
+		this.peerConnection.uplinkVideoCongestionSeverity = severity;
 
-		// How far the path has narrowed: 0 while the estimate is at its recent best,
-		// approaching 1 as it collapses toward nothing. Never negative without a clamp,
-		// because `recentMax` folds in this collection's own estimate before returning —
-		// a path that just got wider is its own maximum.
-		const narrowing = 1 - (availableOutgoingBitrate / recentMax);
+		// An open finding is not raised again; it closes on the verdict above.
+		if (this._raised) return;
 
-		// How far the pacer has backed up: 0 while it sits at its usual level, 0.5 at
-		// twice it, approaching 1 as it runs away. A ratio against the connection's own
-		// recent behaviour, because pacer time has no meaningful absolute scale across
-		// an SFU uplink, a loopback and a mobile link.
-		//
-		// The noise floor goes on the *baseline*, which is what makes a pacer under it
-		// score zero without a branch saying so: a 0.4 ms queue against a floor of 1 ms
-		// gives a ratio above one, and the clamp takes it from there. Left to its real
-		// baseline of 0.05 ms the same 0.4 ms would score 0.875 on pure arithmetic.
-		const queueBaselineInMs = Math.max(baselinePacketSendDelayInMs, MIN_PACKET_SEND_DELAY_IN_MS);
-		const queueing = Math.max(0, 1 - (queueBaselineInMs / packetSendDelayInMs));
-
-		// The geometric mean, so neither signal can carry the finding alone however
-		// extreme it gets, and so a moderate reading on both outranks an extreme one on
-		// either. That is the whole claim: a path narrowing *while* packets back up
-		// behind it is congestion, and either on its own is an encoder changing its
-		// mind or a momentary hiccup.
-		const confidence = Math.sqrt(narrowing * queueing);
-
-		if (confidence < this.config.minConfidence) return;
+		// Checked rather than compared against: `severity < undefined` is false, so a bare
+		// comparison would raise on every collection where the config arrived without it.
+		if (this.config.minSeverity === undefined) return;
+		if (severity < this.config.minSeverity) return;
 
 		this._raise({
 			peerConnectionId: this.peerConnection.peerConnectionId,
+			undershoot,
+			pacerBloating,
+			severity,
 			availableOutgoingBitrate,
+			recentMaxAvailableBitrate,
 			sendingBitrate,
-			headroomInBps,
-			baselineHeadroomInBps,
-			maxAvailableOutgoingBitrate: recentMax,
-			confidence,
-			narrowing,
-			queueing,
-			packetSendDelayInMs,
-			baselinePacketSendDelayInMs,
-			rttInMs: this.peerConnection.ewmaRttInSec === undefined
-				? undefined
-				: this.peerConnection.ewmaRttInSec * 1000,
+			avgPacketSendDelayInMs,
+			estimatedMedianPacketSendDelayInMs,
 		});
+	}
+
+	/**
+	 * Moves the maximum's decay along the post-episode window: fastest the moment the episode
+	 * closed, easing back to the ordinary rate across the window, and back to it outright once
+	 * past. Does nothing when no episode is recent.
+	 */
+	private _easePostEpisodeDecay() {
+		if (this._boostedDecayAt === undefined) return;
+
+		const sinceResolveInMs = this.peerConnection.statsClockTime - this._boostedDecayAt;
+
+		if (POST_EPISODE_FADE_WINDOW_IN_MS <= sinceResolveInMs) {
+			this._boostedDecayAt = undefined;
+
+			return this.recentMaxAvailableBitrateEstimator.updateDecayRate(AVAILABLE_BITRATE_DECAY_PER_SECOND);
+		}
+
+		const fadedBack = sinceResolveInMs / POST_EPISODE_FADE_WINDOW_IN_MS;
+		const boost = POST_EPISODE_DECAY_BOOST + ((1 - POST_EPISODE_DECAY_BOOST) * fadedBack);
+
+		this.recentMaxAvailableBitrateEstimator.updateDecayRate(AVAILABLE_BITRATE_DECAY_PER_SECOND * boost);
 	}
 
 	private _raise(payload: UplinkCongestionIssuePayload) {
 		this._raised = true;
 		this._raisedAt = Date.now();
-		// The connection says what this detector says, and it is set here rather than
-		// at each call site so the two cannot drift. It moves when a finding opens or
-		// closes, never with a collection.
+		// Set here, not at the call sites, so the flag and the finding cannot drift.
 		this.peerConnection.uplinkCongested = true;
 
 		const clientMonitor = this.peerConnection.parent;
@@ -329,43 +262,33 @@ export class UplinkCongestionDetector implements Detector {
 			...payload,
 		});
 
-		// And again on the direction-agnostic feed, for an application that only
-		// wants to know this connection is capacity-limited somewhere. It is a second
-		// delivery of this finding rather than a second finding: one issue is raised,
-		// and `direction` says which detector reached the verdict.
-		clientMonitor.emit('congestion', {
-			clientMonitor,
-			peerConnectionMonitor: this.peerConnection,
-			direction: 'uplink',
-			...payload,
-		});
+		// The same finding again on the direction-agnostic feed. One issue, two deliveries.
 
-		clientMonitor.raiseIssue<UplinkCongestionIssuePayload>(this._issueKey, {
+		this.peerConnection.issues.raise({
+			key: this._issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: UplinkCongestionDetector.ISSUE_TYPE,
 			payload,
 		});
 	}
 
-
-	/**
-	 * Closes any open finding. Guarded on there being one, because the path that
-	 * calls this is the resting state of every receive-only connection in a fleet.
-	 */
+	/** Closes any open finding. Guarded, because this is every receive-only connection's resting state. */
 	private _standDown(comment: string) {
 		this.inputsUnavailable = false;
+		this.peerConnection.uplinkVideoCongestionSeverity = undefined;
 
 		if (this._raised) this._resolve(comment);
 	}
 
 	private _resolve(comment: string) {
 		this._raised = false;
+		this._boostedDecayAt = this.peerConnection.statsClockTime;
 		this.peerConnection.uplinkCongested = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this._issueKey);
+		const issue = this.peerConnection.issues.get(this._issueKey);
 
-		clientMonitor.resolveIssue<UplinkCongestionIssuePayload>(this._issueKey, {
+		this.peerConnection.issues.resolve({
+			key: this._issueKey,
 			comment,
 			payload: issue
 				? {

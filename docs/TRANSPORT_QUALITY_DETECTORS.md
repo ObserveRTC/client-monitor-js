@@ -7,7 +7,7 @@ conclude.
 
 It answers one question: *the path exists, ICE is connected, DTLS completed —
 is the path carrying traffic well enough?* — and it exists because "the network
-is bad" is four different faults with four different fixes, and until 4.10.0
+is bad" is four different faults with four different fixes, and until 4.9.0
 the library could only name one of them.
 
 This is the deep reference for **Category 2** of the library's five detector
@@ -24,7 +24,7 @@ detectors) see the *Events and Issues* section of the
 - [Congestion is not loss, and neither is delay](#congestion-is-not-loss-and-neither-is-delay)
 - [Where the numbers come from](#where-the-numbers-come-from)
 - [The grid](#the-grid)
-- [The shape three of them share: two thresholds and a stats clock](#the-shape-three-of-them-share-two-thresholds-and-a-stats-clock)
+- [The shape three of them share: two thresholds and a stats clock](#the-threshold-and-stats-clock-shape)
 - [Capacity](#capacity)
 - [Delay](#delay)
 - [Delivery reliability](#delivery-reliability)
@@ -120,7 +120,7 @@ the opinion:
 | Value | Meaning |
 |---|---|
 | `avgRttInSec` | `rtcpRttInSec ?? iceRttInSec` — the RTCP round trip when remote reports exist, the ICE/STUN one otherwise |
-| `ewmaRttInSec` | The EWMA of *whichever of those two* `avgRttInSec` is currently reporting (α = 0.1) |
+| `ewmaRttInSec` | The EWMA of *whichever of those two* `avgRttInSec` is currently reporting (α = 0.1). Published for applications; **no detector reads it**, because its memory is set by the collecting period and because `rtcpRttInSec` is never cleared, so the source preference latches on the first RTCP report and the value can freeze without saying so |
 | `avgInboundFractionLost` | Mean interval loss fraction over inbound streams that received packets this tick |
 | `avgOutboundFractionLost` | Mean interval loss fraction the far end reported for the streams we send |
 | `avgInboundJitterInMs` | Mean inter-arrival jitter over inbound streams that received packets this tick |
@@ -128,7 +128,6 @@ the opinion:
 | `availableOutgoingBitrate` | The estimate summed over the selected pairs that reported one, `undefined` where none did — unlike `totalAvailableOutgoingBitrate`, which sums with `?? 0` and cannot tell a silent estimator from a zero one |
 | `avgPacketSendDelayInMs` | Mean pacer queue time per packet this tick, Δ`totalPacketSendDelay` over Δ`packetsSent`, weighted by packets rather than averaged over streams |
 | `avgInboundVideoJitterBufferDelayInMs` | Mean time a video frame spent in the jitter buffer this tick, Δ`jitterBufferDelay` over Δ`jitterBufferEmittedCount`. Video only: audio is a different scale and has its own detector |
-| `outgoingBitrateHeadroom` | `availableOutgoingBitrate - sendingBitrate` — the room the encoder has left, negative at the moment a path narrows, with an EWMA beside it |
 | `qualityLimitationReason` | The most limiting reason across the streams that sent anything this tick, in the specification's own priority order — streams that sent nothing do not vote |
 | `hasInboundVideo` | Whether any inbound video stream was present this collection. Not the same question as `0 < receivingVideoBitrate`: a stream present and delivering nothing is a finding somewhere else |
 
@@ -141,7 +140,7 @@ array on every read.
 The one piece of cross-tick state they do **not** get from the connection is the
 rolling maximum each measures a collapse against — the last ten seconds of the
 outgoing estimate, and of the arriving bitrate. Each detector keeps its own
-window, because that is a yardstick for a judgement rather than a fact about the
+window, because that is a baseline for a judgement rather than a fact about the
 connection: nothing else in the library has a use for it, and a second detector
 wanting one would want its own length anyway. The bookkeeping is duplicated in the
 two files rather than shared, per [design rule
@@ -153,8 +152,8 @@ the connection that anything may want — a score calculator, an application, a
 second detector — while a threshold is an opinion belonging to whoever is
 judging; putting the arithmetic on the monitored object makes the fact available
 without a detector in the way. And it is what keeps
-`TransportDelayDetector`, `TransportLossDetector` and `TransportJitterDetector`
-under forty lines of logic each, which is the whole reason they can be read
+`TransportDelayDetector` and `TransportLossDetector` under forty lines of logic
+each, which is the whole reason they can be read
 start to finish without reading anything else.
 
 **The averages exclude streams that carried nothing.** `_updateTransportQualityAverages`
@@ -182,7 +181,6 @@ something.
 | Delay | `TransportDelayDetector` | `transport-delay-degraded` | `transportDelayDetector` | RTCP or ICE round trip — available everywhere |
 | Delivery reliability | `TransportLossDetector` | `transport-loss-sustained` | `transportLossDetector` | Inbound everywhere; outbound needs `remote-inbound-rtp.packetsReceived` |
 | Delivery reliability | `BlockedTransportDetector` | `blocked-transport` | `blockedTransportDetector` | Needs the pair's `responsesReceived`, plus transport or candidate-pair byte counters |
-| Delivery stability | `TransportJitterDetector` | `transport-delivery-unstable` | `transportJitterDetector` | Inbound RTP `jitter` — available everywhere |
 
 Every class here binds to `PeerConnectionMonitor`. Nothing in this category lives
 at a track monitor, which follows from the subject: a path is a property of a
@@ -192,25 +190,27 @@ stream rather than about the transport carrying all of them.
 The detector `name` strings — the lookup key for `Detectors.getByName()` /
 `disable()` / `enable()` — are `uplink-congestion-detector`,
 `downlink-congestion-detector`, `transport-delay-detector`,
-`transport-loss-detector`, `blocked-transport-detector` and
-`transport-jitter-detector`. `congestion-detector` is retired: it was one class
+`transport-loss-detector` and `blocked-transport-detector`.
+`congestion-detector` is retired: it was one class
 answering for both directions and it became the first two, which is why there is
 no alias — an old spelling could only ever have pointed at one of them.
 
 **Each config key owns exactly one class** — the library-wide rule now ([design
 rule 4](./DETECTOR_TAXONOMY.md#4-one-detector-one-config-block)), and one this
-category has always obeyed. Passing `null` for one of these five keys unregisters
+category has always obeyed. Passing `null` for one of these keys unregisters
 precisely one detector. There is no way to disable "transport quality" as a block,
-and there does not need to be: the five findings have nothing in common
+and there does not need to be: the findings have nothing in common
 operationally except the object they describe.
 
-## The shape three of them share: two thresholds and a stats clock
+## The threshold-and-stats-clock shape
 
-`TransportDelayDetector`, `TransportLossDetector` and `TransportJitterDetector`
-are the same detector three times over a different number, and the shape is
-worth describing once rather than three times.
+`TransportLossDetector` has this shape, and `TransportDelayDetector` had it until
+4.9.0 moved that class onto `PeerConnectionMonitor.detectionRecoveryWindow`
+(described under [Delay](#transportdelaydetector--transport-delay-degraded)
+below). It is documented here because loss still works this way, and because the
+comparison is the clearest statement of what the window changed.
 
-Each reads one value, compares it against a **raise threshold** and a **recovery
+It reads one value, compares it against a **raise threshold** and a **recovery
 threshold**, and accumulates time above the raise threshold in **stats time**
 until a **duration** is satisfied:
 
@@ -272,32 +272,30 @@ for a fleet to calibrate, not findings.
 Two detectors, one per direction, because the evidence is not the same evidence.
 The sending side can read the browser's own bandwidth estimate; the receiving
 side has none to read and has to rebuild the verdict from what arrived. They
-replaced the single `CongestionDetector` in 4.10.0, which answered for both
+replaced the single `CongestionDetector` in 4.9.0, which answered for both
 directions from one signal and carried two permanently-zero fields for the other.
 
 ### `UplinkCongestionDetector` — `uplink-congestion`
 
-**What it reads** is the room left on the path:
-`availableOutgoingBitrate - sendingBitrate`, kept on the connection as
-`outgoingBitrateHeadroom` with an EWMA beside it. On a healthy call it is
-comfortably positive and fairly steady — the encoder asks for less than the path
-offers. When a path narrows the estimate drops immediately and the encoder takes a
-beat to follow it down, so the headroom falls through zero and goes sharply
-negative for a collection or two. **That moment is the signal**: not a level, but a
-sender pressed against a ceiling that just moved.
+**How it decides.** `qualityLimitationReason === 'bandwidth'` decides *whether* this
+is congestion; two witnesses decide *how deep*, and each is already a fraction of this
+connection's own normal, so neither needs a scale to be configured:
 
-Three things must hold together, and each covers what the others cannot:
+- `undershoot` — how far `availableOutgoingBitrate` has fallen below the highest it
+  recently reached, which is a fraction by construction. The maximum is a decaying one:
+  it fades on a half-life of about three minutes of stats time rather than dropping out
+  of a window.
+- `pacerBloating` — how far `avgPacketSendDelayInMs` sits above its own running median,
+  with four times the median as the top of the scale and a 1 ms noise floor under the
+  baseline. That mean is Δ`totalPacketSendDelay` over Δ`packetsSent`, the only reading
+  of a counter whose specification says the total is "added to totalPacketSendDelay when
+  packetsSent is incremented".
 
-- `qualityLimitationReason` is `bandwidth` — the browser's own congestion verdict.
-- the headroom is `headroomDropRatio` (0.25) of the recent maximum estimate below
-  its own EWMA — the maximum being the highest estimate of the last ten seconds of
-  stats time, from a window the detector keeps itself. Measured against the path
-  rather than against the headroom itself, because a difference that passes through
-  zero cannot be a denominator.
-- mean pacer queue time is `sendDelayGrowthRatio` (3×) of its own EWMA and above a
-  10 ms noise floor — Δ`totalPacketSendDelay` over Δ`packetsSent`, the only reading
-  of a counter whose specification says the total is "added to totalPacketSendDelay
-  when packetsSent is incremented".
+They combine as a **geometric mean**, so a witness at its healthy level takes the
+severity to zero rather than merely failing to add: a path narrowing with the pacer
+empty is an encoder that was asked for less — a muted camera, a replaced track, a screen
+share of a still slide — and a pacer filling on an unchanged path is a hiccup. The only
+configured number is `minSeverity`.
 
 That is a change of anchor from 4.9.0, and it was measured rather than argued.
 Against a loopback call throttled to 500 kbit on Chromium 141:
@@ -310,17 +308,8 @@ Against a loopback call throttled to 500 kbit on Chromium 141:
 
 The old detector's anchor was the browser saying the encoder is not free to do as
 it likes, which on a real call is nearly always true — it read `bandwidth` on all
-34 collections of that run, including all 6 healthy ones. Here it is one of three,
-which is a filter rather than a claim and the only honest use of a signal that
-eager.
-
-**The look-alike this shape rules out by construction.** A muted camera, a
-replaced track and a screen share of a still slide all drag the estimate down —
-the estimator cannot probe above what is being sent — and a detector watching the
-estimate alone reads that as a narrowing path. All three make the *headroom grow*:
-the encoder is asking for less while the path keeps offering what it did. The
-earlier draft needed a `minUtilizationRatio` guard for exactly this case; the
-headroom shape does not need one.
+34 collections of that run, including all 6 healthy ones. Here it is a gate rather
+than a claim, and the only honest use of a signal that eager.
 
 **How it recovers.** When the browser stops reporting a bandwidth limitation, and
 on nothing else. There is no recovery threshold on any bitrate, because nothing
@@ -332,9 +321,9 @@ nearly always true under congestion, so it going false says something that it
 going true does not.
 
 `peerConnectionMonitor.uplinkCongested` moves with the finding, never with a
-collection. Two thresholds, no windows, no counters, and every value it reads is a
+collection. One threshold, no windows, no counters, and every value it reads is a
 fact the connection already derived — the downlink detector below has the same
-shape and the same three-part test, on the evidence a receiver can get.
+shape, on the evidence a receiver can get.
 
 **What it does not claim.** Not that packets were lost — a congestion controller
 doing its job backs off before the queue overflows. Not that the round trip is
@@ -359,71 +348,52 @@ downlink is computed at the far end's sender and never reaches you. A receiver
 never computes one. The old detector carried it in two payload fields that were
 permanently zero on the dominant browser; it is used here in no form.
 
-**How it decides.** Three things must hold together, and each covers what the
-others cannot:
+**How it decides.** Two witnesses, each already a fraction of this connection's own
+normal, so neither needs a scale to be configured:
 
-- `qualityLimitationReason` is `bandwidth` — the browser's own congestion verdict.
-  Alone it means almost nothing: over the throttled run it read `bandwidth` on all
-  34 collections including all 6 healthy ones, precision 0.53. As one of three it
-  is a filter rather than a claim, which is the only honest use of a signal that
-  eager.
-- `receivingBitrate` is below `collapseRatio` (0.6) of its rolling maximum — less
-  is arriving than was arriving.
-- `avgInboundVideoJitterBufferDelayInMs` is at `bufferElevationRatio` (2×) of its
-  own pre-episode baseline and above a 100 ms noise floor — packets are queueing
-  rather than simply not being sent. This is what separates "the link cannot carry
-  it" from "the sender had less to send": a static screen share, a muted camera or
-  a dropped simulcast layer collapses the bitrate with the buffer perfectly normal.
+- `undershoot` — how far `receivingBitrate` has fallen below the highest it recently
+  reached, which is a fraction by construction. The maximum is a decaying one: it
+  fades on a half-life of about three minutes of stats time rather than dropping out
+  of a window.
+- `bufferBloating` — how far `avgInboundVideoJitterBufferDelayInMs` sits above its own
+  running median, with four times the median as the top of the scale and a 10 ms noise
+  floor under the baseline.
 
-The baseline is the smoothed level from the last collection with nothing to
-report, latched rather than re-read, so an EWMA already climbing under a deepening
-buffer cannot raise the bar the episode has to clear.
+They combine as a **geometric mean**, so a witness at its healthy level takes the
+severity to zero rather than merely failing to add. That is what separates the two
+conditions this detector has to keep apart: a far end that was asked for less — a muted
+camera, a dropped simulcast layer, a screen share of a still slide — undershoots with
+the buffer flat, and a buffer bloating on an unchanged bitrate is a hiccup rather than a
+path running out of room.
 
-**How it recovers.** Exactly as the uplink does, and for the same reason: when the
-browser stops reporting a bandwidth limitation. Neither direction has anything
-that says what the path can carry *after* it narrows, so a recovery threshold on
-a bitrate would measure against a number nobody can know — a link that settles at
-half its old capacity has recovered, and a ratio against its old maximum would
-hold the finding open for the rest of the call.
+The only configured number is `minSeverity`. Everything else is a fraction of what this
+connection was already doing.
 
-**What it borrows, and what that costs.** `qualityLimitationReason` describes this
-endpoint's *encoder*, so this is a sending-side verdict being read about a
-receiving-side condition. On a shared last mile — home wifi, a mobile link, a
-saturated access network — both directions cross the same bottleneck and the
-verdict is about the link they share. Where they do not share one (an SFU with an
-asymmetric problem, a relay congested in one direction only) the gate can be shut
-while the downlink is genuinely congested, and this detector stays quiet. And a
-connection that sends nothing has no verdict at all, so a **receive-only viewer**
-— a webinar attendee, a spectator — sets `inputsUnavailable` rather than reading
-as a healthy path. That is the largest coverage gap in this category and it is
-recorded in [Known deviations](./DETECTOR_TAXONOMY.md#known-deviations).
+**Nothing gates on `qualityLimitationReason`**, unlike the uplink detector. That verdict
+describes this endpoint's *encoder*, so reading it would make a receive-only connection
+— a webinar attendee, a spectator — permanently blind, which is the population most in
+need of a downlink verdict.
 
-**Loss is recorded and not read.** It travels on the payload as how much was being
-lost when the finding opened and decides nothing. Measured on the same throttle:
+**How it recovers.** When the severity falls back under half of `minSeverity`; the gap
+is the hysteresis. No bitrate threshold says a path recovered, because nothing at a
+receiver knows what the path can carry now — but the baseline itself forgets. The
+maximum keeps being fed while a finding is open, an episode cannot inflate a maximum,
+and the decay is what lets it fade towards what is actually arriving. A link that
+settles at half its former bandwidth is compared against what it now has, and the
+undershoot returns to zero on its own.
 
-| phase | recv kbps | availIn | loss% | nack | fps |
-|---|---|---|---|---|---|
-| healthy | 1849 | null | 0 | 0 | 29 |
-| THROTTLED | 504 | null | 39.3 | 16 | 8 |
-| THROTTLED | 425 | null | 47.5 | 49 | 0 |
-| THROTTLED | 419 | null | 2.8 | 17 | 25 |
-| THROTTLED | 349 | null | 0 | 0 | 8 |
-| THROTTLED | 215 | null | 0 | 0 | 36 |
-| recovering | 704 | null | 0 | 0 | 30 |
+**The baselines.** The maximum takes every collection; the median takes only collections
+with no finding open, because a sustained bloat would drag it up and talk the episode out
+of existence. Both are read *before* the collection under judgement joins them, so a
+collection cannot move its own baseline.
 
-Loss is an onset event, not a state: it burns for about six seconds and then reads
-zero for the rest of an unchanged throttle, because the far end's estimator has
-adapted down and stopped overshooting. Anything resting on it raises and then
-resolves while the viewer is still pinned at a quarter of their bandwidth. What
-stayed elevated through the sustained stretch was jitter (0–2 ms → 600 ms) and
-per-frame jitter buffer delay (5–20 ms → 3109 ms), which is why the buffer is the
-half that decides.
-
-An earlier draft required a loss burst within a recency window to *open* an
-episode, on the reasoning that a collapse beginning with a burst is a collapse the
-link caused. It was cut for two knobs and two pieces of state that the conjunction
-above already covers — the buffer half rules out the same look-alikes on its own.
-Restoring it is a small change if a fleet shows it earning its place.
+**The faster fade after an episode.** Both detectors carry it. A path that lost capacity
+rarely gives all of it back, so for 30 seconds of stats time after a finding closes the
+recent maximum decays on a ~34 second half-life instead of three minutes, and then returns
+to the ordinary rate. Without it a second dip arriving inside that window is scored against
+a peak the path no longer reaches, and the detector reports an episode that never happened
+— the estimators are not reset instead, because a reset would leave both directions blind
+for the collections that follow, which is exactly when a second dip is most likely.
 
 **The neighbour it must not echo.** `JitterBufferStressDetector` also reads a
 jitter buffer under strain. It is audio, per track, and reports what the listener
@@ -438,7 +408,7 @@ picture is degraded, which is `InboundVideoFlowStateDetector`'s subject. And
 nothing at all about a stream that has stopped emitting frames altogether: that is
 a stall rather than a narrow path.
 
-### The `congestion` event, and why there is no `congestion` issue
+### The `congestion` event, and why the two findings stay separate
 
 Two issue types, because two questions answered from two sets of evidence are two
 findings — the rule the whole library is organised on. But "is this connection
@@ -448,10 +418,13 @@ payload of whichever one fired. `PeerConnectionMonitor.congested` is the same
 reading as an attribute: `uplinkCongested || downlinkCongested`, and read-only,
 because a single writable boolean could not say which direction it meant.
 
-The convenience stops at the event. There is no combined issue type and no
-combined issue key, because an issue is a condition with a start and an end and
-the two directions start and end independently — one key would have to pick a
-lifetime, and it would be wrong for whichever direction was still congested. A
+The convenience stops at the event. Neither detector raises a combined *issue*,
+because an issue is a condition with a start and an end and the two directions
+start and end independently — one key would have to pick a lifetime, and it would
+be wrong for whichever direction was still congested. A `congestion` issue type
+does still exist, raised by the deprecated `CongestionDetector` alone; it is
+priced at zero in `ISSUE_SCORING` so that the same episode is not charged twice.
+A
 connection congested both ways emits `congestion` twice, as the two findings open;
 that is two independent verdicts rather than one restated, since neither detector
 reads the other to decide.
@@ -465,25 +438,46 @@ reads the other to decide.
 A path that works and takes too long: the round trip stays high enough, for long
 enough, that conversation stops being conversation and becomes turn-taking.
 
-**The signal it reads** is `ewmaRttInSec`, already smoothed on the peer
-connection, which is the right input for a reason worth stating — a single
-inflated RTT sample is common and means nothing. One retransmission, one
-scheduling hiccup at the far end, one RTCP report that sat in a queue, and an
-instantaneous round trip doubles. What this detector adds on top of the smoothing
-is duration.
+**The signal it reads** is the mean round trip over
+`PeerConnectionMonitor.detectionRecoveryWindow`: `totalRoundTripTime` divided by
+the number of measurements that produced it, across a span the window states in
+milliseconds. A single inflated RTT sample is common and means nothing — one
+retransmission, one scheduling hiccup at the far end, one RTCP report that sat in
+a queue, and an instantaneous round trip doubles — so the smoothing matters, and
+this is where it now comes from.
 
-**Algorithm and thresholds.** The shared shape above, over
-`ewmaRttInSec × 1000`:
+**Why it is no longer `ewmaRttInSec`.** That EWMA has a fixed α of 0.1, so its
+memory is set by how often stats are collected: roughly a minute at a five-second
+collecting period, under half that at two. A `durationInMs` written against one
+cadence therefore meant something else on another, and the two numbers had no way
+to stay consistent. A window states its span in milliseconds and means the same
+thing everywhere, which is why this detector no longer counts a duration of its
+own — the sustain *is* the detection window, configured under
+`peerConnectionDetectionRecoveryWindow`.
+
+**RTCP is preferred over ICE per reading, not once per call.** The two span
+different paths and are held as separate totals that are never summed. Each
+reading picks RTCP when RTCP measurements moved within the window and ICE
+otherwise, so an RTCP stream that stops being reported produces no RTCP reading
+and the detector falls back. Reading `ewmaRttInSec` could not do this: once
+`rtcpRttInSec` is set it is never cleared, so the preference latched on the first
+RTCP report and the EWMA behind it froze along with it, while `inputsUnavailable`
+went on saying the detector could see. The chosen source travels with the issue
+as `rttSource`.
+
+**Algorithm and thresholds.**
 
 | Config | Default | Meaning |
 |---|---|---|
-| `thresholdInMs` | `300` | At or above this, the path counts as slow |
-| `recoveryThresholdInMs` | `200` | Below this, the issue resolves |
-| `durationInMs` | `6000` | Stats time the round trip must stay high before raising |
+| `thresholdInMs` | `300` | Mean round trip at or above this over the detection window: the path counts as slow |
+| `recoveryThresholdInMs` | `200` | The *recovery* window must read below this before the issue resolves |
+| `peerConnectionDetectionRecoveryWindow` | `6000` / `6000` | The spans the two means are taken over |
 
-At the default 2-second collecting period that is three consecutive qualifying
-collections. The payload carries `rttInMs` at the moment of raising and
-`sustainedForInMs`, the accumulated stats time that earned it.
+A finding clears only when the recovery window — the stretch *behind* the
+detection window — also reads below `recoveryThresholdInMs`, so a path has to
+have been good for both spans rather than for one collection. The payload carries
+`rttInMs`, refreshed on every collection the issue stays open rather than frozen
+at the raise, `rttSource`, and `sustainedForInMs`, the span the mean covers.
 
 **False positives.** The measurement is a mean across selected candidate pairs
 and across RTCP-reporting streams, so a peer connection without BUNDLE, or one
@@ -579,7 +573,18 @@ direction alone. It does not set `inputsUnavailable` in that state, because one
 direction genuinely was measured; a Safari session reporting `direction:
 'inbound'` should not be read as evidence that the send path was fine.
 
-### `BlockedTransportDetector` — `blocked-transport`
+### The blocked-media detectors
+
+Three classes, one per direction of the proof — `BlockedStunRequestsDetector`
+(`blocked-stun-requests`), `BlockedOutboundMediaDetector`
+(`blocked-outbound-media-transport`) and `BlockedInboundMediaDetector`
+(`blocked-inbound-media-transport`) — each on `IceTransportMonitor.detectors`,
+so one instance judges one transport. The `blocked-transport` *monitor event*
+survives, emitted by the first of them; the issue type of that name does not.
+
+`BlockedInboundMediaDetector` is the one detector not registered unless its key
+is supplied: it only fires where RTCP survives whatever killed the media, which
+`rtcp-mux` makes rare.
 
 The signature of a firewall — or any policy middlebox — that lets ICE and STUN
 through while blocking the media itself: the candidate pair is `succeeded`,
@@ -608,8 +613,8 @@ neighbour — reliability zero, on a path reporting perfect health, is the extre
 end of the same axis `transport-loss-sustained` measures the middle of.
 
 The move retired connectivity layer 6 and returned that model to five layers in
-4.10.0. The `blocked-transport` issue type, its payload, its
-`blockedTransportDetector` config key and its detector `name` are all unchanged:
+4.9.0. The `blocked-stun-requests` issue type, its payload, its
+`blockedStunRequestsDetector` config key and its detector `name` are all unchanged:
 this was a classification, and what moved is where it is registered and
 documented. `tests/detectors/DetectorTaxonomy.spec.ts` is the machine-readable
 copy that keeps it from drifting back.
@@ -682,7 +687,7 @@ state is plain fields, a replaced transport gets a detector whose clocks start a
 and a transport that goes away takes its detector with it, leaving the issue open as
 every monitor-bound detector does. Reaching it means
 `iceTransport.detectors.getByName('blocked-transport-detector')`, not the peer
-connection's registry; the `blockedTransportDetector` config key gates construction on
+connection's registry; the `blockedStunRequestsDetector` config key gates construction on
 every transport at once.
 
 One more guard, on the STUN gate rather than the discrepancy: a consent counter that has
@@ -720,7 +725,7 @@ indistinguishable from a path that had stopped answering.
 
 `inputsUnavailable` is what makes the resulting silence legible: `true` means this
 transport could have been judged and could not be read, `false` means the evidence was
-there. It describes one transport, because the detector judges one — before 4.10.0's move
+there. It describes one transport, because the detector judges one — before 4.9.0's move
 to the transport monitor it was OR-ed across every transport on the connection. A
 transport sending nothing, or one where ICE never verified or STUN has not yet confirmed,
 leaves it `false`: that is *not applicable*, a different statement about a different
@@ -730,50 +735,36 @@ thing. Nothing about the detector's behaviour changes with the flag.
 
 **Question.** Do packets arrive evenly, or in bursts?
 
-### `TransportJitterDetector` — `transport-delivery-unstable`
+**No detector answers it at this layer, and that is deliberate.** A
+`TransportJitterDetector` reading `avgInboundJitterInMs` against an absolute
+threshold existed briefly during 4.9.0 development and was removed before
+release. The reasoning is recorded here so it is not reinvented:
 
-A path whose packets arrive, but not evenly — bursty delivery that forces the
-receiver to buffer more than it should. Capacity is fine, loss may be zero; what
-is wrong is the timing.
+- **It was not independent evidence.** Its intended pairing was with
+  `JitterBufferStressDetector`, on the argument that a cause and a symptom
+  measured separately corroborate each other. They do not. NetEQ's
+  `jitterBufferTargetDelay` *is* the receiver's response to inter-arrival jitter,
+  so the two move together by construction, and their agreement is an echo rather
+  than a second opinion.
+- **The averaged input loses its meaning.** `avgInboundJitterInMs` is an
+  unweighted mean over every inbound stream that received packets, audio and video
+  together. Video inter-arrival jitter is inflated by frame bursting — the packets
+  of one frame share an RTP timestamp and arrive back to back — so it tracks frame
+  size and pacing as much as path variability. One video stream can carry the mean
+  past an absolute millisecond threshold on a path whose audio is arriving
+  perfectly.
+- **Both halves were already covered, on self-relative baselines.** Uneven
+  delivery reaches a listener through `JitterBufferStressDetector`, which reads the
+  receiver's actual struggle — deep target delay *and* audible time-stretching —
+  and publishes a graded `jitterBufferStressSeverity`. It reaches a viewer through
+  `DownlinkCongestionDetector`'s `bufferBloating` witness, which measures per-frame
+  jitter buffer delay against that connection's own running baseline rather than
+  against a constant somebody chose.
 
-Until this class existed, inter-arrival jitter was the only transport signal in
-the library that **no detector read at all**. `DefaultScoreCalculator` deducted
-points for it and nothing else ever looked, so a session could be scored down for
-jitter without any issue naming it.
-
-**The signal it reads** is `avgInboundJitterInMs`: the mean of
-`inbound-rtp.jitter` (seconds, converted to milliseconds) over inbound streams
-that received packets this tick.
-
-| Config | Default | Meaning |
-|---|---|---|
-| `thresholdInMs` | `100` | At or above this, delivery counts as unstable |
-| `recoveryThresholdInMs` | `30` | Below this, the issue resolves |
-| `durationInMs` | `6000` | Stats time jitter must stay high before raising |
-
-Recovery sits at under a third of the raise threshold, which is appropriate:
-jitter is the noisiest of the four measurements, and a single reordered burst
-can spike the browser's estimate on its own.
-
-**False positives.** The same low-rate noise that affects loss affects this, and
-more so — the browser's jitter estimate is a running filter, so a stream that has
-just started or has just resumed after a pause carries an estimate built from
-very few inter-arrival times. Screen share and video streams with long
-keyframe-driven bursts produce genuinely uneven arrival that the receiver handles
-without any user-visible effect.
-
-**What it deliberately does not claim.** RTP jitter is *a browser-smoothed
-inter-arrival estimate*, not a measurement of the delay variation a user
-experiences. It is computed per the RFC 3550 filter over packet arrival times
-against RTP timestamps, it is smoothed by the implementation, and it says nothing
-about what the jitter buffer did with the unevenness — a deep buffer absorbs a
-great deal of it inaudibly. Treat it as **directional evidence about the path**,
-not as a user-facing number.
-
-It also watches one direction only. `remote-inbound-rtp.jitter` — the far end's
-view of the jitter on what *we* send — is collected by the monitor and read by
-nothing, so there is no outbound counterpart to this issue today. That is a gap
-rather than a decision.
+`PeerConnectionMonitor.avgInboundJitterInMs` stays public for applications that
+want the number. What is gone is the opinion about it, and with it a flat `0.5`
+subtraction from a connection score for a condition the two detectors above
+already price by severity.
 
 ## Issue taxonomy by sub-layer
 
@@ -784,11 +775,10 @@ rather than a decision.
 | Delay | `transport-delay-degraded` | `TransportDelayDetector` | — |
 | Delivery reliability | `transport-loss-sustained` | `TransportLossDetector` | `direction`: `inbound` \| `outbound` |
 | Delivery reliability | `blocked-transport` | `BlockedTransportDetector` | `evidence`: `media-discarded-on-send` \| `media-not-leaving-transport` |
-| Delivery stability | `transport-delivery-unstable` | `TransportJitterDetector` | — |
 
 Every issue here is raised on `PeerConnectionMonitor`, and every one emits a
-monitor event of the same name alongside the issue. Four of the five key their
-issue per peer connection; `blocked-transport` keys per transport, because a peer
+monitor event of the same name alongside the issue. All but one key their issue
+per peer connection; `blocked-transport` keys per transport, because a peer
 connection without BUNDLE has several and they can be blocked independently.
 
 The two discriminators are payload fields rather than separate issue types by the
@@ -810,12 +800,11 @@ quality one, read the connectivity issue first: the lowest category that fired i
 the diagnosis.
 
 **Above: Perceived Quality.** The clearest pairing in the whole taxonomy is
-`transport-delivery-unstable` and `audio-jitter-buffer-stress`.
-`TransportJitterDetector` measures the network delivering unevenly, on the peer
-connection. `JitterBufferStressDetector` measures the *jitter buffer* straining —
-deep target delay plus audible time-stretching — on one inbound audio track. One
-is the cause and lives on the path; the other is the symptom and lives in the
-user's ear.
+`transport-loss-sustained` and `invented-speech`. `TransportLossDetector`
+measures packets not arriving, on the peer connection. `InventedSpeechDetector`
+measures the jitter buffer fabricating audio to cover what did not arrive, on one
+inbound audio track. One is the cause and lives on the path; the other is the
+symptom and lives in the user's ear.
 
 **They are not a chain, and that is the point.** Neither detector reads the
 other's issue, neither is enabled or disabled by the other, and neither's
@@ -823,11 +812,17 @@ threshold refers to the other's. They will frequently co-fire, and the co-firing
 is informative *precisely because* they decided independently: cause and symptom
 confirmed by two separate measurements is evidence, whereas a symptom detector
 that only fires when a cause detector already fired adds nothing to what the
-cause detector said. The same holds for `congestion` alongside `pixelated-video`
-or `video-choppy`, and for `transport-loss-sustained` alongside
-`invented-speech`. Correlating them is the server's job, where the whole
-session is visible — see
+cause detector said. The same holds for `downlink-congestion` alongside
+`pixelated-video` or `video-choppy`. Correlating them is the server's job, where
+the whole session is visible — see
 [Detectors are independent](./DETECTOR_TAXONOMY.md#detectors-are-independent).
+
+**Independence has to be real, not merely architectural.** Two detectors that
+never call each other can still be reading one quantity and the receiver's own
+mechanical response to it, in which case co-firing confirms nothing — which is
+what removed the delivery-stability detector described above. The test is not
+"do these classes share code" but "could one of these be true while the other is
+false, for a reason an engineer would act on?" 
 
 The one place the library still violates this is documented under
 [Known deviations](./DETECTOR_TAXONOMY.md#known-deviations): `DefaultScoreCalculator`
@@ -903,9 +898,8 @@ with itself across browsers. The thresholds in this category are tuned against
 what browsers report, not against what networks do.
 
 **Silence needs to be readable, and here it now is.** Every detector in the
-category exposes a public `inputsUnavailable` field — `TransportDelayDetector`,
-`TransportLossDetector` and `TransportJitterDetector` when their measurement is
-absent, `BlockedTransportDetector` when neither transport nor candidate-pair
+category exposes a public `inputsUnavailable` field — `TransportDelayDetector`
+and `TransportLossDetector` when their measurement is absent, `BlockedTransportDetector` when neither transport nor candidate-pair
 bitrates were reported for a transport it could otherwise have judged, and the
 two capacity detectors when the bandwidth estimate or the jitter buffer counters
 they judge are not reported. See

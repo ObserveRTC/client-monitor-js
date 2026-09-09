@@ -2,7 +2,7 @@
 
 This document is the **map and the rules**: the five categories every detector
 belongs to, what puts a detector in one rather than another, the rules that keep
-the boundaries from drifting, and an index of all 46 classes.
+the boundaries from drifting, and an index of all 45 classes.
 
 It is deliberately not the detail. Each category has its own deep reference, and
 that is where the algorithms, thresholds, payloads, stand-downs and failure modes
@@ -218,7 +218,7 @@ calculator, an application, a second detector — while a threshold is an opinio
 belonging to whoever is judging. Putting the arithmetic on the monitored object
 makes the fact available without a detector in the way, and it is why the video
 quality and transport threshold detectors are each well under a hundred lines: they
-hold no window, no ring buffer and no statistics. As of 4.10.0 no detector
+hold no window, no ring buffer and no statistics. As of 4.9.0 no detector
 re-derives a value the monitor also computes. The last two both stopped that
 release: `InventedSpeechDetector` had the better reason — it judged a ratio over a
 sliding window, and summing per-tick ratios is not the ratio of the sums — and its
@@ -239,16 +239,7 @@ than an exception to it.
 
 A detector measuring how long something has held accumulates the monitored object's
 **`deltaTime`** — the difference between consecutive stats reports' `timestamp`s —
-rather than wall-clock elapsed. Where what it needs is a *timeline* rather than a
-duration — a window with a beginning and an end, rather than "how long has this
-been true" — it reads the monitored object's **`statsClockTime`**, which is that
-same `deltaTime` already accumulated: every monitor that computes one carries it,
-it starts at zero, it never goes backwards, and only differences between two
-readings mean anything. The two capacity detectors age their rolling windows on
-it. A detector keeping its own accumulator of the same quantity is doing a
-monitor's arithmetic; the exception is `InboundVideoFlowStateDetector`, which
-deliberately counts only the collections it could *read* rather than all the time
-that passed — see its class doc. `Date.now()` survives for the issue lifecycle only:
+rather than wall-clock elapsed. `Date.now()` survives for the issue lifecycle only:
 `raisedAt`, the `durationInMs` computed at resolution, and `resolvedAt`. Emission
 rate limiting (the ICE restart recommendation cooldowns) is wall clock too, because
 it is about how often to speak, not how long a condition held.
@@ -297,8 +288,8 @@ with its own default**. The duplication is the point: two detectors asking
 different questions of the same measurement should be able to disagree about where
 the line is. The defaults may be equal today — `createEvent` on the two capture
 detectors and on the two restart detectors, `thresholdInMs` on the two
-stage-boundary detectors, `encoderPerformanceDetector.sourceSupplyRatioThreshold`
-against `sourceCaptureBottleneckDetector.captureFpsRatioThreshold` — and they are free
+stage-boundary detectors, `encoderBottleneckDetector.sourceSupplyRatioThreshold`
+against `videoCaptureBottleneckDetector.captureFpsRatioThreshold` — and they are free
 to move apart without either detector noticing the other.
 
 Declaring the type beside the detector follows from the same idea. The key belongs
@@ -343,7 +334,7 @@ A monitor that patches a missing field puts the same rule at two layers, and the
 copy is the one nothing tests against real browser output. So at monitor level an
 undefined field stays undefined, and every value derived from it is undefined too: the
 adapter already had its chance to infer it, and if it could not, there is nothing left to
-know. Two fixes in 4.10.0 came from applying this: `IceTransportMonitor.getOutboundRtps()`
+know. Two fixes in 4.9.0 came from applying this: `IceTransportMonitor.getOutboundRtps()`
 / `getInboundRtps()` are a plain `transportId` lookup, and `IceCandidateMonitor.isRelay`
 reads `candidateType` alone rather than falling back to `relayProtocol`.
 
@@ -406,9 +397,9 @@ Where one detector genuinely should stand down on a condition another also watch
 it evaluates that condition **from the same raw inputs**. Three worked
 re-derivations, all of which used to be cross-detector reads:
 
-- **`EncoderPerformanceDetector`** stands down on a short capture source, derived
+- **`EncoderBottleneckDetector`** stands down on a short capture source, derived
   from `mediaSource.sourceFps` against `track.getSettings().frameRate` rather than
-  from `SourceCaptureBottleneckDetector`'s `capture-bottleneck` issue. Reading the
+  from `VideoCaptureBottleneckDetector`'s `capture-bottleneck` issue. Reading the
   conclusion made the verdict depend on whether that detector was registered at all,
   and on which of the two `OutboundTrackMonitor` happened to construct first. They
   still agree on defaults, because they read the same two numbers — but the ratio
@@ -488,10 +479,10 @@ for a second stat as well, and that one has no substitute: without the candidate
 pair's `responsesReceived` (Firefox 142+) there is no proof the path still answers,
 so it declines to judge that transport rather than reading ICE's `connected` as
 consent — [design rule
-5](#5-a-detector-never-infers-the-raw-stats-it-needs) in its sharpest form. Eight others set it for the
+5](#5-a-detector-never-infers-the-raw-stats-it-needs) in its sharpest form. Seven others set it for the
 measurement each depends on: `TransportDelayDetector`, `TransportLossDetector`,
-`TransportJitterDetector`, `PixelatedVideoDetector`, `ChoppyVideoDetector`,
-`FrameAssemblyStalledDetector`, `InventedSpeechDetector` and `AVDesyncPlayoutDetector`.
+`PixelatedVideoDetector`, `ChoppyVideoDetector`, `FrameAssemblyStalledDetector`,
+`InventedSpeechDetector` and `AVDesyncPlayoutDetector`.
 
 **`AVDesyncPlayoutDetector` is the clearest illustration of why the flag exists**, because
 for that class being unable to see is the *ordinary* state rather than the
@@ -513,12 +504,12 @@ sender is muted **is not** unavailable. That is *not applicable*, a different
 statement about a different thing: the detector could judge, and there is nothing to
 judge. Only a missing measurement sets the flag.
 
-Twelve of the 46 classes set it, which is not enough — see
+Ten of the 45 classes set it, which is not enough — see
 [Known deviations](#known-deviations).
 
 ## The full map
 
-**46 detector classes, 36 issue types, 10 event-only classes.** One class, one
+**45 detector classes, 35 issue types, 10 event-only classes.** One class, one
 issue type — so within each table the class column and the issue column are the
 same list read twice, which is the point of the arrangement.
 
@@ -584,16 +575,14 @@ ladder: a path can be slow without being congested, congested without losing
 packets, lossy without being jittery. Because none consults another, their co-firing
 is evidence rather than an echo.
 
-**6 classes, 6 issue types**, all bound to `PeerConnectionMonitor`.
+**5 classes, 5 issue types**, all bound to `PeerConnectionMonitor`.
 
 | Class | `name` | Raises | Sub-layer | Config key |
 |---|---|---|---|---|
-| `UplinkCongestionDetector` | `uplink-congestion-detector` | `uplink-congestion` | Capacity | `uplinkCongestionDetector` |
-| `DownlinkCongestionDetector` | `downlink-congestion-detector` | `downlink-congestion` | Capacity | `downlinkCongestionDetector` |
+| `CongestionDetector` | `congestion-detector` | `congestion` | Capacity | `congestionDetector` |
 | `TransportDelayDetector` | `transport-delay-detector` | `transport-delay-degraded` | Delay | `transportDelayDetector` |
 | `TransportLossDetector` | `transport-loss-detector` | `transport-loss-sustained` | Delivery reliability | `transportLossDetector` |
 | `BlockedTransportDetector` | `blocked-transport-detector` | `blocked-transport` | Delivery reliability | `blockedTransportDetector` |
-| `TransportJitterDetector` | `transport-jitter-detector` | `transport-delivery-unstable` | Delivery stability | `transportJitterDetector` |
 
 The two delivery-reliability classes share a sub-layer because they are the two ends
 of one axis: `transport-loss-sustained` is a path dropping a *share* of what crosses
@@ -616,8 +605,8 @@ the call is bad, it says *where* it broke.
 |---|---|---|---|---|
 | `CaptureTrackEndedDetector` | `capture-track-ended-detector` | `capture-track-ended` | Send — the source | `captureTrackEndedDetector` |
 | `SilentAudioSourceDetector` | `silent-audio-source-detector` | `silent-audio-source` | Send — the source | `silentAudioSourceDetector` |
-| `SourceCaptureBottleneckDetector` | `source-capture-bottleneck-detector` | `capture-bottleneck` | Send — capture to frame supply | `sourceCaptureBottleneckDetector` |
-| `EncoderPerformanceDetector` | `encoder-performance-detector` | `encoder-bottleneck` | Send — frames to encoder | `encoderPerformanceDetector` |
+| `VideoCaptureBottleneckDetector` | `video-capture-bottleneck-detector` | `capture-bottleneck` | Send — capture to frame supply | `videoCaptureBottleneckDetector` |
+| `EncoderBottleneckDetector` | `encoder-bottleneck-detector` | `encoder-bottleneck` | Send — frames to encoder | `encoderBottleneckDetector` |
 | `RtpSenderStalledDetector` | `rtp-sender-stalled-detector` | `rtp-sender-stalled` | Send — encoder to RTP sender | `rtpSenderStalledDetector` |
 | `DryOutboundTrackDetector` | `dry-outbound-track-detector` | `dry-outbound-track` | Send — RTP sender to the wire | `dryOutboundTrackDetector` |
 | `TransportDemuxStalledDetector` | `transport-demux-stalled-detector` | `transport-demux-stalled` | Receive — transport to RTP streams | `transportDemuxStalledDetector` |
@@ -627,7 +616,6 @@ the call is bad, it says *where* it broke.
 | `DecoderPerformanceDetector` | `decoder-performance-detector` | `video-decoder-overloaded` | Receive — frames to decoder | `decoderPerformanceDetector` |
 | `StuckDecoderDetector` | `stuck-decoder-detector` | `stuck-decoder` | Receive — frames to decoder | `stuckDecoderDetector` |
 | `PlayoutDiscrepancyDetector` | `playout-discrepancy-detector` | `inbound-video-playout-discrepancy` | Receive — decoder to renderer | `playoutDiscrepancyDetector` |
-| `KeyframeStormDetector` | `keyframe-storm-detector` | `keyframe-storm` | Beside the receive chain — the repair loop | `keyframeStormDetector` |
 | `VideoRecoveryFailedDetector` | `video-recovery-failed-detector` | `video-recovery-failed` | Beside the receive chain — the repair loop | `videoRecoveryFailedDetector` |
 | `CpuPerformanceDetector` | `cpu-performance-detector` | `cpulimitation` | Across both chains — the machine | `cpuPerformanceDetector` |
 
@@ -748,8 +736,7 @@ became; every one of them now fails the lookup.
 | `freezed-video-track-detector` | `frozen-video-track-detector` (a spelling fix; the issue type moved with it) |
 | `synthesized-samples-detector` | `audio-playout-synthesis-detector` (a straight rename) |
 | `inbound-frame-supply-detector` | `decoder-bottleneck-detector` (a straight rename) |
-| `outbound-frame-supply-detector` | `source-capture-bottleneck-detector` (a straight rename) |
-| `congestion-detector` | `uplink-congestion-detector`, `downlink-congestion-detector` (a split into one class per direction, both rebuilt around different evidence — see below) |
+| `outbound-frame-supply-detector` | `video-capture-bottleneck-detector` (a straight rename) |
 
 An application still calling `detectors.disable('capture-failure-detector')`
 therefore silences nothing and gets `false` back. Switching a detector off never
@@ -761,7 +748,7 @@ goes with each of its members'.
 
 ### Retired config keys
 
-**The group keys went with the classes.** Ten keys are no longer members of
+**The group keys went with the classes.** Nine keys are no longer members of
 `ClientMonitorConfig`, split where a class had already become several, renamed where
 the key was a different word from the detector, and replaced where the detector
 behind it was, per [design rule 4](#4-one-detector-one-config-block):
@@ -772,22 +759,18 @@ behind it was, per [design rule 4](#4-one-detector-one-config-block):
 | `dtlsHandshakeDetector` | `dtlsHandshakeStalledDetector`, `dtlsHandshakeFailedDetector` |
 | `icePathStabilityDetector` | `iceDisconnectedDetector`, `iceConnectionFailedDetector`, `iceTransportStalledDetector`, `unstableIcePathDetector`, `iceRestartDetector`, `iceRestartRecommendationDetector` |
 | `mediaPipelineDetector` | `rtpSenderStalledDetector`, `transportDemuxStalledDetector` |
-| `videoRecoveryDetector` | `keyframeStormDetector`, `videoRecoveryFailedDetector` |
+| `videoRecoveryDetector` | `videoRecoveryFailedDetector` |
 | `videoFreezesDetector` | `frozenVideoTrackDetector` *(rename)* |
-| `congestionDetector` | `uplinkCongestionDetector`, `downlinkCongestionDetector` |
 | `syntheticSamplesDetector` | `audioPlayoutSynthesisDetector` *(rename)* |
 | `audioConcealmentDetector` | `inventedSpeechDetector` *(rename — and a different shape; none of the four old fields has an equivalent)* |
 | `audioDesyncDetector` | `avDesyncPlayoutDetector` *(replacement — a skew in milliseconds, not a correction fraction; neither old field has an equivalent)* |
 | `freezedVideoTrackDetector` | `frozenVideoTrackDetector` *(spelling fix; same fields)* |
 | `synthesizedSamplesDetector` | `audioPlayoutSynthesisDetector` *(rename; same fields)* |
 | `inboundFrameSupplyDetector` | `decoderBottleneckDetector` *(rename; same fields)* |
-| `outboundFrameSupplyDetector` | `sourceCaptureBottleneckDetector` *(rename; same fields)* |
+| `outboundFrameSupplyDetector` | `videoCaptureBottleneckDetector` *(rename; same fields)* |
 
-Three keys retired earlier, in the same release, went the other way — they were
-shims rather than groups. 4.9.0 kept `iceConnectivityDetector`,
-`noAvailableIceCandidateDetector` and `longPcConnectionEstablishmentDetector` alive
-in `ClientMonitor`'s normalizer, folded onto their current keys; 4.10.0 deleted
-both the members and the folding, so the library holds no legacy name of any kind:
+Three more keys went the other way — they were renames rather than groups. The
+library holds no legacy name of any kind, so each is simply gone:
 
 | Retired config key | Current key |
 |---|---|
@@ -806,7 +789,7 @@ Splitting a class never renames an issue type — `media-pipeline-stalled` is th
 that disappeared rather than being renamed, becoming `rtp-sender-stalled` and
 `transport-demux-stalled`, and one type cannot alias onto two. Payloads and monitor
 event names are unchanged across every split and rename above, with two exceptions,
-both in 4.10.0 and both for the same reason — the detector stopped measuring what
+both in 4.9.0 and both for the same reason — the detector stopped measuring what
 the old name claimed.
 
 `audio-concealment` became `invented-speech`, taking its monitor event, its payload
@@ -831,31 +814,30 @@ Things in the current tree that do not match this document, recorded here rather
 than quietly tolerated. Three earlier entries are gone because they are genuinely
 fixed — every detector now measures condition duration in stats time, the two
 detectors resting a verdict on a transport bitrate now set `inputsUnavailable`, and
-the source comments describing the pre-4.10.0 arrangement have been rewritten. Nor
+the source comments describing the pre-4.9.0 arrangement have been rewritten. Nor
 is shared configuration on the list any more: every detector reads a block of its
-own, and the one borrowed threshold — `EncoderPerformanceDetector` reaching into
-`sourceCaptureBottleneckDetector` — is now a field of its own. What follows is what is
+own, and the one borrowed threshold — `EncoderBottleneckDetector` reaching into
+`videoCaptureBottleneckDetector` — is now a field of its own. What follows is what is
 still true.
 
-**`DownlinkCongestionDetector` is blind on a receive-only connection.** It gates on
-`outbound-rtp.qualityLimitationReason` — the browser's own congestion verdict, and the
-only one either direction gets — which describes this endpoint's *encoder*. A connection
-that sends nothing reports none, so a webinar attendee or a spectator gets
-`inputsUnavailable` rather than a verdict, and the same holds for an audio-only sender
-(the field "must not exist for audio") and for browsers that do not implement it. On a
-shared last mile the sending verdict is about the link both directions cross, which is
-what makes the gate worth having; where the two directions do not share a bottleneck it
-can be shut while the downlink is genuinely congested. The silence is at least readable,
-which is the part that used to be missing.
+**`CongestionDetector` is permanently silent on Firefox, and unreadably so.** Its
+anchor signal is `outbound-rtp.qualityLimitationReason`, which `FirefoxStatsAdapter`
+lists among the values it deliberately leaves absent rather than substituting a
+guess, so `hasBwLimitedOutboundRtp` is never true there and the detector never
+speaks. It is the one Transport Quality detector that does **not** set
+`inputsUnavailable`, so that silence is indistinguishable from a healthy path and a
+fleet dashboard counting `congestion` per browser reads Firefox as the network's
+best-behaved population. This is the case the flag exists for, on an entire browser
+engine, and the flag is not set.
 
-**`peerConnection.outboundFractionLost` is a sum wearing a fraction's name.** It is
-`deltaFractionLost` added up across every `remote-inbound-rtp` report, beside
-`avgOutboundFractionLost`, which is the mean of the same deltas and what
-`TransportLossDetector` judges. On a connection sending one stream the two coincide;
-on one sending six, six streams losing a little over 0.8% each sum past a 5% bar
-while no individual stream is in any trouble. It gated the retired
-`CongestionDetector`'s low-sensitivity branch and nothing reads it now, but it is
-still public and still misnamed.
+**Two detectors read "outbound loss" and read different quantities.**
+`CongestionDetector`'s low-sensitivity branch gates on
+`peerConnection.outboundFractionLost`, the **sum** of `deltaFractionLost` across
+every `remote-inbound-rtp` report; `TransportLossDetector` judges
+`avgOutboundFractionLost`, the **mean** of the same deltas. On a peer connection
+sending one stream the two coincide; on one sending six, six streams losing a
+little over 0.8% each cross the 5% bar while no individual stream is in any trouble.
+Only one of the two is a fraction, and neither name says which.
 
 **`DefaultScoreCalculator` reads two detectors' issues.** It calls `isIssueActive`
 with keys it reconstructs as string literals — `invented-speech-track-<id>` and
@@ -865,39 +847,34 @@ library where one component depends on another's verdict, on its key format, and
 it being enabled: disable the audio detectors and the score quietly stops penalising
 audio degradation that is still happening.
 
-One instance of it got better in 4.10.0 rather than worse. The `audio-time-stretch`
-penalty used to be gated on `audio-desync` and then scaled `timeStretchRate` against
-`fractionalCorrectionAlertOnThreshold` — a threshold belonging to a detector that
-measured a different normalization of the same counters. It is now gated on
-`audio-jitter-buffer-stress` and scaled against that detector's own
-`timeStretchThreshold`, so the penalty, the signal and the detector that owns the
-signal are finally the same three things. The string-literal key reconstruction
-remains.
+**This one is fixed in 4.9.0.** Six conditions used to exist as score reasons in
+parallel with the detectors that own them — `pixelated-video`, `low-fps`,
+`volatile-fps`, `high-rtt`, `high-jitter` and `high-packetloss` were all computed
+by the score calculator from raw stats, while `PixelatedVideoDetector`,
+`ChoppyVideoDetector`, `TransportDelayDetector` and `TransportLossDetector`
+derived the same conditions independently with their own thresholds. (`high-jitter`
+has no detector successor at all: see [Delivery
+stability](./TRANSPORT_QUALITY_DETECTORS.md#delivery-stability) for why that score
+reason was dropped rather than replaced.) Two sets of thresholds for one condition, with no guarantee they
+agreed; for pixelation the two did not even measure the same thing.
 
-**Six conditions still exist as score reasons in parallel with the detectors that
-own them.** `pixelated-video`, `low-fps`, `volatile-fps`, `high-rtt`, `high-jitter`
-and `high-packetloss` are all `DefaultScoreCalculatorSubtractionReason` keys
-computed by the score calculator from raw stats, while `PixelatedVideoDetector`,
-`ChoppyVideoDetector`, `TransportDelayDetector`, `TransportJitterDetector` and
-`TransportLossDetector` derive the same conditions independently with their own
-thresholds. Two sets of thresholds for one condition, with no guarantee they agree.
+`DefaultScoreCalculator` now reads the open issues and nothing else. It holds no
+thresholds of its own, so a condition is judged in exactly one place — the
+detector — and `scoreReasons` is keyed by issue type, which removes the
+string-literal reconstruction along with the duplication. What the calculator
+still decides is what a finding *costs*, in one table (`ISSUE_SCORING`); see
+[Score Calculations](./SCORE_CALCULATIONS.md).
 
-For pixelation it is worse than duplication, because the two do not measure the same
-thing: the detector reads `bitPerPixel` against a flat threshold, the score
-calculator reads `avgQpPerFrame` against a per-codec, per-motion-type band from
-`VIDEO_QP_THRESHOLDS` scaled by presented size. A session can carry a
-`pixelated-video` issue and no `pixelated-video` score penalty, or the reverse, and
-both are working as written. `dropped-video-frames` is the one reason in that list
-with no detector counterpart at all. And `FrozenVideoTrackDetector` runs the
-derived-values convention backwards for the same consumer, computing the freeze
-state and writing `isFreezed` back onto `InboundRtpMonitor` because nothing else
-does — so `frozenVideoTrackDetector: null` quietly stops the score penalising
-freezes.
+One consequence worth naming: a condition with **no** detector no longer reaches
+the score at all. `dropped-video-frames` was the one reason in that list with no
+detector counterpart, and it is simply gone rather than silently reimplemented.
+`unscoredIssueTypes()` covers the opposite hole — a detector whose findings no
+rule prices.
 
-**Silence is still not readable across most of Perceived Quality.** Twelve of the 46
+**Silence is still not readable across most of Perceived Quality.** Ten of the 45
 classes set `inputsUnavailable`, four of them in Category 4:
 `PixelatedVideoDetector`, `ChoppyVideoDetector`, `InventedSpeechDetector` and
-`AVDesyncPlayoutDetector`, the last two added in 4.10.0. `FrozenVideoTrackDetector` and
+`AVDesyncPlayoutDetector`, the last two added in 4.9.0. `FrozenVideoTrackDetector` and
 `JitterBufferStressDetector` still return quietly when their counters are missing,
 so a browser omitting `jitterBufferTargetDelay` produces a permanently and invisibly
 silent detector. No telemetry detector sets it either, least defensibly

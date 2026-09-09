@@ -3,38 +3,20 @@ import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
 export type CaptureTrackMutedDetectorConfig = {
-	/**
-	 * Whether to buffer a `CAPTURE_TRACK_MUTED` client event into the sample
-	 * in addition to emitting the monitor event.
-	 *
-	 * DEFAULT: true
-	 */
+	/** Buffer a `CAPTURE_TRACK_MUTED` client event into the sample too. Default true. */
 	createEvent?: boolean;
 }
 
 /**
- * Records the moment something outside the application took the capture device
- * away: `track.muted` flipped to true. This is not the application's own mute —
- * that is `track.enabled`, which the application sets and already knows about —
- * but the browser's statement that the source has stopped delivering data. The
- * OS grabbed the microphone for a system call, another application claimed
- * exclusive access to the camera, the laptop lid closed, the privacy shutter
- * moved, the device went to sleep.
+ * Timestamps the moment something outside the application took the capture device away:
+ * `track.muted` flipped to true — the OS grabbing the microphone, another app claiming the camera,
+ * a closed lid, a privacy shutter. Use it to explain the silence and dry-track findings that follow
+ * it, and to tell an external capture loss apart from the application's own mute (`track.enabled`).
  *
- * It raises no issue, by design. A muted source is very often exactly what the
- * user intended, and the same flag covers both the deliberate and the
- * accidental case, so calling it a fault would file thousands of correct system
- * mutes as call failures. What it is worth is a timestamp: the record of when
- * capture stopped, next to which the silence and dry-track findings that follow
- * stop looking mysterious. Whoever reads the session decides what it means.
+ * Only the false → true transition is reported, never the first observation and never the recovery.
  *
- * Only the false → true transition is reported, never the first observation. A
- * track already muted when monitoring began says nothing about a change — it
- * may have been muted since before the call — and reporting it would put a
- * spurious mute event at the start of every session that joined that way. The
- * transition back to unmuted is not reported either: this detector is here to
- * mark where capture stopped, and its sibling detectors observe the recovery
- * directly.
+ * It raises no issue by design: a muted source is usually what the user intended, and the same flag
+ * covers both cases.
  *
  * Raises no issue. Emits `capture-track-muted`, plus the `CAPTURE_TRACK_MUTED`
  * client event unless `createEvent` is false. Config: `captureTrackMutedDetector`.

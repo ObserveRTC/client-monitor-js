@@ -19,73 +19,36 @@ export type AVDesyncPlayoutIssuePayload = {
 
 export type AVDesyncPlayoutDetectorConfig = {
 	/**
-	 * Milliseconds of audio *ahead* of video at or above which the issue is
-	 * raised. The two directions have separate thresholds because they are not
-	 * equally objectionable: in the physical world sound always arrives after
-	 * light, so a viewer forgives audio lagging far more readily than audio
-	 * leading. ITU-R BT.1359-1 puts the acceptability limit at roughly +90ms
-	 * ahead against −185ms behind, which is where these defaults come from.
+	 * Raise and resolve thresholds per direction, in ms. Audio ahead is far less forgivable than
+	 * audio behind, so each direction gets its own pair.
 	 */
 	audioAheadRaiseInMs: number;
-
-	/** Milliseconds ahead below which the issue resolves — BT.1359-1's detectability limit. */
 	audioAheadResolveInMs: number;
-
-	/** Milliseconds of audio *behind* video (as a magnitude) at or above which the issue is raised. */
 	audioBehindRaiseInMs: number;
-
-	/** Milliseconds behind (as a magnitude) below which the issue resolves. */
 	audioBehindResolveInMs: number;
 
-	/**
-	 * How long (ms of stats time) the skew must stay past the raise threshold
-	 * before the issue opens. `estimatedPlayoutTimestamp` is extrapolated between
-	 * RTCP sender reports, which arrive around every five seconds, so the first
-	 * readings after a track starts can move sharply before the RTP-to-NTP
-	 * mapping settles. This is what stops that transient becoming an issue.
-	 */
+	/** Stats time the skew must hold past the raise threshold before opening, in ms. */
 	sustainForInMs: number;
 }
 
 /**
- * Reports a speaker's voice and their lips coming apart — the two tracks of one participant playing
- * out at measurably different points in the sender's timeline.
+ * Reports a speaker's voice and their lips coming apart — one participant's audio and video playing
+ * out at measurably different points in the sender's timeline. Use it to tell lip-sync drift apart
+ * from either track simply being late or stuttering on its own.
  *
- * This is the only detector in the library that compares two streams. Everything else judges one
- * object against a threshold; lip sync is by definition a relationship, and cannot be inferred from
- * either track alone. The measurement is the difference between the two tracks'
- * `estimatedPlayoutTimestamp` values, which the specification defines for exactly this purpose and
- * even writes the subtraction out: both values are already expressed on the *sender's* NTP clock,
- * because each has consumed the RTP-to-NTP mapping carried in that sender's RTCP sender reports, so
- * they subtract directly and no third quantity is needed to relate them.
+ * A finding usually means the two tracks were buffered differently on the way here: one path
+ * degraded while the other did not, or the audio buffer grew to cover jitter while video kept
+ * rendering. The sign says which is ahead, which is what tells a lagging picture from lagging sound.
  *
- * **Which video track.** The library cannot know which video track belongs with which audio track —
- * an SFU hands over independent streams, and `MediaStream` grouping is not reliably preserved across
- * topologies. So the pairing is the application's to declare, through the inbound track context's
- * `linkedVideoTrackId`. Until it is declared this detector measures nothing and says so through
- * `inputsUnavailable`; a wrong pairing would produce a confidently wrong number, and guessing was
- * the worse failure.
+ * It subtracts the two tracks' `estimatedPlayoutTimestamp` values, which are both already on the
+ * sender's NTP clock and so compare directly. The pairing is the application's to declare through
+ * `linkedVideoTrackId`; until it does, the detector measures nothing and says so through
+ * `inputsUnavailable`, since a guessed pairing would give a confidently wrong number. Each direction
+ * has its own raise and resolve thresholds, and the payload names which one fired.
  *
- * **The two directions are not symmetric.** Sound arrives after light in the physical world, so a
- * viewer is markedly more tolerant of audio lagging than of audio leading — ITU-R BT.1359-1 puts
- * the acceptability limit near +90ms ahead against −185ms behind. Thresholding the absolute skew
- * against one number would be either too strict on lag or too lax on lead, so each direction gets
- * its own raise and resolve threshold, and the payload names which one fired.
- *
- * What replaced what, and why: until 4.10.0 this slot held a detector reading
- * `insertedSamplesForDeceleration` and `removedSamplesForAcceleration` — NetEQ's accelerate and
- * preemptive-expand counters. Those measure the jitter buffer time-stretching audio to track its
- * target delay, which is not synchronisation at all, and the coupling that does exist runs the other
- * way: when sync logic detects drift it *raises* NetEQ's target delay, and NetEQ decelerates to
- * reach it. The old detector therefore fired on the correction rather than the fault. That signal is
- * still read, correctly labelled, by `JitterBufferStressDetector`.
- *
- * **Known limitation, and it is a large one.** `estimatedPlayoutTimestamp` is thinly implemented:
- * Firefox populates it, Chrome declares it but only when A/V sync is enabled internally, and Safari
- * does not. Where it is absent this detector reports `inputsUnavailable` rather than silence, which
- * is the point of that flag — a fleet dashboard must be able to tell "in sync" from "cannot see".
- * The spec also extrapolates the timestamp between sender reports, so a frozen renderer can keep
- * reporting smooth playout; this detector will not catch desync that begins during a freeze.
+ * `estimatedPlayoutTimestamp` is thinly implemented and extrapolated between sender reports, so this
+ * says nothing about desync that begins during a freeze, and reports `inputsUnavailable` rather than
+ * health where the browser omits it.
  *
  * Issue raised: `av-desync`. Monitor event: `av-desync`.
  * Config: `avDesyncPlayoutDetector`.
@@ -127,8 +90,7 @@ export class AVDesyncPlayoutDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 
-		// Nothing is playing out on one side or the other, so there is no
-		// relationship to measure. The accumulator is discarded rather than drained.
+		// One side is not playing out, so there is no relationship to measure.
 		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
 			this._sustainedForInMs = 0;
 
@@ -138,9 +100,7 @@ export class AVDesyncPlayoutDetector implements Detector {
 		const diffInMs = this.trackMonitor.linkedVideoPlayoutDiffInMs;
 
 		if (diffInMs === undefined) {
-			// No linked video track declared, or one of the two playout timestamps
-			// is missing. Either way the comparison could not be made, which is not
-			// the same as the tracks being in sync.
+			// No pairing declared, or a timestamp missing — unmeasurable, not in sync.
 			this.inputsUnavailable = true;
 			this._sustainedForInMs = 0;
 
@@ -165,9 +125,7 @@ export class AVDesyncPlayoutDetector implements Detector {
 			return;
 		}
 
-		// Between the two thresholds nothing changes: an open issue stays open and a
-		// closed one stays closed. That band is what stops a call sitting on the
-		// limit from flapping.
+		// Between the thresholds nothing changes — the band is what stops flapping.
 		if (skewInMs < raiseAt) return;
 
 		this._sustainedForInMs += inboundRtp.deltaTime ?? 0;
@@ -193,7 +151,8 @@ export class AVDesyncPlayoutDetector implements Detector {
 			direction,
 		});
 
-		clientMonitor.raiseIssue<AVDesyncPlayoutIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: AVDesyncPlayoutDetector.ISSUE_TYPE,
 			payload: {
@@ -210,8 +169,7 @@ export class AVDesyncPlayoutDetector implements Detector {
 	private _resolve(comment: string) {
 		this._raised = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: AVDesyncPlayoutIssuePayload | undefined;
 
 		if (issue) {
@@ -221,7 +179,8 @@ export class AVDesyncPlayoutDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<AVDesyncPlayoutIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

@@ -1,192 +1,91 @@
 import { ClientMonitor } from "../ClientMonitor";
-import { VIDEO_QP_MAX, VIDEO_QP_THRESHOLDS } from "./CalculatedScore";
-import type { VideoQpThresholds } from "./CalculatedScore";
+import { CalculatedScore } from "./CalculatedScore";
 import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
-import type { InboundRtpMonitor } from "../monitors/InboundRtpMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { TrackMonitor } from "../monitors/TrackMonitor";
+import { clamp } from "../utils/common";
 
-export type DefaultScoreCalculatorOutboundVideoTrackScoreAppData = {
-	lastNScores: number[];
-	diffBitrateSquares: number[];
-	lastBitrate?: number;
-	ewmaBitrate?: number;
-}
+const normalizedClamp = (value?: number) => clamp(value ?? 0, 0, 1);
 
-export type DefaultScoreCalculatorSubtractionReason =
-	'high-rtt' |
-	/**
-	 * On the peer connection: average measured jitter across the streams is
-	 * high — a jittery path. On an inbound video track: the track's own jitter
-	 * exceeds one sampling interval (20 ms at the 90 kHz video clock),
-	 * normalized `0..1` up to the saturation point.
-	 */
-	'high-jitter' |
-	'high-packetloss' |
-	'low-fps' |
-	'volatile-fps' |
-	'dropped-video-frames' |
-	'video-frame-corruptions' |
-	'high-deviation-from-target-bitrate' |
-	'cpu-limitation' |
-	/** The encoder spent most of the interval bandwidth-limited. */
-	'bandwidth-limitation' |
-	'high-volatile-bitrate' |
-	/** The inbound video track is currently frozen. */
-	'frozen-video' |
-	/**
-	 * The decoded picture was coarsely quantized enough to show — blocking and
-	 * loss of detail. Derived from the inbound `qpSum`, so it describes the
-	 * frames this viewer actually saw; absent when the browser does not report
-	 * `qpSum` for the codec in use.
-	 */
-	'pixelated-video' |
-	/** Audible audio concealment share is significant. */
-	'invented-speech' | // we are overpenalizing it becasue the pc is already penalized
-	/** NetEQ is stretching/compressing a significant share of samples. */
-	'audio-time-stretch' |
-	/** The jitter buffer target delay adds noticeable latency. */
-	'high-jitter-buffer-delay' |
-	/** A screen-share track is encoded well below the captured resolution. */
-	'downscaled-screenshare';
-
-export type DefaultScoreCalculatorSubtractions = {
-	[x in DefaultScoreCalculatorSubtractionReason]?: number;
-}
-
-export type DefaultScoreCalculatorOutboundAudioTrackScoreAppData = {
-	lastNScores: number[];
-}
-
-export type DefaultScoreCalculatorInboundVideoTrackScoreAppData = {
-	lastNScores: number[];
-}
-
-export type DefaultScoreCalculatorPeerConnectionScoreAppData = {
-	lastNScores: number[];
-}
-
+type DefaultScoreCalculatorSubtractions = Record<string, number>;
 /**
- * DefaultScoreCalculator is a default implementation of the ScoreCalculator interface.
- * It calculates the score of the client monitor, peer connections, and tracks.
- * The score ranges and thresholds are defined as follows:
- * - 4.0 <= good < 5.0
- * - 3.0 <= fair < 4.0
- * - 2.0 <= poor < 3.0
- * - 1.0 <= bad < 2.0
- * - 0.0 <= very bad < 1.0
+ * Default `ScoreCalculator`: scores the client monitor, its peer connections and their tracks on
+ * a 0.0-5.0 scale, where 4.0 and above is good, 3.0 fair, 2.0 poor, 1.0 bad.
+ *
+ * **The score is a reading of the open issues, and nothing else.** Every monitor starts at 5.0
+ * and is reduced by the findings its own detectors raised, taken from that monitor's issue
+ * registry. Nothing here re-derives a threshold from raw stats: the detectors already decided
+ * what is wrong, so a fault is judged in exactly one place and the score cannot disagree with
+ * the issue list an operator is looking at.
+ *
+ * How a fault counts depends on its kind, which `ISSUE_SCORING` decides per issue type:
+ *
+ * - **Connectivity** — the path is down. The score is zero while the issue is open, and nothing
+ *   else is consulted: nothing riding on an unusable path can be good.
+ * - **Pipeline disruption** — media stopped moving somewhere in the chain. It *caps* the score
+ *   in proportion to its severity, so a lost capture device takes it to zero while a keyframe
+ *   storm merely holds it down.
+ * - **Perceived quality** — media is flowing and a person can tell it is wrong. It *subtracts*,
+ *   so several mild faults accumulate the way a viewer experiences them.
+ * - **Transport quality** — the path carries media badly. It subtracts from the *connection*,
+ *   which already multiplies into every track riding on it.
+ *
+ * Capping and subtracting differ on purpose. Two broken pipelines are not twice as bad as one,
+ * because there is no media either way — but two quality faults really are worse than one.
+ * `scoreReasons` is keyed by issue type throughout, so the reason a score fell is the name of
+ * the finding that caused it.
+ *
+ * A monitor holding no issues scores 5.0, which is a real statement: its detectors ran and
+ * raised nothing. That is not the same as a score of `undefined`, which means too few
+ * collections to judge yet, and which is left out of every aggregate above it.
  */
 export class DefaultScoreCalculator {
 	public static readonly MAX_SCORE = 5.0;
 	public static readonly MIN_SCORE = 0.0;
-	public static lastNScoresMaxLength = 10;
-	public static lastNScoresMinLength = 5;
-	public static readonly TARGET_AUDIO_BITRATE = 32000; // 64 kbps is a good quality for Opus
-	// public static readonly MAX_AUDIO_BITRATE = 510000; // 510 kbps is a good quality for Opus
-	public static readonly MIN_AUDIO_BITRATE = 6000; // 6 kbps is the lowest usable bitrate
-	private static readonly NORMALIZATION_FACTOR = Math.log10(this.TARGET_AUDIO_BITRATE / this.MIN_AUDIO_BITRATE);
-
-	// ---- normalized penalty ramps: 0 at the activation threshold, 1 at saturation ----
 
 	/**
-	 * Inbound video jitter is free below one sampling interval — 20 ms at the
-	 * 90 kHz video clock — because the receiver absorbs that much by design.
+	 * What a blocky picture is worth at the size it is shown, as a multiplier on the table price,
+	 * and the linear magnification at which each tier starts.
+	 *
+	 * Deliberately asymmetric and deliberately coarse: blown up, the coded blocks are the thing the
+	 * viewer complains about; in a thumbnail nobody can see them. Between the two tiers, and
+	 * whenever the track could not measure how large it is being shown, the picture is charged what
+	 * the table says.
 	 */
-	public static INBOUND_VIDEO_JITTER_ACTIVATION_IN_MS = 20;
-	/** Matches the peer-connection-level "high" jitter threshold. */
-	public static INBOUND_VIDEO_JITTER_SATURATION_IN_MS = 100;
-	/** Below this share of the EWMA fps as std deviation, fps volatility is noise. */
-	public static FPS_VOLATILITY_ACTIVATION = 0.1;
-	public static FPS_VOLATILITY_SATURATION = 0.2;
-	public static DROPPED_FRAMES_FRACTION_ACTIVATION = 0.1;
-	public static DROPPED_FRAMES_FRACTION_SATURATION = 0.2;
-	public static FRAME_CORRUPTION_PROBABILITY_ACTIVATION = 0.05;
-	public static FRAME_CORRUPTION_PROBABILITY_SATURATION = 0.5;
-	public static TARGET_BITRATE_DEVIATION_ACTIVATION = 0.05;
-	public static TARGET_BITRATE_DEVIATION_SATURATION = 0.15;
-	public static BITRATE_VOLATILITY_ACTIVATION = 0.1;
-	public static BITRATE_VOLATILITY_SATURATION = 0.2;
-
-	/** Deliberately asymmetric: a large pixelated video is what the viewer complains about. */
-	public static PIXELATION_MAX_PENALTY_LARGE = 3.0;
-	public static PIXELATION_MAX_PENALTY = 2.0;
-	public static PIXELATION_MAX_PENALTY_SMALL = 0.5;
-
-	/** Linear magnification, i.e. sqrt of the area ratio, at which the weight tiers switch. */
+	public static PIXELATION_WEIGHT_LARGE = 1.5;
+	public static PIXELATION_WEIGHT_SMALL = 0.25;
 	public static PIXELATION_LARGE_MAGNIFICATION = 1.5;
 	public static PIXELATION_SMALL_MAGNIFICATION = 0.75;
 
 	/**
-	 * Bounds on the magnification fed to the band shift. The raw ratio is
-	 * unbounded in both directions — 180p on a 4K screen is a factor of 10.7 —
-	 * and neither extreme should move the bar as far as it literally implies.
-	 */
-	public static PIXELATION_MAGNIFICATION_MIN = 0.5;
-	public static PIXELATION_MAGNIFICATION_MAX = 2.0;
-
-	/**
-	 * How far the QP band moves per doubling of display magnification, as a
-	 * fraction of the band's own width — and **deliberately asymmetric**.
+	 * The top of each codec's quantizer scale, keyed by the subtype of the codec's `mimeType`.
 	 *
-	 * Magnifying and shrinking are not equal and opposite. Blowing a picture up
-	 * makes every coded block bigger on the retina and the bar for "acceptable"
-	 * has to come down hard; shrinking it into a thumbnail hides the blocks, but
-	 * only a little forgiveness is warranted, because a thumbnail bad enough to
-	 * notice is still bad. So the band drops `UP` of its width per octave of
-	 * magnification and rises only `DOWN` per octave of reduction.
+	 * `qpSum` is reported in the codec's own units and those units are not comparable: a mean
+	 * quantizer of 40 is severe H.264 and unremarkable VP9. Without the codec the number cannot be
+	 * read at all, which is why an unrecognised `mimeType` yields no reading rather than a guess.
+	 */
+	public static readonly QP_SCALE_BY_CODEC: Record<string, number> = {
+		vp8: 127,
+		vp9: 255,
+		av1: 255,
+		h264: 51,
+		h265: 51,
+		hevc: 51,
+	};
+
+	/**
+	 * Where on a codec's scale, as a fraction of its maximum, the picture stops looking clean and
+	 * where it is as coarse as that codec gets. Between the two the reading rises linearly.
 	 *
-	 * Expressed as a fraction of the band width rather than in QP points because
-	 * QP scales are not comparable between codecs — six points is a quantizer
-	 * doubling in H.264's 0-51 and almost nothing in AV1's 0-255 — while each
-	 * codec's own band already carries its scale.
+	 * Expressed as fractions rather than per-codec quantizer values so that one pair of numbers
+	 * covers every codec in the table above, and adding a codec means adding its scale and nothing
+	 * else.
 	 */
-	public static PIXELATION_QP_SHIFT_PER_OCTAVE_UP = 0.6;
-	public static PIXELATION_QP_SHIFT_PER_OCTAVE_DOWN = 0.15;
+	public static QP_CLEAN_RATIO = 0.5;
+	public static QP_COARSE_RATIO = 0.8;
 
-	/** Invented-speech share at which the penalty saturates (~"severely concealed"). */
-	public static readonly INVENTED_SPEECH_SATURATION = 0.1;
-	/**
-	 * Fallback activation when `config.inventedSpeechDetector` is absent. Kept in step with that
-	 * detector's own `allowedInventedRatio` default deliberately: the penalty is meant to start where
-	 * the detector stops tolerating invention, and a fallback that disagreed with it would score a
-	 * configless monitor differently from a defaulted one.
-	 */
-	public static readonly DEFAULT_INVENTED_SPEECH_ACTIVATION = 0.05;
-	public static readonly TIME_STRETCH_SATURATION = 0.3;
-	/**
-	 * Fallback activation when `config.jitterBufferStressDetector` is absent. Kept in step with that
-	 * detector's own `timeStretchThreshold` default deliberately, for the same reason as the
-	 * invented-speech fallback above: a fallback that disagreed with it would score a configless
-	 * monitor differently from a defaulted one.
-	 */
-	public static readonly DEFAULT_TIME_STRETCH_ACTIVATION = 0.02;
-	public static readonly JITTER_BUFFER_TARGET_DELAY_SATURATION_IN_MS = 500;
-	/** Fallback activation when the jitter-buffer-stress detector config is absent. */
-	public static readonly DEFAULT_JITTER_BUFFER_TARGET_DELAY_ACTIVATION_IN_MS = 200;
-
-	/**
-	 * Traffic a stream has to carry in an interval before its loss and jitter
-	 * count as a measurement of the path. Set an order of magnitude below real
-	 * media and an order of magnitude above a probe stream: observed traffic was
-	 * ~2 kbps / 8 packets for a probation stream against ≥22 kbps / ≥250 packets
-	 * for every real audio and video stream on the same transport.
-	 */
-	public static readonly MIN_PATH_SAMPLE_BITRATE = 8_000;
-	public static readonly MIN_PATH_SAMPLE_PACKETS = 25;
-
-	/**
-	 * Whether this stream carried enough in the interval for its ratios to mean
-	 * anything. Any one kind of evidence is enough — a stream delivering frames
-	 * is real whatever its bitrate, and a codec in DTX can fall under the
-	 * bitrate floor while still sending plenty of packets.
-	 */
-	public static carriesMedia(bitrate?: number, deltaPackets?: number, deltaFrames?: number): boolean {
-		return DefaultScoreCalculator.MIN_PATH_SAMPLE_BITRATE <= (bitrate ?? 0) ||
-			DefaultScoreCalculator.MIN_PATH_SAMPLE_PACKETS <= (deltaPackets ?? 0) ||
-			0 < (deltaFrames ?? 0);
-	}
-
+	/** What reduced scores on the most recent update, and across the call so far. */
 	public currentReasons: DefaultScoreCalculatorSubtractions = {};
 	public totalReasons: DefaultScoreCalculatorSubtractions = {};
 
@@ -203,172 +102,6 @@ export class DefaultScoreCalculator {
 			this._calculateTrackScore(track);
 		}
 		this._calculateClientMonitorScore();
-	}
-
-	public _calculateClientMonitorScore() {
-		const clientMonitor: ClientMonitor = this.clientMonitor;
-		let clientTotalScore = 0;
-		let clientTotalWeight = 0;
-		this.currentReasons = {};
-
-		// The peer connection scales its tracks rather than sitting beside them:
-		// every track rides the path, so a degraded path degrades what the
-		// viewer got from each of them. The tracks average within the peer
-		// connection, that average is scaled by the path's own score normalized
-		// to 0..1, and the client score is the weighted average of those
-		// products — which keeps the useful property that a call can never
-		// score better than the connection carrying it.
-		for (const pcMonitor of clientMonitor.peerConnections) {
-			const pcScore = pcMonitor.calculatedStabilityScore;
-
-			if (pcScore.value === undefined) continue;
-
-			let trackTotalScore = 0;
-			let trackTotalWeight = 0;
-			let noTrack = true;
-
-			for (const trackMonitor of pcMonitor.tracks) {
-				const trackScore = trackMonitor.calculatedScore;
-
-				if (trackScore.value === undefined) continue;
-
-				trackTotalScore += trackScore.value * trackScore.weight;
-				trackTotalWeight += trackScore.weight;
-				noTrack = false;
-
-				accumulateSubtractions(this.currentReasons, trackScore.reasons ?? {});
-			}
-
-			const weightedTrackScore = noTrack
-				? DefaultScoreCalculator.MAX_SCORE
-				: trackTotalScore / Math.max(trackTotalWeight, 1);
-			const normalizedPcScore = Math.max(
-				DefaultScoreCalculator.MIN_SCORE,
-				pcScore.value,
-			) / DefaultScoreCalculator.MAX_SCORE;
-
-			clientTotalScore += weightedTrackScore * normalizedPcScore * pcScore.weight;
-			clientTotalWeight += pcScore.weight;
-
-			accumulateSubtractions(this.currentReasons, pcMonitor.scoreReasons ?? {});
-		}
-
-		const clientScore = clientTotalScore / Math.max(clientTotalWeight, 1);
-		// The client score subtracts nothing of its own — it is a weighted
-		// aggregate — so it has no own reasons to record. The accumulated view
-		// goes out on the 'score' event only.
-		clientMonitor.setScore(clientScore, undefined, this.currentReasons);
-
-		accumulateSubtractions(this.totalReasons, this.currentReasons);
-	}
-
-	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
-		// Packet Jitter measured in seconds
-		// we use RTT and lost packets to calculate the base score for the connection
-		const score = pcMonitor.calculatedStabilityScore;
-		const rttInMs = (pcMonitor.avgRttInSec ?? 0) * 1000;
-
-		// Jitter is reported per stream in seconds; average it over the streams
-		// that actually measured one. Same for the loss fractions: one stream at
-		// 10% and ten streams at 1% each are different situations, but a raw sum
-		// reads both as 10% — the average keeps the penalty about the path.
-		// Loss uses the per-interval delta fraction on both directions, so the
-		// penalty reflects the current interval, not lifetime accumulation.
-		//
-		// Streams carrying no media are excluded, because their ratios are not
-		// measurements. An SFU's bandwidth-probation stream (mediasoup sends one
-		// on `mid: "probator"`) delivers a handful of deliberately discardable
-		// packets per interval and no frames at all: observed at ~2 kbps with
-		// ~50% "loss" and ~490 ms "jitter" while the real streams on the same
-		// transport ran at 0% loss and 2 ms jitter. Averaged in with equal
-		// weight it pinned the connection at the minimum score for a whole
-		// session.
-		let jitterSumInSec = 0;
-		let jitterMeasurements = 0;
-		let fractionLostSum = 0;
-		let fractionLostMeasurements = 0;
-
-		for (const rtp of pcMonitor.inboundRtps) {
-			if (!DefaultScoreCalculator.carriesMedia(rtp.bitrate, rtp.deltaPacketsReceived, rtp.deltaFramesReceived)) continue;
-
-			if (rtp.jitter !== undefined) {
-				jitterSumInSec += rtp.jitter;
-				++jitterMeasurements;
-			}
-			if (rtp.deltaFractionLost !== undefined) {
-				fractionLostSum += rtp.deltaFractionLost;
-				++fractionLostMeasurements;
-			}
-		}
-		for (const rtp of pcMonitor.remoteInboundRtps) {
-			// The far end reports no byte counter, so packets are the only
-			// evidence of traffic available on the send side.
-			if (!DefaultScoreCalculator.carriesMedia(undefined, rtp.deltaPacketsReceived, undefined)) continue;
-
-			if (rtp.jitter !== undefined) {
-				jitterSumInSec += rtp.jitter;
-				++jitterMeasurements;
-			}
-			if (rtp.deltaFractionLost !== undefined) {
-				fractionLostSum += rtp.deltaFractionLost;
-				++fractionLostMeasurements;
-			}
-		}
-
-		const avgJitterInMs = 0 < jitterMeasurements ? (jitterSumInSec / jitterMeasurements) * 1000 : 0;
-		const fractionLost = 0 < fractionLostMeasurements ? fractionLostSum / fractionLostMeasurements : 0;
-
-		let scoreValue = 5.0;
-		let appData = score.appData as DefaultScoreCalculatorPeerConnectionScoreAppData | undefined;
-		const subtractions: DefaultScoreCalculatorSubtractions = {};
-
-		if (!appData) {
-			appData = {
-				lastNScores: [],
-				// lastScoreDetails: {
-				// 	rttPenalty: 0,
-				// 	fractionLostPenalty: 0,
-				// }
-			}
-			score.appData = appData;
-		}
-		score.reasons = subtractions;
-
-		// RTT and jitter are penalized separately: a long path and a jittery
-		// path are different problems with different fixes, and the reasons
-		// should say which one this is.
-		if (300 < rttInMs) {
-			subtractions["high-rtt"] = 2.0;
-		} else if (150 < rttInMs) {
-			subtractions["high-rtt"] = 1.0;
-		}
-
-		if (100 < avgJitterInMs) {
-			subtractions["high-jitter"] = 2.0;
-		} else if (30 < avgJitterInMs) {
-			subtractions["high-jitter"] = 1.0;
-		}
-
-		if (0.01 < fractionLost) {
-			if (fractionLost < 0.05) {
-				subtractions["high-packetloss"] = 1.0;
-			}	else if (fractionLost < 0.2) {
-				subtractions["high-packetloss"] = 2.0;
-			} else {
-				subtractions["high-packetloss"] = 5.0;
-			}
-		}
-
-		scoreValue = Math.max(
-			DefaultScoreCalculator.MIN_SCORE,
-			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
-		);
-
-		appData.lastNScores.push(scoreValue);
-
-		const finalScore = this._calculateFinalScore(appData.lastNScores);
-
-		score.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
 	}
 
 	public _calculateTrackScore(trackMonitor: TrackMonitor) {
@@ -396,546 +129,367 @@ export class DefaultScoreCalculator {
 		}
 	}
 
+	// ---- per-track scores ---------------------------------------------------
+	//
+	// One method per direction and kind. Most are thin, because a track's score is its own issues
+	// and the issue table already knows what each fault costs. The seam exists for the rule that
+	// cannot live in the table because it depends on this client rather than on the fault — today
+	// that is inbound video, where a blocky picture costs more full-screen than in a thumbnail.
+
 	private _calculateInboundVideoTrackScore(trackMonitor: InboundTrackMonitor): void {
-		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
-			if (trackMonitor.calculatedScore.appData) {
-				trackMonitor.calculatedScore.appData = undefined;
-			}
-
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-
-		// fps volatility
-		// fractionOfDroppedFrames
-		// totalCorruptionProbability
-
-		const inboundRtp = trackMonitor.getInboundRtp();
-
-		if (!inboundRtp) {
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-		let appData = trackMonitor.calculatedScore.appData as DefaultScoreCalculatorInboundVideoTrackScoreAppData | undefined;
+		const activeIssues = trackMonitor.issues;
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
+		let hasIssues = false;
 
-		if (!appData) {
-			appData = {
-				lastNScores: [],
-			}
-			trackMonitor.calculatedScore.appData = appData;
-		}
-		trackMonitor.calculatedScore.reasons = subtractions;
-
-		// Screen-share content legitimately runs at very low and bursty frame
-		// rates (nothing changes between keystrokes), so the fps-based
-		// penalties below are noise for it — same reasoning as the outbound
-		// side skipping bitrate volatility for screen share.
-		const isScreenShare = trackMonitor.isScreenShare;
-
-		if (!isScreenShare && inboundRtp.framesPerSecond && inboundRtp.ewmaFps && inboundRtp.lastNFramesPerSec.length >= 2) {
-			const n = inboundRtp.lastNFramesPerSec.length;
-			const mean = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + fps, 0) / n;
-			const variance = inboundRtp.lastNFramesPerSec.reduce((acc, fps) => acc + Math.pow(fps - mean, 2), 0) / n;
-			const stdDev = Math.sqrt(variance);
-			const volatility = stdDev / inboundRtp.ewmaFps;
-
-			// console.warn('volatility', volatility, 'stdDev', stdDev, 'mean', mean, 'ewmaFps', inboundRtp.ewmaFps);
-
-			const volatilityPenalty = this._normalizedPenalty(
-				volatility,
-				DefaultScoreCalculator.FPS_VOLATILITY_ACTIVATION,
-				DefaultScoreCalculator.FPS_VOLATILITY_SATURATION,
-			);
-
-			if (0 < volatilityPenalty) {
-				subtractions['volatile-fps'] = volatilityPenalty;
-			}
+		if (activeIssues.hasType('dry-inbound-track')) {
+			subtractions['dry-inbound-track'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
 		}
 
-		if (inboundRtp.framesDropped && inboundRtp.framesRendered) {
-			const fractionOfDroppedFrames = inboundRtp.framesDropped / (inboundRtp.framesDropped + inboundRtp.framesRendered);
-			const droppedFramesPenalty = this._normalizedPenalty(
-				fractionOfDroppedFrames,
-				DefaultScoreCalculator.DROPPED_FRAMES_FRACTION_ACTIVATION,
-				DefaultScoreCalculator.DROPPED_FRAMES_FRACTION_SATURATION,
-			);
-
-			if (0 < droppedFramesPenalty) {
-				subtractions['dropped-video-frames'] = droppedFramesPenalty;
-			}
+		if (activeIssues.hasType('stuck-decoder')) {
+			subtractions['stuck-decoder'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
 		}
 
-		if (inboundRtp.deltaCorruptionProbability) {
-			const corruptionPenalty = this._normalizedPenalty(
-				inboundRtp.deltaCorruptionProbability,
-				DefaultScoreCalculator.FRAME_CORRUPTION_PROBABILITY_ACTIVATION,
-				DefaultScoreCalculator.FRAME_CORRUPTION_PROBABILITY_SATURATION,
-			);
-
-			if (0 < corruptionPenalty) {
-				subtractions['video-frame-corruptions'] = corruptionPenalty;
-			}
-		}
-
-		// A frozen picture dominates every other quality aspect of the track.
-		// `frameFlowState` is derived by InboundVideoFlowStateDetector, and is `frozen`
-		// for as long as a frozen finding is open against the track; when that detector
-		// is disabled the field stays undefined and no penalty applies. `choppy` is deliberately not
-		// penalised here — that would change every existing score — but it is the
-		// obvious place to put a smaller subtraction if one is ever wanted.
 		if (trackMonitor.frameFlowState === 'frozen') {
-			subtractions['frozen-video'] = 2.0;
+			subtractions['frozen-video'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
+		} else if (trackMonitor.frameFlowState === 'choppy') {
+			subtractions['choppy-video'] = DefaultScoreCalculator.MAX_SCORE / 2;
+			hasIssues = true;
 		}
 
-		// Sustained low frame rate while frames are actually flowing — a dry or
-		// paused track is DryInboundTrackDetector's verdict, not a score matter.
-		// Screen share is exempt: static content at 1-2 fps is healthy.
-		if (!isScreenShare && inboundRtp.ewmaFps !== undefined && inboundRtp.ewmaFps < 10 && 0 < (inboundRtp.deltaFramesReceived ?? 0)) {
-			subtractions['low-fps'] = 1.0;
+		const qpScore = this._inboundQpSeverity(trackMonitor);
+
+		if (qpScore) {
+			subtractions['blocky-video'] = qpScore;
 		}
-
-		const avgQpPerFrame = inboundRtp.avgQpPerFrame;
-		const codecMimeType = inboundRtp.getCodec()?.mimeType;
-		const codec = codecMimeType?.split('/')[1]?.toLowerCase();
-		// undeclared screen share is judged strictly: blocked text is a hard failure
-		const motionType = trackMonitor.motionType ?? (isScreenShare ? 'lowmotion' : 'standard');
-		const qpThresholds = codec ? VIDEO_QP_THRESHOLDS[codec]?.[motionType] : undefined;
-
-		if (avgQpPerFrame !== undefined && qpThresholds) {
-			const magnification = this._displayMagnification(trackMonitor, inboundRtp);
-			const band = this._qpBandFor(qpThresholds, codec, magnification);
-			const qpPenalty = this._normalizedPenalty(avgQpPerFrame, band.activation, band.saturation);
-
-			if (0 < qpPenalty) {
-				subtractions['pixelated-video'] = this._getRoundedScore(
-					qpPenalty * this._pixelationWeight(magnification)
-				);
-			}
-		}
-
-		const scoreValue = Math.max(
-			DefaultScoreCalculator.MIN_SCORE,
-			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
-		);
-
-		appData.lastNScores.push(scoreValue);
-
-		const finalScore = this._calculateFinalScore(appData.lastNScores)
-
-		trackMonitor.calculatedScore.value = finalScore !== undefined ? this._getRoundedScore(finalScore) : undefined;
-	}
-
-	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {
-		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
-			if (trackMonitor.calculatedScore.appData) {
-				trackMonitor.calculatedScore.appData = undefined;
-			}
-
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-
-		const outboundRtp = trackMonitor.getHighestLayer();
-
-		if (!outboundRtp) {
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-		const score = trackMonitor.calculatedScore;
-		let appData = score.appData as DefaultScoreCalculatorOutboundVideoTrackScoreAppData | undefined;
-		const subtractions: DefaultScoreCalculatorSubtractions = {};
-
-		if (!appData) {
-			appData = {
-				lastNScores: [],
-				diffBitrateSquares: [],
-			}
-			score.appData = appData;
-		}
-		score.reasons = subtractions;
-
-		// max score: 5
-		// target deviation penalty: 0-1 (normalized)
-		// cpu limitation penalty: 0-2
-		// bandwidth limitation penalty: 0-1
-		// bitrate volatility penalty: 0-1 (normalized)
-
-		// The interval share is the trustworthy form of the limitation signal —
-		// the instantaneous `qualityLimitationReason` flickers (see
-		// `OutboundRtpMonitor.qualityLimitationDurationShares`). The
-		// instantaneous reason remains as fallback for browsers that do not
-		// report the duration totals.
-		const limitationShares = outboundRtp.qualityLimitationDurationShares;
-
-		if (limitationShares !== undefined) {
-			if (0.3 <= limitationShares.cpu) {
-				subtractions['cpu-limitation'] = 2.0;
-			}
-			if (0.5 <= limitationShares.bandwidth) {
-				// milder than cpu: bandwidth adaptation is the system working
-				subtractions['bandwidth-limitation'] = 1.0;
-			}
-		} else if (outboundRtp.qualityLimitationReason === 'cpu') {
-			subtractions['cpu-limitation'] = 2.0;
-		} else if (outboundRtp.qualityLimitationReason === 'bandwidth') {
-			subtractions['bandwidth-limitation'] = 1.0;
-		}
-
-		if (!trackMonitor.isScreenShare) {
-			// for screen share we are not calculating bitrate volatility.
-
-			if (outboundRtp.targetBitrate) {
-				// funny thing, encoder target from a layer is for the encoder, but the bitrate is for that particular layer
-				const payloadBitrate = [...trackMonitor.mappedOutboundRtps.values()].reduce((acc, rtp) => acc + (rtp.payloadBitrate ?? 0), 0);
-
-				if (payloadBitrate) {
-					const deviation = outboundRtp.targetBitrate - payloadBitrate;
-					const percentage = deviation / outboundRtp.targetBitrate;
-					const lowThreshold = Math.max(20000, outboundRtp.targetBitrate * 0.05);
-
-					if (0 < deviation && lowThreshold < deviation) {
-						const deviationPenalty = this._normalizedPenalty(
-							percentage,
-							DefaultScoreCalculator.TARGET_BITRATE_DEVIATION_ACTIVATION,
-							DefaultScoreCalculator.TARGET_BITRATE_DEVIATION_SATURATION,
-						);
-
-						if (0 < deviationPenalty) {
-							subtractions['high-deviation-from-target-bitrate'] = deviationPenalty;
-						}
-					}
-				}
-			}
-
-			if (outboundRtp.bitrate) {
-				if (!appData.ewmaBitrate) {
-					appData.ewmaBitrate = outboundRtp.bitrate;
-				} else {
-					appData.ewmaBitrate = 0.9 * appData.ewmaBitrate + 0.1 * outboundRtp.bitrate;
-				}
-				if (appData.lastBitrate) {
-					const diffBitrate = Math.abs(appData.lastBitrate - outboundRtp.bitrate);
-
-					appData.diffBitrateSquares.push(diffBitrate * diffBitrate);
-
-					while (appData.diffBitrateSquares.length > 10) {
-						appData.diffBitrateSquares.shift();
-					}
-				}
-				if (appData.diffBitrateSquares.length > 3) {
-					const avgBitrateSquare = appData.diffBitrateSquares.reduce((acc, square) => acc + square, 0) / appData.diffBitrateSquares.length;
-					const stdDev = Math.sqrt(avgBitrateSquare);
-					const volatility = stdDev / appData.ewmaBitrate;
-
-					// console.warn('volatility', volatility, 'stdDev', stdDev, 'avgBitrateSquare', avgBitrateSquare);
-					const bitrateVolatilityPenalty = this._normalizedPenalty(
-						volatility,
-						DefaultScoreCalculator.BITRATE_VOLATILITY_ACTIVATION,
-						DefaultScoreCalculator.BITRATE_VOLATILITY_SATURATION,
-					);
-
-					if (0 < bitrateVolatilityPenalty) {
-						subtractions['high-volatile-bitrate'] = bitrateVolatilityPenalty;
-					}
-				}
-				appData.lastBitrate = outboundRtp.bitrate;
-			}
-
-		} else {
-			// Screen share: sharpness IS the quality. Frame-rate and bitrate
-			// volatility are meaningless on mostly-static content (VBR drops to
-			// ~zero between changes), and the encoder target swings by design.
-			// What actually hurts is the encoder sending a downscaled version of
-			// the captured surface — text becomes unreadable.
-			const source = trackMonitor.getMediaSource();
-			const sourceArea = (source.width ?? 0) * (source.height ?? 0);
-			const sentArea = (outboundRtp.frameWidth ?? 0) * (outboundRtp.frameHeight ?? 0);
-
-			if (0 < sourceArea && 0 < sentArea) {
-				const areaRatio = sentArea / sourceArea;
-
-				if (areaRatio < 0.25) {
-					subtractions['downscaled-screenshare'] = 2.0;
-				} else if (areaRatio < 0.5) {
-					subtractions['downscaled-screenshare'] = 1.0;
-				}
-			}
-		}
-
-		const scoreValue = Math.max(
-			DefaultScoreCalculator.MIN_SCORE,
-			DefaultScoreCalculator.MAX_SCORE - this._getTotalSubtraction(subtractions)
-		);
-
-		appData.lastNScores.push(scoreValue);
-
-		score.value = this._calculateFinalScore(appData.lastNScores);
 	}
 
 	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor): void {
-		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
-			if (trackMonitor.calculatedScore.appData) {
-				trackMonitor.calculatedScore.appData = undefined;
-			}
-
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-
-		const bitrate = trackMonitor.bitrate;
-		const inboundRtp = trackMonitor.getInboundRtp();
-
-		if (!bitrate) {
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-
-		const clientMonitor = trackMonitor.getPeerConnection().parent;
-		const trackId = trackMonitor.track.id;
+		const activeIssues = trackMonitor.issues;
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
+		let hasIssues = false;
 
-		trackMonitor.calculatedScore.reasons = subtractions;
-
-		const normalizedBitrate = Math.log10(
-			Math.max(
-				bitrate,
-				DefaultScoreCalculator.MIN_AUDIO_BITRATE
-			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
-		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
-
-		const baseScore = Math.min(DefaultScoreCalculator.MAX_SCORE, 5 * normalizedBitrate);
-
-		// When the audio detectors run, their windowed, hysteresis-guarded
-		// verdicts are more robust than any per-tick reading — the issue gates
-		// *whether* a penalty applies. The per-tick metric then scales *how
-		// much*, normalized 0..1 from the detector's own activation threshold
-		// up to a saturation point. A tick where the metric dipped back under
-		// the threshold (or measured nothing) contributes no penalty even
-		// while hysteresis keeps the issue open. Without the detectors, the
-		// score falls back to the pure loss decay above.
-		if (clientMonitor.isIssueActive(`invented-speech-track-${trackId}`)) {
-			const inventedSpeechPenalty = this._normalizedPenalty(
-				inboundRtp.inventedSpeechRatio ?? 0,
-				clientMonitor.config?.inventedSpeechDetector?.allowedInventedRatio
-					?? DefaultScoreCalculator.DEFAULT_INVENTED_SPEECH_ACTIVATION,
-				DefaultScoreCalculator.INVENTED_SPEECH_SATURATION,
-			);
-
-			if (0 < inventedSpeechPenalty) {
-				subtractions['invented-speech'] = inventedSpeechPenalty;
-			}
-		}
-		if (clientMonitor.isIssueActive(`audio-jitter-buffer-stress-track-${trackId}`)) {
-			const jitterBufferPenalty = this._normalizedPenalty(
-				inboundRtp.jitterBufferTargetDelayInMs ?? 0,
-				clientMonitor.config?.jitterBufferStressDetector?.targetDelayThresholdInMs
-					?? DefaultScoreCalculator.DEFAULT_JITTER_BUFFER_TARGET_DELAY_ACTIVATION_IN_MS,
-				DefaultScoreCalculator.JITTER_BUFFER_TARGET_DELAY_SATURATION_IN_MS,
-			);
-
-			if (0 < jitterBufferPenalty) {
-				subtractions['high-jitter-buffer-delay'] = jitterBufferPenalty;
-			}
-		}
-		if (clientMonitor.isIssueActive(`audio-jitter-buffer-stress-track-${trackId}`)) {
-			const timeStretchPenalty = this._normalizedPenalty(
-				inboundRtp.timeStretchRate ?? 0,
-				clientMonitor.config?.jitterBufferStressDetector?.timeStretchThreshold
-					?? DefaultScoreCalculator.DEFAULT_TIME_STRETCH_ACTIVATION,
-				DefaultScoreCalculator.TIME_STRETCH_SATURATION,
-			);
-
-			if (0 < timeStretchPenalty) {
-				subtractions['audio-time-stretch'] = timeStretchPenalty;
-			}
+		if (activeIssues.hasType('dry-inbound-track')) {
+			subtractions['dry-inbound-track'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
 		}
 
-		const score = Math.max(
-			DefaultScoreCalculator.MIN_SCORE,
-			baseScore - this._getTotalSubtraction(subtractions)
-		);
-		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
+		const inventedSpeechRatio = normalizedClamp(trackMonitor.getInboundRtp()?.inventedSpeechRatio);
+
+		subtractions['invented-speech'] = inventedSpeechRatio;
+		hasIssues ||= activeIssues.hasType('invented-speech');
+
+		const synthesizedAudioRatio = normalizedClamp(trackMonitor.synthesizedAudioRatio);
+
+		subtractions['synthesized-audio'] = synthesizedAudioRatio;
+		hasIssues ||= activeIssues.hasType('synthesized-audio');
+
+		subtractions['audio-jitter-buffer-stress'] = normalizedClamp(trackMonitor.jitterBufferStressSeverity);
+		hasIssues ||= activeIssues.hasType('audio-jitter-buffer-stress');
+
+		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
+
+		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
+			trackMonitor.calculatedScore.reasons = subtractions;
+		}
+	}
+
+	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {
+		const activeIssues = trackMonitor.issues;
+		const subtractions: Record<string, number> = {};
+		let hasIssues = false;
+
+		if (activeIssues.hasType('dry-outbound-track')) {
+			subtractions['dry-outbound-track'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
+		}
+
+		const videoCaptureDegradation = normalizedClamp(trackMonitor.videoCaptureDegradation);
+
+		if (activeIssues.hasType('video-capture-bottleneck')) {
+			hasIssues = true;
+		}
+		subtractions['video-capture-bottleneck'] = videoCaptureDegradation;
+
+		const encoderBottleneck = activeIssues.getFirstPayloadByType('encoder-bottleneck');
+
+		if (encoderBottleneck) {
+			subtractions['encoder-bottleneck'] = 2 * Math.max(0, Math.min(1, encoderBottleneck.encodeDegradation));
+		}
+
+		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
+
+		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
+			trackMonitor.calculatedScore.reasons = subtractions;
+		}
 	}
 
 	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor): void {
-		if (!trackMonitor.track.enabled || trackMonitor.track.muted) {
-			if (trackMonitor.calculatedScore.appData) {
-				trackMonitor.calculatedScore.appData = undefined;
-			}
-
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-
-		const outboundRtp = trackMonitor.getOutboundRtps()?.[0];
-
-		if (!outboundRtp || outboundRtp.bitrate === undefined) {
-			trackMonitor.calculatedScore.value = undefined;
-			return;
-		}
-		const audioLevel =  outboundRtp.getMediaSource()?.audioLevel;
-		if (audioLevel !== undefined && audioLevel < 0.01) {
-			trackMonitor.calculatedScore.value = undefined;
-
-			return;
-		}
-
+		const activeIssues = trackMonitor.issues;
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
+		let hasIssues = false;
 
-		trackMonitor.calculatedScore.reasons = subtractions;
+		if (activeIssues.hasType('dry-outbound-track')) {
+			subtractions['dry-outbound-track'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
+		}
 
-		const normalizedBitrate = Math.log10(
-			Math.max(
-				outboundRtp.bitrate,
-				DefaultScoreCalculator.MIN_AUDIO_BITRATE
-			) / DefaultScoreCalculator.MIN_AUDIO_BITRATE
-		) / DefaultScoreCalculator.NORMALIZATION_FACTOR
+		if (activeIssues.hasType('silent-audio-source')) {
+			subtractions['silent-audio-source'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
+		}
 
-		const baseScore = Math.min(DefaultScoreCalculator.MAX_SCORE, 5 * normalizedBitrate);
+		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
 
-		const score = Math.max(
-			DefaultScoreCalculator.MIN_SCORE,
-			baseScore - this._getTotalSubtraction(subtractions)
-		);
-		trackMonitor.calculatedScore.value = this._getRoundedScore(score);
+		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
+			trackMonitor.calculatedScore.reasons = subtractions;
+		}
 	}
 
-	private _calculateFinalScore(scores: number[]) {
-		let counter = 0;
-		let weight = 0;
-		let totalScore = 0;
+	/**
+	 * The connection's own score: its connectivity and transport-quality issues.
+	 *
+	 * Deliberately not an average of its tracks. `_calculateClientMonitorScore` multiplies this
+	 * into them, so a path in trouble drags down everything riding on it instead of being
+	 * averaged away by tracks that happen to look fine.
+	 */
+	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
+		let hasIssues = false;
 
-		if (DefaultScoreCalculator.lastNScoresMaxLength < scores.length) {
-			scores.shift();
-		} else if (scores.length < DefaultScoreCalculator.lastNScoresMinLength) {
-			return;
+		// Congestion distorts significantly but does not make the path useless, so it is worth at
+		// most two of the five points: the severity is a 0..1 reading, doubled to reach that.
+		subtractions['uplink-congestion'] = 2 * normalizedClamp(pcMonitor.uplinkVideoCongestionSeverity);
+		hasIssues ||= pcMonitor.issues.hasType('uplink-congestion');
+
+		subtractions['downlink-congestion'] = 2 * normalizedClamp(pcMonitor.downlinkVideoCongestionSeverity);
+		hasIssues ||= pcMonitor.issues.hasType('downlink-congestion');
+
+		subtractions['transport-loss-sustained'] = normalizedClamp(Math.max(
+			pcMonitor.avgInboundFractionLost ?? 0,
+			pcMonitor.avgOutboundFractionLost ?? 0,
+		));
+		hasIssues ||= pcMonitor.issues.hasType('transport-loss-sustained');
+
+		if (pcMonitor.issues.hasType('transport-delay-degraded')) {
+			subtractions['transport-delay-degraded'] = 2;
+			hasIssues = true;
 		}
+
+		pcMonitor.calculatedStabilityScore.value = reduceScoreReasons(subtractions);
+
+		if (hasIssues || pcMonitor.calculatedStabilityScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
+			pcMonitor.calculatedStabilityScore.reasons = subtractions;
+		}
+	}
+
+	/**
+	 * The call's score: how far the dimensions it could measure sit from a call where all of them
+	 * are perfect.
+	 *
+	 * Five dimensions — the transport, and inbound and outbound audio and video — each already
+	 * scored by the rules above, each collapsed to the weighted mean of the monitors that make it
+	 * up. A dimension nothing reported is *absent*, not zero: a call that sends no video is not a
+	 * call whose video is broken, and counting it as zero would be the same statement.
+	 *
+	 * They combine as `5 - RMSE`, the root-mean-square distance from perfect, rather than as a
+	 * mean. Squaring the distances is what makes one collapsed dimension cost more than the same
+	 * total shortfall spread evenly, which is how a call is actually experienced: nobody whose
+	 * video has died calls it two thirds fine because the audio and the path are still good.
+	 * `[5, 5, 0]` scores `2.11` where an average would say `3.33`.
+	 */
+	public _calculateClientMonitorScore() {
+		const clientMonitor: ClientMonitor = this.clientMonitor;
+
+		this.currentReasons = {};
+
+		const clientScore = this._clientScoreFrom([
+			this._dimensionScore(clientMonitor.peerConnections.map((pc) => pc.calculatedStabilityScore)),
+			this._dimensionScore(this._trackScores('inbound', 'audio')),
+			this._dimensionScore(this._trackScores('inbound', 'video')),
+			this._dimensionScore(this._trackScores('outbound', 'audio')),
+			this._dimensionScore(this._trackScores('outbound', 'video')),
+		]);
+
+		// Nothing measurable is not a score of zero, and there is nothing to publish from it.
+		if (clientScore === undefined) return;
+
+		// A distance from perfect subtracts nothing of its own, so it has no reasons of its own.
+		clientMonitor.setScore(clientScore, undefined, this.currentReasons);
+
+		accumulateSubtractions(this.totalReasons, this.currentReasons);
+	}
+
+	/**
+	 * `5 - RMSE`: the root-mean-square distance of the dimensions from perfect, on the same 0..5
+	 * scale as everything it is built from.
+	 *
+	 * `null` and `undefined` are dropped rather than read as zero, so a dimension that does not
+	 * apply to this call cannot lower its score. With none left there is no distance to measure
+	 * and the answer is `undefined`, which is a different statement from `0`.
+	 */
+	private _clientScoreFrom(scores: (number | undefined | null)[]): number | undefined {
+		const measured = scores.filter(
+			(score): score is number => score !== undefined && score !== null,
+		);
+
+		if (measured.length === 0) return undefined;
+
+		const meanSquaredDistance = measured.reduce(
+			(sum, score) => sum + ((DefaultScoreCalculator.MAX_SCORE - score) ** 2),
+			0,
+		) / measured.length;
+
+		return this._getRoundedScore(DefaultScoreCalculator.MAX_SCORE - Math.sqrt(meanSquaredDistance));
+	}
+
+	/**
+	 * One dimension's score: the weighted mean of the monitors that make it up, with their reasons
+	 * folded into this tick's aggregate on the way past.
+	 *
+	 * `undefined` when nothing in the dimension has a score yet — too few collections to judge, or
+	 * no such monitor on this call at all.
+	 */
+	private _dimensionScore(scores: CalculatedScore[]): number | undefined {
+		let total = 0;
+		let totalWeight = 0;
 
 		for (const score of scores) {
-			weight += 1;
-			counter += weight;
-			totalScore += weight * score;
+			if (score.value === undefined) continue;
+
+			total += score.value * score.weight;
+			totalWeight += score.weight;
+
+			accumulateSubtractions(this.currentReasons, score.reasons ?? {});
 		}
 
-		return totalScore / counter;
+		return 0 < totalWeight ? total / totalWeight : undefined;
+	}
+
+	private _trackScores(
+		direction: 'inbound' | 'outbound',
+		kind: 'audio' | 'video',
+	): CalculatedScore[] {
+		const scores: CalculatedScore[] = [];
+
+		for (const track of this.clientMonitor.tracks) {
+			if (track.direction !== direction || track.kind !== kind) continue;
+
+			scores.push(track.calculatedScore);
+		}
+
+		return scores;
 	}
 
 	private _getRoundedScore(score: number) {
-		return Math.round(score * 100) / 100;
-	}
-
-	/**
-	 * Linear penalty ramp: 0 at or below `activation`, 1 at or beyond
-	 * `saturation`, proportional in between (rounded to two decimals).
-	 * Degenerates to a binary 0/1 step when a caller configures
-	 * `saturation <= activation`.
-	 */
-	/**
-	 * The linear factor by which the decoded picture is scaled to reach the
-	 * viewer, clamped. Taken from the **areas**, so a presented box whose
-	 * proportions differ from the frame's does not read as magnification on
-	 * width alone. `undefined` when either side of the ratio is missing.
-	 */
-	private _displayMagnification(
-		trackMonitor: InboundTrackMonitor,
-		inboundRtp: InboundRtpMonitor,
-	): number | undefined {
-		const presented = trackMonitor.presentedResolution;
-		const decodedWidth = inboundRtp.frameWidth;
-		const decodedHeight = inboundRtp.frameHeight;
-
-		if (!presented || !decodedWidth || !decodedHeight) return undefined;
-		if (presented.width <= 0 || presented.height <= 0) return undefined;
-
-		return Math.min(
-			DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MAX,
-			Math.max(
-				DefaultScoreCalculator.PIXELATION_MAGNIFICATION_MIN,
-				Math.sqrt((presented.width * presented.height) / (decodedWidth * decodedHeight)),
-			),
+		const clamped = Math.max(
+			DefaultScoreCalculator.MIN_SCORE,
+			Math.min(DefaultScoreCalculator.MAX_SCORE, score),
 		);
+
+		return Math.round(clamped * 100) / 100;
 	}
 
 	/**
-	 * The band to judge this track's quantizer against, moved to suit the size
-	 * the picture is shown at:
+	 * The multiplier for a `pixelated-video` cost at this track's magnification.
 	 *
-	 * ```
-	 * shift = (saturation - activation) * SHIFT_PER_OCTAVE * log2(magnification)
-	 * band  = { activation - shift, saturation - shift }
-	 * ```
-	 *
-	 * `log2` because magnification is a ratio, and a different `SHIFT_PER_OCTAVE`
-	 * in each direction because magnifying and shrinking are not equally
-	 * consequential. The result is held inside the codec's own scale, since a
-	 * saturation past the highest quantizer a codec can emit would make the
-	 * penalty unreachable rather than lenient. No magnification, or no known
-	 * range for the codec, returns the band unmoved.
+	 * `1` whenever the track could not measure the size — an unmeasurable magnification means "no
+	 * adjustment", not "no opinion", so a missing measurement never silences the finding.
 	 */
-	private _qpBandFor(
-		qpThresholds: VideoQpThresholds,
-		codec: string | undefined,
-		magnification: number | undefined,
-	): VideoQpThresholds {
-		const maxQp = codec ? VIDEO_QP_MAX[codec] : undefined;
-
-		if (magnification === undefined || !maxQp) return qpThresholds;
-
-		const octaves = Math.log2(magnification);
-
-		if (octaves === 0) return qpThresholds;
-
-		const fraction = 0 < octaves
-			? DefaultScoreCalculator.PIXELATION_QP_SHIFT_PER_OCTAVE_UP
-			: DefaultScoreCalculator.PIXELATION_QP_SHIFT_PER_OCTAVE_DOWN;
-		const shift = (qpThresholds.saturation - qpThresholds.activation) * fraction * octaves;
-		const activation = Math.min(Math.max(1, qpThresholds.activation - shift), maxQp - 1);
-		const saturation = Math.min(Math.max(activation + 1, qpThresholds.saturation - shift), maxQp);
-
-		return { activation, saturation };
-	}
-
-	/** What a saturated quantizer is worth at the size the picture is shown. */
 	private _pixelationWeight(magnification: number | undefined): number {
-		if (magnification === undefined) return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
+		if (magnification === undefined) return 1;
 		if (DefaultScoreCalculator.PIXELATION_LARGE_MAGNIFICATION <= magnification) {
-			return DefaultScoreCalculator.PIXELATION_MAX_PENALTY_LARGE;
+			return DefaultScoreCalculator.PIXELATION_WEIGHT_LARGE;
 		}
 		if (magnification < DefaultScoreCalculator.PIXELATION_SMALL_MAGNIFICATION) {
-			return DefaultScoreCalculator.PIXELATION_MAX_PENALTY_SMALL;
+			return DefaultScoreCalculator.PIXELATION_WEIGHT_SMALL;
 		}
 
-		return DefaultScoreCalculator.PIXELATION_MAX_PENALTY;
+		return 1;
 	}
 
-	private _normalizedPenalty(value: number, activation: number, saturation: number): number {
-		if (value <= activation) return 0;
-		if (saturation <= value) return 1;
+	/**
+	 * How hard this inbound video was being quantised, as a 0..1 reading where **0 is a clean
+	 * picture and 1 is as blocky as the codec gets**, or `undefined` when that cannot be worked
+	 * out.
+	 *
+	 * The polarity is worth stating outright because it is the reverse of QP's own: a *low*
+	 * quantizer is good video, so this is deliberately not a reading of QP but of how bad the
+	 * picture is because of it. That makes it a subtraction like every other continuous value in
+	 * this file - `videoCaptureDegradation`, `jitterBufferStressSeverity`, `decodingDegradation` -
+	 * and it composes with them directly, bigger number taking more off the score. It is not a
+	 * quality figure and must not be used as a multiplier.
+	 *
+	 * `qpSum` is the one direct statement about coding quality the stats API offers: the sum of the
+	 * quantizer parameters over the frames decoded, so `InboundRtpMonitor.avgQpPerFrame` is the mean
+	 * quantizer of the last interval. A high quantizer is what a blocky picture is *made of*, which
+	 * makes it a far better witness than `bitPerPixel`, whose value at constant visual quality
+	 * swings about tenfold with content and motion and again with codec generation.
+	 *
+	 * `qpSum` is optional in the spec and its scale is codec-specific, so this returns `undefined`
+	 * whenever the mean quantizer is missing, no codec is linked, or the codec's scale is not in
+	 * `QP_SCALE_BY_CODEC`. **`undefined` means "no reading", never "fine"** — a caller that cannot
+	 * get a number should leave pixelation out of the score entirely rather than score it as zero,
+	 * because a track whose browser does not report `qpSum` is not thereby a track with a clean
+	 * picture.
+	 *
+	 * The scale, once the codec is known: 0 at or below `QP_CLEAN_RATIO` of that codec's maximum
+	 * quantizer, 1 at or above `QP_COARSE_RATIO` of it, rising linearly between the two. On H.264
+	 * that is 0 at a mean QP of 25.5 or less, 1 at 41 or more, and about 0.48 at 33; on VP8, 0 at
+	 * 63 and 1 at 102; on VP9 and AV1, 0 at 127 and 1 at 204.
+	 */
+	private _inboundQpSeverity(trackMonitor: InboundTrackMonitor): number | undefined {
+		const inboundRtp = trackMonitor.getInboundRtp();
+		const avgQpPerFrame = inboundRtp?.avgQpPerFrame;
 
-		return this._getRoundedScore((value - activation) / (saturation - activation));
-	}
+		if (avgQpPerFrame === undefined) return undefined;
 
-	private _getTotalSubtraction(subtractions: DefaultScoreCalculatorSubtractions) {
-		let result = 0;
-		for (const key of Object.keys(subtractions)) {
-			const value = subtractions[key as DefaultScoreCalculatorSubtractionReason];
-			if (typeof value !== 'number') continue;
+		// `video/VP8`, `video/H264`, ... - the subtype is the codec, normalised so that spellings
+		// like `H.264` and `HEVC` land on the same key as the table uses.
+		const codec = inboundRtp?.getCodec()?.mimeType
+			?.split('/')[1]
+			?.toLowerCase()
+			.replace(/[^a-z0-9]/g, '');
 
-			result += value;
-		}
+		if (codec === undefined) return undefined;
 
-		return result;
+		const qpScale = DefaultScoreCalculator.QP_SCALE_BY_CODEC[codec];
+
+		if (qpScale === undefined) return undefined;
+
+		const clean = qpScale * DefaultScoreCalculator.QP_CLEAN_RATIO;
+		const coarse = qpScale * DefaultScoreCalculator.QP_COARSE_RATIO;
+
+		if (coarse <= clean) return undefined;
+
+		return clamp((avgQpPerFrame - clean) / (coarse - clean), 0, 1);
 	}
 }
 
-function accumulateSubtractions(to: DefaultScoreCalculatorSubtractions, from: DefaultScoreCalculatorSubtractions) {
-	for (const [key, value] of Object.entries(from)) {
-		if (typeof value !== 'number') continue;
-		const k = key as DefaultScoreCalculatorSubtractionReason;
+function reduceScoreReasons(
+	source: DefaultScoreCalculatorSubtractions,
+): number {
+	let score = DefaultScoreCalculator.MAX_SCORE;
 
-		to[k] = (to[k] ?? 0) + value;
+	for (const value of Object.values(source)) {
+		score -= value;
+
+		if (score <= DefaultScoreCalculator.MIN_SCORE) {
+			return DefaultScoreCalculator.MIN_SCORE;
+		}
 	}
 
-	return to;
+	return score;
+}
+
+/** Adds one set of subtractions into another, keyed by issue type. */
+function accumulateSubtractions(
+	target: DefaultScoreCalculatorSubtractions,
+	source: Record<string, number>,
+) {
+	for (const [ reason, value ] of Object.entries(source)) {
+		target[reason] = (target[reason] ?? 0) + value;
+	}
 }

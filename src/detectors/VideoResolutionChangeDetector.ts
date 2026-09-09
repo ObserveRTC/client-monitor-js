@@ -7,41 +7,25 @@ import { ClientEventTypes } from "../schema/ClientEventTypes";
 export type VideoResolutionChangeDirection = 'upgrade' | 'downgrade' | 'reshape';
 
 export type VideoResolutionChangeDetectorConfig = {
-	/**
-	 * Whether to buffer a `VIDEO_RESOLUTION_CHANGED` client event into the
-	 * sample.
-	 *
-	 * DEFAULT: true
-	 */
+	/** Whether to buffer a `VIDEO_RESOLUTION_CHANGED` client event into the sample. DEFAULT: true */
 	createEvent?: boolean;
 }
 
 /**
- * Reports when the frame size of a video track changes, on either direction of the
- * connection. A resolution change is an observation, not a fault — the adaptation
- * ladder moving is the system working — which is why this emits events and never
- * raises an issue; it becomes evidence of a problem only in correlation with
- * something else, and that correlation belongs downstream.
+ * Reports a video track's frame size changing, in either direction of the connection. The
+ * adaptation ladder moving is the system working, so this emits events and raises no issue — the
+ * value is the context attached: outbound, `qualityLimitationReason` at the moment of the change
+ * separates an encoder dropping resolution for bandwidth or CPU from the application changing its
+ * constraints, which look identical from the resolution alone; inbound, a change usually means the
+ * SFU switched which simulcast layer it forwards.
  *
- * What makes the event worth carrying is the context attached to it. On the send
- * side, `qualityLimitationReason` at the moment of the change is what separates "the
- * encoder dropped resolution because of bandwidth or CPU" from "the application
- * changed its constraints" — from the resolution alone the two are identical, and
- * confusing them sends an investigation in exactly the wrong direction. On the
- * receive side a change usually means the SFU switched which simulcast layer it
- * forwards. Direction is classified by pixel count as `upgrade` or `downgrade`, or
- * `reshape` when the pixel count is unchanged but the aspect ratio is not — an
- * orientation change on mobile, typically.
- *
- * On an outbound simulcast track only the highest layer is followed, since the track
- * carries several resolutions at once. A zero or absent frame size is a stream that
- * has not produced a frame yet rather than a downgrade, and the first size seen is
- * the baseline, not a change.
+ * On an outbound simulcast track only the highest layer is followed. A zero or absent frame size
+ * is a stream that has not produced a frame yet rather than a downgrade, and the first size seen
+ * is the baseline, not a change.
  *
  * Raises no issue.
  * Monitor event: `video-resolution-changed`; client event `VIDEO_RESOLUTION_CHANGED`
- * when `createEvent` is left on.
- * Config: `videoResolutionChangeDetector`.
+ * when `createEvent` is left on. Config: `videoResolutionChangeDetector`.
  *
  * Category: Telemetry
  * Layer: Media
@@ -72,7 +56,7 @@ export class VideoResolutionChangeDetector implements Detector {
 
 		const rtp = this.trackMonitor.direction === 'inbound'
 			? this.trackMonitor.getInboundRtp()
-			: this.trackMonitor.getHighestLayer();
+			: this.trackMonitor.highestLayer;
 
 		if (!rtp) return;
 

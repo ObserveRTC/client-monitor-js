@@ -1,3 +1,4 @@
+import { stubClientIssues } from "../helpers/detectorMocks";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 
@@ -11,11 +12,11 @@ import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 /** Everything else off, so constructing a track monitor registers nothing. */
 const NO_DETECTORS = {
 	dryInboundTrackDetector: null,
+	inboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
 	codecChangeDetector: null,
 	avDesyncPlayoutDetector: null,
 	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,
-	keyframeStormDetector: null,
 	videoRecoveryFailedDetector: null,
 	playoutDiscrepancyDetector: null,
 	decoderBottleneckDetector: null,
@@ -45,7 +46,7 @@ function createCall(config: Record<string, unknown> = NO_DETECTORS) {
 	const peerConnection: any = {
 		peerConnectionId: 'pc-1',
 		mappedInboundTracks: new Map<string, InboundTrackMonitor>(),
-		parent: { config },
+		parent: { config, activeIssues: stubClientIssues() },
 	};
 
 	peerConnection.getPeerConnection = () => peerConnection;
@@ -55,7 +56,9 @@ function createCall(config: Record<string, unknown> = NO_DETECTORS) {
 			kind,
 			deltaTime: 1000,
 			estimatedPlayoutTimestamp: undefined as number | undefined,
-			getPeerConnection: () => peerConnection,
+			statsClockTime: 0,
+		getMediaPlayout: () => undefined,
+		getPeerConnection: () => peerConnection,
 		};
 		const monitor = new InboundTrackMonitor(createTrack(kind, id) as any, inboundRtp);
 

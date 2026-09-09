@@ -24,23 +24,18 @@ export type TransportLossDetectorConfig = {
 }
 
 /**
- * Reports a path that is persistently dropping a material share of what is sent over it. The path is
- * up, the path is stable, and packets are simply not all arriving.
+ * Reports a path that is persistently dropping a material share of what is sent over it: the path is
+ * up and stable, and packets simply are not all arriving. Use it to tell loss apart from congestion —
+ * a well-behaved congestion controller congests a path with almost no loss, and a lossy wireless link
+ * loses packets with no congestion signal at all. Both can be true at once, decided independently.
  *
- * Loss has always been visible to this library, but only ever as somebody else's qualifier: it gates
- * the retired `CongestionDetector`'s low-sensitivity mode and stands `DecoderPerformanceDetector` down so it
- * does not blame a decoder for a network fault. Neither of those makes a claim *about the loss*, so
- * nothing could raise it, resolve it, or count it. That is what this adds.
+ * A finding points at the medium rather than at load: a weak or contended wireless link, a faulty
+ * cable or port, or a middlebox dropping under pressure. Sustained loss with no congestion signal is
+ * the signature of a path that is damaged rather than full.
  *
- * It is not congestion. Congestion is the sender being told to slow down and backing off; loss is
- * packets vanishing whether or not anyone backed off. A well-behaved congestion controller produces
- * a congested path with very little loss, and a lossy wireless link produces loss with no congestion
- * signal at all. Both can be true at once, and both detectors decide independently.
- *
- * Both directions are watched with one threshold, and whichever is worse is reported — one issue
- * type, with the direction in the payload. `deltaPacketsReceived` gating on the monitor side means
- * streams that carried nothing this tick are excluded from the mean rather than counted as healthy;
- * without that, a call with eight muted tracks and one bleeding one looks fine.
+ * Both directions are watched with one threshold and the worse one is reported, its direction in the
+ * payload. Streams that carried nothing this tick are excluded from the mean rather than counted as
+ * healthy, so a call with eight muted tracks and one bleeding one does not look fine.
  *
  * Issue raised: `transport-loss-sustained`. Monitor event: `transport-loss-sustained`.
  * Config: `transportLossDetector`.
@@ -85,8 +80,6 @@ export class TransportLossDetector implements Detector {
 
 		this.inputsUnavailable = false;
 
-		// Whichever direction is worse is the one worth reporting; a path losing
-		// packets one way is a problem regardless of which way that is.
 		const direction: 'inbound' | 'outbound' = (outbound ?? -1) > (inbound ?? -1) ? 'outbound' : 'inbound';
 		const fractionLost = Math.max(inbound ?? 0, outbound ?? 0);
 
@@ -117,7 +110,8 @@ export class TransportLossDetector implements Detector {
 			direction,
 		});
 
-		clientMonitor.raiseIssue<TransportLossIssuePayload>(this.issueKey, {
+		this.peerConnection.issues.raise({
+			key: this.issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: TransportLossDetector.ISSUE_TYPE,
 			payload: {
@@ -132,8 +126,7 @@ export class TransportLossDetector implements Detector {
 	private _resolve(comment: string) {
 		this._raised = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.peerConnection.issues.get(this.issueKey);
 		let payload: TransportLossIssuePayload | undefined;
 
 		if (issue) {
@@ -143,7 +136,8 @@ export class TransportLossDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<TransportLossIssuePayload>(this.issueKey, {
+		this.peerConnection.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

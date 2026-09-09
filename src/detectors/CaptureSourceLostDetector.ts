@@ -8,59 +8,37 @@ export type CaptureSourceLostIssuePayload = {
 	kind: string;
 	deviceLabel?: string;
 }
+export type CaptureSourceLostIssueType = 'capture-source-lost';
 
 export type CaptureSourceLostDetectorConfig = {
-	/**
-	 * Whether to buffer a `CAPTURE_SOURCE_LOST` client event into the sample
-	 * in addition to emitting the monitor event.
-	 *
-	 * DEFAULT: true
-	 */
+	/** Also buffer a `CAPTURE_SOURCE_LOST` client event into the sample. Default true. */
 	createEvent?: boolean;
 }
 
 /**
- * Reports the capture device behind an outbound track being taken away: a webcam
- * unplugged, a Bluetooth headset that dropped its link, a screen share the user
- * stopped from the browser's own bar, a virtual camera whose application quit,
- * a permission the user revoked. None of them leave a trace in RTP — the encoder
- * keeps its `outbound-rtp` entry and the counters simply stop advancing, so every
- * detector reading transport or encoder stats sees a track that has gone quiet
- * with no way to say why. The track object is the only place the reason is
- * written down.
+ * Reports the capture device behind an outbound track being taken away: a webcam unplugged, a
+ * headset that dropped its link, a screen share the user stopped, a permission revoked. Use it to
+ * explain a track that went quiet for a reason no transport or encoder statistic can show — the
+ * counters simply stop advancing, and the track object is the only place the reason is written down.
  *
- * **It reports the loss, never the application's own `stop()`.** Both leave
- * `readyState === 'ended'`, and reading that alone would make this fire mostly on
- * the deliberate case — a user leaving a call, a screen share the app tore down —
- * which is not a finding at all. What separates them is the `ended` *event*: by
- * specification it fires when the source permanently goes away, and `stop()` is
- * the one way a track ends without it. `PeerConnectionMonitor` listens for that
- * event and records `OutboundTrackMonitor.sourceEnded`, which is the single input
- * here. A track the application stopped never sets it and is never reported.
+ * The single input is `OutboundTrackMonitor.sourceEnded`, set from the track's `ended` event, which
+ * fires when the source goes away and never for the application's own `stop()`. The loss is
+ * terminal, so this is a one-shot `addIssue` rather than a condition to later resolve.
  *
- * The loss is terminal — a track never comes back from `ended`, the application
- * has to acquire a new one — so this is `addIssue`, not `raiseIssue`: a one-shot
- * entry that never enters the active-issue store, because there is no condition
- * to later find resolved. Parking it there instead would leave an application
- * asking "what is wrong right now" being told about a webcam unplugged an hour
- * ago, one entry per device for the life of the monitor, all of them force-
- * resolved at close under a comment that never happened.
- *
- * It is deliberately not conditioned on the sender being live: a device unplugged
- * during a pause is a fact about the device, true whether or not anyone was
- * receiving it, and an application about to resume onto a device that no longer
- * exists is precisely who needs to be told.
+ * It does not claim the track was live: a device unplugged during a pause is still a fact about the
+ * device.
  *
  * Reports `capture-source-lost`. Emits `capture-source-lost`, plus the
  * `CAPTURE_SOURCE_LOST` client event unless `createEvent` is false.
  * Config: `captureSourceLostDetector`.
+ * Track attribute: `OutboundTrackMonitor.lostCaptureSource`.
  *
  * Category: Pipeline Disruption
  * Layer: Send — the source
  *
  */
 export class CaptureSourceLostDetector implements Detector {
-	public static readonly ISSUE_TYPE = 'capture-source-lost';
+	public static readonly ISSUE_TYPE: CaptureSourceLostIssueType = 'capture-source-lost';
 
 	public readonly name = 'capture-source-lost-detector';
 	public disabled = false;
@@ -82,18 +60,23 @@ export class CaptureSourceLostDetector implements Detector {
 	}
 
 	public update() {
-		if (this.disabled) return;
+		if (this.disabled) {
+			this.trackMonitor.lostCaptureSource = undefined;
+
+			return;
+		}
 		if (this._reported) return;
 
-		// The single input, and deliberately not `track.readyState`. Both a lost
-		// device and the application's own `stop()` leave the track `ended`, so
-		// `readyState` cannot tell them apart and is not evidence of anything here.
-		// `sourceEnded` is set by `PeerConnectionMonitor` from the track's `ended`
-		// event, which fires for the first and never for the second — so this reads
-		// "nothing has been lost yet, come back next collection".
-		if (this.trackMonitor.sourceEnded === false) return;
+		// Not `track.readyState`: a lost device and the application's own `stop()` both leave it `ended`.
+		if (this.trackMonitor.sourceEnded === false) {
+			this.trackMonitor.lostCaptureSource = false;
+
+			return;
+		}
 
 		this._reported = true;
+		// Terminal: a device that went away never comes back to `false`.
+		this.trackMonitor.lostCaptureSource = true;
 
 		const track = this.trackMonitor.track;
 		const clientMonitor = this.peerConnection.parent;
@@ -110,7 +93,9 @@ export class CaptureSourceLostDetector implements Detector {
 			deviceLabel: track.label,
 		};
 
-		clientMonitor.addIssue<CaptureSourceLostIssuePayload>({
+		// One-shot, so nothing is stored in any registry — but it still goes through the track's,
+		// so every issue this detector reports leaves by the same door.
+		this.trackMonitor.issues.notify({
 			includeInSample: this.includeIssueInSample,
 			type: CaptureSourceLostDetector.ISSUE_TYPE,
 			payload,

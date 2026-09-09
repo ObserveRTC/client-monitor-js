@@ -16,8 +16,7 @@ export type {
     FrozenVideoFlow,
     ChoppyVideoFlow,
 } from './detectors/InboundVideoFlowStateDetector';
-export { VIDEO_QP_THRESHOLDS, VIDEO_QP_MAX } from "./scores/CalculatedScore";
-export type { VideoMotionType, VideoQpThresholds } from "./scores/CalculatedScore";
+export type { VideoMotionType } from "./scores/CalculatedScore";
 export { MediaPlayoutMonitor } from "./monitors/MediaPlayoutMonitor";
 export { MediaSourceMonitor } from "./monitors/MediaSourceMonitor";
 export { OutboundRtpMonitor } from "./monitors/OutboundRtpMonitor";
@@ -64,7 +63,6 @@ export type {
     InventedSpeechEventPayload,
     AudioJitterBufferStressEventPayload,
     VideoDecoderOverloadedEventPayload,
-    KeyframeStormEventPayload,
     VideoRecoveryFailedEventPayload,
     CaptureBottleneckEventPayload,
     EncoderBottleneckEventPayload,
@@ -119,11 +117,12 @@ export type {
     ClientMonitorIssue,
     ClientMonitorResolvedIssue,
     ClientMonitorIssueType,
-    FrameSupplyIssuePayload,
 } from './ClientMonitorIssues';
 export { AVDesyncPlayoutDetector } from './detectors/AVDesyncPlayoutDetector';
 export type { AVDesyncPlayoutDetectorConfig } from './detectors/AVDesyncPlayoutDetector';
 export type { AVDesyncPlayoutIssuePayload, AVDesyncDirection } from './detectors/AVDesyncPlayoutDetector';
+export { CongestionDetector } from './detectors/CongestionDetector';
+export type { CongestionIssuePayload, CongestionDetectorConfig } from './detectors/CongestionDetector';
 export type { UplinkCongestionIssuePayload, UplinkCongestionDetectorConfig } from './detectors/UplinkCongestionDetector';
 export type { DownlinkCongestionIssuePayload, DownlinkCongestionDetectorConfig } from './detectors/DownlinkCongestionDetector';
 export type { CpuPerformanceIssuePayload } from './detectors/CpuPerformanceDetector';
@@ -139,18 +138,15 @@ export type { JitterBufferStressIssuePayload } from './detectors/JitterBufferStr
 export { DecoderPerformanceDetector } from './detectors/DecoderPerformanceDetector';
 export type { DecoderPerformanceDetectorConfig } from './detectors/DecoderPerformanceDetector';
 export type { DecoderPerformanceIssuePayload } from './detectors/DecoderPerformanceDetector';
-export { KeyframeStormDetector } from './detectors/KeyframeStormDetector';
-export type { KeyframeStormDetectorConfig } from './detectors/KeyframeStormDetector';
-export type { KeyframeStormIssuePayload } from './detectors/KeyframeStormDetector';
 export { VideoRecoveryFailedDetector } from './detectors/VideoRecoveryFailedDetector';
 export type { VideoRecoveryFailedDetectorConfig } from './detectors/VideoRecoveryFailedDetector';
 export type { VideoRecoveryFailedIssuePayload } from './detectors/VideoRecoveryFailedDetector';
-export { SourceCaptureBottleneckDetector } from './detectors/SourceCaptureBottleneckDetector';
-export type { SourceCaptureBottleneckDetectorConfig } from './detectors/SourceCaptureBottleneckDetector';
-export type { CaptureBottleneckIssuePayload } from './detectors/SourceCaptureBottleneckDetector';
-export { EncoderPerformanceDetector } from './detectors/EncoderPerformanceDetector';
-export type { EncoderPerformanceDetectorConfig } from './detectors/EncoderPerformanceDetector';
-export type { EncoderBottleneckIssuePayload } from './detectors/EncoderPerformanceDetector';
+export { VideoCaptureBottleneckDetector } from './detectors/VideoCaptureBottleneckDetector';
+export type { VideoCaptureBottleneckDetectorConfig } from './detectors/VideoCaptureBottleneckDetector';
+export type { VideoCaptureBottleneckIssuePayload as CaptureBottleneckIssuePayload } from './detectors/VideoCaptureBottleneckDetector';
+export { EncoderBottleneckDetector } from './detectors/EncoderBottleneckDetector';
+export type { EncoderBottleneckDetectorConfig } from './detectors/EncoderBottleneckDetector';
+export type { EncoderBottleneckIssuePayload } from './detectors/EncoderBottleneckDetector';
 export { DecoderBottleneckDetector } from './detectors/DecoderBottleneckDetector';
 export type { DecoderBottleneckDetectorConfig } from './detectors/DecoderBottleneckDetector';
 export type { DecoderBottleneckIssuePayload } from './detectors/DecoderBottleneckDetector';
@@ -187,9 +183,6 @@ export type { TransportDelayIssuePayload } from './detectors/TransportDelayDetec
 export { TransportLossDetector } from './detectors/TransportLossDetector';
 export type { TransportLossDetectorConfig } from './detectors/TransportLossDetector';
 export type { TransportLossIssuePayload } from './detectors/TransportLossDetector';
-export { TransportJitterDetector } from './detectors/TransportJitterDetector';
-export type { TransportJitterDetectorConfig } from './detectors/TransportJitterDetector';
-export type { TransportJitterIssuePayload } from './detectors/TransportJitterDetector';
 /*
  * `IcePathStabilityDetector` (and its pre-4.9.0 name `IceConnectivityDetector`)
  * became the six classes below: one per issue type, plus the two that report
@@ -272,16 +265,8 @@ export type {
 } from './scores/ScoreCalculator';
 export { sampledScoreReasons } from './scores/utils';
 
-export type {
-    DefaultScoreCalculator,
-    DefaultScoreCalculatorInboundVideoTrackScoreAppData,
-    DefaultScoreCalculatorOutboundAudioTrackScoreAppData,
-    DefaultScoreCalculatorOutboundVideoTrackScoreAppData,
-    DefaultScoreCalculatorSubtractionReason,
-    DefaultScoreCalculatorSubtractions,
-    // DefaultScoreCalculatorInboundAudioTrackScoreAppData,
-    DefaultScoreCalculatorPeerConnectionScoreAppData
-} from './scores/DefaultScoreCalculator';
+export type { DefaultScoreCalculator } from './scores/DefaultScoreCalculator';
+
 
 export type {
 	ClientSample,

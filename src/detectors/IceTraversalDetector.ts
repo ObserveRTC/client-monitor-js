@@ -1,29 +1,23 @@
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
-/**
- * `IceTraversalDetector` has no tunables — it reports which kind of path the connection settled on
- * and never raises anything, so there is no threshold to move. The type exists so the detector can
- * be disabled on its own: `{}` enables it, `null` disables it.
- */
+/** No tunables. The type exists so the detector can be toggled: `{}` enables it, `null` disables it. */
 export type IceTraversalDetectorConfig = Record<string, never>;
 
 /**
- * Reports that the set of selected ICE candidate pairs changed — the network path underneath the
- * call moved, which is what a user experiences as the brief cut-out when Wi-Fi hands over to
- * cellular, a VPN comes up, or a NAT rebinding forces a new pair. A tuple is
- * `localAddress:localPort:remoteAddress:remotePort:protocol`, built by the candidate pair itself, so
- * this detector and the connectivity detectors always agree on what the selected path is.
+ * Reports that the set of selected ICE candidate pairs changed — the network path under the call
+ * moved. Use it to place the brief cut-out a user felt when Wi-Fi handed over to cellular, a VPN
+ * came up, or a NAT rebinding forced a new pair. A tuple is
+ * `localAddress:localPort:remoteAddress:remotePort:protocol`, built by the candidate pair itself,
+ * so this and the connectivity detectors always agree on what the selected path is.
  *
- * It stays deliberately the low-level primitive: it reports only *that* the tuple set changed.
- * `SelectedIcePath` classifies what kind of change it was and emits `ice-path-changed`, and
- * `UnstableIcePathDetector` owns the issue raised when a path keeps switching. Establishment itself
- * is not a change: growing from an empty set is skipped, or every call would report a path move in
- * its first seconds.
+ * Establishment is not a change: growing from an empty set is skipped.
+ *
+ * It reports only *that* the tuple set changed. `SelectedIcePath` classifies the kind of change,
+ * and `UnstableIcePathDetector` owns the issue raised when a path keeps switching.
  *
  * Monitor event: `ice-tuple-changed`. No issue. Config: `iceTraversalDetector` — `{}` registers the
- * detector, `null` leaves it unregistered. The block holds no values: reporting that the tuple set
- * changed is not a matter of degree, so there is nothing here to tune.
+ * detector, `null` leaves it unregistered.
  *
  * Category: Telemetry
  * Layer: Transport

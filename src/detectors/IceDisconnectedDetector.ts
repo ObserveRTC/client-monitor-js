@@ -2,20 +2,17 @@ import { IceTransportMonitor } from "../monitors/IceTransportMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
-/**
- * `disconnectedForMs` is how long the transport had already been `disconnected` when the issue was
- * raised — the threshold, not the episode; `durationInMs` is the episode, filled in on resolve.
- * `iceGeneration` counts the ICE restarts observed on this transport so far, so an issue can be tied
- * to the generation it belongs to.
- */
 export type IceDisconnectedIssuePayload = {
 	peerConnectionId: string;
 	transportId: string;
 	iceState?: string;
 	dtlsState?: string;
 	selectedCandidatePairId?: string;
+	/** How long the transport had been `disconnected` when the issue was raised — the threshold, not the episode. */
 	disconnectedForMs: number;
+	/** ICE restarts observed on this transport so far, tying the issue to its generation. */
 	iceGeneration: number;
+	/** The episode's length, filled in on resolve. */
 	durationInMs?: number;
 };
 
@@ -31,39 +28,24 @@ type TransportState = {
 const ISSUE_TYPE = 'ice-disconnected';
 
 export type IceDisconnectedDetectorConfig = {
-	/**
-	 * How long (in milliseconds) an ICE transport must stay `disconnected`
-	 * before an issue is raised. Transient disconnections below this
-	 * threshold are ignored, since they are common and self-healing; raising
-	 * it tolerates longer blips, lowering it reports them.
-	 */
+	/** How long a transport must stay `disconnected` before an issue is raised; shorter blips are ignored. */
 	disconnectedThresholdInMs: number;
 }
 
 /**
  * Reports an ICE transport that has been `disconnected` long enough that it is no longer going to
- * fix itself. `disconnected` on its own is not a fault and never worth an issue: it is what a
- * browser says when consent checks have missed for a moment, and a Wi-Fi roam, a brief radio dropout
- * or a busy CPU produce it several times in an ordinary call while ICE quietly recovers. What
- * separates the blip from the outage is only how long it lasts, which is what
- * `disconnectedThresholdInMs` measures.
+ * fix itself. Use it to tell an outage from the ordinary blip a Wi-Fi roam or a busy CPU produces
+ * several times a call: only duration separates them, which is what `disconnectedThresholdInMs`
+ * measures.
  *
- * The clock is stats time — each `disconnected` tick adds the transport's own `deltaTime` — so a
- * collection that ran late or was skipped still credits the outage with the time it actually lasted
- * underneath, rather than the time the library happened to spend not looking. Anything that ends the
- * condition resets the accumulator to zero, so the next blip is judged fresh instead of inheriting
- * the last one's credit.
+ * The clock is stats time, so a late or skipped collection still credits the outage with the time it
+ * really lasted, and anything ending the condition zeroes it. A changed ICE local username fragment
+ * means a new generation, which resolves the standing issue and restarts the clock; the fragment is
+ * read here rather than asked of `IceRestartDetector`, so neither depends on the other's ordering.
  *
- * A changed ICE local username fragment means a new ICE generation, and the new generation deserves
- * to be judged on its own: the standing issue is resolved and the clock restarts. The fragment is
- * read here rather than asked of `IceRestartDetector`, so neither detector depends on the other or
- * on the order they run in.
- *
- * What it deliberately does not claim: that the media path is gone. A `disconnected` transport
- * frequently comes back, which is why the issue is resolved rather than terminal, and why `failed` —
- * which is terminal for the generation — belongs to `IceConnectionFailedDetector` instead. It also
- * says nothing about a transport that is `connected` and simply carrying nothing;
- * `IceTransportStalledDetector` owns that, and the two conditions cannot be true at once.
+ * It does not claim the media path is gone — `disconnected` often comes back, terminal `failed`
+ * belongs to `IceConnectionFailedDetector`, and a connected path carrying nothing belongs to
+ * `IceTransportStalledDetector`.
  *
  * Issue raised: `ice-disconnected`, resolved when ICE reconnects, when an ICE restart is inferred,
  * or when the transport goes away. Config: `iceDisconnectedDetector`.
@@ -134,9 +116,7 @@ export class IceDisconnectedDetector implements Detector {
 		}
 
 		if (iceState !== 'disconnected') {
-			// 'new' / 'checking' / 'closed' / 'failed'. None of them is this detector's
-			// condition, and a standing issue is left standing: a transport that fell
-			// from `disconnected` into `failed` has not recovered, it has got worse.
+			// A standing issue is left standing: a fall into `failed` is not a recovery.
 			state.disconnectedForInMs = 0;
 
 			return;
@@ -149,9 +129,8 @@ export class IceDisconnectedDetector implements Detector {
 
 		state.raisedAt = Date.now();
 
-		this.peerConnection.parent.raiseIssue<IceDisconnectedIssuePayload>(
-			this._issueKey(transport.id),
-			{
+		this.peerConnection.issues.raise({
+				key: this._issueKey(transport.id),
 				includeInSample: this.includeIssueInSample,
 				type: ISSUE_TYPE,
 				payload: {
@@ -196,13 +175,13 @@ export class IceDisconnectedDetector implements Detector {
 
 		state.raisedAt = undefined;
 
-		const clientMonitor = this.peerConnection.parent;
 		const key = this._issueKey(transportId);
-		const issue = clientMonitor.activeIssues.get(key);
+		const issue = this.peerConnection.issues.get(key);
 
 		if (!issue) return;
 
-		clientMonitor.resolveIssue<IceDisconnectedIssuePayload>(key, {
+		this.peerConnection.issues.resolve({
+			key: key,
 			comment,
 			payload: {
 				...(issue.payload as IceDisconnectedIssuePayload),

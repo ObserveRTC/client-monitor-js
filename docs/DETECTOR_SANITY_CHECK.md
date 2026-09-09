@@ -1,6 +1,6 @@
 # Detector sanity check — the method
 
-This is the working method behind the 4.10.0 detector pass, written so it can be
+This is the working method behind the 4.9.0 detector pass, written so it can be
 continued in a fresh session, a fresh account, or by somebody else. It has three
 parts: **the prompt to paste**, **the context that prompt needs**, and **the
 method itself** — what to actually look for, which primary sources were worth
@@ -73,7 +73,7 @@ re-litigates settled decisions.
 | `tests/detectors/<DetectorName>.spec.ts` | Read **adversarially** — see defect 10 |
 | The monitor it binds to | `InboundRtpMonitor`, `PeerConnectionMonitor`, `IceTransportMonitor`… — the derived values already available, so the rebuild reads rather than re-derives |
 | `tests/detectors/DetectorTaxonomy.spec.ts` | The machine-readable taxonomy and the tests that enforce the stamps and config ownership |
-| `CHANGELOG.md`, the 4.10.0 section | What has already been decided and why. Prevents re-proposing something that was tried |
+| `CHANGELOG.md`, the 4.9.0 section | What has already been decided and why. Prevents re-proposing something that was tried |
 
 `README.md` has a per-detector section too, but it is long; let the session grep
 it for the class name rather than reading it whole.
@@ -207,27 +207,21 @@ A detector is finished when all of these hold:
 
 ## Progress ledger
 
-46 detector classes. Keep the list in `__CHECKED_DETECTORS` at the repo root
+45 detector classes. Keep the list in `__CHECKED_DETECTORS` at the repo root
 current as they are done.
 
 **Checked and rebuilt:** `InventedSpeechDetector` (was `AudioConcealmentDetector`),
-`AVDesyncPlayoutDetector` (was `AudioDesyncDetector`), `BlockedTransportDetector`
-(now `BlockedStunRequestsDetector`, `BlockedOutboundMediaDetector` and
-`BlockedInboundMediaDetector`), `InboundVideoFlowStateDetector` (the merge of
-`ChoppyVideoDetector` and `FrozenVideoTrackDetector`), and `CongestionDetector`
-(split into `UplinkCongestionDetector` and `DownlinkCongestionDetector`, both
-rebuilt around measured signals — see
-[CONGESTION_RESTRUCTURE_HANDOFF.md](./CONGESTION_RESTRUCTURE_HANDOFF.md)).
+`AVDesyncPlayoutDetector` (was `AudioDesyncDetector`), `BlockedTransportDetector`.
 
 **Remaining, in a reasonable order** — the ones with the most stat-semantics
 risk first, since that is where the method pays:
 
 | Group | Classes |
 |---|---|
-| Perceived quality | `JitterBufferStressDetector`, `AudioPlayoutSynthesisDetector`, `PixelatedVideoDetector`, `PlayoutDiscrepancyDetector`, `SilentAudioSourceDetector` |
-| Transport quality | `TransportDelayDetector`, `TransportLossDetector`, `TransportJitterDetector` |
-| Pipeline disruption | `FrameAssemblyStalledDetector`, `TransportDemuxStalledDetector`, `RtpSenderStalledDetector`, `DryInboundTrackDetector`, `DryOutboundTrackDetector`, `StuckDecoderDetector`, `VideoRecoveryFailedDetector`, `KeyframeStormDetector` |
-| Frame supply and performance | `DecoderBottleneckDetector`, `SourceCaptureBottleneckDetector`, `EncoderPerformanceDetector`, `DecoderPerformanceDetector`, `CpuPerformanceDetector` |
+| Perceived quality | `JitterBufferStressDetector`, `AudioPlayoutSynthesisDetector`, `PixelatedVideoDetector`, `ChoppyVideoDetector`, `FrozenVideoTrackDetector`, `PlayoutDiscrepancyDetector`, `SilentAudioSourceDetector` |
+| Transport quality | `TransportDelayDetector`, `TransportLossDetector`, `CongestionDetector` |
+| Pipeline disruption | `FrameAssemblyStalledDetector`, `TransportDemuxStalledDetector`, `RtpSenderStalledDetector`, `DryInboundTrackDetector`, `DryOutboundTrackDetector`, `StuckDecoderDetector`, `VideoRecoveryFailedDetector` |
+| Frame supply and performance | `DecoderBottleneckDetector`, `VideoCaptureBottleneckDetector`, `EncoderBottleneckDetector`, `DecoderPerformanceDetector`, `CpuPerformanceDetector` |
 | Connectivity | `IceReachabilityDetector`, `IceTraversalDetector`, `IcePathEstablishmentDetector`, `IceEstablishmentFailedDetector`, `IceConnectionFailedDetector`, `IceDisconnectedDetector`, `IceTransportStalledDetector`, `UnstableIcePathDetector`, `IceRestartDetector`, `IceRestartRecommendationDetector`, `DtlsHandshakeFailedDetector`, `DtlsHandshakeStalledDetector` |
 | Capture | `CaptureTrackEndedDetector`, `CaptureTrackMutedDetector` |
 | Telemetry | `CodecChangeDetector`, `SimulcastLayerDetector`, `VideoResolutionChangeDetector`, `StatsGapDetector` |

@@ -1,3 +1,5 @@
+import { mockIssueRegistry } from "../helpers/detectorMocks";
+import { IssueRegistry } from "../../src/utils/IssueRegistry";
 import { IceReachabilityDetector } from "../../src/detectors/IceReachabilityDetector";
 
 interface TestIssue {
@@ -59,6 +61,15 @@ class MockClientMonitor {
 }
 
 class MockPeerConnectionMonitor {
+    /**
+     * This mock's own issue registry, created lazily so it does not depend on field order.
+     * It routes back into the local client mock, leaving every existing assertion intact.
+     */
+    private _issues?: IssueRegistry;
+    public get issues(): IssueRegistry {
+        return this._issues ??= mockIssueRegistry(this.parent);
+    }
+
     public peerConnectionId = 'test-pc-id';
     public parent = new MockClientMonitor();
     public closed = false;

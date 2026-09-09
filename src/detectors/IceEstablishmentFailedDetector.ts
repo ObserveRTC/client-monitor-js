@@ -11,13 +11,7 @@ export type IceLocalCandidateCounts = {
 	unknown: number;
 };
 
-/**
- * `localCandidateCounts` and `candidatePairStates` are the summary of what was actually tried, which
- * is the whole diagnostic value of the issue: they say whether the client got as far as a reflexive
- * or relay candidate, and how far the checks against the far end got. `sustainedForInMs` is how long
- * the connection had been failing to establish when the issue was raised; `durationInMs` is filled in
- * if it establishes later.
- */
+/** A summary of what was actually tried: how far gathering got, and how far the checks against the far end got. */
 export type IceEstablishmentFailedIssuePayload = {
 	peerConnectionId: string;
 	connectionState?: string;
@@ -34,49 +28,24 @@ export type IceEstablishmentFailedIssuePayload = {
 const ISSUE_TYPE = 'ice-establishment-failed';
 
 export type IceEstablishmentFailedDetectorConfig = {
-	/**
-	 * How long (in milliseconds) the connection must go on failing to
-	 * establish before the issue is raised, measured in accumulated stats
-	 * time rather than wall clock. It should comfortably exceed
-	 * `icePathEstablishmentDetector.thresholdInMs`, since a connection that
-	 * is merely slow is not yet one that failed.
-	 */
+	/** Stats time the connection must go on failing to establish before raising, in ms. Keep it above
+	 * `icePathEstablishmentDetector.thresholdInMs` — merely slow is not yet failed. */
 	thresholdInMs: number;
 }
 
 /**
- * The call that never connected — by a wide margin the most common connectivity failure a user
- * actually reports, and until this detector existed the one thing the library could not put in
- * `activeIssues`. Layer 3 emitted an event when establishment dragged on and recommended a restart,
- * but an event is a notification: it is gone the moment it fires, it does not resolve, and nothing
- * asking "what is wrong with this session right now" could see it. So the single most user-visible
- * failure produced an empty issue list, which read as a healthy call.
+ * Reports the call that never connected, as a resolvable issue rather than a passing event. The
+ * payload carries what was actually tried, so an operator can tell the common causes apart: host
+ * candidates only means gathering never reached a STUN server; host and reflexive but no relay means
+ * TURN was never configured or never answered; relay candidates with every pair `in-progress` or
+ * `failed` means the relay is unreachable or the far end never answered the checks.
  *
- * The condition is deliberately three facts together, none of them sufficient alone. Local
- * candidates exist, so this is emphatically not the no-network case — `IceReachabilityDetector` owns
- * that, and the two are mutually exclusive by construction rather than by suppression. The peer
- * connection has never reached `connected`, so this is establishment failing rather than a working
- * call that later broke, which the layer-5 detectors own. And no candidate pair has ever been
- * nominated or reached `succeeded`, which is what distinguishes "checks are still running and might
- * yet win" from "nothing ever won": a connection where a pair succeeded and DTLS is what stalled is
- * a different fault with a different owner. All three have to hold for the whole of
- * `thresholdInMs`, accumulated from the peer connection's own `deltaTime`, because ICE checking
- * legitimately takes seconds and a threshold measured in wall time would punish a slow collection
- * rather than a slow connection.
+ * Three facts must hold together for the whole of `thresholdInMs` in stats time: local candidates
+ * exist (so this is not the no-network case `IceReachabilityDetector` owns), the connection has
+ * never reached `connected` (so this is establishment failing, not a working call that broke), and
+ * no pair was ever nominated or `succeeded` (so a stalled DTLS handshake stays its owner's).
  *
- * The payload carries what was tried rather than only that it failed, which is where the candidate
- * types and the pair `nominated`/`state` fields — collected by this library since forever and read
- * by nothing — finally earn their place. Host candidates only means gathering never reached a STUN
- * server. Host and reflexive but no relay means TURN was never configured or never answered, which
- * is the single most common cause of a call that only fails between certain networks. Relay
- * candidates present with every pair still `in-progress` or `failed` means the relay itself is not
- * reachable or the far end never answered the checks. That is the difference between a
- * misconfiguration, a firewall and a dead peer, and it is all in the stats already.
- *
- * What it deliberately does not claim: which side is at fault. Every fact here is local — what this
- * endpoint gathered and how its own checks went — and a far end that never sent an answer looks
- * exactly like a far end whose candidates cannot be reached. The counts are evidence for a human
- * or a server-side correlation to work with, not a verdict.
+ * It does not claim which side is at fault — every fact here is local.
  *
  * Issue raised: `ice-establishment-failed`, resolved if the connection establishes after all or
  * when the peer connection closes. Config: `iceEstablishmentFailedDetector`.
@@ -123,8 +92,7 @@ export class IceEstablishmentFailedDetector implements Detector {
 			this._everConnected = true;
 		}
 
-		// Latched, not sampled: a pair that won once is proof establishment got
-		// there, however the pair looks on any later tick.
+		// Latched, not sampled: a pair that won once stays proof on every later tick.
 		for (const pair of this.peerConnection.iceCandidatePairs) {
 			if (pair.nominated === true || pair.state === 'succeeded') {
 				this._everNominated = true;
@@ -140,8 +108,7 @@ export class IceEstablishmentFailedDetector implements Detector {
 			return;
 		}
 
-		// With no local candidates there is nothing to have failed *with*, and
-		// `no-available-ice-candidate` is the issue that owns that case.
+		// Nothing to have failed with — `no-available-ice-candidate` owns that case.
 		if (this.peerConnection.localIceCandidates.length === 0) {
 			this._sustainedForInMs = 0;
 
@@ -155,7 +122,8 @@ export class IceEstablishmentFailedDetector implements Detector {
 
 		this._raisedAt = Date.now();
 
-		this.peerConnection.parent.raiseIssue<IceEstablishmentFailedIssuePayload>(this._issueKey, {
+		this.peerConnection.issues.raise({
+			key: this._issueKey,
 			includeInSample: this.includeIssueInSample,
 			type: ISSUE_TYPE,
 			payload: {
@@ -204,12 +172,12 @@ export class IceEstablishmentFailedDetector implements Detector {
 
 		this._raisedAt = undefined;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this._issueKey);
+		const issue = this.peerConnection.issues.get(this._issueKey);
 
 		if (!issue) return;
 
-		clientMonitor.resolveIssue<IceEstablishmentFailedIssuePayload>(this._issueKey, {
+		this.peerConnection.issues.resolve({
+			key: this._issueKey,
 			comment,
 			payload: {
 				...(issue.payload as IceEstablishmentFailedIssuePayload),

@@ -1,39 +1,29 @@
 /**
- * The largest value seen recently, where "recently" is a half-life rather than a
- * window: one number of state, no array to walk, and no way for it to quietly become
- * two samples the way a ten-second window does against an application collecting
- * every five.
+ * The largest value seen recently, where "recently" is a half-life rather than a window.
+ * Each observation decays what came before by the elapsed time and then takes the larger
+ * of the two, so the estimate is always at least the newest sample.
  *
- * Each observation decays what came before by the elapsed time and then takes the
- * larger of the two, so the estimate is always at least the newest sample — a path
- * that just got wider is its own maximum.
- *
- * `decayPerSecond` is applied over the elapsed *stats* time rather than per
- * observation, so an application collecting every second and one collecting every
- * five forget at the same rate in wall-clock terms. A per-observation decay would
- * make the memory five times shorter on the faster one without anything saying so.
- *
- * `sampleCount` is exposed because the maximum of a single sample is that sample
- * rather than a maximum, and a caller comparing against it should be able to say so.
- *
- * ```typescript
- * // Half of a peak is forgotten after about three minutes.
- * const recentMax = new DecayingMaxEstimator(0.996);
- *
- * recentMax.update(bitrate, deltaTimeInMs);
- * recentMax.estimate;                        // `undefined` until the first sample
- * ```
+ * The decay is per second of elapsed stats time, not per observation, so applications
+ * collecting at different periods forget at the same wall-clock rate.
  */
 export class DecayingMaxEstimator {
 	private estimateValue?: number;
 	private samples = 0;
 
 	public constructor(
-		public readonly decayPerSecond: number,
+		private decayPerSecond: number,
 	) {
 		if (decayPerSecond <= 0 || decayPerSecond > 1) {
 			throw new RangeError('decayPerSecond must be greater than 0 and at most 1');
 		}
+	}
+
+	public updateDecayRate(decayPerSecond: number): void {
+		if (decayPerSecond <= 0 || decayPerSecond > 1) {
+			throw new RangeError('decayPerSecond must be greater than 0 and at most 1');
+		}
+
+		this.decayPerSecond = decayPerSecond;
 	}
 
 	/** Folds one observation in and returns the new estimate. */
@@ -57,7 +47,7 @@ export class DecayingMaxEstimator {
 		return this.estimateValue;
 	}
 
-	/** How many observations have been folded in. */
+	/** How many observations have been folded in — the maximum of one sample is not a maximum. */
 	public get sampleCount(): number {
 		return this.samples;
 	}

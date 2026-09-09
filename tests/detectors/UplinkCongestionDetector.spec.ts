@@ -3,59 +3,58 @@ import { UplinkCongestionDetector } from "../../src/detectors/UplinkCongestionDe
 import { MockClientMonitor, MockPeerConnectionMonitor } from "../helpers/detectorMocks";
 
 const CONFIG = {
-	minConfidence: 0.65,
+	minSeverity: 0.65,
+	pacerBloatingSaturatesAt: 4,
 };
-
-/** `1 - available / recentMax`, the half of the confidence the estimate contributes. */
-const narrowingOf = (available: number, recentMax: number) => Math.max(0, 1 - (available / recentMax));
-/** `1 - baseline / pacer`, the half the pacer contributes. */
-const queueingOf = (pacer: number, baseline: number) =>
-	(pacer < 1 ? 0 : Math.max(0, 1 - (Math.max(baseline, 1) / pacer)));
-const confidenceOf = (narrowing: number, queueing: number) => Math.sqrt(narrowing * queueing);
 
 const ISSUE_TYPE = 'uplink-congestion';
 const ISSUE_KEY = `${ISSUE_TYPE}-pc-pc-1`;
 
+/** The two witnesses, restated so an expectation reads as arithmetic rather than a number. */
+const undershootOf = (available: number, recentMax: number) => Math.max(0, 1 - (available / recentMax));
+
+/** Zero at the baseline, one at four times it. */
+const PACER_BLOATING_SATURATES_AT = 4;
+const MIN_PACKET_SEND_DELAY_IN_MS = 1;
+const pacerBloatingOf = (pacer: number, baseline: number) => {
+	const floored = Math.max(baseline, MIN_PACKET_SEND_DELAY_IN_MS);
+
+	return Math.min(1, Math.max(0, (pacer - floored) / (floored * (PACER_BLOATING_SATURATES_AT - 1))));
+};
+const severityOf = (undershoot: number, pacerBloating: number) => Math.sqrt(undershoot * pacerBloating);
+
 /**
- * The throttled run the detector was built against: a loopback peer connection on
- * Chromium 141 behind `tbf rate 500kbit`. Healthy, the estimate sat at 1161 kbps
- * with the encoder sending around a megabit — 161 kbps of room. At the moment the
- * throttle bit, the estimate fell to ~400 while the encoder was still sending a
- * megabit, so the room went to −600 kbps for a collection before the encoder
- * followed it down. That inversion is what this detector is looking for.
- */
-/**
- * The detector's memory of what this path recently carried fades at this rate per
- * second of stats time. Every expectation below that involves the recent maximum is
- * written in terms of it rather than as a number, because the arithmetic *is* the
- * behaviour: a peak observed one second ago is worth this much less already.
+ * The detector's memory of what this path recently carried fades at this rate per second
+ * of stats time. Every expectation below that involves the recent maximum is written in
+ * terms of it rather than as a number, because the arithmetic *is* the behaviour.
  */
 const DECAY_PER_SECOND = 0.996;
 
+/** A few settled collections before the interesting one. No gate requires them. */
+const SETTLING_TICKS = 3;
+
+/**
+ * The throttled run the detector was built against: a loopback peer connection on
+ * Chromium 141 behind `tbf rate 500kbit`. Healthy, the estimate sat at 1161 kbps with the
+ * encoder sending around a megabit. When the throttle bit, the estimate fell to ~400 kbps
+ * while the encoder was still sending a megabit, and the pacer filled behind it.
+ */
 const HEALTHY_ESTIMATE = 1_161_000;
 const HEALTHY_SENDING = 1_000_000;
 const THROTTLED_ESTIMATE = 400_000;
+const HEALTHY_SEND_DELAY_IN_MS = 30;
+const BLOATED_SEND_DELAY_IN_MS = 240;
 
 class MockCapacityPeerConnection extends MockPeerConnectionMonitor {
-	public availableOutgoingBitrate: number | undefined = undefined;
+	/** Summed across the selected pairs, and `undefined` where the browser computed none. */
+	public totalAvailableOutgoingBitrate: number | undefined = undefined;
 	public sendingBitrate = 0;
 
 	/** The gap between the two stats reports this collection came from. */
 	public deltaTime: number | undefined = 1000;
 
-	/**
-	 * The connection's accumulated stats time, which the real monitor advances by
-	 * `deltaTime` on every collection. The detector's window ages on this.
-	 */
-	public statsClockTime = 0;
-
-	/** `availableOutgoingBitrate - sendingBitrate`, and its EWMA. */
-	public outgoingBitrateHeadroom: number | undefined = undefined;
-	public ewmaOutgoingBitrateHeadroom: number | undefined = undefined;
-
+	/** Pacer time per video packet over this collection. */
 	public avgPacketSendDelayInMs: number | undefined = undefined;
-	public estimatedMedianPacketSendDelayInMs: number | undefined = undefined;
-	public ewmaRttInSec: number | undefined = undefined;
 	public uplinkCongested = false;
 
 	/** The browser's own limitation verdict, folded across the streams that sent. */
@@ -66,36 +65,24 @@ type TickInput = {
 	available?: number;
 	sending?: number;
 	deltaTime?: number;
-	/** The average room this call had been running with. */
-	baselineHeadroom?: number;
 	sendDelay?: number;
-	baselineSendDelay?: number;
 	qualityLimitationReason?: string;
 };
 
-function setup() {
+function setup(config: Partial<typeof CONFIG> = {}) {
 	const peerConnection = new MockCapacityPeerConnection();
 	const clientMonitor: MockClientMonitor = peerConnection.parent;
 
-	clientMonitor.config.uplinkCongestionDetector = { ...CONFIG };
+	clientMonitor.config.uplinkCongestionDetector = { ...CONFIG, ...config };
 
 	const detector = new UplinkCongestionDetector(peerConnection as any);
 
-	/** One collection. The headroom is derived here exactly as the monitor derives it. */
+	/** One collection, as the monitor would present it. */
 	const tick = (input: TickInput = {}) => {
-		const available = 'available' in input ? input.available : HEALTHY_ESTIMATE;
-		const sending = input.sending ?? HEALTHY_SENDING;
-
 		peerConnection.deltaTime = input.deltaTime ?? 1000;
-		peerConnection.statsClockTime += peerConnection.deltaTime;
-		peerConnection.availableOutgoingBitrate = available;
-		peerConnection.sendingBitrate = sending;
-		peerConnection.outgoingBitrateHeadroom = available === undefined ? undefined : available - sending;
-		peerConnection.ewmaOutgoingBitrateHeadroom = 'baselineHeadroom' in input
-			? input.baselineHeadroom
-			: HEALTHY_ESTIMATE - HEALTHY_SENDING;
-		peerConnection.avgPacketSendDelayInMs = 'sendDelay' in input ? input.sendDelay : 2;
-		peerConnection.estimatedMedianPacketSendDelayInMs = 'baselineSendDelay' in input ? input.baselineSendDelay : 2;
+		peerConnection.totalAvailableOutgoingBitrate = 'available' in input ? input.available : HEALTHY_ESTIMATE;
+		peerConnection.sendingBitrate = input.sending ?? HEALTHY_SENDING;
+		peerConnection.avgPacketSendDelayInMs = 'sendDelay' in input ? input.sendDelay : HEALTHY_SEND_DELAY_IN_MS;
 		peerConnection.qualityLimitationReason = 'qualityLimitationReason' in input
 			? input.qualityLimitationReason
 			: 'none';
@@ -103,47 +90,52 @@ function setup() {
 	};
 
 	/**
-	 * A healthy collection. Two of these are what give the detector's own rolling
-	 * window a maximum to measure a drop against — one sample is not a maximum.
+	 * A settled collection. Enough of these give the detector a maximum to measure an
+	 * undershoot against and a median to measure bloating against.
 	 */
-	const healthyTicks = (count: number, input: TickInput = {}) => {
+	const settledTicks = (count: number, input: TickInput = {}) => {
 		for (let i = 0; i < count; ++i) tick(input);
 	};
 
 	/**
-	 * The onset of a throttle: the estimate has collapsed well below its recent
-	 * maximum, the browser says bandwidth, and both witnesses are rising.
+	 * The onset of a throttle: the estimate undershoots its recent maximum, the pacer
+	 * bloats past its median, and the browser says bandwidth.
 	 */
-	const throttledTicks = (count: number, input: TickInput = {}) => {
+	const congestedTicks = (count: number, input: TickInput = {}) => {
 		for (let i = 0; i < count; ++i) {
 			tick({
 				available: THROTTLED_ESTIMATE,
 				sending: HEALTHY_SENDING,
-				sendDelay: 240,
-				baselineSendDelay: 30,
+				sendDelay: BLOATED_SEND_DELAY_IN_MS,
 				qualityLimitationReason: 'bandwidth',
 				...input,
 			});
 		}
 	};
 
-	return { detector, peerConnection, clientMonitor, tick, healthyTicks, throttledTicks };
+	const raisedCount = () => clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE).length;
+
+	return { detector, peerConnection, clientMonitor, tick, settledTicks, congestedTicks, raisedCount };
 }
 
 describe('UplinkCongestionDetector', () => {
 	it('is named after the fault and the direction it reports', () => {
-		const { detector, healthyTicks } = setup();
+		const { detector } = setup();
 
 		expect(detector.name).toBe('uplink-congestion-detector');
 	});
 
-	it('raises when the verdict, the narrowed path and the pacer queue all hold', () => {
-		const { clientMonitor, peerConnection, throttledTicks, healthyTicks } = setup();
+	it('raises when the verdict, the undershoot and the pacer bloating all hold', () => {
+		const { clientMonitor, settledTicks, congestedTicks } = setup();
 
-		peerConnection.ewmaRttInSec = 0.18;
-		healthyTicks(1);
-		throttledTicks(1);
+		settledTicks(SETTLING_TICKS);
+		congestedTicks(1);
 
+		// The baseline is what the settled collections left behind. This collection is
+		// judged against it and only then joins it, so it cannot move its own baseline.
+		const recentMax = HEALTHY_ESTIMATE;
+		const undershoot = undershootOf(THROTTLED_ESTIMATE, recentMax);
+		const pacerBloating = pacerBloatingOf(BLOATED_SEND_DELAY_IN_MS, HEALTHY_SEND_DELAY_IN_MS);
 		const issue = clientMonitor.issueOfType(ISSUE_TYPE);
 
 		expect(clientMonitor.getIssues()).toHaveLength(1);
@@ -152,386 +144,281 @@ describe('UplinkCongestionDetector', () => {
 			peerConnectionId: 'pc-1',
 			availableOutgoingBitrate: THROTTLED_ESTIMATE,
 			sendingBitrate: HEALTHY_SENDING,
-			// The encoder had not followed the estimate down yet.
-			headroomInBps: THROTTLED_ESTIMATE - HEALTHY_SENDING,
-			baselineHeadroomInBps: HEALTHY_ESTIMATE - HEALTHY_SENDING,
-			// One second of stats time after the peak was observed, so it has faded
-			// by exactly one second's worth.
-			maxAvailableOutgoingBitrate: HEALTHY_ESTIMATE * DECAY_PER_SECOND,
-			narrowing: narrowingOf(THROTTLED_ESTIMATE, HEALTHY_ESTIMATE * DECAY_PER_SECOND),
-			queueing: queueingOf(240, 30),
-			confidence: confidenceOf(
-				narrowingOf(THROTTLED_ESTIMATE, HEALTHY_ESTIMATE * DECAY_PER_SECOND),
-				queueingOf(240, 30),
-			),
-			packetSendDelayInMs: 240,
-			baselinePacketSendDelayInMs: 30,
-			rttInMs: 180,
+			recentMaxAvailableBitrate: recentMax,
+			undershoot,
+			pacerBloating,
+			severity: severityOf(undershoot, pacerBloating),
+			avgPacketSendDelayInMs: BLOATED_SEND_DELAY_IN_MS,
+			estimatedMedianPacketSendDelayInMs: HEALTHY_SEND_DELAY_IN_MS,
 		});
 		expect(clientMonitor.emittedOf(ISSUE_TYPE)).toHaveLength(1);
 	});
 
 	it('raises once per episode however long it lasts', () => {
-		const { clientMonitor, throttledTicks, healthyTicks } = setup();
+		const { clientMonitor, settledTicks, congestedTicks, raisedCount } = setup();
 
-		healthyTicks(1);
-		throttledTicks(8);
+		settledTicks(SETTLING_TICKS);
+		congestedTicks(8);
 
-		expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(1);
+		expect(raisedCount()).toBe(1);
 		expect(clientMonitor.emittedOf(ISSUE_TYPE)).toHaveLength(1);
 	});
 
 	describe('what must hold together', () => {
 		it('says nothing without the browser calling the encoder bandwidth limited', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
+			const { settledTicks, congestedTicks, raisedCount } = setup();
 
-			// Everything else about these collections says congestion. The verdict is
-			// far too eager to raise on by itself — precision 0.53 over a throttled run
-			// — but as a gate it is what rules out a drop the path did not cause.
-			healthyTicks(1);
-			throttledTicks(4, { qualityLimitationReason: 'none' });
+			// Both witnesses are where a finding wants them. The verdict decides whether
+			// this is congestion at all, and it says no.
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(4, { qualityLimitationReason: 'cpu' });
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
 		});
 
-		it('says nothing while the path is as wide as it has been all call', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
+		it('says nothing while the estimate is where it has been all call', () => {
+			const { settledTicks, congestedTicks, raisedCount } = setup();
 
-			// Bandwidth limited, pacer filling, and the estimate exactly where it was —
-			// which is most of a screen share's life. `narrowing` is zero, so however
-			// deep the queue gets the geometric mean stays there with it.
-			healthyTicks(1);
-			throttledTicks(4, { available: HEALTHY_ESTIMATE, sendDelay: 10_000 });
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(4, { available: HEALTHY_ESTIMATE });
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
 		});
 
-		it('says nothing when the path narrowed and the pacer did not move', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
+		it('says nothing when the estimate undershoots and the pacer is not bloating', () => {
+			const { settledTicks, congestedTicks, raisedCount } = setup();
 
-			// The mirror of the test above: `queueing` is zero, so the estimate may
-			// collapse as far as it likes and the confidence stays at zero.
-			healthyTicks(1);
-			throttledTicks(4, { available: 1, sendDelay: 2, baselineSendDelay: 2 });
+			// The geometric mean's whole point: one witness at its settled level takes the
+			// severity to zero rather than merely failing to add to it.
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(4, { sendDelay: HEALTHY_SEND_DELAY_IN_MS });
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
+		});
+
+		it('says nothing about a pacer that is deep but has not bloated', () => {
+			const { settledTicks, congestedTicks, raisedCount } = setup();
+
+			// A pacer that was always this deep is this connection's normal, whatever the
+			// absolute number looks like.
+			settledTicks(SETTLING_TICKS, { sendDelay: BLOATED_SEND_DELAY_IN_MS });
+			congestedTicks(4, { sendDelay: BLOATED_SEND_DELAY_IN_MS });
+
+			expect(raisedCount()).toBe(0);
+		});
+
+		it('says nothing about a pacer bloating from nothing to nothing', () => {
+			const { settledTicks, congestedTicks, raisedCount } = setup();
+
+			// Four times the baseline and still under the noise floor: 0.2ms at 0.8ms is
+			// arithmetic, and a ratio alone cannot say so.
+			settledTicks(SETTLING_TICKS, { sendDelay: 0.2 });
+			congestedTicks(4, { sendDelay: 0.8 });
+
+			expect(raisedCount()).toBe(0);
+		});
+
+		it('scores an estimate above its recent maximum as no undershoot at all', () => {
+			const { settledTicks, congestedTicks, raisedCount } = setup();
+
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(4, { available: HEALTHY_ESTIMATE * 2 });
+
+			expect(raisedCount()).toBe(0);
+		});
+
+		it('takes two moderate witnesses over one extreme one', () => {
+			const { clientMonitor, settledTicks, tick } = setup();
+
+			// An undershoot of nearly one with the pacer at its median scores zero, because
+			// the geometric mean multiplies. Two moderate witnesses clear the bar that one
+			// extreme witness cannot — which is the ordering the mean exists to produce.
+			settledTicks(SETTLING_TICKS);
+			tick({
+				available: 1,
+				sendDelay: HEALTHY_SEND_DELAY_IN_MS,
+				qualityLimitationReason: 'bandwidth',
+			});
+
+			expect(clientMonitor.getIssues()).toHaveLength(0);
+
+			// Undershoot ~0.66 and bloating ~0.67: severity ~0.66, just over the bar.
+			tick({
+				available: HEALTHY_ESTIMATE * 0.34,
+				sendDelay: HEALTHY_SEND_DELAY_IN_MS * 3,
+				qualityLimitationReason: 'bandwidth',
+			});
+
+			expect(clientMonitor.getIssues()).toHaveLength(1);
+		});
+	});
+
+	describe('the baselines it measures against', () => {
+		it('keeps feeding them while the browser calls the encoder bandwidth limited', () => {
+			const { clientMonitor, tick, congestedTicks } = setup();
+
+			// The regression this exists for. The verdict reads `bandwidth` on nearly every
+			// collection of a real call — all 34 of the measured throttle run, including its
+			// 6 healthy ones. Feeding the baselines only on collections without it starved
+			// them: no baseline was ever established, and the detector went permanently
+			// silent on exactly the calls it is meant to describe.
+			for (let i = 0; i < SETTLING_TICKS; ++i) {
+				tick({ qualityLimitationReason: 'bandwidth' });
+			}
+
+			congestedTicks(1);
+
+			expect(clientMonitor.getIssues()).toHaveLength(1);
 		});
 
 		/**
-		 * The case the whole rewrite exists for. Over two captured sessions the pacer
-		 * stayed empty through genuine congestion — an estimator that lowers the
-		 * encoder target queues nothing, because less was produced rather than held —
-		 * and requiring it cost four of the ten episodes in one of them.
+		 * One observation is a usable baseline: the decaying maximum starts as that sample
+		 * and the frugal quantile as its own estimate, so both witnesses read against a real
+		 * number rather than a placeholder. Waiting for more only means a collapse arriving
+		 * early in a call goes unreported — and a call that is congested from its first
+		 * seconds is exactly the one worth describing.
 		 */
-		it('says nothing about a pacer queue that is deep but has not grown', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
+		it('judges a collapse against a baseline of a single collection', () => {
+			const { clientMonitor, settledTicks, congestedTicks } = setup();
 
-			// Well over the noise floor, and only a third above the level this call has
-			// been running at all along: a pacer that was always this busy is not a queue
-			// building now, so `queueing` is 0.25 and the pair cannot clear the bar.
-			healthyTicks(1);
-			throttledTicks(4, { sendDelay: 40, baselineSendDelay: 30 });
+			settledTicks(1);
+			congestedTicks(1);
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(clientMonitor.getIssues()).toHaveLength(1);
 		});
 
-		/**
-		 * A moderate reading on both beats an extreme reading on either. That is the
-		 * property the geometric mean exists for, and the one thing two independent
-		 * thresholds could not express however they were tuned.
-		 */
-		it('takes two moderate signals over one extreme one', () => {
-			const moderate = setup();
-			const lopsided = setup();
+		it('does not let an open episode drag the median it is judged against', () => {
+			const { clientMonitor, settledTicks, congestedTicks } = setup();
 
-			// Both halves around 0.7.
-			moderate.healthyTicks(1);
-			moderate.throttledTicks(1, { available: 300_000, sendDelay: 100, baselineSendDelay: 30 });
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
+			expect(clientMonitor.getIssues()).toHaveLength(1);
 
-			// A queue a thousand times deeper, against an estimate that has barely moved.
-			lopsided.healthyTicks(1);
-			lopsided.throttledTicks(1, { available: 1_100_000, sendDelay: 100_000, baselineSendDelay: 30 });
+			// Twenty collections of a deep pacer. Were the median taking them, it would
+			// climb until the bloating scored zero and the episode talked itself out of
+			// existence while the pacer was still deep.
+			congestedTicks(20);
 
-			expect(moderate.clientMonitor.getIssues()).toHaveLength(1);
-			expect(lopsided.clientMonitor.getIssues()).toHaveLength(0);
+			expect(clientMonitor.getIssues()).toHaveLength(1);
 		});
 
-		/**
-		 * A path that just got wider is its own recent maximum, so `narrowing` is zero
-		 * rather than negative and the confidence goes to zero with it. Worth a test
-		 * because the alternative is a negative under a square root.
-		 */
-		it('scores a path that just got wider as no narrowing at all', () => {
-			const { clientMonitor, detector, healthyTicks, throttledTicks } = setup();
+		it('fades the maximum by elapsed time rather than by collection', () => {
+			const { clientMonitor, settledTicks, congestedTicks, tick } = setup();
 
-			healthyTicks(2);
-			// The estimate doubles while the pacer runs away.
-			throttledTicks(4, { available: HEALTHY_ESTIMATE * 2, sendDelay: 10_000 });
+			settledTicks(SETTLING_TICKS);
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
-			expect(detector.inputsUnavailable).toBe(false);
+			// One collection, sixty seconds of it — a backgrounded tab, a saturated main
+			// thread. The maximum fades per second of stats time, not per collection, so
+			// applications collecting at different periods forget at the same rate.
+			tick({ available: HEALTHY_ESTIMATE * 0.5, deltaTime: 60_000 });
+			congestedTicks(1);
+
+			const faded = HEALTHY_ESTIMATE * Math.pow(DECAY_PER_SECOND, 60);
+
+			expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.recentMaxAvailableBitrate)
+				.toBeCloseTo(faded, 0);
 		});
 
-		/**
-		 * Without the floor, a pacer at 0.4ms against a baseline of 0.05ms scores
-		 * `queueing` = 0.875 on arithmetic that is entirely noise, and a mild narrowing
-		 * is then enough to clear the bar.
-		 */
-		it('scores a pacer under the noise floor as no queue at all', () => {
-			const { clientMonitor, healthyTicks, throttledTicks } = setup();
+		it('holds the maximum steady across ordinary collections', () => {
+			const { clientMonitor, settledTicks, congestedTicks } = setup();
 
-			healthyTicks(1);
-			throttledTicks(4, { available: 1, sendDelay: 0.4, baselineSendDelay: 0.05 });
+			// Ten seconds of settled collections fade it by well under a percent, so the
+			// baseline a call is judged against is the path at its best, not its latest.
+			settledTicks(10);
+			congestedTicks(1);
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
-		});
-
-		it('reports how sure it was, and the two halves it came from', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
-
-			healthyTicks(1);
-			throttledTicks(1, { available: 300_000, sendDelay: 100, baselineSendDelay: 30 });
-
-			const payload = clientMonitor.issueOfType(ISSUE_TYPE)?.payload as any;
-
-			expect(payload.narrowing).toBeCloseTo(0.741, 2);
-			expect(payload.queueing).toBeCloseTo(0.7, 2);
-			expect(payload.confidence).toBeCloseTo(Math.sqrt(payload.narrowing * payload.queueing), 6);
-			expect(payload.confidence).toBeGreaterThanOrEqual(CONFIG.minConfidence);
-		});
-
-		it('says nothing about a pacer queue that tripled from nothing to nothing', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
-
-			// Doubled and still under the floor: 0.4ms at 0.8ms is noise, and a ratio
-			// alone cannot say so, so `queueing` is forced to zero.
-			healthyTicks(1);
-			throttledTicks(4, { sendDelay: 0.8, baselineSendDelay: 0.4 });
-
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.recentMaxAvailableBitrate)
+				.toBe(HEALTHY_ESTIMATE);
 		});
 	});
 
 	describe('the look-alike this shape rules out by construction', () => {
 		it('says nothing about a sender that stopped asking for bandwidth', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
+			const { settledTicks, congestedTicks, raisedCount } = setup();
 
-			// A muted camera, a replaced track, a screen share of a still slide. The
-			// encoder asks for less, so nothing queues behind it — `queueing` is zero and
-			// the confidence with it, however far the estimate follows the demand down.
-			healthyTicks(1);
-			throttledTicks(4, {
-				available: 300_000, sending: 100_000,
-				sendDelay: 2, baselineSendDelay: 2,
-			});
+			// A muted camera, a replaced track, a screen share of a still slide. The estimate
+			// follows the demand down — an undershoot — but nothing is queueing behind it,
+			// because the encoder is asking for less rather than being refused more.
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(4, { sending: 100_000, sendDelay: HEALTHY_SEND_DELAY_IN_MS });
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
 		});
 	});
 
 	describe('the conditions it refuses to judge on', () => {
 		it('says nothing about a connection sending nothing at all', () => {
-			const { clientMonitor, detector, throttledTicks, healthyTicks } = setup();
+			const { detector, settledTicks, congestedTicks, raisedCount } = setup();
 
-			healthyTicks(1);
-			throttledTicks(4, { sending: 0 });
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(4, { sending: 0 });
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
 			// Nothing to judge is not the same as being unable to see.
 			expect(detector.inputsUnavailable).toBe(false);
 		});
 
 		it('reports being blind rather than healthy where the browser computed no estimate', () => {
-			const { clientMonitor, detector, throttledTicks, healthyTicks } = setup();
+			const { detector, settledTicks, congestedTicks, raisedCount } = setup();
 
-			// Firefox, and anything else whose congestion control produced neither a
-			// send-side nor a receive-side estimate.
-			healthyTicks(1);
-			throttledTicks(2, { available: undefined });
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(2, { available: undefined });
 
 			expect(detector.inputsUnavailable).toBe(true);
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
 		});
 
 		it('reports being blind where there is no verdict to read', () => {
-			const { clientMonitor, detector, throttledTicks, healthyTicks } = setup();
+			const { detector, settledTicks, congestedTicks, raisedCount } = setup();
 
-			// An audio-only sender: the field "must not exist for audio".
-			healthyTicks(1);
-			throttledTicks(2, { qualityLimitationReason: undefined });
+			// An audio-only sender: the field must not exist for audio.
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(2, { qualityLimitationReason: undefined });
 
 			expect(detector.inputsUnavailable).toBe(true);
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(raisedCount()).toBe(0);
 		});
 
-		/**
-		 * The ramp-up at the start of every call is exactly where a detector inventing a
-		 * baseline out of one sample would fire. Nothing guards it: the maximum folds in
-		 * the newest sample, so on the first collection the estimate is its own maximum
-		 * and `narrowing` scores zero however low the estimate happens to be.
-		 */
-		it('says nothing on the first collection, having nothing to compare against', () => {
-			const { clientMonitor, throttledTicks } = setup();
+		it('reports being blind on a collection with no pacer measurement', () => {
+			const { detector, settledTicks, congestedTicks, raisedCount } = setup();
 
-			throttledTicks(1);
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(2, { sendDelay: undefined });
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
-		});
-
-		it('scores the first collection at zero confidence, whatever the estimate is', () => {
-			const { clientMonitor, tick } = setup();
-
-			// A tiny estimate and a pacer running away, on the very first collection.
-			tick({
-				available: 1, sending: HEALTHY_SENDING, sendDelay: 10_000, baselineSendDelay: 1,
-				qualityLimitationReason: 'bandwidth',
-			});
-
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
-		});
-
-		it('forgets a peak that has faded', () => {
-			const { clientMonitor, healthyTicks, throttledTicks } = setup();
-
-			healthyTicks(2);
-
-			// Five minutes of quiet collections on the narrowed path — the browser is
-			// not calling it bandwidth limited, so nothing is raised, but the memory of
-			// the wide path keeps fading while the narrow one keeps being observed. Well
-			// past the three-minute half-life, so nothing of the wide path is left.
-			throttledTicks(60, { qualityLimitationReason: 'none', deltaTime: 5000 });
-
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
-
-			// The same estimate that opened a finding against the wide path raises
-			// nothing now: measured against the narrow path this call has actually been
-			// running on, it is not a collapse at all. A link that settled at a third
-			// of what it once carried has settled, and saying otherwise for the rest of
-			// the call is the failure a call-long maximum would produce.
-			throttledTicks(1);
-
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
-
-			// It takes a fresh collapse against *that* level to open one.
-			throttledTicks(1, { available: THROTTLED_ESTIMATE * 0.3 });
-
-			// Measured against the narrow path this call has actually been running on,
-			// faded by the one second since it was last observed — and no trace of the
-			// wide path it lost a minute ago.
-			expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.maxAvailableOutgoingBitrate)
-				.toBeCloseTo(THROTTLED_ESTIMATE * DECAY_PER_SECOND, 0);
-		});
-
-		/**
-		 * The memory reaches past the collection before. A yardstick that only ever
-		 * compared a collection with its predecessor could not see a path that narrowed
-		 * over several of them — which is most of them, since a bandwidth estimator
-		 * ramps down over seconds.
-		 */
-		it('measures against the recent past, not against the collection before', () => {
-			const { clientMonitor, healthyTicks, throttledTicks, tick } = setup();
-
-			healthyTicks(2);
-
-			// Three collections at an intermediate level, quiet enough that nothing is
-			// raised on them.
-			for (let i = 0; i < 3; ++i) tick({ available: 500_000 });
-
-			throttledTicks(1);
-
-			// 400k is a collapse against the 1161k this path was carrying four
-			// collections ago, and not against the 500k of the collection before.
-			expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.maxAvailableOutgoingBitrate)
-				.toBeCloseTo(HEALTHY_ESTIMATE * Math.pow(DECAY_PER_SECOND, 4), 0);
-		});
-
-		/**
-		 * The memory fades per second of stats time, not per collection. Per collection
-		 * would make an application collecting every second forget five times faster
-		 * than one collecting every five, with nothing saying so — the same trap, in
-		 * reverse, as sizing a window in milliseconds and getting two samples out of it.
-		 */
-		it('fades by elapsed time rather than by collection', () => {
-			const slow = setup();
-			const fast = setup();
-
-			slow.healthyTicks(1);
-			// One collection covering five seconds.
-			slow.throttledTicks(1, { deltaTime: 5000 });
-
-			fast.healthyTicks(1);
-			// Five collections covering the same five seconds. The four in between
-			// observe the narrowed path without the browser calling it a limitation, so
-			// nothing is raised on them and the peak is left to fade.
-			for (let i = 0; i < 4; ++i) {
-				fast.tick({ deltaTime: 1000, available: THROTTLED_ESTIMATE, qualityLimitationReason: 'none' });
-			}
-			fast.throttledTicks(1, { deltaTime: 1000 });
-
-			const slowMax = slow.clientMonitor.issueOfType(ISSUE_TYPE)?.payload.maxAvailableOutgoingBitrate;
-			const fastMax = fast.clientMonitor.issueOfType(ISSUE_TYPE)?.payload.maxAvailableOutgoingBitrate;
-
-			expect(slowMax).toBeCloseTo(HEALTHY_ESTIMATE * Math.pow(DECAY_PER_SECOND, 5), 0);
-			expect(fastMax).toBeCloseTo(slowMax as number, 0);
-		});
-
-		it('does not fade on a collection that reported no estimate', () => {
-			const { clientMonitor, healthyTicks, throttledTicks, tick } = setup();
-
-			healthyTicks(2);
-
-			// Nothing observed is not an observation: twenty blind collections must not
-			// make what this path recently carried any less true.
-			for (let i = 0; i < 20; ++i) tick({ available: undefined });
-
-			throttledTicks(1);
-
-			// Faded by the one second of this collection, and by nothing the blind ones
-			// contributed.
-			expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.maxAvailableOutgoingBitrate)
-				.toBeCloseTo(HEALTHY_ESTIMATE * DECAY_PER_SECOND, 0);
-		});
-
-		it('says nothing on a collection with no pacer measurement', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
-
-			healthyTicks(1);
-			throttledTicks(4, { sendDelay: undefined });
-
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(0);
+			expect(detector.inputsUnavailable).toBe(true);
+			expect(raisedCount()).toBe(0);
 		});
 	});
 
 	describe('closing the finding', () => {
 		it('resolves when the browser stops reporting a bandwidth limitation', () => {
-			const { clientMonitor, throttledTicks, tick, healthyTicks } = setup();
+			const { clientMonitor, settledTicks, congestedTicks, tick } = setup();
 
-			healthyTicks(1);
-			throttledTicks(1);
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
 			expect(clientMonitor.getIssues()).toHaveLength(1);
 
 			tick({ qualityLimitationReason: 'none' });
 
 			expect(clientMonitor.getIssues()).toHaveLength(0);
-			expect(clientMonitor.resolvedIssues).toHaveLength(1);
 			expect(clientMonitor.resolvedIssues[0]?.comment)
 				.toBe('the browser no longer reports the encoder as bandwidth limited');
 			expect(clientMonitor.resolvedIssues[0]?.payload.durationInMs).toEqual(expect.any(Number));
 		});
 
 		it('resolves on a path that settled below what it used to carry', () => {
-			const { clientMonitor, throttledTicks, tick, healthyTicks } = setup();
+			const { clientMonitor, settledTicks, congestedTicks, tick } = setup();
 
-			healthyTicks(1);
-			throttledTicks(1);
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
 
-			// The encoder has followed the estimate down and the call is stable at a
-			// third of what it was. This link has recovered, and it is never coming
-			// back to where it was — a recovery threshold on the bitrate would hold
-			// the finding open for the rest of the call.
+			// The encoder has followed the estimate down and the call is stable at a third
+			// of what it was. This link has recovered and is never coming back to where it
+			// started; a bitrate threshold against the old maximum would say otherwise.
 			tick({
 				available: THROTTLED_ESTIMATE,
 				sending: 380_000,
+				sendDelay: BLOATED_SEND_DELAY_IN_MS,
 				qualityLimitationReason: 'none',
 			});
 
@@ -539,67 +426,51 @@ describe('UplinkCongestionDetector', () => {
 		});
 
 		it('holds the finding open while the limitation stands', () => {
-			const { clientMonitor, throttledTicks, tick, healthyTicks } = setup();
+			const { clientMonitor, settledTicks, congestedTicks, tick } = setup();
 
-			healthyTicks(1);
-			throttledTicks(1);
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
 
-			// The room is back and the pacer has drained, but the browser still calls
-			// the encoder bandwidth limited: the episode is not over.
+			// Both witnesses back at their settled levels, and the browser still calling the
+			// encoder bandwidth limited: the episode is not over.
 			tick({ qualityLimitationReason: 'bandwidth' });
 
 			expect(clientMonitor.getIssues()).toHaveLength(1);
 		});
 
 		it('closes the finding when the connection stops sending', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
+			const { clientMonitor, settledTicks, congestedTicks } = setup();
 
-			healthyTicks(1);
-			throttledTicks(1);
-			throttledTicks(1, { sending: 0 });
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
+			congestedTicks(1, { sending: 0 });
 
 			expect(clientMonitor.getIssues()).toHaveLength(0);
 			expect(clientMonitor.resolvedIssues[0]?.comment).toBe('nothing is being sent over this connection');
 		});
 
 		it('opens a second finding for a second episode', () => {
-			const { clientMonitor, throttledTicks, tick, healthyTicks } = setup();
+			const { clientMonitor, settledTicks, congestedTicks, tick, raisedCount } = setup();
 
-			healthyTicks(1);
-			throttledTicks(1);
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
 			tick({ qualityLimitationReason: 'none' });
-			throttledTicks(1);
+			congestedTicks(1);
 
-			expect(clientMonitor.raisedIssues.filter((issue) => issue.type === ISSUE_TYPE)).toHaveLength(2);
+			expect(raisedCount()).toBe(2);
 			expect(clientMonitor.getIssues()).toHaveLength(1);
 		});
 	});
 
-	describe('the direction-agnostic feed', () => {
-		it('emits `congestion` alongside its own event, saying which direction', () => {
-			const { clientMonitor, throttledTicks, healthyTicks } = setup();
-
-			healthyTicks(1);
-			throttledTicks(1);
-
-			const combined = clientMonitor.emittedOf('congestion');
-
-			expect(combined).toHaveLength(1);
-			expect(combined[0]?.payload.direction).toBe('uplink');
-			// The whole finding travels on it, not a flattened summary.
-			expect(combined[0]?.payload.headroomInBps).toBe(THROTTLED_ESTIMATE - HEALTHY_SENDING);
-		});
-	});
 
 	describe('the connection attribute', () => {
 		it('moves with the finding rather than with the collection', () => {
-			const { peerConnection, throttledTicks, tick, healthyTicks } = setup();
+			const { peerConnection, settledTicks, congestedTicks, tick } = setup();
 
-			tick();
+			settledTicks(SETTLING_TICKS);
 			expect(peerConnection.uplinkCongested).toBe(false);
 
-			healthyTicks(1);
-			throttledTicks(1);
+			congestedTicks(1);
 			expect(peerConnection.uplinkCongested).toBe(true);
 
 			tick({ qualityLimitationReason: 'none' });
@@ -607,12 +478,93 @@ describe('UplinkCongestionDetector', () => {
 		});
 	});
 
+	/**
+	 * `uplinkVideoCongestionSeverity` is the continuous reading beside the boolean flag: a
+	 * finding is on or off, this is how bad it is right now. An application drawing a meter
+	 * reads it every collection, so it has to keep moving while an episode is open and has to
+	 * go blank when there is nothing to judge — a stale number would draw a healthy path as
+	 * congested for the rest of the call.
+	 */
+	describe('the severity published on the connection', () => {
+		it('carries the same number the finding was raised with', () => {
+			const { peerConnection, clientMonitor, settledTicks, congestedTicks } = setup();
+
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
+
+			const payload = clientMonitor.issueOfType(ISSUE_TYPE)?.payload as any;
+
+			expect(peerConnection.uplinkVideoCongestionSeverity).toBe(payload.severity);
+		});
+
+		it('keeps moving while the finding stays open', () => {
+			const { peerConnection, settledTicks, congestedTicks } = setup();
+
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
+
+			const atOnset = peerConnection.uplinkVideoCongestionSeverity;
+
+			// The same episode, deeper: the estimate has fallen further still.
+			congestedTicks(1, { available: THROTTLED_ESTIMATE / 4 });
+
+			expect(atOnset).toBeGreaterThan(0);
+			expect(peerConnection.uplinkVideoCongestionSeverity).toBeGreaterThan(atOnset as number);
+		});
+
+		it('is published on settled collections too, not only congested ones', () => {
+			const { peerConnection, settledTicks, tick } = setup();
+
+			settledTicks(SETTLING_TICKS);
+			// Bandwidth limited, but nothing given up — a probe overshoot rather than a fault.
+			tick({ qualityLimitationReason: 'bandwidth' });
+
+			expect(peerConnection.uplinkVideoCongestionSeverity).toBe(0);
+		});
+
+		it('goes blank when the browser stops reporting a bandwidth limitation', () => {
+			const { peerConnection, settledTicks, congestedTicks, tick } = setup();
+
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
+			expect(peerConnection.uplinkVideoCongestionSeverity).toBeGreaterThan(0);
+
+			tick({ qualityLimitationReason: 'none' });
+
+			expect(peerConnection.uplinkVideoCongestionSeverity).toBeUndefined();
+		});
+
+		it('goes blank when the browser reports no estimate at all', () => {
+			const { peerConnection, settledTicks, congestedTicks, tick } = setup();
+
+			settledTicks(SETTLING_TICKS);
+			congestedTicks(1);
+
+			tick({ available: undefined, qualityLimitationReason: 'bandwidth' });
+
+			expect(peerConnection.uplinkVideoCongestionSeverity).toBeUndefined();
+		});
+	});
+
+	it('fails closed where the configured severity never arrived', () => {
+		const { clientMonitor, settledTicks, congestedTicks, raisedCount } = setup();
+
+		// Untyped config, an `as` cast, config deserialized at runtime. `severity < undefined`
+		// is false, so a comparison written that way would raise on every collection.
+		clientMonitor.config.uplinkCongestionDetector = {} as any;
+
+		settledTicks(SETTLING_TICKS);
+		congestedTicks(4);
+
+		expect(raisedCount()).toBe(0);
+	});
+
 	it('does nothing at all while disabled', () => {
-		const { clientMonitor, detector, throttledTicks, healthyTicks } = setup();
+		const { clientMonitor, detector, settledTicks, congestedTicks } = setup();
 
 		detector.disabled = true;
-		healthyTicks(1);
-		throttledTicks(4);
+		settledTicks(SETTLING_TICKS);
+		congestedTicks(4);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 		expect(clientMonitor.emitted).toHaveLength(0);

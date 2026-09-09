@@ -14,11 +14,7 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 	packetsSent?: number | undefined;
 	bytesSent?: number | undefined;
 
-	/**
-	 * What the far end reported sending in this interval, from its RTCP sender report.
-	 * `undefined` until two reports have been seen, or where the counter is not
-	 * reported. A backwards counter yields `undefined`, never 0.
-	 */
+	/** What the far end reported sending in this interval; `undefined` when there is no new report. */
 	deltaPacketsSent?: number | undefined;
 	deltaBytesSent?: number | undefined;
 	localId?: string | undefined;
@@ -31,27 +27,14 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 	// derived fields
 	bitrate?: number | undefined;
 
-	/**
-	 * Milliseconds between this stats report and the previous one, from the
-	 * reports' own timestamps.
-	 *
-	 * `remote-outbound-rtp` advances only when a sender report arrives, and
-	 * `getStats()` keeps serving the last one in between — so **`0` means no new
-	 * report this collection**, and the interval counters are `undefined`
-	 * alongside it. `undefined` means no second report has been seen yet. A
-	 * positive value is the only reading that says the far end just spoke.
-	 */
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
 	deltaTime?: number | undefined;
 
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 	
 	public constructor(
@@ -74,16 +57,7 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 		return result;
 	}
 
-	/**
-	 * Milliseconds of **stats time** this monitor has observed, accumulated from
-	 * `deltaTime` — the clock every window and duration in the library is measured
-	 * on, and the one thing `Date.now()` must never stand in for.
-	 *
-	 * It advances by what each collection actually cost rather than by one nominal
-	 * period, so a late or skipped collection widens a window by the time the
-	 * condition really held underneath. It never goes backwards and it is not a
-	 * timestamp: only differences between two readings of it mean anything.
-	 */
+	/** Accumulated stats time. Only differences between two readings mean anything. */
 	public statsClockTime = 0;
 
 	public getPeerConnection() {
@@ -112,10 +86,8 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 		const elapsedInMs = stats.timestamp - this.timestamp;
 
 		if (elapsedInMs <= 0) {
-			// The same sender report came back — see `deltaTime`. A stale claim about
-			// what the far end sent is worse than no claim: it reads as the far end
-			// still talking long after its RTCP stopped, and with rtcp-mux its RTCP
-			// stops with its media.
+			// The same sender report came back: a stale claim would read as the far end
+			// still talking long after its RTCP stopped.
 			this.deltaTime = 0;
 			this.deltaPacketsSent = undefined;
 			this.deltaBytesSent = undefined;

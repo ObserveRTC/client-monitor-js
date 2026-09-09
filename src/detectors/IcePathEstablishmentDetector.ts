@@ -6,65 +6,32 @@ import { Detector } from "./Detector";
 /** Which stage of establishment a too-long `connecting` is actually stuck in. */
 export type IcePathEstablishmentStage = 'ice-gathering' | 'ice-checking' | 'dtls' | 'unknown';
 
-/**
- * Severity order used to pick the transport that best explains a stalled
- * establishment. A connection without BUNDLE has several transports, and the
- * failing one is the story — not whichever healthy sibling was listed first.
- */
+/** Severity order for picking the transport that best explains a stall — without BUNDLE there are several. */
 const ICE_STATE_SEVERITY: Record<string, number> = {
 	failed: 6, disconnected: 5, checking: 4, new: 3, connected: 2, completed: 1, closed: 0,
 };
 
 export type IcePathEstablishmentDetectorConfig = {
-	/**
-	 * Flag to indicate if the detector should create the
-	 * `LONG_PC_CONNECTION_ESTABLISHMENT` client event in addition to
-	 * emitting the monitor event. Set it to `false` to keep the event out of
-	 * the sample stream while still receiving it in-process.
-	 *
-	 * DEFAULT: true
-	 */
+	/** Also add the `LONG_PC_CONNECTION_ESTABLISHMENT` client event, not just the monitor event. Default true. */
 	createEvent?: boolean
 
-	/**
-	 * The time threshold (in milliseconds) for reporting prolonged
-	 * PeerConnection establishment. Raising it makes the detector quieter on
-	 * slow-but-working networks; lowering it reports sooner and more often.
-	 */
+	/** How long a connection may stay in `connecting` before it is reported, in ms. */
 	thresholdInMs: number;
 }
 
 /**
- * Reports how long a peer connection has been trying to connect, and — the part that makes the
- * report actionable — which stage of connecting it is stuck in. Nothing else in the library can
- * answer that second question, because `connectionState: 'connecting'` deliberately covers ICE
- * gathering, ICE checking and the DTLS handshake alike, and the three have nothing in common except
- * that the connection is not ready yet.
+ * Reports how long a peer connection has been trying to connect and, more usefully, which stage it
+ * is stuck in. `connectionState: 'connecting'` covers ICE gathering, ICE checking and the DTLS
+ * handshake alike; `stalledStage` tells them apart, so an operator can say whether to look at
+ * candidate gathering, at reachability, or at the certificate exchange.
  *
- * The trigger is `connectionState` rather than any transport's ICE state precisely because of that
- * coverage: a connection whose ICE side finished and whose DTLS handshake is hanging has every
- * transport reading `connected` while the call still does not work, and a detector watching ICE
- * alone would call it healthy. `_stalledStage()` then narrows the report to the stage actually
- * responsible, using the selected pair being `succeeded` as the proof that the ICE side is done
- * where the browser reports no per-transport `iceState` at all.
+ * The trigger is `connectionState` rather than any transport's ICE state, because a connection whose
+ * ICE side finished and whose DTLS handshake hangs reads `connected` on every transport. Time is
+ * accumulated from the connection's own `deltaTime`, so a backgrounded tab does not report the wall
+ * clock it slept through, and the stage is read from the same observations as the duration. Any exit
+ * from `connecting` re-arms the detector and zeroes the clock, so each attempt is timed on its own.
  *
- * It re-arms on **any** exit from `connecting`, not only on `connected`. Resetting on success alone
- * would silence every attempt after the first failure, and a retry that is also taking too long is
- * more interesting than the first attempt was, not less. The same exit zeroes the establishment
- * clock, so each attempt is timed from its own start rather than from the connection's.
- *
- * That clock is stats time: `_connectingForInMs` accumulates the peer connection's own `deltaTime`
- * on every tick spent in `connecting`. Measuring against `connectingStartedAt` — a wall-clock stamp
- * — reported the time the *page* spent, which is a different quantity the moment collection runs
- * late: a backgrounded tab resurfacing after two minutes would announce a two-minute establishment
- * it never watched, and the `stalledStage` shipped alongside would be read off a single stats report
- * taken after the fact. The duration and the stage it explains now come from the same observations.
- *
- * This detector raises no issue: it says establishment is slow, which is not yet a claim that it has
- * failed. `IceEstablishmentFailedDetector` — same layer, its own class — makes that claim once the
- * evidence supports it, and `IceRestartRecommendationDetector` owns the `never-established` restart
- * recommendation that used to live here. All three read the connection's own state rather than each
- * other's conclusions.
+ * It raises no issue: slow is not yet failed. `IceEstablishmentFailedDetector` makes that claim.
  *
  * Monitor event: `ice-path-establishment-slow`. Client event:
  * `LONG_PC_CONNECTION_ESTABLISHMENT`, when `createEvent`. Config: `icePathEstablishmentDetector`.
@@ -94,10 +61,8 @@ export class IcePathEstablishmentDetector implements Detector {
 		if (this.disabled) return;
 
 		if (this.peerConnection.connectionState !== 'connecting') {
-			// Rearms on *any* exit from `connecting`: resetting only on `connected` would silence every attempt after the first failure.
+			// Any exit re-arms, not just `connected`, so each attempt is timed on its own.
 			this._evented = false;
-			// The condition has broken, so the clock starts over: a second attempt must
-			// earn the threshold on its own, not inherit what the first one banked.
 			this._connectingForInMs = 0;
 
 			return;
@@ -132,11 +97,8 @@ export class IcePathEstablishmentDetector implements Detector {
 			type: ClientEventTypes.LONG_PC_CONNECTION_ESTABLISHMENT,
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
-				// stats time, not wall-clock: how much observed `connecting` the
-				// threshold was actually crossed with
+				// Stats time, not wall clock.
 				duration: durationInMs,
-				// `connecting` covers both ICE and DTLS — this names which of them
-				// the connection is actually stuck in.
 				stalledStage,
 				iceState: subject?.iceState,
 				dtlsState: subject?.dtlsState,
@@ -145,16 +107,8 @@ export class IcePathEstablishmentDetector implements Detector {
 		});
 	}
 
-	/**
-	 * Where establishment is actually stuck. `connectionState: 'connecting'` covers ICE and the DTLS
-	 * handshake alike; the per-transport states can name the stage — `ice-gathering` before any
-	 * transport exists, `ice-checking` while a transport is still negotiating connectivity, `dtls`
-	 * once a transport's ICE side is done (proven by `iceState` where the browser reports one, by the
-	 * selected pair being `succeeded` where it does not) yet the connection still is not `connected`,
-	 * and `unknown` when the stats give no verdict.
-	 */
+	/** Narrows a stalled `connecting` to the stage responsible, or `unknown` when the stats give no verdict. */
 	private _stalledStage(): IcePathEstablishmentStage {
-		// nullish-guarded so a partially mocked monitor (tests, custom sources) stays judgeable
 		const transports = this.peerConnection.iceTransports ?? [];
 
 		if (transports.length === 0) {
@@ -171,8 +125,7 @@ export class IcePathEstablishmentDetector implements Detector {
 				anyIceDone = true;
 				continue;
 			}
-			// no reported iceState (Safari, reconstructed Firefox transport):
-			// a succeeded selected pair proves the ICE side done
+			// Where no iceState is reported (Safari), a succeeded pair proves the ICE side done.
 			if (iceState === undefined && transport.getSelectedCandidatePair()?.state === 'succeeded') {
 				anyIceDone = true;
 			}

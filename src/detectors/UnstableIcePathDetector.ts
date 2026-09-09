@@ -3,10 +3,7 @@ import { IceTransportMonitor } from "../monitors/IceTransportMonitor";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
-/**
- * `pathKey` identifies the path whose selection keeps moving, `switches` is how many switches were
- * counted inside `windowInMs`, and `kind` is how the path was classified at raise time.
- */
+/** The path whose selection keeps moving, and how many switches were counted inside the window. */
 export type UnstableIcePathIssuePayload = {
 	peerConnectionId: string;
 	pathKey: string;
@@ -15,13 +12,7 @@ export type UnstableIcePathIssuePayload = {
 	windowInMs: number;
 	/** Absent when the transport had no selected candidate pair to classify at raise time. */
 	kind?: IcePathKind;
-	/**
-	 * Switches inside the window according to the browser's own
-	 * `selectedCandidatePairChanges` counter, when the browser reports one
-	 * (Chrome 80+, Firefox 155+). It also counts flaps too fast for the
-	 * tick-to-tick pair diffing to observe, which is why `switches` can
-	 * exceed the observed transition count.
-	 */
+	/** Switches per the browser's own counter, where it reports one. It also sees flaps too fast to diff. */
 	nativePairChanges?: number;
 	durationInMs?: number;
 };
@@ -39,48 +30,25 @@ type TransportState = {
 const ISSUE_TYPE = 'unstable-ice-path';
 
 export type UnstableIcePathDetectorConfig = {
-	/**
-	 * The window (in milliseconds) over which selected-path switches are
-	 * counted. It tumbles rather than slides: once this much stats time has
-	 * accumulated the count starts over. A wider window catches slower
-	 * churn at the cost of remembering switches for longer.
-	 */
+	/** Tumbling window over which selected-path switches are counted, in stats time. */
 	pathSwitchWindowInMs: number;
 
-	/**
-	 * How many selected-path switches inside `pathSwitchWindowInMs` are
-	 * needed before the path is considered unstable.
-	 */
+	/** Switches inside one window needed before the path counts as unstable. */
 	pathSwitchThreshold: number;
 }
 
 /**
- * Reports an ICE transport whose selected path will not settle. This is a different failure from a
- * path that is down, and a worse one to experience: each reselection is a fresh round of consent
- * checks over a new tuple, so media stutters, the encoder's bandwidth estimate is thrown away and
- * rebuilt, and the call sounds broken while every state field reports `connected` throughout. The
- * usual causes are a device with two live interfaces fighting over which one wins, a NAT rewriting
- * bindings underneath a live flow, or a TURN allocation that keeps being re-established.
+ * Reports an ICE transport whose selected path will not settle. Use it to tell path churn from a
+ * path that is simply down: each reselection costs a fresh round of consent checks and a discarded
+ * bandwidth estimate, so the call stutters while every state field reads `connected` throughout —
+ * two live interfaces fighting, a NAT rewriting bindings, a TURN allocation being re-established.
  *
- * Switches are counted as the larger of two sources, because neither alone is sufficient. Diffing
- * `selectedCandidatePairId` from tick to tick is portable and works everywhere, but it is blind to a
- * flap that departs and returns inside one collecting period — two switches that look like none. The
- * browser's own `deltaSelectedCandidatePairChanges` sees exactly those, and is the ground truth for
- * *how many* happened, but Safari does not report it at all and neither does Firefox before 155.
- * Taking the maximum means the detector uses the better evidence where it exists and still works
- * where it does not.
+ * Switches are the larger of two counts. Diffing `selectedCandidatePairId` tick to tick is portable
+ * but blind to a flap that departs and returns inside one collecting period; the browser's own
+ * `deltaSelectedCandidatePairChanges` sees those but is not reported everywhere. The window tumbles
+ * rather than slides, in stats time, so a late collection cannot shrink what it was measuring.
  *
- * The window is **tumbling**, not sliding: each tick adds the transport's own `deltaTime`, and once
- * the accumulated time passes `pathSwitchWindowInMs` both counters reset and a new window starts.
- * A sliding window would need a timestamp per switch and the bookkeeping to age them out, and it
- * would buy nothing here — the question being asked is "is this path flapping right now", where the
- * difference between a window that slides and one that tumbles is at worst a threshold reached one
- * window later. The clock is stats time for the usual reason: a collection that ran late must not
- * shrink the window it was measuring.
- *
- * What it deliberately does not claim: which path is better, or that the switching itself is the
- * fault rather than a symptom of the network underneath. It reports that the selection is not
- * settling and how often, and leaves the cause to whoever reads the candidate types alongside it.
+ * It does not claim which path is better, or that the switching is the fault rather than a symptom.
  *
  * Issue raised: `unstable-ice-path`, resolved when a whole window passes below the threshold or when
  * the transport goes away. Config: `unstableIcePathDetector`.
@@ -144,9 +112,8 @@ export class UnstableIcePathDetector implements Detector {
 
 			state.raisedAt = Date.now();
 
-			this.peerConnection.parent.raiseIssue<UnstableIcePathIssuePayload>(
-				this._issueKey(transport.id),
-				{
+			this.peerConnection.issues.raise({
+					key: this._issueKey(transport.id),
 					includeInSample: this.includeIssueInSample,
 					type: ISSUE_TYPE,
 					payload: {
@@ -164,8 +131,7 @@ export class UnstableIcePathDetector implements Detector {
 
 		if (state.windowElapsedInMs < pathSwitchWindowInMs) return;
 
-		// The window tumbles: a standing issue survives only if the window that
-		// just closed still carried enough switches to justify it.
+		// A standing issue survives only if the window just closing still justified it.
 		if (state.switchesInWindow < pathSwitchThreshold) {
 			this._resolve(transport.id, 'ice path became stable');
 		}
@@ -200,13 +166,13 @@ export class UnstableIcePathDetector implements Detector {
 
 		state.raisedAt = undefined;
 
-		const clientMonitor = this.peerConnection.parent;
 		const key = this._issueKey(transportId);
-		const issue = clientMonitor.activeIssues.get(key);
+		const issue = this.peerConnection.issues.get(key);
 
 		if (!issue) return;
 
-		clientMonitor.resolveIssue<UnstableIcePathIssuePayload>(key, {
+		this.peerConnection.issues.resolve({
+			key: key,
 			comment,
 			payload: {
 				...(issue.payload as UnstableIcePathIssuePayload),

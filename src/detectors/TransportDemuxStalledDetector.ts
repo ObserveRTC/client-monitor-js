@@ -1,12 +1,7 @@
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
-/**
- * `transportReceivingBitrate` is what the ICE transport says is arriving, and `demuxedBytesDelta` how
- * much of it reached an inbound RTP stream over the interval the issue was raised on — zero, which is
- * the whole finding. `stalledForMs` is how long the boundary had been broken at raise time, measured
- * in stats time.
- */
+/** What the transport says arrived against how much of it reached an inbound RTP stream — zero, which is the finding. */
 export type TransportDemuxStalledIssuePayload = {
 	peerConnectionId: string;
 	transportId: string;
@@ -25,58 +20,30 @@ type DemuxState = {
 const ISSUE_TYPE = 'transport-demux-stalled';
 
 export type TransportDemuxStalledDetectorConfig = {
-	/**
-	 * How long (in milliseconds) the broken stage boundary must persist
-	 * before the issue is raised.
-	 */
+	/** How long the broken boundary must persist before raising, in ms. */
 	thresholdInMs: number;
 
-	/**
-	 * Transport receive bitrate (bps) at or above which incoming traffic
-	 * counts as media that must demux into some inbound RTP — set well
-	 * above what RTCP + STUN alone can explain.
-	 */
+	/** Receive bitrate (bps) above which arriving traffic counts as media — set well above RTCP plus STUN. */
 	minTransportReceiveBitrateBps: number;
 }
 
 /**
- * Watches one stage boundary on the receive side: bytes arrive on the ICE transport, and the receiver
- * demuxes them into inbound RTP streams. The boundary is broken when the upstream counter advances
- * and the downstream one stays flat — the transport receiving at a media-level rate while every
- * inbound RTP attributed to it reports zero bytes. Packets are arriving that never reach a stream,
- * which is what an SSRC mismatch after renegotiation looks like from inside the browser, or a
- * consumer created against a producer that is already gone. It is a boundary worth naming: everything
- * else about the call looks healthy, the transport counters keep climbing, and the picture is simply
- * never there.
+ * Reports media arriving on an ICE transport that never reaches any inbound RTP stream — the
+ * transport counters climb while every stream attributed to it stays at zero bytes. Use it to
+ * explain a tile that never appears while the call otherwise looks healthy: an SSRC mismatch after
+ * renegotiation, or a consumer created against a producer that is already gone.
  *
- * Two guards make the verdict honest. `minTransportReceiveBitrateBps` is the floor that rules out
- * RTCP and STUN consent explaining the arriving bytes — a transport receiving a few hundred bps is
- * receiving housekeeping, not media. And without at least one inbound RTP attributed to the
- * transport there is no demux expectation to violate at all: a send-only transport, the ordinary
- * shape of an SFU publish transport, has nothing to demux into by design. A closed peer connection is
- * not judged either.
+ * `minTransportReceiveBitrateBps` rules out RTCP and STUN explaining the arriving bytes, and a
+ * transport with no inbound RTP attributed to it is not judged at all, since a send-only transport
+ * has nothing to demux into by design. The stall clock is stats time, kept per transport id, and a
+ * transport that disappears resolves its issue.
  *
- * The stall clock accumulates each tick's `deltaTime` from the transport rather than wall-clock
- * elapsed, so only media time actually observed counts towards `thresholdInMs`; a throttled page
- * cannot age a boundary into an issue. State is kept per transport id, and a transport that
- * disappears resolves its issue rather than leaving it open.
- *
- * `inputsUnavailable` covers the one blind spot in that arrangement. The upstream half of the
- * comparison is `transport.receivingBitrate`, which is derived solely from
- * `RTCTransportStats.bytesReceived` — and **Firefox still does not populate it as of 153**. There
- * the detector is permanently and silently inert: it cannot tell an SSRC mismatch from a perfectly
- * demuxing call, because it never learns whether anything arrived. The flag is set on a tick where
- * a transport that has inbound RTP attributed to it demuxed nothing and no receiving bitrate was
- * reported — the tick the detector would otherwise have judged — and cleared otherwise. It changes
- * nothing about the verdict: with no evidence that bytes arrived, the boundary is not called broken.
- *
- * This detector deliberately reads no issue but its own. Its predecessor annotated every payload with
- * the other issues active on the peer connection, which made one detector's output a function of
- * every other detector's verdicts and of the order they ran in; that field is gone, and correlating
- * issues is the server's job, where the whole session is visible.
+ * Where the browser reports no transport receiving bitrate it sets `inputsUnavailable` rather than
+ * reading as healthy — with no evidence bytes arrived, the boundary is never called broken.
  *
  * Issue raised: `transport-demux-stalled`. Monitor event: `transport-demux-stalled`.
  * Config: `transportDemuxStalledDetector`.
+ * Connection attribute: `PeerConnectionMonitor.stalledTransportDemux`.
  *
  * Category: Pipeline Disruption
  * Layer: Receive — transport to RTP streams
@@ -102,12 +69,22 @@ export class TransportDemuxStalledDetector implements Detector {
 	}
 
 	public update(): void {
-		if (this.disabled) return;
-		if (this.peerConnection.closed) return;
+		if (this.disabled) {
+			this.peerConnection.stalledTransportDemux = undefined;
+
+			return;
+		}
+		if (this.peerConnection.closed) {
+			this.peerConnection.stalledTransportDemux = undefined;
+
+			return;
+		}
 
 		const seenTransports = new Set<string>();
-		// Aggregated over the transports judged this tick: if any one of them went unjudged for
-		// want of a receiving bitrate, this tick's silence is not evidence of health.
+		// A transport with no inbound RTP has no demux expectation to violate, so it neither
+		// proves nor disproves anything; the flag needs at least one that does.
+		let anyJudged = false;
+		// One unjudgeable transport makes this tick's silence unusable as evidence of health.
 		let inputsUnavailable = false;
 
 		for (const transport of this.peerConnection.iceTransports) {
@@ -123,14 +100,14 @@ export class TransportDemuxStalledDetector implements Detector {
 				demuxedBytesDelta = (demuxedBytesDelta ?? 0) + inboundRtp.deltaBytesReceived;
 			}
 
-			// Nothing was demuxed and the browser did not say whether anything arrived: the
-			// question this detector asks cannot be answered on this transport this tick.
+			// Nothing demuxed and no word on whether anything arrived — unanswerable this tick.
 			if (0 < inboundRtps.length && demuxedBytesDelta === 0 && receivingBitrate === undefined) {
 				inputsUnavailable = true;
 			}
 
-			// The bitrate floor is what rules out RTCP and STUN traffic explaining the arriving bytes; without at
-			// least one inbound RTP there is no demux expectation to violate at all.
+			// No inbound RTP means no demux expectation to violate; the floor rules out RTCP and STUN.
+			if (0 < inboundRtps.length && receivingBitrate !== undefined) anyJudged = true;
+
 			const broken = 0 < inboundRtps.length
 				&& demuxedBytesDelta === 0
 				&& receivingBitrate !== undefined
@@ -144,7 +121,7 @@ export class TransportDemuxStalledDetector implements Detector {
 			if (state.stalledForMs === undefined) {
 				state.stalledForMs = 0;
 			} else {
-				// stats time, not wall-clock: only intervals actually observed count towards the threshold
+				// Stats time: only observed intervals count towards the threshold.
 				state.stalledForMs += transport.deltaTime ?? 0;
 			}
 
@@ -168,7 +145,8 @@ export class TransportDemuxStalledDetector implements Detector {
 				...payload,
 			});
 
-			clientMonitor.raiseIssue<TransportDemuxStalledIssuePayload>(this._issueKey(transport.id), {
+			this.peerConnection.issues.raise({
+				key: this._issueKey(transport.id),
 				includeInSample: this.includeIssueInSample,
 				type: ISSUE_TYPE,
 				payload,
@@ -183,6 +161,12 @@ export class TransportDemuxStalledDetector implements Detector {
 			this._clear(transportId, 'ice transport is gone');
 			this._states.delete(transportId);
 		}
+
+		const anyStalled = [ ...this._states.values() ].some((state) => state.raisedAt !== undefined);
+
+		this.peerConnection.stalledTransportDemux = anyStalled
+			? true
+			: anyJudged && !inputsUnavailable ? false : undefined;
 	}
 
 	private _getState(transportId: string): DemuxState {
@@ -205,17 +189,17 @@ export class TransportDemuxStalledDetector implements Detector {
 
 		if (state.raisedAt === undefined) return;
 
-		const clientMonitor = this.peerConnection.parent;
 		const key = this._issueKey(transportId);
-		const issue = clientMonitor.activeIssues.get(key);
+		const issue = this.peerConnection.issues.get(key);
 
 		if (issue) {
-			clientMonitor.resolveIssue(key, {
+			this.peerConnection.issues.resolve({
+				key: key,
 				comment,
 				payload: {
 					...issue.payload,
 					durationInMs: Date.now() - state.raisedAt,
-				},
+				} as TransportDemuxStalledIssuePayload,
 				resolvedAt: Date.now(),
 			});
 		}

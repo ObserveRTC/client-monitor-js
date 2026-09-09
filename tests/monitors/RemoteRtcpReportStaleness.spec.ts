@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ClientMonitor } from "../../src/ClientMonitor";
 import { PeerConnectionMonitor } from "../../src/monitors/PeerConnectionMonitor";
 import { RemoteInboundRtpMonitor } from "../../src/monitors/RemoteInboundRtpMonitor";

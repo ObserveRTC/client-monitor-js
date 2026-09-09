@@ -1,4 +1,7 @@
+import { mockIssueRegistry } from "../helpers/detectorMocks";
+import { IssueRegistry } from "../../src/utils/IssueRegistry";
 import { PlayoutDiscrepancyDetector } from "../../src/detectors/PlayoutDiscrepancyDetector";
+import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
 
 // Types for test mocks
 interface PlayoutDiscrepancyConfig {
@@ -107,6 +110,15 @@ class MockClientMonitor {
 }
 
 class MockPeerConnectionMonitor {
+    /**
+     * This mock's own issue registry, created lazily so it does not depend on field order.
+     * It routes back into the local client mock, leaving every existing assertion intact.
+     */
+    private _issues?: IssueRegistry;
+    public get issues(): IssueRegistry {
+        return this._issues ??= mockIssueRegistry(this.parent);
+    }
+
     public peerConnectionId = 'test-pc-id';
     public parent = new MockClientMonitor();
 
@@ -115,10 +127,39 @@ class MockPeerConnectionMonitor {
     }
 }
 
+/**
+ * The detector reads its frame counters from the track's `detectionRecoveryWindow` rather than from
+ * one collection's deltas, so the mock turns each `setInboundRtp` into one collection's worth of
+ * window entries: the running totals advance by the deltas the test names, and the window is sized
+ * so its detection half holds exactly the last collection. That keeps every test below reading as
+ * "this collection carried these frames", which is what they were written to say.
+ */
+const COLLECTION_MS = 1000;
+
 class MockInboundTrackMonitor {
+    /** This mock track's own registry, routed back into the local client mock. */
+    private _issues?: IssueRegistry;
+    public get issues(): IssueRegistry {
+        return this._issues ??= mockIssueRegistry(this.getPeerConnection().parent);
+    }
+
     public track = { id: 'test-track-id' };
+
+    public readonly detectionRecoveryWindow = new DetectionRecoveryWindow<{
+        totalFramesReceived: number | null;
+        totalFramesRendered: number | null;
+    }>({ detectionWindowMs: COLLECTION_MS, recoveryWindowMs: COLLECTION_MS });
+
     private peerConnection = new MockPeerConnectionMonitor();
     private inboundRtp: InboundRtpStats | null = null;
+    private _statsClockTime = 0;
+    private _totalFramesReceived = 0;
+    private _totalFramesRendered = 0;
+
+    public constructor() {
+        // One entry to difference the first collection against, as a real track always has.
+        this._addWindowEntry();
+    }
 
     getPeerConnection() {
         return this.peerConnection;
@@ -130,6 +171,34 @@ class MockInboundTrackMonitor {
 
     setInboundRtp(stats: InboundRtpStats | null) {
         this.inboundRtp = stats;
+
+        // A collection reporting no counter leaves the totals unreported, which is what the window
+        // sees when the browser stops carrying them.
+        const received = stats?.deltaFramesReceived;
+        const rendered = stats?.deltaFramesRendered;
+
+        if (received === undefined || rendered === undefined) {
+            this._addWindowEntry({ unreported: true });
+
+            return;
+        }
+
+        this._totalFramesReceived += received;
+        this._totalFramesRendered += rendered;
+        this._addWindowEntry();
+    }
+
+    private _addWindowEntry(options: { unreported?: boolean } = {}) {
+        this.detectionRecoveryWindow.add({
+            timestamp: this._statsClockTime,
+            value: options.unreported
+                ? { totalFramesReceived: null, totalFramesRendered: null }
+                : {
+                    totalFramesReceived: this._totalFramesReceived,
+                    totalFramesRendered: this._totalFramesRendered,
+                },
+        });
+        this._statsClockTime += COLLECTION_MS;
     }
 }
 
@@ -143,6 +212,111 @@ describe('PlayoutDiscrepancyDetector', () => {
         mockClientMonitor = mockTrackMonitor.getPeerConnection().parent as MockClientMonitor;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         detector = new PlayoutDiscrepancyDetector(mockTrackMonitor as any);
+    });
+
+    /**
+     * The number beside the flag: the share of arriving frames that never got painted, published on
+     * every collection that was judged rather than only the ones past the threshold.
+     */
+    describe('the published skew', () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const skew = () => (mockTrackMonitor as any).videoPlayoutSkew;
+
+        it('is the share of arriving frames that went unpainted', () => {
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 40,
+                deltaFramesRendered: 30,
+                ewmaFps: 30,
+            });
+
+            detector.update();
+
+            expect(skew()).toBeCloseTo(0.25, 6);
+        });
+
+        it('is zero for a renderer painting everything that arrives', () => {
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 40,
+                deltaFramesRendered: 40,
+                ewmaFps: 30,
+            });
+
+            detector.update();
+
+            expect(skew()).toBe(0);
+        });
+
+        it('is published below the threshold, where no issue exists', () => {
+            // 10% dropped, under the 25% that opens an episode.
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 40,
+                deltaFramesRendered: 36,
+                ewmaFps: 30,
+            });
+
+            detector.update();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(skew()).toBeCloseTo(0.1, 6);
+        });
+
+        it('means the same at any frame rate, being a share rather than a count', () => {
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 20, deltaFramesRendered: 15, ewmaFps: 15,
+            });
+            detector.update();
+            const slow = skew();
+
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 200, deltaFramesRendered: 150, ewmaFps: 60,
+            });
+            detector.update();
+
+            // A quarter dropped either way, though one collection carried ten times the frames.
+            expect(skew()).toBeCloseTo(slow, 6);
+        });
+
+        it('goes slightly negative when the renderer runs ahead of the counter', () => {
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 40,
+                deltaFramesRendered: 42,
+                ewmaFps: 30,
+            });
+
+            detector.update();
+
+            // Noise around zero from the two counters advancing a moment apart, reported as it is
+            // rather than clamped, so a consumer can see it for what it is.
+            expect(skew()).toBeLessThan(0);
+        });
+
+        it('is blanked where the detector could not judge', () => {
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 40, deltaFramesRendered: 10, ewmaFps: 30,
+            });
+            detector.update();
+            expect(skew()).toBeGreaterThan(0);
+
+            mockClientMonitor.activeTab = false;
+            detector.update();
+
+            expect(skew()).toBeUndefined();
+        });
+
+        it('is blanked when the interval carried too few frames to judge', () => {
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 40, deltaFramesRendered: 10, ewmaFps: 30,
+            });
+            detector.update();
+            expect(skew()).toBeGreaterThan(0);
+
+            mockTrackMonitor.setInboundRtp({
+                deltaFramesReceived: 2, deltaFramesRendered: 0, ewmaFps: 30,
+            });
+            detector.update();
+
+            expect(skew()).toBeUndefined();
+        });
     });
 
     describe('Constructor', () => {

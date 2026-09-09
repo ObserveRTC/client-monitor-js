@@ -1,3 +1,5 @@
+import { mockIssueRegistry } from "../helpers/detectorMocks";
+import { IssueRegistry } from "../../src/utils/IssueRegistry";
 import { DryInboundTrackDetector } from "../../src/detectors/DryInboundTrackDetector";
 
 // Types for test mocks
@@ -108,6 +110,15 @@ class MockClientMonitor {
 }
 
 class MockPeerConnectionMonitor {
+    /**
+     * This mock's own issue registry, created lazily so it does not depend on field order.
+     * It routes back into the local client mock, leaving every existing assertion intact.
+     */
+    private _issues?: IssueRegistry;
+    public get issues(): IssueRegistry {
+        return this._issues ??= mockIssueRegistry(this.parent);
+    }
+
     public peerConnectionId = 'test-pc-id';
     public parent = new MockClientMonitor();
 
@@ -117,6 +128,12 @@ class MockPeerConnectionMonitor {
 }
 
 class MockInboundTrackMonitor {
+    /** This mock track's own registry, routed back into the local client mock. */
+    private _issues?: IssueRegistry;
+    public get issues(): IssueRegistry {
+        return this._issues ??= mockIssueRegistry(this.getPeerConnection().parent);
+    }
+
     public track = { id: 'test-track-id' };
     private peerConnection = new MockPeerConnectionMonitor();
     private inboundRtp: InboundRtpStats | null = null;

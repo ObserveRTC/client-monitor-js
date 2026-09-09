@@ -5,7 +5,7 @@ export default {
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { useESM: true }],
   },
-  testPathIgnorePatterns: ["/node_modules/", "/tests/helpers/"],
+  testPathIgnorePatterns: ["/node_modules/", "/tests/helpers/", "/dist/", "/.internal/"],
   testRegex: '(/tests/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$',
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   moduleNameMapper: {

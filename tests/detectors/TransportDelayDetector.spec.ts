@@ -1,28 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { TransportDelayDetector } from "../../src/detectors/TransportDelayDetector";
+import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
 import { MockClientMonitor, MockPeerConnectionMonitor } from "../helpers/detectorMocks";
 
 const CONFIG = {
 	thresholdInMs: 300,
 	recoveryThresholdInMs: 200,
-	durationInMs: 6000,
+};
+
+/** 6s of stats time each, so three 2s collections fill the detection window exactly. */
+const WINDOW = {
+	detectionWindowMs: 6000,
+	recoveryWindowMs: 6000,
 };
 
 const ISSUE_TYPE = 'transport-delay-degraded';
 const ISSUE_KEY = `${ISSUE_TYPE}-pc-pc-1`;
 
 /**
- * The shared peer connection mock is track-oriented. A transport quality
- * detector never looks at a track: it reads the aggregate the real
- * `PeerConnectionMonitor` computes over its candidate pairs, plus that
- * monitor's own stats clock.
+ * The shared peer connection mock is track-oriented. A transport quality detector never looks at a
+ * track: it reads the window the real `PeerConnectionMonitor` keeps over its RTCP and ICE round
+ * trip totals, on that monitor's own stats clock.
  */
 class MockTransportPeerConnection extends MockPeerConnectionMonitor {
-	/** Smoothed round trip, as `PeerConnectionMonitor.ewmaRttInSec` exposes it — in *seconds*. */
-	public ewmaRttInSec: number | undefined = undefined;
+	public statsClockTime = 0;
 
-	/** The gap between the two stats reports this tick came from. */
-	public deltaTime: number | undefined = undefined;
+	public readonly detectionRecoveryWindow = new DetectionRecoveryWindow<{
+		totalRtcpRoundTripTimeInMs: number | null;
+		totalRtcpRoundTripMeasurements: number | null;
+		totalIceRoundTripTimeInMs: number | null;
+		totalIceResponsesReceived: number | null;
+	}>(WINDOW);
 }
 
 function setup() {
@@ -33,19 +41,68 @@ function setup() {
 
 	const detector = new TransportDelayDetector(peerConnection as any);
 
+	// Running totals, exactly as the browser reports them: one more measurement each collection,
+	// its round trip added to the accumulated time. The window differences its own endpoints.
+	let rtcpTimeInMs = 0;
+	let rtcpMeasurements = 0;
+	let iceTimeInMs = 0;
+	let iceResponses = 0;
+
+	// Both totals are reported every collection, as a browser reports them: they are cumulative
+	// and keep being served whether or not a new measurement landed. `reported: false` is the
+	// other case entirely - a connection measuring no round trip at all.
+	const feed = (reported: boolean) => peerConnection.detectionRecoveryWindow.add({
+		timestamp: peerConnection.statsClockTime,
+		value: {
+			totalRtcpRoundTripTimeInMs: reported ? rtcpTimeInMs : null,
+			totalRtcpRoundTripMeasurements: reported ? rtcpMeasurements : null,
+			totalIceRoundTripTimeInMs: reported ? iceTimeInMs : null,
+			totalIceResponsesReceived: reported ? iceResponses : null,
+		},
+	});
+
+	// One entry to difference the first collection against, as a real connection always has.
+	feed(true);
+
 	/**
-	 * One collection: the smoothed round trip is `rttInMs` now, and the two
-	 * reports it came from were `deltaTime` milliseconds apart. The duration is
-	 * accumulated from that gap and never from the wall clock, so a spec drives
-	 * it here rather than by advancing timers.
+	 * One collection: a round trip of `rttInMs` was measured, and the two reports it came from
+	 * were `deltaTime` milliseconds apart. Stats time is advanced here rather than by the wall
+	 * clock, which is the only thing the window is ever measured on.
 	 */
-	const tick = (rttInMs: number | undefined, deltaTime: number | undefined = 2000) => {
-		peerConnection.ewmaRttInSec = rttInMs === undefined ? undefined : rttInMs / 1000;
-		peerConnection.deltaTime = deltaTime;
+	const tick = (
+		rttInMs: number | undefined,
+		deltaTime: number | undefined = 2000,
+		source: 'rtcp' | 'ice' = 'rtcp',
+	) => {
+		peerConnection.statsClockTime += deltaTime ?? 0;
+
+		if (rttInMs !== undefined) {
+			if (source === 'rtcp') {
+				rtcpTimeInMs += rttInMs;
+				rtcpMeasurements += 1;
+			} else {
+				iceTimeInMs += rttInMs;
+				iceResponses += 1;
+			}
+		}
+
+		// A source that measured nothing this collection keeps serving its unchanged total, which
+		// is what a browser with nothing new to report actually looks like.
+		feed(rttInMs !== undefined);
 		detector.update();
 	};
 
-	return { detector, peerConnection, clientMonitor, tick };
+	/** Fills the detection window, which needs three 2s collections behind the seed entry. */
+	const fillDetectionWindow = (rttInMs: number) => {
+		for (let i = 0; i < 3; ++i) tick(rttInMs);
+	};
+
+	/** And the recovery window behind it, so a resolution can be judged. */
+	const fillRecoveryWindow = (rttInMs: number) => {
+		for (let i = 0; i < 3; ++i) tick(rttInMs);
+	};
+
+	return { detector, peerConnection, clientMonitor, tick, fillDetectionWindow, fillRecoveryWindow };
 }
 
 describe('TransportDelayDetector', () => {
@@ -55,13 +112,10 @@ describe('TransportDelayDetector', () => {
 		expect(detector.name).toBe('transport-delay-detector');
 	});
 
-	it('raises once the round trip has stayed high for the whole duration', () => {
-		const { clientMonitor, tick } = setup();
+	it('raises once the mean round trip over the detection window is above the threshold', () => {
+		const { clientMonitor, fillDetectionWindow } = setup();
 
-		// Three collections of 2s each is exactly the 6s the config asks for.
-		tick(400);
-		tick(400);
-		tick(400);
+		fillDetectionWindow(400);
 
 		const issue = clientMonitor.issueOfType(ISSUE_TYPE);
 
@@ -70,13 +124,15 @@ describe('TransportDelayDetector', () => {
 		expect(issue?.payload).toEqual({
 			peerConnectionId: 'pc-1',
 			rttInMs: 400,
+			rttSource: 'rtcp',
 			sustainedForInMs: 6000,
 		});
 		expect(clientMonitor.emittedOf(ISSUE_TYPE)).toHaveLength(1);
 		expect(clientMonitor.emittedOf(ISSUE_TYPE)[0]?.payload.rttInMs).toBe(400);
 	});
 
-	it('does not raise one tick short of the duration', () => {
+	// The window is the sustain: an unfilled one is not a short verdict, it is no verdict.
+	it('does not raise one collection short of the detection window', () => {
 		const { clientMonitor, tick } = setup();
 
 		tick(400);
@@ -85,74 +141,73 @@ describe('TransportDelayDetector', () => {
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
-	// A round trip sitting exactly on the line is the case the two thresholds
-	// exist for: without the gap between them the issue would open and shut on
-	// every collection, and the band is inclusive of the recovery threshold.
-	it('holds the current state while the round trip sits between the two thresholds', () => {
+	/**
+	 * The mean is what is thresholded, not the newest sample, which is the whole reason for
+	 * reading a window: one bad collection in an otherwise fine stretch is not a slow path.
+	 */
+	it('does not raise on a single spike that the window averages away', () => {
 		const { clientMonitor, tick } = setup();
 
-		// Above recovery, below the bar: nothing accumulates, so a call parked in
-		// the band never raises however long it sits there.
+		tick(100);
+		tick(100);
+		tick(600);
+
+		// (100 + 100 + 600) / 3 is under the 300ms bar, though the last sample is twice it.
+		expect(clientMonitor.getIssues()).toHaveLength(0);
+	});
+
+	// A round trip sitting between the thresholds is the case the two of them exist for: without
+	// the gap the issue would open and shut on every collection.
+	it('holds the current state while the round trip sits between the two thresholds', () => {
+		const { clientMonitor, tick, fillDetectionWindow } = setup();
+
+		// Above recovery, below the bar: a call parked in the band never raises, however long it
+		// sits there.
 		for (let i = 0; i < 10; ++i) tick(250);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 
-		tick(400);
-		tick(400);
-		tick(400);
+		fillDetectionWindow(400);
 		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
 
-		// Back into the band with the issue open: it must stay open.
-		for (let i = 0; i < 5; ++i) tick(250);
+		// Back into the band with the issue open: it must stay open, however long for.
+		for (let i = 0; i < 10; ++i) tick(250);
 
 		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
 		expect(clientMonitor.resolvedIssues).toHaveLength(0);
 
-		// Exactly on the recovery threshold is still inside the band...
-		tick(200);
+		// Exactly on the recovery threshold is still inside the band.
+		for (let i = 0; i < 10; ++i) tick(200);
 		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
-
-		// ...and only a round trip genuinely below it clears the issue.
-		tick(199);
-		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(false);
 	});
 
-	it('resolves once the round trip drops below the recovery threshold, saying how long it lasted', () => {
-		const { clientMonitor, tick } = setup();
+	/**
+	 * Both windows have to agree before a finding closes, so the path must have been good for the
+	 * stretch behind the current one too — not merely for the most recent collection.
+	 */
+	it('resolves only once the recovery window agrees, saying how long it lasted', () => {
+		const { clientMonitor, fillDetectionWindow } = setup();
 
-		tick(400);
-		tick(400);
-		tick(400);
+		fillDetectionWindow(400);
 		expect(clientMonitor.getIssues()).toHaveLength(1);
 
-		tick(120);
+		// The detection window is clean again, but the stretch behind it still holds the episode.
+		fillDetectionWindow(120);
+		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
+
+		// Now the recovery window has aged onto the good stretch as well.
+		fillDetectionWindow(120);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 		expect(clientMonitor.resolvedIssues).toHaveLength(1);
 		expect(clientMonitor.resolvedIssues[0]?.comment).toBe('round trip recovered');
 		expect(clientMonitor.resolvedIssues[0]?.payload).toEqual({
 			peerConnectionId: 'pc-1',
-			rttInMs: 400,
+			rttInMs: expect.any(Number),
+			rttSource: 'rtcp',
 			sustainedForInMs: 6000,
 			durationInMs: expect.any(Number),
 		});
-	});
-
-	it('makes the next episode earn the full duration again', () => {
-		const { clientMonitor, tick } = setup();
-
-		tick(400);
-		tick(400);
-		tick(400);
-		tick(120);
-		expect(clientMonitor.getIssues()).toHaveLength(0);
-
-		tick(400);
-		tick(400);
-		expect(clientMonitor.getIssues()).toHaveLength(0);
-
-		tick(400);
-		expect(clientMonitor.getIssues()).toHaveLength(1);
 	});
 
 	it('raises the issue only once while the delay persists', () => {
@@ -164,9 +219,25 @@ describe('TransportDelayDetector', () => {
 		expect(clientMonitor.emittedOf(ISSUE_TYPE)).toHaveLength(1);
 	});
 
-	// The duration is the path's own time, not the library's. A blocked main
-	// thread or a sleeping device is time nobody was looking, and only the stats
-	// timestamps can tell that apart from a genuinely slow minute.
+	// Raising once does not mean reporting once: an operator reading the payload should see the
+	// round trip as it is now, not the one that happened to open the episode.
+	it('refreshes the measurement on the open issue as the round trip moves', () => {
+		const { clientMonitor, tick, fillDetectionWindow } = setup();
+
+		fillDetectionWindow(400);
+		expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.rttInMs).toBe(400);
+
+		for (let i = 0; i < 6; ++i) tick(800);
+
+		expect(clientMonitor.raisedIssues).toHaveLength(1);
+		expect(clientMonitor.issueOfType(ISSUE_TYPE)?.payload.rttInMs).toBe(800);
+	});
+
+	/**
+	 * The window is the path's own time, not the library's. A blocked main thread or a sleeping
+	 * device is time nobody was looking, and only the stats timestamps can tell that apart from a
+	 * genuinely slow minute.
+	 */
 	it('raises nothing when only wall-clock time passes', () => {
 		jest.useFakeTimers();
 		jest.setSystemTime(1_000);
@@ -180,7 +251,7 @@ describe('TransportDelayDetector', () => {
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 
-		// The very next collection that carries real stats time raises immediately.
+		// The very next collection that carries real stats time fills the window and raises.
 		tick(400, 6000);
 
 		expect(clientMonitor.getIssues()).toHaveLength(1);
@@ -188,34 +259,56 @@ describe('TransportDelayDetector', () => {
 		jest.useRealTimers();
 	});
 
-	it('treats an absent deltaTime as no stats time at all', () => {
-		const { detector, peerConnection, clientMonitor } = setup();
+	/**
+	 * The preference is decided from this window's deltas every time, not latched the first time
+	 * RTCP is seen. An RTCP total that stops advancing yields no reading at all, and the detector
+	 * falls back rather than thresholding a number that stopped moving.
+	 */
+	it('prefers the RTCP round trip while RTCP is still being measured', () => {
+		const { clientMonitor, tick } = setup();
 
-		// Driven without `tick`: a default parameter would swallow an
-		// explicitly-passed `undefined` and hand the detector 2000ms anyway.
-		peerConnection.ewmaRttInSec = 0.4;
-		peerConnection.deltaTime = undefined;
-		for (let i = 0; i < 10; ++i) detector.update();
+		// ICE says the path is slow, RTCP says it is fine. RTCP wins, so nothing is raised.
+		for (let i = 0; i < 6; ++i) {
+			tick(100, 2000, 'rtcp');
+			tick(900, 0, 'ice');
+		}
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
-	it('reports its inputs unavailable while the peer connection has no round trip', () => {
+	it('falls back to the ICE round trip once RTCP stops being measured', () => {
+		const { clientMonitor, tick } = setup();
+
+		// A stretch of healthy RTCP, so a latched preference would have something stale to hold.
+		for (let i = 0; i < 4; ++i) tick(100, 2000, 'rtcp');
+		expect(clientMonitor.getIssues()).toHaveLength(0);
+
+		// RTCP stops: its totals stay put, so its delta across the window is zero measurements.
+		for (let i = 0; i < 4; ++i) tick(900, 2000, 'ice');
+
+		const issue = clientMonitor.issueOfType(ISSUE_TYPE);
+
+		expect(clientMonitor.getIssues()).toHaveLength(1);
+		expect(issue?.payload.rttSource).toBe('ice');
+		expect(issue?.payload.rttInMs).toBe(900);
+	});
+
+	it('reports its inputs unavailable while the peer connection measures no round trip at all', () => {
 		const { detector, clientMonitor, tick } = setup();
 
-		for (let i = 0; i < 5; ++i) tick(undefined);
+		for (let i = 0; i < 4; ++i) tick(undefined);
 
 		expect(detector.inputsUnavailable).toBe(true);
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
-	it('clears inputsUnavailable as soon as a round trip is reported again', () => {
+	it('clears inputsUnavailable as soon as a round trip is measured again', () => {
 		const { detector, tick } = setup();
 
-		tick(undefined);
+		for (let i = 0; i < 4; ++i) tick(undefined);
 		expect(detector.inputsUnavailable).toBe(true);
 
-		tick(50);
+		for (let i = 0; i < 4; ++i) tick(100);
 
 		expect(detector.inputsUnavailable).toBe(false);
 	});
@@ -227,6 +320,5 @@ describe('TransportDelayDetector', () => {
 		for (let i = 0; i < 10; ++i) tick(400);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
-		expect(detector.inputsUnavailable).toBe(false);
 	});
 });

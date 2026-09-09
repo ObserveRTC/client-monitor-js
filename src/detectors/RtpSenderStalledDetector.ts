@@ -1,19 +1,17 @@
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 
-/**
- * `framesEncodedDelta` is the progress the encoder made over the interval the issue was raised on,
- * `packetsSentDelta` the progress the sender did not make — the flat counter that is the whole
- * finding. `stalledForMs` is how long the boundary had been broken at raise time, measured in stats
- * time.
- */
 export type RtpSenderStalledIssuePayload = {
 	peerConnectionId: string;
 	ssrc: number;
 	trackId?: string;
+	/** Encoder progress over the interval the issue was raised on. */
 	framesEncodedDelta?: number;
+	/** Sender progress over that same interval — the flat counter that is the whole finding. */
 	packetsSentDelta?: number;
+	/** How long the boundary had been broken at raise time, in stats time. */
 	stalledForMs: number;
+	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 };
 
@@ -26,37 +24,25 @@ type SenderState = {
 const ISSUE_TYPE = 'rtp-sender-stalled';
 
 export type RtpSenderStalledDetectorConfig = {
-	/**
-	 * How long (in milliseconds) the broken stage boundary must persist
-	 * before the issue is raised.
-	 */
+	/** How long the broken stage boundary must persist before the issue is raised, in ms. */
 	thresholdInMs: number;
 }
 
 /**
- * Watches one stage boundary on the send side: the encoder hands frames to the RTP sender, and the
- * sender puts packets on the wire. Every stage in the chain carries a monotonic counter, which makes
- * a break *locatable* rather than merely detectable — the boundary is broken when the upstream
- * counter advances and the downstream one stays flat. Here that is `deltaFramesEncoded > 0` while
- * `deltaPacketsSent === 0` on the same outbound RTP. An encoded frame always packetizes, so a
- * sustained violation is a wedged sender or pacer; it has been seen in the wild after `replaceTrack`
- * races and simulcast reconfigurations, where the encoder happily keeps running against a sender that
- * will never transmit again. The value of the issue is that it names the stage: the difference
- * between "the call broke" and something a support engineer can act on.
+ * Reports a wedged RTP sender or pacer: the encoder keeps producing frames while packets stop
+ * leaving. Use it to name the stage rather than the symptom — the difference between "the call
+ * broke" and a sender that will never transmit again, as seen after `replaceTrack` races and
+ * simulcast reconfigurations.
  *
- * The innocent explanations for silence on the wire — congestion, resolution adaptation, a paused
- * sender — would have stopped the *encoder*, so they cannot produce this signature. What is refused
- * outright: a closed peer connection, and an outbound RTP whose track is missing, muted or not live,
- * or whose simulcast layer is inactive, since a deliberately silenced sender is not a wedged one.
- *
- * The stall clock accumulates each tick's `deltaTime` rather than wall-clock elapsed, so the
- * threshold is crossed by media time actually observed: a page that was throttled or a collection
- * that was skipped cannot age a boundary into an issue nobody watched break. State is kept per ssrc —
- * simulcast layers wedge one at a time — and an ssrc that disappears resolves its issue rather than
- * leaving it open forever.
+ * The boundary is broken when `deltaFramesEncoded > 0` while `deltaPacketsSent === 0` on the same
+ * outbound RTP, held past `thresholdInMs` of accumulated stats time. The innocent explanations for
+ * silence on the wire — congestion, adaptation, a paused sender — would have stopped the *encoder*,
+ * so they cannot produce this signature; a track that is missing, muted, not live or on an inactive
+ * simulcast layer is refused outright. State is per ssrc, since layers wedge one at a time.
  *
  * Issue raised: `rtp-sender-stalled`. Monitor event: `rtp-sender-stalled`.
  * Config: `rtpSenderStalledDetector`.
+ * Connection attribute: `PeerConnectionMonitor.stalledRtpSender`.
  *
  * Category: Pipeline Disruption
  * Layer: Send — encoder to RTP sender
@@ -81,10 +67,21 @@ export class RtpSenderStalledDetector implements Detector {
 	}
 
 	public update(): void {
-		if (this.disabled) return;
-		if (this.peerConnection.closed) return;
+		if (this.disabled) {
+			this.peerConnection.stalledRtpSender = undefined;
+
+			return;
+		}
+		if (this.peerConnection.closed) {
+			this.peerConnection.stalledRtpSender = undefined;
+
+			return;
+		}
 
 		const seenSsrcs = new Set<number>();
+		// The connection's flag is the worst of its senders: any one wedged is a wedged connection,
+		// and it takes at least one judgeable sender before silence can be called health.
+		let anyJudged = false;
 
 		for (const outboundRtp of this.peerConnection.outboundRtps) {
 			seenSsrcs.add(outboundRtp.ssrc);
@@ -95,8 +92,11 @@ export class RtpSenderStalledDetector implements Detector {
 			const guarded = !track || track.muted || track.readyState !== 'live' || outboundRtp.active === false;
 			const framesEncodedDelta = outboundRtp.deltaFramesEncoded;
 			const packetsSentDelta = outboundRtp.deltaPacketsSent;
-			// An encoded frame always packetizes, so a sustained violation is a wedged sender/pacer;
-			// adaptation and congestion would stop the *encoder* instead, which is what `guarded` filters out.
+
+			if (!guarded && framesEncodedDelta !== undefined && packetsSentDelta !== undefined) {
+				anyJudged = true;
+			}
+			// An encoded frame always packetizes, so a sustained violation is a wedged sender or pacer.
 			const broken = !guarded
 				&& framesEncodedDelta !== undefined && 0 < framesEncodedDelta
 				&& packetsSentDelta !== undefined && packetsSentDelta === 0;
@@ -109,7 +109,7 @@ export class RtpSenderStalledDetector implements Detector {
 			if (state.stalledForMs === undefined) {
 				state.stalledForMs = 0;
 			} else {
-				// stats time, not wall-clock: only intervals actually observed count towards the threshold
+				// Stats time, not wall-clock: only observed intervals count towards the threshold.
 				state.stalledForMs += outboundRtp.deltaTime ?? 0;
 			}
 
@@ -134,7 +134,8 @@ export class RtpSenderStalledDetector implements Detector {
 				...payload,
 			});
 
-			clientMonitor.raiseIssue<RtpSenderStalledIssuePayload>(this._issueKey(outboundRtp.ssrc), {
+			this.peerConnection.issues.raise({
+				key: this._issueKey(outboundRtp.ssrc),
 				includeInSample: this.includeIssueInSample,
 				type: ISSUE_TYPE,
 				payload,
@@ -147,6 +148,10 @@ export class RtpSenderStalledDetector implements Detector {
 			this._clear(ssrc, 'outbound rtp is gone');
 			this._states.delete(ssrc);
 		}
+
+		const anyStalled = [ ...this._states.values() ].some((state) => state.raisedAt !== undefined);
+
+		this.peerConnection.stalledRtpSender = anyStalled ? true : anyJudged ? false : undefined;
 	}
 
 	private _getState(ssrc: number): SenderState {
@@ -169,17 +174,17 @@ export class RtpSenderStalledDetector implements Detector {
 
 		if (state.raisedAt === undefined) return;
 
-		const clientMonitor = this.peerConnection.parent;
 		const key = this._issueKey(ssrc);
-		const issue = clientMonitor.activeIssues.get(key);
+		const issue = this.peerConnection.issues.get(key);
 
 		if (issue) {
-			clientMonitor.resolveIssue(key, {
+			this.peerConnection.issues.resolve({
+				key: key,
 				comment,
 				payload: {
 					...issue.payload,
 					durationInMs: Date.now() - state.raisedAt,
-				},
+				} as RtpSenderStalledIssuePayload,
 				resolvedAt: Date.now(),
 			});
 		}

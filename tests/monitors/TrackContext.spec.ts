@@ -1,3 +1,4 @@
+import { stubClientIssues } from "../helpers/detectorMocks";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ClientMonitor } from "../../src/ClientMonitor";
 import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
@@ -11,13 +12,16 @@ const noDetectorsConfig = {
 	captureTrackMutedDetector: null,
 	silentAudioSourceDetector: null,
 	codecChangeDetector: null,
-	sourceCaptureBottleneckDetector: null,
+	videoCaptureBottleneckDetector: null,
 	decoderBottleneckDetector: null,
 	simulcastLayerDetector: null,
 	videoResolutionChangeDetector: null,
 	inboundVideoFlowStateDetector: null,
 	avDesyncPlayoutDetector: null,
 	dryInboundTrackDetector: null,
+	encoderBottleneckDetector: null,
+	inboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
+	outboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
 	playoutDiscrepancyDetector: null,
 	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,
@@ -25,7 +29,7 @@ const noDetectorsConfig = {
 	stuckDecoderDetector: null,
 };
 
-const peerConnectionStub = () => ({ parent: { config: noDetectorsConfig } });
+const peerConnectionStub = () => ({ parent: { config: noDetectorsConfig, activeIssues: stubClientIssues() } });
 
 function createMockTrack(overrides: Record<string, unknown> = {}) {
 	return {

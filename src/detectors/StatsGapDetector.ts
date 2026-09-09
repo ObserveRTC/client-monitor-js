@@ -3,49 +3,29 @@ import { ClientMonitor } from "../ClientMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
 export type StatsGapDetectorConfig = {
-	/**
-	 * Multiple of `collectingPeriodInMs` the actual interval must exceed to
-	 * count as a gap.
-	 */
+	/** Multiple of `collectingPeriodInMs` the actual interval must exceed to count as a gap. */
 	gapRatioThreshold: number;
 
-	/**
-	 * Absolute floor (milliseconds) below which an overrun is treated as
-	 * ordinary scheduling jitter, so a short collecting period does not
-	 * report a gap on every tick.
-	 */
+	/** Absolute floor in ms, below which an overrun is treated as ordinary scheduling jitter. */
 	minGapInMs: number;
 
-	/**
-	 * Whether to buffer a `STATS_COLLECTION_GAP` client event into the
-	 * sample.
-	 *
-	 * DEFAULT: true
-	 */
+	/** Whether to buffer a `STATS_COLLECTION_GAP` client event into the sample. DEFAULT: true */
 	createEvent?: boolean;
 }
 
 /**
- * Protects the monitor from itself. Every rate this library reports is a delta
- * divided by an elapsed time, and all of them assume collection happened roughly on
- * schedule. When the tab is backgrounded, the device sleeps, or the main thread is
- * blocked long enough, that assumption breaks: counters keep advancing while the
- * monitor is not looking, and the first tick afterwards attributes a large
- * accumulation to a short window, which reads as a network event that never happened.
+ * Reports that stats collection itself ran late — a backgrounded tab, a sleeping device, a
+ * blocked main thread. Use it to discount the interval afterwards: every rate here is a delta
+ * over an elapsed time, so the first tick after a gap attributes a large accumulation to a short
+ * window and reads as a network event that never happened.
  *
- * Rather than trying to correct for it — the counters genuinely cannot say when
- * within the gap the traffic happened — the gap is reported, so a consumer can
- * discount that interval instead. An overrun has to clear both a ratio of
- * `collectingPeriodInMs` and an absolute floor: the ratio catches a proportionally
- * large overrun, and the floor keeps a fast collecting period from reporting
- * ordinary scheduling jitter. The first collection has nothing to be late relative
- * to, so it only establishes the baseline.
+ * An overrun must clear both a ratio of `collectingPeriodInMs` and an absolute floor. The first
+ * collection has nothing to be late relative to, so it only establishes the baseline.
  *
- * This is an observation about the *measurement*, not about the call, so it raises
- * no issue.
+ * This is an observation about the *measurement*, not about the call, so it raises no issue.
+ *
  * Monitor event: `stats-collection-gap`; client event `STATS_COLLECTION_GAP` when
- * `createEvent` is left on.
- * Config: `statsGapDetector`.
+ * `createEvent` is left on. Config: `statsGapDetector`.
  *
  * Category: Telemetry
  * Layer: Lifecycle
@@ -83,7 +63,6 @@ export class StatsGapDetector implements Detector {
 
 		if (!expectedPeriodInMs || expectedPeriodInMs < 1) return;
 
-		// The ratio catches a proportionally large overrun; the absolute floor keeps a fast collecting period from reporting ordinary jitter.
 		const overran = expectedPeriodInMs * this.config.gapRatioThreshold < actualPeriodInMs &&
 			this.config.minGapInMs < actualPeriodInMs;
 

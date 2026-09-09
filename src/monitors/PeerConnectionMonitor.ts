@@ -1,9 +1,11 @@
+import { BlockedStunRequestsDetector, BlockedTransportIssuePayload } from "../detectors/BlockedStunRequestsDetector";
+import { IssueRegistry } from "../utils/IssueRegistry";
+import { DetectionRecoveryWindow } from "../utils/DetectionRecoveryWindow";
 import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
 import * as W3C from "../schema/W3cStatsIdentifiers";
 import { Logger } from "../utils/logger";
-import { FrugalQuantileEstimator } from "../utils/FrugalQuantileEstimator";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -18,29 +20,29 @@ import { IceCandidatePairMonitor } from "./IceCandidatePairMonitor";
 import { CertificateMonitor } from "./CertificateMonitor";
 import { DataChannelMonitor } from "./DataChannelMonitor";
 import { IcePathEstablishmentDetector } from "../detectors/IcePathEstablishmentDetector";
-import { UplinkCongestionDetector } from "../detectors/UplinkCongestionDetector";
-import { DownlinkCongestionDetector } from "../detectors/DownlinkCongestionDetector";
+import { CongestionDetector } from "../detectors/CongestionDetector";
+import { UplinkCongestionDetector, UplinkCongestionIssuePayload } from "../detectors/UplinkCongestionDetector";
+import { DownlinkCongestionDetector, DownlinkCongestionIssuePayload } from "../detectors/DownlinkCongestionDetector";
 import { InboundTrackMonitor } from "./InboundTrackMonitor";
 import { OutboundTrackMonitor } from "./OutboundTrackMonitor";
 import { CalculatedScore } from "../scores/CalculatedScore";
 import { IceTraversalDetector } from "../detectors/IceTraversalDetector";
-import { IceDisconnectedDetector } from "../detectors/IceDisconnectedDetector";
-import { IceConnectionFailedDetector } from "../detectors/IceConnectionFailedDetector";
-import { IceTransportStalledDetector } from "../detectors/IceTransportStalledDetector";
-import { UnstableIcePathDetector } from "../detectors/UnstableIcePathDetector";
+import { IceDisconnectedDetector, IceDisconnectedIssuePayload } from "../detectors/IceDisconnectedDetector";
+import { IceConnectionFailedDetector, IceConnectionFailedIssuePayload } from "../detectors/IceConnectionFailedDetector";
+import { IceTransportStalledDetector, IceTransportStalledIssuePayload } from "../detectors/IceTransportStalledDetector";
+import { UnstableIcePathDetector, UnstableIcePathIssuePayload } from "../detectors/UnstableIcePathDetector";
 import { IceRestartDetector } from "../detectors/IceRestartDetector";
 import { IceRestartRecommendationDetector } from "../detectors/IceRestartRecommendationDetector";
-import { IceEstablishmentFailedDetector } from "../detectors/IceEstablishmentFailedDetector";
-import { DtlsHandshakeFailedDetector } from "../detectors/DtlsHandshakeFailedDetector";
-import { DtlsHandshakeStalledDetector } from "../detectors/DtlsHandshakeStalledDetector";
-import { IceReachabilityDetector } from "../detectors/IceReachabilityDetector";
-import { RtpSenderStalledDetector } from "../detectors/RtpSenderStalledDetector";
-import { TransportDemuxStalledDetector } from "../detectors/TransportDemuxStalledDetector";
-import { TransportDelayDetector } from "../detectors/TransportDelayDetector";
-import { TransportLossDetector } from "../detectors/TransportLossDetector";
-import { TransportJitterDetector } from "../detectors/TransportJitterDetector";
-import { BlockedOutboundMediaDetector } from "../detectors/BlockedOutboundMediaDetector";
-import { BlockedInboundMediaDetector } from "../detectors/BlockedInboundMediaDetector";
+import { IceEstablishmentFailedDetector, IceEstablishmentFailedIssuePayload } from "../detectors/IceEstablishmentFailedDetector";
+import { DtlsHandshakeFailedDetector, DtlsHandshakeFailedIssuePayload } from "../detectors/DtlsHandshakeFailedDetector";
+import { DtlsHandshakeStalledDetector, DtlsHandshakeStalledIssuePayload } from "../detectors/DtlsHandshakeStalledDetector";
+import { IceReachabilityDetector, NoAvailableIceCandidateIssuePayload } from "../detectors/IceReachabilityDetector";
+import { RtpSenderStalledDetector, RtpSenderStalledIssuePayload } from "../detectors/RtpSenderStalledDetector";
+import { TransportDemuxStalledDetector, TransportDemuxStalledIssuePayload } from "../detectors/TransportDemuxStalledDetector";
+import { TransportDelayDetector, TransportDelayIssuePayload } from "../detectors/TransportDelayDetector";
+import { TransportLossDetector, TransportLossIssuePayload } from "../detectors/TransportLossDetector";
+import { BlockedOutboundMediaDetector, BlockedOutboundMediaIssuePayload } from "../detectors/BlockedOutboundMediaDetector";
+import { BlockedInboundMediaDetector, BlockedInboundMediaIssuePayload } from "../detectors/BlockedInboundMediaDetector";
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
 import { SelectedIcePath } from "./SelectedIcePath";
@@ -58,10 +60,12 @@ import {
 	OutboundRtpStats,
 	PeerConnectionSample,
 	PeerConnectionTransportStats,
+	QualityLimitationDurations,
 	RemoteInboundRtpStats,
 	RemoteOutboundRtpStats
 } from "../schema/ClientSample";
 import { TrackMonitor } from './TrackMonitor';
+import { accumulatedValue } from '../utils/common';
 
 const MODULE_NAME = 'PeerConnectionMonitor';
 
@@ -71,10 +75,55 @@ export type PeerConnectionMonitorEvents = {
 	'stats': [W3C.RtcStats[]],
 }
 
+export type PeerConnectionQualityLimitationReason = keyof QualityLimitationDurations;
+
+/**
+ * Every issue a peer connection can carry, keyed by the detector that raises it. This is what
+ * `issues` is typed to, so a detector cannot raise a type this monitor has no business reporting,
+ * and adding a detector without adding it here fails to compile at that detector's `raise`.
+ *
+ * Only detectors that raise a *stateful* issue appear. `IceTraversalDetector`, `IceRestartDetector`, `IceRestartRecommendationDetector` and `IcePathEstablishmentDetector` emit events and raise nothing, so they have no entry.
+ */
+export type PeerConnectionIssues = {
+	[BlockedInboundMediaDetector.ISSUE_TYPE]: BlockedInboundMediaIssuePayload,
+	// Raised on an `IceTransportMonitor`, which uplinks into this connection: a child registry's
+	// types have to be a subset of its parent's, so the connection admits it on the way past.
+	[BlockedStunRequestsDetector.ISSUE_TYPE]: BlockedTransportIssuePayload,
+	[BlockedOutboundMediaDetector.ISSUE_TYPE]: BlockedOutboundMediaIssuePayload,
+	[DownlinkCongestionDetector.ISSUE_TYPE]: DownlinkCongestionIssuePayload,
+	[DtlsHandshakeFailedDetector.ISSUE_TYPE]: DtlsHandshakeFailedIssuePayload,
+	[DtlsHandshakeStalledDetector.ISSUE_TYPE]: DtlsHandshakeStalledIssuePayload,
+	[IceConnectionFailedDetector.ISSUE_TYPE]: IceConnectionFailedIssuePayload,
+	[IceDisconnectedDetector.ISSUE_TYPE]: IceDisconnectedIssuePayload,
+	[IceEstablishmentFailedDetector.ISSUE_TYPE]: IceEstablishmentFailedIssuePayload,
+	[IceReachabilityDetector.ISSUE_TYPE]: NoAvailableIceCandidateIssuePayload,
+	[IceTransportStalledDetector.ISSUE_TYPE]: IceTransportStalledIssuePayload,
+	[RtpSenderStalledDetector.ISSUE_TYPE]: RtpSenderStalledIssuePayload,
+	[TransportDelayDetector.ISSUE_TYPE]: TransportDelayIssuePayload,
+	[TransportDemuxStalledDetector.ISSUE_TYPE]: TransportDemuxStalledIssuePayload,
+	[TransportLossDetector.ISSUE_TYPE]: TransportLossIssuePayload,
+	[UnstableIcePathDetector.ISSUE_TYPE]: UnstableIcePathIssuePayload,
+	[UplinkCongestionDetector.ISSUE_TYPE]: UplinkCongestionIssuePayload,
+}
+
 export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEvents> {
+	private static readonly LIMITATION_PRIORITY: Record<PeerConnectionQualityLimitationReason, number> = {
+		none: 1,
+		other: 2,
+		cpu: 3,
+		bandwidth: 4,
+	};
+
 	public readonly statsAdapters: StatsAdapters;
 
 	public readonly detectors: Detectors;
+
+	/**
+	 * This connection's own active issues, uplinked into the client monitor's registry. Its
+	 * detectors raise, update and resolve here and nowhere else — writes travel up, so a
+	 * resolution sent straight to a higher layer would leave this copy standing forever.
+	 */
+	public readonly issues: IssueRegistry<PeerConnectionIssues>;
 	public readonly mappedCodecMonitors = new Map<string, CodecMonitor>();
 	public readonly mappedInboundRtpMonitors = new Map<number, InboundRtpMonitor>();
 	public readonly mappedRemoteOutboundRtpMonitors = new Map<number, RemoteOutboundRtpMonitor>();
@@ -117,235 +166,171 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public inboundFractionalLost = 0.0;
 
 	// ---- derived: transport quality ----
-	// The three properties of a working path — how long it takes, how much of it
-	// arrives, how evenly it arrives — averaged across the streams that actually
-	// carried media this tick. They are computed here, on the thing being
-	// observed, so that the detectors that judge them only have to compare a
-	// number with a threshold. `inboundFractionalLost` above is a *sum* across
-	// streams and is kept for backwards compatibility; these are means, which is
-	// what a threshold can be reasoned about against.
+	// Means over the streams that actually carried media this tick, unlike the sums above.
+	// `undefined` rather than `0` when no stream qualified: "nothing arrived" and "nothing
+	// was lost" must not look the same to a detector.
 
-	/**
-	 * Mean interval packet-loss fraction (`0..1`) over inbound streams that
-	 * received packets this tick. `undefined` when no stream carried media —
-	 * never `0`, because "nothing arrived" and "nothing was lost" must not look
-	 * the same to a detector.
-	 */
+	/** Mean interval packet-loss fraction (`0..1`) over inbound streams that received packets. */
 	public avgInboundFractionLost?: number;
 
-	/**
-	 * Mean interval packet-loss fraction (`0..1`) the far end reported for the
-	 * streams this endpoint sends, over remote-inbound reports that carried a
-	 * measurement this tick.
-	 */
+	/** Mean interval packet-loss fraction (`0..1`) the far end reported for what this endpoint sends. */
 	public avgOutboundFractionLost?: number;
 
-	/**
-	 * Mean inter-arrival jitter in milliseconds over inbound streams that
-	 * received packets this tick. The one transport-quality signal in the
-	 * library that no detector has ever read.
-	 */
+	/** Mean inter-arrival jitter in milliseconds over inbound streams that received packets. */
 	public avgInboundJitterInMs?: number;
 
 
 	/**
-	 * Milliseconds between this stats collection and the previous one, from the
-	 * stats reports' own timestamps — the newest timestamp seen in this
-	 * collection minus the newest seen in the previous one, not wall-clock time.
-	 * Peer-connection-level detectors accumulate this to measure how long a
-	 * condition has held, so a late or skipped collection still measures the
-	 * time the condition actually held underneath.
+	 * Milliseconds between this stats collection and the previous one: the newest report
+	 * timestamp of this collection minus the newest of the previous, not wall-clock time.
 	 */
 	public deltaTime?: number | undefined;
 
 	/**
-	 * Milliseconds of **stats time** this connection has observed, accumulated from
-	 * `deltaTime` — the clock every window and duration in the library is measured
-	 * on, and the one thing `Date.now()` must never stand in for.
-	 *
-	 * It advances by what each collection actually cost rather than by one nominal
-	 * period, so a late or skipped collection widens a window by the time the
-	 * condition really held underneath. It never goes backwards and it is not a
-	 * timestamp: only differences between two readings of it mean anything. Every
-	 * monitor that computes a `deltaTime` carries one of these.
+	 * Milliseconds of stats time this connection has observed, accumulated from `deltaTime`.
+	 * Every window and duration in the library is measured on this clock, never on `Date.now()`;
+	 * it is not a timestamp, so only differences between two readings mean anything.
 	 */
 	public statsClockTime = 0;
+
+	/**
+	 * The connection's running totals over a detection window and the recovery window behind it,
+	 * shared by every detector bound to this peer connection so they judge the same stretch.
+	 *
+	 * The path-level quantities are ratios of cumulative counters, and a window is what turns them
+	 * into a mean over a stated span: round trip is `totalRoundTripTime` over the number of
+	 * measurements that produced it, which is a true interval mean rather than an EWMA whose memory
+	 * silently depends on the collecting period.
+	 *
+	 * **RTCP and ICE round trips are kept apart and never summed into one total.** They span
+	 * different paths — RTCP reaches the far endpoint, ICE only the peer this connection talks to,
+	 * which in an SFU topology is the SFU — so a detector picks one and reads it, and a delta can
+	 * never be half of one and half of the other.
+	 *
+	 * Each total is a sum over the reports present in a collection, so a renegotiation that removes
+	 * a stream or an ICE restart that selects a different pair makes the sum fall. The window
+	 * reports a counter that went backwards as `null`, which is the honest answer: no reading for
+	 * this window rather than a wrong one.
+	 */
+	public readonly detectionRecoveryWindow: DetectionRecoveryWindow<{
+		/** Seconds of RTCP round trip summed over the reports, times 1000. */
+		totalRtcpRoundTripTimeInMs: number | null;
+		/** How many RTCP round trip measurements those milliseconds are spread over. */
+		totalRtcpRoundTripMeasurements: number | null;
+		/** The same for the round trip ICE measures with its connectivity checks. */
+		totalIceRoundTripTimeInMs: number | null;
+		totalIceResponsesReceived: number | null;
+	}>;
 
 	/** The newest stats timestamp seen in the previous collection, for `deltaTime`. */
 	private _previousNewestTimestamp?: number;
 
-	public totalInboundPacketsLost = 0;
-	public totalInboundPacketsReceived = 0;
-	public totalOutboundPacketsSent = 0;
-	public totalOutboundPacketsReceived = 0;
-	public totalOutboundPacketsLost = 0;
-	public totalDataChannelBytesSent = 0;
-	public totalDataChannelBytesReceived = 0;
-	public totalSentAudioBytes = 0;
-	public totalSentVideoBytes = 0;
-	public totalReceivedAudioBytes = 0;
-	public totalReceivedVideoBytes = 0;
-	public totalAvailableIncomingBitrate = 0;
-	public totalAvailableOutgoingBitrate = 0;
+	public totalInboundPacketsLost?: number;
+	public totalInboundPacketsReceived?: number;
+	public totalOutboundPacketsSent?: number;
+	public totalOutboundPacketsReceived?: number;
+	public totalOutboundPacketsLost?: number;
+	public totalDataChannelBytesSent?: number;
+	public totalDataChannelBytesReceived?: number;
+	public totalSentAudioBytes?: number;
+	public totalSentVideoBytes?: number;
+	public totalReceivedAudioBytes?: number;
+	public totalReceivedVideoBytes?: number;
+	public totalAvailableIncomingBitrate?: number;
+	public totalAvailableOutgoingBitrate?: number;
+	public totalPacketSendDelayInSec?: number;
 
 	// deltas between two stats
-	public deltaInboundPacketsLost = 0;
-	public deltaInboundPacketsReceived = 0;
-	public deltaOutboundPacketsSent = 0;
-	public deltaOutboundPacketsReceived = 0;
-	public deltaOutboundPacketsLost = 0;
-	public deltaAudioBytesSent = 0;
-	public deltaVideoBytesSent = 0;
-	public deltaAudioBytesReceived = 0;
-	public deltaVideoBytesReceived = 0;
-	public deltaDataChannelBytesReceived = 0;
-	public deltaDataChannelBytesSent = 0;
-
-	// adjust these to reflect what the name actually is
-	public highestSeenSendingBitrate?: number;
-	public highestSeenReceivingBitrate?: number;
-	public highestSeenAvailableOutgoingBitrate?: number;
-	public highestSeenAvailableIncomingBitrate?: number;
+	public deltaInboundPacketsLost?: number;
+	public deltaInboundPacketsReceived?: number;
+	public deltaOutboundPacketsSent?: number;
+	public deltaOutboundPacketsReceived?: number;
+	public deltaOutboundPacketsLost?: number;
+	public deltaAudioBytesSent?: number;
+	public deltaVideoBytesSent?: number;
+	public deltaAudioBytesReceived?: number;
+	public deltaVideoBytesReceived?: number;
+	public deltaDataChannelBytesReceived?: number;
+	public deltaDataChannelBytesSent?: number;
+	public deltaPacketSendDelayInSec?: number;
+	/** Video only, to divide `deltaPacketSendDelayInSec` by — the two are accumulated together. */
+	public deltaVideoPacketsSent?: number;
 
 	/**
-	 * Whether the sending path is currently reported congested, and the receiving
-	 * one. Each is owned by the detector of that direction and moves only when its
-	 * finding opens or closes — never with a collection — so an application can
-	 * render a badge from it without watching the issue stream.
-	 *
-	 * Two flags rather than the single `congested` of 4.9.0, because the two
-	 * directions are two findings with two sets of evidence: a receiver has no
-	 * bandwidth estimate to read, so one boolean could only ever have meant the
-	 * uplink while reading as though it meant the connection.
-	 */
-	public uplinkCongested = false;
-	public downlinkCongested = false;
-
-	// ---- derived: capacity ----
-	// The bandwidth estimate and the two queues that fill when a path stops being
-	// wide enough, in the shape a detector can threshold: a level, a recent
-	// maximum to compare it against, and a smoothed baseline. Every one of them is
-	// `undefined` rather than `0` where the browser reported nothing, because
-	// "the estimator says zero" and "there is no estimator" are different facts.
-
-	/**
-	 * Available outgoing bitrate in bps, summed over the selected candidate pairs
-	 * that reported one, and `undefined` when none did.
-	 *
-	 * The specification makes absence meaningful: the field "only exists when the
-	 * underlying congestion control calculated either a send-side bandwidth
-	 * estimation … or received a receive-side estimation via RTCP", and "must not
-	 * exist for candidate pairs that were never used for sending packets … or
-	 * candidate pairs that have been used previously but are not currently in
-	 * use". `totalAvailableOutgoingBitrate` beside it sums the same values with
-	 * `?? 0` and so cannot tell a silent estimator from a zero one; this is the
-	 * reading a detector judges.
-	 */
-	public availableOutgoingBitrate?: number;
-
-	/**
-	 * What the path is offering minus what this endpoint is putting on it, in bps —
-	 * `availableOutgoingBitrate - sendingBitrate`. `undefined` when there is no
-	 * estimate to subtract from.
-	 *
-	 * The room the encoder has left. On a healthy call it is comfortably positive
-	 * and fairly steady; it goes sharply negative at the moment a path narrows,
-	 * because the estimate falls immediately and the encoder takes a beat to follow
-	 * it down. That moment is the one this measures — a sender pressed against a
-	 * ceiling that just dropped.
-	 */
-	public outgoingBitrateHeadroom?: number;
-
-	/** EWMA (α = 0.1) of `outgoingBitrateHeadroom`, as the level it is judged against. */
-	public ewmaOutgoingBitrateHeadroom?: number;
-
-	/**
-	 * Mean time a packet spent waiting in the pacer before it reached the socket
-	 * this tick, in milliseconds — Σ`deltaTotalPacketSendDelay` over
-	 * Σ`deltaPacketsSent` across the outbound streams that sent anything.
-	 *
-	 * `totalPacketSendDelay` is cumulative by specification — "this measurement is
-	 * added to totalPacketSendDelay when packetsSent is incremented" — so the
-	 * quotient of the two deltas is the only reading of it that describes now.
-	 * Weighted by packets rather than averaged over streams, so a stream sending
-	 * three packets cannot outvote one sending three hundred.
+	 * Mean time a video packet waited in the pacer this collection, in milliseconds.
+	 * The per-collection sum divided by the packets that carried it, so it measures
+	 * queueing rather than how much was sent.
 	 */
 	public avgPacketSendDelayInMs?: number;
 
-	/**
-	 * Streaming median *estimate* of `avgPacketSendDelayInMs`, as the baseline it is
-	 * judged against. An estimate rather than a median because it keeps one number
-	 * rather than the samples — see `FrugalQuantileEstimator`.
-	 *
-	 * A median rather than a mean because the pacer is spiky: on a captured session
-	 * its median ran 0.37 ms with 111 excursions past 10 ms, and an EWMA of the same
-	 * series settled at 6.02 ms — sixteen times the level the signal actually sits at,
-	 * which turns "twice the baseline" into a bar nothing reaches.
-	 */
-	public estimatedMedianPacketSendDelayInMs?: number;
-
-	/** The estimator behind the field above; the field is the value it last returned. */
-	private readonly _frugalMedianPacketSendDelay = new FrugalQuantileEstimator(0.5);
+	/** The two halves of the receive-side mirror, accumulated together over inbound video. */
+	public deltaInboundVideoJitterBufferDelayInSec?: number;
+	public deltaInboundVideoJitterBufferEmittedCount?: number;
 
 	/**
-	 * Mean time a video frame spent in the jitter buffer this tick, in
-	 * milliseconds — Σ`deltaJitterBufferDelay` over
-	 * Σ`deltaJitterBufferEmittedCount` across inbound **video** streams that
-	 * emitted frames.
+	 * Mean time a video frame waited in the jitter buffer this collection, in
+	 * milliseconds — the per-collection sum divided by the frames that left the buffer,
+	 * so it measures queueing rather than how much arrived.
 	 *
-	 * Video only, and deliberately: audio and video buffers hold different things
-	 * on different scales, so a mean over both describes neither, and the audio
-	 * buffer already has a detector of its own in `JitterBufferStressDetector`.
+	 * Video only. Audio is a different scale entirely and has `JitterBufferStressDetector`
+	 * of its own; a mean over both would describe neither.
 	 */
 	public avgInboundVideoJitterBufferDelayInMs?: number;
 
-	/** EWMA (α = 0.1) of `avgInboundVideoJitterBufferDelayInMs`. */
-	public ewmaInboundVideoJitterBufferDelayInMs?: number;
+	/**
+	 * Whether each direction is currently reported congested. Each flag is owned by the
+	 * detector of that direction and moves only when its finding opens or closes, never with
+	 * a collection, so an application can render a badge without watching the issue stream.
+	 */
+	public uplinkCongested = false;
+	public uplinkVideoCongestionSeverity?: number;
+	public downlinkCongested = false;
+	public downlinkVideoCongestionSeverity?: number;
+
+	public cpulimited = false;
+
+	// ---- Pipeline disruption ------------------------------------------------
+	// One flag per detector that judges this connection, each owned solely by its detector and
+	// named after the fault it reports. Tri-state on purpose:
+	//
+	//   true      that detector's finding is open right now
+	//   false     it looked this collection and found nothing wrong
+	//   undefined it could not judge — disabled, no config, or missing the counters it reads
+	//
+	// `undefined` is never "healthy": counting healthy connections means testing for `false`
+	// explicitly, so a stretch nobody examined is not silently counted as fine.
+
+	/** The encoder producing frames while packets stop leaving. `RtpSenderStalledDetector`. */
+	public stalledRtpSender?: boolean;
+
+	/** Media arriving on a transport that never reaches any inbound RTP stream. `TransportDemuxStalledDetector`. */
+	public stalledTransportDemux?: boolean;
+
+	public hasInboundMedia = false;
+	public hasOutboundMedia = false;
 
 	/**
-	 * Whether this connection carried any inbound video stream this collection.
-	 * A structural fact, and not the same question as `0 < receivingVideoBitrate`:
-	 * a stream that exists and delivered nothing is a stream nobody can see, which
-	 * is a finding somewhere else rather than an absence of one here.
+	 * Whether any inbound **video** stream was present this collection. Not the same
+	 * question as a receiving bitrate above zero: a stream that exists and delivers
+	 * nothing is a stall, which is a finding somewhere else rather than an absence here.
 	 */
 	public hasInboundVideo = false;
 
 	/**
-	 * The most limiting reason the outbound streams that sent anything this tick
-	 * reported, in the priority order the specification names — "the reasons must
-	 * be reported in the following order of priority: 'bandwidth', 'cpu',
-	 * 'other'". `undefined` where no sending stream reported one, which is every
-	 * audio-only connection (the field "must not exist for audio") and every
-	 * browser that does not implement it.
-	 *
-	 * Streams that sent nothing are left out: an inactive simulcast layer reports
-	 * whatever it was last limited by, and it is not limiting anything now.
+	 * The most limiting `qualityLimitationReason` across the outbound streams that sent
+	 * something this tick. Streams that sent nothing are left out: they report whatever they
+	 * were last limited by, and are not limiting anything now.
 	 */
-	public qualityLimitationReason?: string;
+	public qualityLimitationReason?: PeerConnectionQualityLimitationReason;
 
 	/**
-	 * The two queue sums, accumulated in the collection loop beside the bitrates
-	 * rather than in a pass of their own — `outboundRtps` and `inboundRtps` build
-	 * a fresh array on every read, and the loop is already visiting each stream.
-	 */
-	private _sendDelayInSec = 0;
-	private _sentPackets = 0;
-	private _videoBufferDelayInSec = 0;
-	private _emittedVideoFrames = 0;
-
-	/**
-	 * Round trip time measured by ICE connectivity checks (STUN), averaged over
-	 * the selected candidate pairs. In an SFU topology this is the trip to
-	 * whatever terminates ICE — the SFU — **not** to the far peer.
+	 * Round trip measured by ICE connectivity checks, averaged over the selected candidate
+	 * pairs. In an SFU topology this is the trip to the SFU, not to the far peer.
 	 */
 	public iceRttInSec?: number;
 	public ewmaIceRttInSec?: number;
 
-	/**
-	 * Round trip time reported by RTCP, averaged over the remote RTP reports.
-	 * This is the media round trip, so it is the one that describes what the
-	 * far end actually experiences.
-	 */
+	/** Round trip reported by RTCP — the media round trip, out to the far end. */
 	public rtcpRttInSec?: number;
 	public ewmaRtcpRttInSec?: number;
 	public connectingStartedAt?: number;
@@ -353,11 +338,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	private _connectionState?: W3C.RtcPeerConnectionState;
 	public iceState?: W3C.RtcIceTransportState;
 
-	/**
-	 * The ICE gathering state of the underlying peer connection / mediasoup
-	 * transport, kept up to date by the source bindings. `undefined` until the
-	 * first gathering-state event (or when the source does not report it).
-	 */
+	/** ICE gathering state, kept up to date by the source bindings; `undefined` until first reported. */
 	public iceGatheringState?: string;
 
 	public usingTURN?: boolean;
@@ -367,10 +348,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		value: undefined,
 	}
 
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -382,49 +360,32 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	) {
 		super();
 		this.statsAdapters = new StatsAdapters(logger);
+		this.issues = new IssueRegistry<PeerConnectionIssues>(parent.activeIssues.asSink);
+		this.detectionRecoveryWindow = new DetectionRecoveryWindow(
+			parent.config.peerConnectionDetectionRecoveryWindow
+		);
 		this.detectors = new Detectors();
-		// The connectivity detectors are registered in layer order — reachability,
-		// traversal, path establishment, secure transport, path continuity — so that
-		// reading this constructor top to bottom describes the stack the way the
-		// documentation does. It is a readability convention, not a dependency: see
-		// below. The five detector categories are mapped in
-		// docs/DETECTOR_TAXONOMY.md; the five connectivity layers in
-		// docs/CONNECTIVITY_DETECTORS.md.
-		//
-		// Within a layer there is one class per issue type, and a layer holds as
-		// many classes as it has distinct findings. Each one is gated on its own
-		// config key — one detector, one key — which is what makes each of them
-		// independently disableable and keeps a throw in one from costing the others
-		// their verdict for the tick. And because every one of them reaches its
-		// verdict from raw stats rather than from what another concluded earlier in
-		// the tick, the run order carries no meaning — not between layers and not
-		// within one. A user disabling layer 3 does not silence layer 5.
+		// Registered in connectivity-layer order for readability only. Every detector reaches
+		// its verdict from raw stats rather than from what another concluded, so the run order
+		// carries no meaning and each can be disabled on its own config key.
 		if (parent.config.iceReachabilityDetector !== null) {
 			this.detectors.add(new IceReachabilityDetector(this));           // layer 1
 		}
 		if (parent.config.iceTraversalDetector !== null) {
 			this.detectors.add(new IceTraversalDetector(this));              // layer 2
 		}
-		// Layer 3 has two findings: establishment that is slow (an event, since slow
-		// is not yet failed) and establishment that demonstrably did not work.
 		if (parent.config.icePathEstablishmentDetector !== null) {
 			this.detectors.add(new IcePathEstablishmentDetector(this));      // layer 3
 		}
 		if (parent.config.iceEstablishmentFailedDetector !== null) {
 			this.detectors.add(new IceEstablishmentFailedDetector(this));    // layer 3
 		}
-		// Layer 4 keeps a class per finding: a terminal `dtlsState: 'failed'` and a
-		// handshake that never answers are different conditions with different
-		// evidence, so neither can take the other down and either can be disabled
-		// on its own.
 		if (parent.config.dtlsHandshakeFailedDetector !== null) {
 			this.detectors.add(new DtlsHandshakeFailedDetector(this));       // layer 4
 		}
 		if (parent.config.dtlsHandshakeStalledDetector !== null) {
 			this.detectors.add(new DtlsHandshakeStalledDetector(this));      // layer 4
 		}
-		// Layer 5, four findings about a path that already worked: it is down, it is
-		// finished, it is up but delivering nothing, and it will not settle.
 		if (parent.config.iceDisconnectedDetector !== null) {
 			this.detectors.add(new IceDisconnectedDetector(this));           // layer 5
 		}
@@ -437,31 +398,27 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		if (parent.config.unstableIcePathDetector !== null) {
 			this.detectors.add(new UnstableIcePathDetector(this));           // layer 5
 		}
-		// Telemetry alongside them: an ICE restart is a fact rather than a fault,
-		// and recommending one is advice rather than a finding.
+		// Telemetry rather than faults: a restart is a fact, and recommending one is advice.
 		if (parent.config.iceRestartDetector !== null) {
 			this.detectors.add(new IceRestartDetector(this));
 		}
 		if (parent.config.iceRestartRecommendationDetector !== null) {
 			this.detectors.add(new IceRestartRecommendationDetector(this));
 		}
-		// Pipeline Disruption — a different category (docs/DETECTOR_TAXONOMY.md).
-		// One stage boundary per class: neither reads the other's state, nor any
-		// other detector's issues, so the order they run in carries no meaning.
+		// Pipeline Disruption — one stage boundary per class.
 		if (parent.config.rtpSenderStalledDetector !== null) {
 			this.detectors.add(new RtpSenderStalledDetector(this));
 		}
 		if (parent.config.transportDemuxStalledDetector !== null) {
 			this.detectors.add(new TransportDemuxStalledDetector(this));
 		}
-		// Transport Quality — the path works; is it carrying traffic well enough?
-		// Capacity, delay, delivery reliability, delivery stability: four
-		// independent properties of one working path, five detectors, no shared
-		// state and no order dependency between them.
-		// Capacity holds two findings, one per direction, because the evidence for
-		// them is not the same evidence: the sending side reads the browser's own
-		// bandwidth estimate, and the receiving side has none to read and rebuilds
-		// the verdict from what arrived and what the jitter buffer had to do with it.
+		// Transport Quality — the path works; is it carrying traffic well enough? Capacity
+		// holds one finding per direction, since the two rest on different evidence.
+		// Deprecated, and registered before the pair that replaced it so the legacy event still
+		// fires first for anything that listened for it in ordering-sensitive code.
+		if (parent.config.congestionDetector !== null) {
+			this.detectors.add(new CongestionDetector(this));
+		}
 		if (parent.config.uplinkCongestionDetector !== null) {
 			this.detectors.add(new UplinkCongestionDetector(this));
 		}
@@ -474,16 +431,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		if (parent.config.transportLossDetector !== null) {
 			this.detectors.add(new TransportLossDetector(this));
 		}
-		// Delivery reliability holds two, but only one of them is registered here.
-		// `blocked-transport` is a finding about a single ICE transport rather than
-		// about the connection, so `BlockedStunRequestsDetector` lives on
-		// `IceTransportMonitor.detectors` and is constructed with the transport.
-		if (parent.config.transportJitterDetector !== null) {
-			this.detectors.add(new TransportJitterDetector(this));
-		}
-		// Media flow is a property of the connection rather than of one transport: the far
-		// end's reports are per stream, the streams are the connection's, and under BUNDLE
-		// they all ride the same transport anyway.
+		// `BlockedStunRequestsDetector` belongs to this group too, but is a finding about one
+		// ICE transport, so it lives on `IceTransportMonitor.detectors` instead.
 		if (parent.config.blockedOutboundMediaDetector !== null) {
 			this.detectors.add(new BlockedOutboundMediaDetector(this));
 		}
@@ -494,13 +443,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	/**
-	 * The round trip time to prefer when a single number is needed: RTCP when
-	 * the remote reports are available, falling back to the ICE measurement.
-	 *
-	 * These are two different measurements — RTCP spans the media path to the
-	 * far end, ICE spans the connectivity check to whatever terminates ICE — and
-	 * they must never be averaged together. Read `rtcpRttInSec` / `iceRttInSec`
-	 * directly when the distinction matters.
+	 * The round trip to prefer when a single number is needed: RTCP where available, else ICE.
+	 * The two span different paths and are never blended; read either directly when it matters.
 	 */
 	public get avgRttInSec(): number | undefined {
 		return this.rtcpRttInSec ?? this.iceRttInSec;
@@ -520,15 +464,13 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	/**
-	 * Whether either direction is currently reported congested — the 4.9.0
-	 * `congested` reading, kept because "is this connection capacity-limited at
-	 * all" is a fair question to ask in one word. Read-only now: the two flags
-	 * above are owned by the detector of that direction, and a single writable
-	 * boolean could not say which of them it meant.
+	 * The whole-connection verdict of the deprecated `CongestionDetector`, and nothing else's: the
+	 * detectors that replaced it own `uplinkCongested` and `downlinkCongested`, so removing this
+	 * field with that detector cannot disturb them.
+	 *
+	 * @deprecated Read `uplinkCongested` and `downlinkCongested` instead.
 	 */
-	public get congested() {
-		return this.uplinkCongested || this.downlinkCongested;
-	}
+	public congested = false;
 
 	public get receivingBitrate() {
 		return (this.receivingAudioBitrate ?? 0) + (this.receivingVideoBitrate ?? 0) + (this.dataChannelReceivingBitrate ?? 0);
@@ -582,9 +524,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	private _acceptAdaptedStats(stats: W3C.RtcStats[]) {
-		// Computed first, from the reports' own timestamps rather than wall-clock
-		// time, so it is available to everything downstream — including the
-		// detectors this tick's loop feeds.
+		// Computed first, so `deltaTime` is available to everything downstream this tick.
 		let newestTimestamp: number | undefined;
 
 		for (const statsItem of stats) {
@@ -604,22 +544,26 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			this._previousNewestTimestamp = newestTimestamp;
 		}
 
-		// Kept apart deliberately: RTCP and ICE round trips measure different
-		// paths, and blending them makes the result move when streams come and
-		// go rather than when the network changes.
+		// Kept apart: RTCP and ICE round trips measure different paths.
 		const rtcpRttMeasurementsInS: number[] = [];
 		const iceRttMeasurementsInS: number[] = [];
-		this.deltaVideoBytesSent = 0;
-		this.deltaAudioBytesSent = 0;
-		this.deltaVideoBytesReceived = 0;
-		this.deltaAudioBytesReceived = 0;
-		this.deltaDataChannelBytesReceived = 0;
-		this.deltaDataChannelBytesSent = 0;
-		this.deltaOutboundPacketsLost = 0;
-		this.deltaOutboundPacketsReceived = 0;
-		this.deltaOutboundPacketsSent = 0;
-		this.deltaInboundPacketsLost = 0;
-		this.deltaInboundPacketsReceived = 0;
+		this.deltaVideoBytesSent = undefined;
+		this.deltaAudioBytesSent = undefined;
+		this.deltaVideoBytesReceived = undefined;
+		this.deltaAudioBytesReceived = undefined;
+		this.deltaDataChannelBytesReceived = undefined;
+		this.deltaDataChannelBytesSent = undefined;
+		this.deltaOutboundPacketsLost = undefined;
+		this.deltaOutboundPacketsReceived = undefined;
+		this.deltaOutboundPacketsSent = undefined;
+		this.deltaInboundPacketsLost = undefined;
+		this.deltaInboundPacketsReceived = undefined;
+		this.deltaPacketSendDelayInSec = undefined;
+		this.deltaInboundVideoJitterBufferDelayInSec = undefined;
+		this.deltaInboundVideoJitterBufferEmittedCount = undefined;
+		this.avgInboundVideoJitterBufferDelayInMs = undefined;
+		this.deltaVideoPacketsSent = undefined;
+		this.avgPacketSendDelayInMs = undefined;
 
 		this.sendingAudioBitrate = 0;
 		this.sendingVideoBitrate = 0;
@@ -629,14 +573,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.dataChannelReceivingBitrate = 0;
 		this.outboundFractionLost = 0;
 		this.inboundFractionalLost = 0;
-		this.totalAvailableIncomingBitrate = 0;
-		this.totalAvailableOutgoingBitrate = 0;
-		this.hasInboundVideo = false;
+		this.totalAvailableIncomingBitrate = undefined;
+		this.totalAvailableOutgoingBitrate = undefined;
 		this.qualityLimitationReason = undefined;
-		this._sendDelayInSec = 0;
-		this._sentPackets = 0;
-		this._videoBufferDelayInSec = 0;
-		this._emittedVideoFrames = 0;
+		this.hasInboundMedia = false;
+		this.hasOutboundMedia = false;
+		this.hasInboundVideo = false;
 
 		for (let i = 0, input = stats; i < 2 && 0 < input.length; ++i) {
 
@@ -651,39 +593,42 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						switch (monitor?.kind) {
 							case 'audio':
 								this.receivingAudioBitrate += monitor?.bitrate ?? 0;
-								this.deltaAudioBytesReceived += monitor?.deltaBytesReceived ?? 0;
+								this.deltaAudioBytesReceived = accumulatedValue(this.deltaAudioBytesReceived, monitor?.deltaBytesReceived);
+								this.hasInboundMedia = true;
 								break;
 							case 'video':
 								this.receivingVideoBitrate += monitor?.bitrate ?? 0;
-								this.deltaVideoBytesReceived += monitor?.deltaBytesReceived ?? 0;
+								this.deltaVideoBytesReceived = accumulatedValue(this.deltaVideoBytesReceived, monitor?.deltaBytesReceived);
+								this.hasInboundMedia = true;
 								this.hasInboundVideo = true;
 
-								// Video only, and summed rather than averaged over streams:
-								// the quotient of the two sums is the mean over frames,
-								// which is what a threshold can be reasoned about.
-								if (monitor?.deltaJitterBufferEmittedCount && monitor.deltaJitterBufferDelay !== undefined) {
-									this._videoBufferDelayInSec += monitor.deltaJitterBufferDelay;
-									this._emittedVideoFrames += monitor.deltaJitterBufferEmittedCount;
+								// Summed rather than averaged over streams: the quotient of the two
+								// sums is the mean over frames, which is what a threshold can be
+								// reasoned about.
+								if (monitor?.deltaJitterBufferEmittedCount) {
+									this.deltaInboundVideoJitterBufferDelayInSec = accumulatedValue(
+										this.deltaInboundVideoJitterBufferDelayInSec,
+										monitor?.deltaJitterBufferDelay,
+									);
+									this.deltaInboundVideoJitterBufferEmittedCount = accumulatedValue(
+										this.deltaInboundVideoJitterBufferEmittedCount,
+										monitor?.deltaJitterBufferEmittedCount,
+									);
 								}
+
 								break;
 						}
 
 						this.inboundFractionalLost += monitor?.deltaFractionLost ?? 0.0;
-						this.deltaInboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
-						this.deltaInboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
+						this.deltaInboundPacketsLost = accumulatedValue(this.deltaInboundPacketsLost, monitor?.deltaPacketsLost);
+						this.deltaInboundPacketsReceived = accumulatedValue(this.deltaInboundPacketsReceived, monitor?.deltaPacketsReceived);
 						break;
 					}
 					case W3C.StatsType.remoteOutboundRtp: {
 						const monitor = this._updateRemoteOutboundRtp(statsItem);
 
-						// Only when this report is new. `getStats()` keeps serving the last
-						// sender report until another arrives, so counting it every tick
-						// re-averages one measurement as though the far end kept speaking —
-						// which is how a path whose RTCP has stopped keeps reading as healthy.
-						// `deltaTime` is `0` for a report that did not advance, including on
-						// the collection that first sees one: a report is counted from the
-						// second collection that carries it, and the round trip is worth one
-						// collection of patience rather than a number with no interval behind it.
+						// Only when this report is new: `getStats()` keeps serving the last sender
+						// report, and re-averaging it would make stopped RTCP read as healthy.
 						if (monitor?.roundTripTime !== undefined && 0 < (monitor.deltaTime ?? 0)) {
 							rtcpRttMeasurementsInS.push(monitor.roundTripTime);
 						}
@@ -695,28 +640,25 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 						switch (monitor?.kind) {
 							case 'audio':
 								this.sendingAudioBitrate += monitor?.bitrate ?? 0;
-								this.deltaAudioBytesSent += monitor?.deltaBytesSent ?? 0;
+								this.deltaAudioBytesSent = accumulatedValue(this.deltaAudioBytesSent, monitor?.deltaBytesSent);
+								this.hasOutboundMedia = true;
 								break;
 							case 'video':
 								this.sendingVideoBitrate += monitor?.bitrate ?? 0;
-								this.deltaVideoBytesSent += monitor?.deltaBytesSent ?? 0;
+								this.deltaVideoBytesSent = accumulatedValue(this.deltaVideoBytesSent, monitor?.deltaBytesSent);
+								this.totalPacketSendDelayInSec = accumulatedValue(this.totalPacketSendDelayInSec, monitor?.deltaPacketSendDelay);
+								this.deltaPacketSendDelayInSec = accumulatedValue(this.deltaPacketSendDelayInSec, monitor?.deltaPacketSendDelay);
+								this.deltaVideoPacketsSent = accumulatedValue(this.deltaVideoPacketsSent, monitor?.deltaPacketsSent);
+								this.hasOutboundMedia = true;
 								break;
 						}
-						this.deltaOutboundPacketsSent += monitor?.deltaPacketsSent ?? 0;
+						this.deltaOutboundPacketsSent = accumulatedValue(this.deltaOutboundPacketsSent, monitor?.deltaPacketsSent);
 
-						// Only streams that actually sent something: a paused sender and an
-						// inactive simulcast layer both keep reporting the limitation they
-						// had when they stopped, and neither is limiting anything now.
-						if (monitor?.deltaPacketsSent) {
-							if (monitor.deltaTotalPacketSendDelay !== undefined) {
-								this._sendDelayInSec += monitor.deltaTotalPacketSendDelay;
-								this._sentPackets += monitor.deltaPacketsSent;
-							}
-
-							this.qualityLimitationReason = PeerConnectionMonitor._mostLimiting(
-								this.qualityLimitationReason,
-								monitor.qualityLimitationReason,
-							);
+						// Only a stream that sent this collection gets a vote. A paused sender and
+						// an inactive simulcast layer keep reporting whatever limited them when they
+						// stopped, and neither is limiting anything now.
+						if (0 < (monitor?.deltaPacketsSent ?? 0)) {
+							this._updatePeerConnectionLimitationReason(monitor?.qualityLimitationReason);
 						}
 						break;
 					}
@@ -724,24 +666,22 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 					case W3C.StatsType.remoteInboundRtp: {
 						const monitor = this._updateRemoteInboundRtp(statsItem);
 
-						// remote-inbound-rtp carries the RTT the far end measured
-						// for the stream we send: the canonical RTCP round trip. Counted
-						// only when the report is new, for the reason above.
+						// The canonical RTCP round trip, counted only when the report is new.
 						if (monitor?.roundTripTime !== undefined && 0 < (monitor.deltaTime ?? 0)) {
 							rtcpRttMeasurementsInS.push(monitor.roundTripTime);
 						}
 
 						this.outboundFractionLost += monitor?.deltaFractionLost ?? 0.0;
-						this.deltaOutboundPacketsLost += monitor?.deltaPacketsLost ?? 0;
-						this.deltaOutboundPacketsReceived += monitor?.deltaPacketsReceived ?? 0;
+						this.deltaOutboundPacketsLost = accumulatedValue(this.deltaOutboundPacketsLost, monitor?.deltaPacketsLost);
+						this.deltaOutboundPacketsReceived = accumulatedValue(this.deltaOutboundPacketsReceived, monitor?.deltaPacketsReceived);
 						break;
 					}
 
 					case W3C.StatsType.dataChannel: {
 						const monitor = this._updateDataChannel(statsItem);
 
-						this.deltaDataChannelBytesSent += monitor?.deltaBytesSent ?? 0;
-						this.deltaDataChannelBytesReceived += monitor?.deltaBytesReceived ?? 0;
+						this.deltaDataChannelBytesSent = accumulatedValue(this.deltaDataChannelBytesSent, monitor?.deltaBytesSent);
+						this.deltaDataChannelBytesReceived = accumulatedValue(this.deltaDataChannelBytesReceived, monitor?.deltaBytesReceived);
 						this.dataChannelSendingBitrate += monitor?.sendingBitrate ?? 0;
 						this.dataChannelReceivingBitrate += monitor?.receivingBitrate ?? 0;
 						break;
@@ -752,22 +692,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 					case W3C.StatsType.mediaPlayout:
 						this._updateMediaPlayout(statsItem);
 						break;
-					case W3C.StatsType.transport: {
-						const monitor = this._updateIceTransport(statsItem);
-						const selectedPair = monitor?.getSelectedCandidatePair();
-
-						this.totalAvailableIncomingBitrate += selectedPair?.availableIncomingBitrate ?? 0;
-						this.totalAvailableOutgoingBitrate += selectedPair?.availableOutgoingBitrate ?? 0;
-
-						// interval average when a check completed this tick; the
-						// (possibly stale) latest check otherwise
-						const iceRtt = selectedPair?.avgRoundTripTimeInSec ?? selectedPair?.currentRoundTripTime;
-
-						if (iceRtt !== undefined) {
-							iceRttMeasurementsInS.push(iceRtt);
-						}
+					case W3C.StatsType.transport:
+						// What the selected pair carries is read after the loop instead: `transport`
+						// only names the pair by id, and that pair may not have been accepted yet,
+						// so reading it here answers with the previous collection's numbers.
+						this._updateIceTransport(statsItem);
 						break;
-					}
 
 					case W3C.StatsType.peerConnection:
 						this._updatePeerConnectionTransport(statsItem);
@@ -791,15 +721,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 			const postAdapted = this.statsAdapters.postAdapt(input);
 
-			// The second pass exists for an adapter that synthesizes reports out of
-			// the ones above — `FirefoxStatsAdapter` rebuilding a transport report
-			// from the selected candidate pair is the shape it was written for. Where
-			// nothing rewrote the list, `postAdapt()` hands back the array it was
-			// given, and walking it again folds every report in a second time: each
-			// `+=` in the loop above counts its stream once per pass, which doubled
-			// `sendingBitrate`, `receivingBitrate` and every byte and packet delta on
-			// this monitor. Identity is the test, so an adapter that genuinely
-			// produces new reports still gets its pass.
+			// The second pass is for an adapter that synthesizes new reports. Identity is the
+			// test: walking the same array again would count every `+=` above twice.
 			if (postAdapted === input) break;
 
 			input = postAdapted;
@@ -813,6 +736,22 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 				? (this.rtcpRttInSec * 0.1) + (this.ewmaRtcpRttInSec * 0.9)
 				: this.rtcpRttInSec;
 		}
+		this._updateTransportQualityAverages();
+
+		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
+
+		for (const selectedPair of selectedIceCandidatePairs) {
+			this.totalAvailableIncomingBitrate = accumulatedValue(this.totalAvailableIncomingBitrate, selectedPair.availableIncomingBitrate);
+			this.totalAvailableOutgoingBitrate = accumulatedValue(this.totalAvailableOutgoingBitrate, selectedPair.availableOutgoingBitrate);
+
+			// Interval average when a check completed this tick; the possibly stale latest one otherwise.
+			const iceRtt = selectedPair.avgRoundTripTimeInSec ?? selectedPair.currentRoundTripTime;
+
+			if (iceRtt !== undefined) {
+				iceRttMeasurementsInS.push(iceRtt);
+			}
+		}
+
 		if (0 < iceRttMeasurementsInS.length) {
 			this.iceRttInSec = iceRttMeasurementsInS.reduce((acc, rtt) => acc + rtt, 0) / iceRttMeasurementsInS.length;
 			this.ewmaIceRttInSec = this.ewmaIceRttInSec !== undefined
@@ -820,45 +759,46 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 				: this.iceRttInSec;
 		}
 
-		this._updateTransportQualityAverages();
-
-		this.highestSeenAvailableIncomingBitrate = Math.max(this.highestSeenAvailableIncomingBitrate ?? 0, this.totalAvailableIncomingBitrate);
-		this.highestSeenAvailableOutgoingBitrate = Math.max(this.highestSeenAvailableOutgoingBitrate ?? 0, this.totalAvailableOutgoingBitrate);
-		this.highestSeenSendingBitrate = Math.max(this.highestSeenSendingBitrate ?? 0, this.sendingAudioBitrate + this.sendingVideoBitrate);
-		this.highestSeenReceivingBitrate = Math.max(this.highestSeenReceivingBitrate ?? 0, this.receivingAudioBitrate + this.receivingVideoBitrate);
-
-		const selectedIceCandidatePairs = this.selectedIceCandidatePairs;
-
 		this._updateSelectedIcePaths(selectedIceCandidatePairs);
 
-		// Each flag is decided per candidate pair, so a TURN verdict can never be
-		// assembled from signals belonging to two different candidates.
 		this.usingTCP = selectedIceCandidatePairs.some(pair => pair.usingTcp);
 		this.usingTURN = selectedIceCandidatePairs.some(pair => pair.usingTurn);
-		// The most severe state across the transports: with BUNDLE there is exactly
-		// one, and without it a failed transport must not be masked by a healthy
-		// sibling that happened to be listed first.
+		// Most severe across the transports, so a failed one is not masked by a healthy sibling.
 		this.iceState = this._mostSevereIceState();
 
-		this._updateCapacityFacts(selectedIceCandidatePairs);
+		// Undefined unless packets actually carried the delay, so no division by zero
+		// and no fabricated zero on a collection that sent nothing.
+		this.avgPacketSendDelayInMs = this.deltaPacketSendDelayInSec !== undefined
+			&& this.deltaVideoPacketsSent !== undefined
+			&& this.deltaVideoPacketsSent > 0
+			? (this.deltaPacketSendDelayInSec * 1000) / this.deltaVideoPacketsSent
+			: undefined;
 
-		this.totalDataChannelBytesReceived += this.deltaDataChannelBytesReceived;
-		this.totalDataChannelBytesSent += this.deltaDataChannelBytesSent;
-		this.totalSentAudioBytes += this.deltaAudioBytesSent;
-		this.totalSentVideoBytes += this.deltaVideoBytesSent;
-		this.totalReceivedAudioBytes += this.deltaAudioBytesReceived;
-		this.totalReceivedVideoBytes += this.deltaVideoBytesReceived;
-		this.totalOutboundPacketsSent += this.deltaOutboundPacketsSent;
-		this.totalOutboundPacketsReceived += this.deltaOutboundPacketsReceived;
-		this.totalOutboundPacketsLost += this.deltaOutboundPacketsLost;
-		this.totalInboundPacketsLost += this.deltaInboundPacketsLost;
-		this.totalInboundPacketsReceived += this.deltaInboundPacketsReceived;
+		// Same shape as the pacer mean above: undefined unless frames actually left the
+		// buffer, so a stalled stream reports no measurement rather than a fabricated zero.
+		this.avgInboundVideoJitterBufferDelayInMs = this.deltaInboundVideoJitterBufferDelayInSec !== undefined
+			&& this.deltaInboundVideoJitterBufferEmittedCount !== undefined
+			&& this.deltaInboundVideoJitterBufferEmittedCount > 0
+			? (this.deltaInboundVideoJitterBufferDelayInSec * 1000) / this.deltaInboundVideoJitterBufferEmittedCount
+			: undefined;
+
+		this.totalDataChannelBytesReceived = accumulatedValue(this.totalDataChannelBytesReceived, this.deltaDataChannelBytesReceived);
+		this.totalDataChannelBytesSent = accumulatedValue(this.totalDataChannelBytesSent, this.deltaDataChannelBytesSent);
+		this.totalSentAudioBytes = accumulatedValue(this.totalSentAudioBytes, this.deltaAudioBytesSent);
+		this.totalSentVideoBytes = accumulatedValue(this.totalSentVideoBytes, this.deltaVideoBytesSent);
+		this.totalReceivedAudioBytes = accumulatedValue(this.totalReceivedAudioBytes, this.deltaAudioBytesReceived);
+		this.totalReceivedVideoBytes = accumulatedValue(this.totalReceivedVideoBytes, this.deltaVideoBytesReceived);
+		this.totalOutboundPacketsSent = accumulatedValue(this.totalOutboundPacketsSent, this.deltaOutboundPacketsSent);
+		this.totalOutboundPacketsReceived = accumulatedValue(this.totalOutboundPacketsReceived, this.deltaOutboundPacketsReceived);
+		this.totalOutboundPacketsLost = accumulatedValue(this.totalOutboundPacketsLost, this.deltaOutboundPacketsLost);
+		this.totalInboundPacketsLost = accumulatedValue(this.totalInboundPacketsLost, this.deltaInboundPacketsLost);
+		this.totalInboundPacketsReceived = accumulatedValue(this.totalInboundPacketsReceived, this.deltaInboundPacketsReceived);
+
+		this._feedDetectionRecoveryWindow();
 
 		this.detectors.update();
 
-		// Transport-bound detectors run after the connection-level ones, on the same tick
-		// and from the same stats. The order carries no meaning — no detector reads what
-		// another concluded — it simply keeps the connection's own findings first.
+		// Transport-bound detectors run on the same tick and from the same stats.
 		for (const iceTransport of this.iceTransports) {
 			iceTransport.detectors.update();
 		}
@@ -899,12 +839,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			this._pendingMediaStreamTracks.delete(track.id);
 			this.mappedInboundTracks.delete(track.id);
 
-			// An outbound track is recorded rather than dropped. This event is the
-			// only place the library learns that a capture source went away by
-			// itself — `stop()` ends a track without firing it — and deleting the
-			// monitor here would delete, in the same breath, the detector whose whole
-			// subject that is. It is dropped by `_checkVisited` once its stats stop
-			// arriving, after its detectors have had a last look.
+			// An outbound track is flagged rather than dropped: this event is the only place
+			// the library learns a capture source went away by itself, and the detector whose
+			// subject that is still needs a last look. `_checkVisited` drops it afterwards.
 			const outboundTrack = this.mappedOutboundTracks.get(track.id);
 
 			if (outboundTrack) outboundTrack.sourceEnded = true;
@@ -935,6 +872,55 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	public get inboundRtps() {
 		return [ ...this.mappedInboundRtpMonitors.values() ];
+	}
+
+	/**
+	 * Hands this collection's cumulative round trip counters to the shared window, before the
+	 * detectors read it.
+	 *
+	 * The raw W3C totals go in rather than per-collection deltas, so a delta spans exactly the
+	 * stretch its duration measures and a missed collection costs nothing. A report that carries a
+	 * total but no measurement count, or the reverse, contributes to neither: a sum of times
+	 * divided by a count that does not cover the same reports is not a mean of anything.
+	 *
+	 * `null` where nothing reported the pair at all, which the window carries through to a `null`
+	 * delta — a detector then knows it could not see, instead of reading a zero.
+	 */
+	private _feedDetectionRecoveryWindow() {
+		let rtcpTimeInMs: number | null = null;
+		let rtcpMeasurements: number | null = null;
+		let iceTimeInMs: number | null = null;
+		let iceResponses: number | null = null;
+
+		// Both RTCP report types carry a round trip, and the pair is summed as one RTCP total, as
+		// `rtcpRttInSec` has always averaged them together.
+		for (const monitor of [ ...this.remoteInboundRtps, ...this.remoteOutboundRtps ]) {
+			const { totalRoundTripTime, roundTripTimeMeasurements } = monitor;
+
+			if (totalRoundTripTime === undefined || roundTripTimeMeasurements === undefined) continue;
+
+			rtcpTimeInMs = (rtcpTimeInMs ?? 0) + (totalRoundTripTime * 1000);
+			rtcpMeasurements = (rtcpMeasurements ?? 0) + roundTripTimeMeasurements;
+		}
+
+		for (const pair of this.selectedIceCandidatePairs) {
+			const { totalRoundTripTime, responsesReceived } = pair;
+
+			if (totalRoundTripTime === undefined || responsesReceived === undefined) continue;
+
+			iceTimeInMs = (iceTimeInMs ?? 0) + (totalRoundTripTime * 1000);
+			iceResponses = (iceResponses ?? 0) + responsesReceived;
+		}
+
+		this.detectionRecoveryWindow.add({
+			timestamp: this.statsClockTime,
+			value: {
+				totalRtcpRoundTripTimeInMs: rtcpTimeInMs,
+				totalRtcpRoundTripMeasurements: rtcpMeasurements,
+				totalIceRoundTripTimeInMs: iceTimeInMs,
+				totalIceResponsesReceived: iceResponses,
+			},
+		});
 	}
 
 	public get remoteOutboundRtps() {
@@ -991,14 +977,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	/**
-	 * The selected ICE path of this peer connection, or `undefined` before ICE
-	 * selects one.
-	 *
-	 * With BUNDLE negotiated — the normal case, and always the case for
-	 * mediasoup transports — a peer connection has exactly one ICE transport and
-	 * therefore exactly one path, so this is the accessor to reach for. Read
-	 * `selectedIcePaths` when you must handle a connection whose m-lines were
-	 * not bundled and can sit on different paths.
+	 * The selected ICE path, or `undefined` before ICE selects one. With BUNDLE there is
+	 * exactly one; read `selectedIcePaths` for an unbundled connection.
 	 */
 	public get selectedIcePath(): SelectedIcePath | undefined {
 		for (const selectedIcePath of this.mappedSelectedIcePaths.values()) return selectedIcePath;
@@ -1007,17 +987,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	/**
-	 * True while `BlockedStunRequestsDetector` has an open finding on any of this
-	 * connection's ICE transports: STUN requests keep going out and nothing comes back.
-	 *
-	 * Derived rather than stored, because the things that read it —
-	 * the blocked-media detectors, a score calculator, an application — ask about the
-	 * connection, while the fact belongs to one transport. Folding it here means a
-	 * transport that is replaced or goes away takes its finding with it: its monitor is
-	 * dropped from `mappedIceTransportMonitors` and stops being counted, instead of
-	 * leaving a flag behind that only the detector it no longer has could have cleared.
-	 * With BUNDLE there is exactly one transport and the two readings are the same
-	 * question.
+	 * True while any of this connection's ICE transports has STUN going out and nothing
+	 * coming back. Derived rather than stored, so a transport that goes away takes its
+	 * finding with it.
 	 */
 	public get blockedTransport(): boolean {
 		for (const transport of this.mappedIceTransportMonitors.values()) {
@@ -1077,11 +1049,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		return this._connectionState;
 	}
 
-	/**
-	 * Keeps one live `SelectedIcePath` per ICE transport that has a selected
-	 * candidate pair: creates paths as transports select one, feeds the current
-	 * pair to existing ones, and closes paths whose transport is gone.
-	 */
+	/** Keeps one live `SelectedIcePath` per ICE transport that has a selected candidate pair. */
 	private _updateSelectedIcePaths(selectedIceCandidatePairs: IceCandidatePairMonitor[]) {
 		const seenKeys = new Set<string>();
 
@@ -1118,90 +1086,29 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 	}
 
-	/**
-	 * Averages loss and jitter across the streams that actually carried media in
-	 * this interval. Streams that received nothing are excluded rather than
-	 * counted as zero: a muted track or a stream that has not started would
-	 * otherwise drag every average toward "healthy" exactly when the interesting
-	 * streams are the ones in trouble. When no stream qualifies the averages are
-	 * left `undefined`, and every detector reading them stands down.
-	 */
-	/**
-	 * The capacity facts, from the same collection every other derived value here
-	 * comes from: what the path says it can carry, what it recently could, and the
-	 * two queues that fill when it stops being wide enough.
-	 *
-	 * Every one of them is a measurement of this interval. Nothing is carried
-	 * forward: a stream that reported nothing this tick makes the value
-	 * `undefined` rather than leaving the previous answer standing, because a
-	 * detector reading a stale number as a current one is exactly the failure the
-	 * freshness gating above exists to prevent.
-	 */
-	private _updateCapacityFacts(selectedIceCandidatePairs: IceCandidatePairMonitor[]) {
-		let availableOutgoing: number | undefined;
 
-		for (const pair of selectedIceCandidatePairs) {
-			if (pair.availableOutgoingBitrate === undefined) continue;
+	private _updatePeerConnectionLimitationReason(current?: string) {
+		if (current === undefined) return;
+		if (!(current in PeerConnectionMonitor.LIMITATION_PRIORITY)) return;
 
-			availableOutgoing = (availableOutgoing ?? 0) + pair.availableOutgoingBitrate;
+		const newReason = current as keyof typeof PeerConnectionMonitor.LIMITATION_PRIORITY;
+
+		if (this.qualityLimitationReason === undefined) {
+			this.qualityLimitationReason = newReason;
+			return;
 		}
 
-		this.availableOutgoingBitrate = availableOutgoing;
+		const currentPriority = PeerConnectionMonitor.LIMITATION_PRIORITY[this.qualityLimitationReason];
+		const newPriority = PeerConnectionMonitor.LIMITATION_PRIORITY[newReason];
 
-		// Both sums were accumulated in the collection loop above. `totalPacketSendDelay`
-		// and `jitterBufferDelay` are in seconds by specification.
-		this.avgPacketSendDelayInMs = 0 < this._sentPackets
-			? (this._sendDelayInSec / this._sentPackets) * 1000
-			: undefined;
-
-		if (this.avgPacketSendDelayInMs !== undefined) {
-			this.estimatedMedianPacketSendDelayInMs = this._frugalMedianPacketSendDelay.update(this.avgPacketSendDelayInMs);
+		if (currentPriority < newPriority) {
+			this.qualityLimitationReason = newReason;
 		}
 
-		this.avgInboundVideoJitterBufferDelayInMs = 0 < this._emittedVideoFrames
-			? (this._videoBufferDelayInSec / this._emittedVideoFrames) * 1000
-			: undefined;
-
-		if (this.avgInboundVideoJitterBufferDelayInMs !== undefined) {
-			this.ewmaInboundVideoJitterBufferDelayInMs = this.ewmaInboundVideoJitterBufferDelayInMs !== undefined
-				? (this.avgInboundVideoJitterBufferDelayInMs * 0.1) + (this.ewmaInboundVideoJitterBufferDelayInMs * 0.9)
-				: this.avgInboundVideoJitterBufferDelayInMs;
-		}
-
-		this.outgoingBitrateHeadroom = this.availableOutgoingBitrate === undefined
-			? undefined
-			: this.availableOutgoingBitrate - this.sendingBitrate;
-
-		if (this.outgoingBitrateHeadroom !== undefined) {
-			this.ewmaOutgoingBitrateHeadroom = this.ewmaOutgoingBitrateHeadroom !== undefined
-				? (this.outgoingBitrateHeadroom * 0.1) + (this.ewmaOutgoingBitrateHeadroom * 0.9)
-				: this.outgoingBitrateHeadroom;
-		}
+		return this.qualityLimitationReason;
 	}
 
-	/**
-	 * The more limiting of two `qualityLimitationReason` values, in the priority
-	 * order the specification states: "bandwidth", "cpu", "other". `none` is the
-	 * least limiting of all and loses to every other answer, which is what makes
-	 * the fold over the streams order-independent.
-	 */
-	private static _mostLimiting(current: string | undefined, candidate: string | undefined) {
-		if (candidate === undefined) return current;
-		if (current === undefined) return candidate;
-
-		const rank = (reason: string) => PeerConnectionMonitor.LIMITATION_PRIORITY[reason] ?? 0;
-
-		return rank(candidate) > rank(current) ? candidate : current;
-	}
-
-	private static readonly LIMITATION_PRIORITY: Record<string, number> = {
-		none: 1,
-		other: 2,
-		cpu: 3,
-		bandwidth: 4,
-	};
-
-
+	/** Averages loss and jitter over the streams that carried media; ones that received nothing are excluded, not counted as zero. */
 	private _updateTransportQualityAverages() {
 		let lossSum = 0;
 		let lossCount = 0;
@@ -1274,13 +1181,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 			const outboundTrack = this.mappedOutboundTracks.get(monitor.trackIdentifier ?? '');
 
-			// A source that went away takes its stats entry with it, usually on the
-			// very collection where it ended — so the ordinary update pass, which runs
-			// after this sweep, would never see the track again. Detectors get their
-			// last look here instead. Only on `sourceEnded`: every other removal is an
-			// ordinary teardown with nothing left to find, and running detectors over
-			// a monitor whose stats have already stopped would be judging stale
-			// numbers.
+			// A source that went away takes its stats entry with it, so the ordinary update
+			// pass would never see the track again; its detectors get their last look here.
 			if (outboundTrack?.sourceEnded) outboundTrack.detectors.update();
 
 			this.mappedOutboundTracks.delete(monitor.trackIdentifier ?? '');
@@ -1341,8 +1243,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.mappedSelectedIcePaths.forEach(selectedIcePath => selectedIcePath.close());
 		this.mappedSelectedIcePaths.clear();
 
-		// this will clear up everything since the second time
-		// the visited will be false, hence will delete the monitors
+		// Twice: on the second pass every monitor is unvisited, so all of them are dropped.
 		this._checkVisited();
 		this._checkVisited();
 

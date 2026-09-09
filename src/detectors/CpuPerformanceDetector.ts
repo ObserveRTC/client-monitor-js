@@ -1,104 +1,93 @@
 import { ClientMonitor } from "..";
 import { Detector } from "./Detector";
 
+/**
+ * Markers of an implementation that does its work off the CPU, matched case-insensitively as
+ * substrings of `encoderImplementation` / `decoderImplementation`.
+ *
+ * `accelerator` is the broad one and carries most of the weight: every hardware path Chromium
+ * exposes is named for the accelerator behind it — `MediaFoundationVideoEncodeAccelerator`,
+ * `VaapiVideoDecodeAccelerator`, `V4L2VideoEncodeAccelerator`, and so on. The rest catch vendor
+ * and platform names that do not follow that convention, plus Chromium's older generic
+ * `ExternalEncoder` / `ExternalDecoder`.
+ *
+ * These strings are free-form and vendor-specific, so this list is a blocklist rather than proof:
+ * an unrecognised hardware implementation still counts as CPU work. `powerEfficient*` is checked
+ * alongside it to cover what the names miss.
+ */
+const OFF_CPU_IMPLEMENTATION_MARKERS = [
+	'accelerator',
+	'external',
+	'hardware',
+	'mediacodec',
+	'mediafoundation',
+	'videotoolbox',
+	'vaapi',
+	'nvenc',
+	'nvdec',
+	'quicksync',
+	'omx',
+];
+
 export type CpuPerformanceIssuePayload = {
+	/**
+	 * Time spent inside the video encoders per unit of stats time, summed over every sending
+	 * stream that encodes on the CPU. `0.5` is half the interval occupied encoding; because the
+	 * streams add, three simulcast layers busy half the time each come to `1.5` rather than
+	 * saturating at `1`.
+	 */
+	encoderUtilization: number;
+
+	/** The same for the video decoders, summed over every receiving stream that decodes on the CPU. */
+	decoderUtilization?: number;
+
+	/**
+	 * The lower of the two utilizations, or whichever one exists on a client that only sends or
+	 * only receives. This is what gets compared against `utilizationThreshold`.
+	 */
+	minUtilization: number;
+
+	/** How many video streams were left out of each sum for encoding or decoding off the CPU. */
+	hardwareAcceleratedEncoders: number;
+	hardwareAcceleratedDecoders: number;
+
 	/** Filled in when the issue is resolved. */
 	durationInMs?: number;
 }
 
 export type CpuPerformanceDetectorConfig = {
 	/**
-	 * Thresholds for the ratio of decoded to received frames on inbound
-	 * video tracks. When the decoder cannot keep up with the incoming
-	 * stream (a classic sign of CPU limitation) frames are received but
-	 * never decoded, so the decoded/received ratio drops.
-	 *
-	 * This replaces FPS-volatility based detection, which false-triggered
-	 * on content such as screen share whose frame rate legitimately swings
-	 * (e.g. 15 -> 1 fps when the shared content goes static). When fps
-	 * drops legitimately, received and decoded frames drop together so the
-	 * ratio stays close to 1.0 and no alert fires.
-	 *
-	 * - `alertOn`: ratio at or below which the alert turns ON (e.g. 0.7).
-	 * - `alertOff`: ratio at or above which the alert turns OFF (e.g. 0.85);
-	 *   should be higher than `alertOn` to provide hysteresis.
-	 * - `minReceivedFrames`: the minimum number of frames that must have
-	 *   been received in an interval before the ratio is evaluated, guarding
-	 *   against noise at low frame rates (e.g. 1 received, 0 decoded).
-	 * - `frameArrivalBurstFactor`: burst guard against bursty frame
-	 *   *arrival* being read as CPU limitation. The detector keeps a
-	 *   smoothed (EWMA) frames-received-per-interval baseline per track;
-	 *   an interval whose received count exceeds
-	 *   `frameArrivalBurstFactor * baseline` is a burst — a simulcast
-	 *   layer switch, keyframe recovery or post-stall queue flush
-	 *   momentarily outpaces the decoder without the CPU being the
-	 *   problem — and its ratio is skipped rather than judged. A track's
-	 *   first interval (no baseline yet) is also skipped, since a fresh
-	 *   consumer routinely starts with a keyframe burst. Sustained decoder
-	 *   starvation still alerts because its low ratio persists across
-	 *   ordinary-arrival intervals. Set to `undefined` to disable the
-	 *   guard and judge every interval.
+	 * The utilization `minUtilization` has to reach before this reports anything. Read it as a
+	 * usage level: `0.15` means both halves of the pipeline are spending at least 15% of the
+	 * interval inside a codec.
 	 */
-	incomingDecodedFramesRatioThresholds: {
-		alertOn: number;
-		alertOff: number;
-		minReceivedFrames: number;
-		frameArrivalBurstFactor?: number;
-	};
-
-	/**
-	 * Thresholds for the duration of collecting performance stats.
-	 * - `lowWatermark`: The minimum duration threshold (in milliseconds).
-	 * - `highWatermark`: The maximum duration threshold (in milliseconds).
-	 */
-	durationOfCollectingStatsThreshold: {
-		lowWatermark: number;
-		highWatermark: number;
-	};
-
-	/**
-	 * Share of an interval (`0..1`) an outbound video stream must spend
-	 * explicitly CPU-limited, per `qualityLimitationDurations.cpu`, before
-	 * that counts as CPU limitation. Corroborates the instantaneous
-	 * `qualityLimitationReason`, which flickers.
-	 *
-	 * Set to `undefined` to skip this check.
-	 */
-	encoderCpuLimitationShareThreshold?: number;
-
-	/**
-	 * Fraction of the per-frame time budget that encoding one frame may
-	 * consume before the encoder counts as CPU-pressured. The budget is
-	 * derived from the stream's own frame rate (33ms at 30fps), so this is
-	 * portable across frame rates in a way a fixed millisecond value is not.
-	 *
-	 * Set to `undefined` to skip this check.
-	 */
-	encodeTimeBudgetRatio?: number;
+	utilizationThreshold: number;
 }
 
 /**
- * Watches for the client machine, rather than the network, being why a call looks bad: the
- * encoder shedding resolution, the decoder falling behind, the stats loop running late. A
- * per-monitor singleton with separate on and off conditions, so the alert cannot flap.
+ * Reports the client machine, rather than the network, being why a call looks bad. Use it to tell a
+ * saturated CPU apart from a congested link before anyone goes looking at the network.
  *
- * Four signals feed it. The browser's own `qualityLimitationReason === 'cpu'` is the most direct.
- * Encoder pressure is measured two further ways: the share of the interval the encoder spent
- * CPU-limited, and encode time per frame against the budget the stream's frame rate implies
- * (1000/fps — 33ms at 30fps). A long stats collection is a saturated main thread delaying the
- * collector, and decoded-over-received frames says whether the receive side is keeping up.
+ * A finding means the device is out of headroom: too many streams for it, a thermal or battery
+ * throttle, another application taking the machine, or a software codec on hardware too old to run
+ * it. It is a property of the endpoint, so the same user tends to show it on every call.
  *
- * That last is a ratio rather than frame-rate volatility, which false-triggered on screen share
- * whose fps legitimately swings 15 to 1 when content goes static — received and decoded frames
- * fall together there. Its own failure mode is a bursty *arrival*: a layer switch, a keyframe
- * recovery or a post-stall flush dumps frames into one interval and the decoder trails the spike
- * for a single tick on an idle machine. So a smoothed per-ssrc arrival rate is kept
- * and ticks exceeding `frameArrivalBurstFactor` times it are skipped — a starved decoder still
- * alerts, its ratio staying low across ticks with ordinary arrival rates.
+ * The measurement is **utilization** — codec time per unit of stats time, summed over the video
+ * streams, where `0.25` is a quarter of the interval spent inside a codec. Summed rather than
+ * averaged, so three simulcast layers busy half the time each read `1.5`; nothing clamps it at `1`.
+ * `encoderUtilization` and `decoderUtilization` combine with `min()` into `minUtilization`, so codec
+ * work on one side alone is a busy stream and work on both at once is a busy machine. A client
+ * missing one direction is judged on the other.
  *
- * It refuses to judge a backgrounded tab at all, resolving any open alert — throttled timers and
- * halted rendering would read as CPU limitation on a wholly idle CPU. Tracks with too few frames,
- * or with no arrival baseline yet, are skipped rather than counted either way.
+ * It is not CPU time: `totalEncodeTime` is elapsed time inside the codec call, so a hardware codec
+ * waiting on the GPU would count in full. Streams naming an off-CPU implementation, or flagged
+ * `powerEfficient`, are left out of the sums — a wholly hardware pipeline yields no clue and sets
+ * `inputsUnavailable` rather than reading as healthy. A backgrounded tab is not judged at all,
+ * since throttled timers stretch the interval and read as an idle machine.
+ *
+ * Deliberately not gated on `qualityLimitationReason === 'cpu'`: Chrome's precedence is
+ * `bandwidth > cpu > none`, so a machine that is both would report `bandwidth` and the gate would
+ * close exactly where both problems are real.
  *
  * Raises `cpulimitation`. Emits `cpulimitation`. Config: `cpuPerformanceDetector`.
  *
@@ -109,18 +98,14 @@ export type CpuPerformanceDetectorConfig = {
 export class CpuPerformanceDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'cpulimitation';
 
-	/** 0.3 ≈ the last ~5 ticks dominate: the baseline follows a legitimate rate change within a few intervals, while a single-tick spike barely moves it. */
-	private static readonly FRAME_ARRIVAL_EWMA_ALPHA = 0.3;
-
 	public readonly name = 'cpu-performance-detector';
 	public disabled = false;
 	public includeIssueInSample = true;
+	public inputsUnavailable = false;
 
 	private readonly issueKey = CpuPerformanceDetector.ISSUE_TYPE;
 
 	private _startedAlertAt?: number;
-
-	private _avgDeltaFramesReceivedBySsrc = new Map<number, number>();
 
 	public constructor(
 		public readonly clientMonitor: ClientMonitor,
@@ -130,131 +115,157 @@ export class CpuPerformanceDetector implements Detector {
 		return this.clientMonitor.config.cpuPerformanceDetector!;
 	}
 
-
 	public update() {
 		if (this.disabled) return;
 
 		if (!this.clientMonitor.activeTab) {
-			if (this.clientMonitor.cpuPerformanceAlertOn) {
-				this.clientMonitor.cpuPerformanceAlertOn = false;
-				this._resolve('tab in background');
-			}
+			this.inputsUnavailable = false;
+			this.clientMonitor.cpuUtilization = undefined;
 
-			return;
+			return this._standDown('tab in background');
 		}
 
-		const isLimited = this.clientMonitor.cpuPerformanceAlertOn;
-		let gotLimited = false;
-		const { alertOn, alertOff, minReceivedFrames, frameArrivalBurstFactor } = this.config.incomingDecodedFramesRatioThresholds ?? {};
+		const encoder = this._utilization(
+			this.clientMonitor.outboundRtps,
+			(rtp) => rtp.deltaEncodeTime,
+			(rtp) => rtp.encoderImplementation,
+			(rtp) => rtp.powerEfficientEncoder,
+		);
+		const decoder = this._utilization(
+			this.clientMonitor.inboundRtps,
+			(rtp) => rtp.deltaTotalDecodeTime,
+			(rtp) => rtp.decoderImplementation,
+			(rtp) => rtp.powerEfficientDecoder,
+		);
 
+		// No video at all, or none of it running on the CPU. Either way there is no CPU cost
+		// visible here — which is not the same as a machine with room to spare.
+		if (encoder.utilization === undefined && decoder.utilization === undefined) {
+			this.inputsUnavailable = true;
+			this.clientMonitor.cpuUtilization = undefined;
 
-		if (this.config.durationOfCollectingStatsThreshold) {
-			const { lowWatermark, highWatermark } = this.config.durationOfCollectingStatsThreshold;
-
-			gotLimited = (isLimited ? lowWatermark : highWatermark) < this.clientMonitor.durationOfCollectingStatsInMs;
+			return this._standDown(encoder.hardwareAccelerated + decoder.hardwareAccelerated > 0
+				? 'all video is encoded and decoded off the cpu'
+				: 'no video is being encoded or decoded');
 		}
 
-		for (const outboundRtp of this.clientMonitor.outboundRtps) {
-			if (gotLimited) break;
+		this.inputsUnavailable = false;
 
-			gotLimited ||= outboundRtp.qualityLimitationReason === 'cpu' ||
-				this._checkEncoderPressure(outboundRtp);
+		// The lower of the two, and whichever one exists when the client only sends or only receives.
+		const minUtilization = encoder.utilization === undefined
+			? decoder.utilization as number
+			: decoder.utilization === undefined
+				? encoder.utilization
+				: Math.min(encoder.utilization, decoder.utilization);
+
+		// Written before the threshold test, so the measurement is there below the bar as well as
+		// above it — a machine at 0.7 of its budget is not the same as one nobody measured.
+		this.clientMonitor.cpuUtilization = minUtilization;
+
+		if (minUtilization < this.config.utilizationThreshold) {
+			return this._standDown('cpu limitation ended');
 		}
 
-		if (alertOn !== undefined && alertOff !== undefined) {
-			const minFrames = minReceivedFrames ?? 0;
-			const nextAvgs = new Map<number, number>();
-			const alpha = CpuPerformanceDetector.FRAME_ARRIVAL_EWMA_ALPHA;
+		if (this.clientMonitor.cpuPerformanceAlertOn) return;
 
-			for (const inboundRtp of this.clientMonitor.inboundRtps) {
-				if (inboundRtp.kind !== 'video') continue;
-
-				const receivedFrames = inboundRtp.deltaFramesReceived ?? 0;
-				const decodedFrames = inboundRtp.deltaFramesDecoded ?? 0;
-
-				// updated on every tick, even ones another signal already flagged, so the guard never compares against a stale average
-				const avgReceivedFrames = this._avgDeltaFramesReceivedBySsrc.get(inboundRtp.ssrc);
-
-				nextAvgs.set(inboundRtp.ssrc, avgReceivedFrames === undefined
-					? receivedFrames
-					: avgReceivedFrames * (1 - alpha) + receivedFrames * alpha
-				);
-
-				if (gotLimited) continue;
-
-				// too few frames to judge: this is what keeps legitimate fps swings (screen share 15 -> 1 fps) from alerting
-				if (receivedFrames < minFrames) continue;
-
-				if (frameArrivalBurstFactor !== undefined) {
-					if (avgReceivedFrames === undefined) continue;
-
-					// An arrival burst (layer switch, keyframe recovery, post-stall flush) outpaces the decoder
-					// for a single tick without the CPU being the problem, observed on an otherwise idle machine.
-					if (receivedFrames > avgReceivedFrames * frameArrivalBurstFactor) continue;
-				}
-
-				// clamp to 1: frames received in a previous interval can be decoded in this one
-				const decodedRatio = Math.min(decodedFrames / receivedFrames, 1);
-
-				if (isLimited) {
-					gotLimited = decodedRatio < alertOff;
-				} else if (decodedRatio <= alertOn) {
-					gotLimited = true;
-				}
-			}
-
-			this._avgDeltaFramesReceivedBySsrc = nextAvgs;
-		}
-
-		if (gotLimited) {
-			if (isLimited) return;
-			this.clientMonitor.cpuPerformanceAlertOn = true;
-
-			this.clientMonitor.emit('cpulimitation', {
-				clientMonitor: this.clientMonitor,
-			});
-
-			this._raise();
-
-		} else {
-			if (!isLimited) return;
-			this.clientMonitor.cpuPerformanceAlertOn = false;
-			this._resolve('cpu limitation ended');
-		}
-	}
-
-	/** The encode budget per frame comes from the stream's own frame rate: 1000/fps is 33ms at 30fps. */
-	private _checkEncoderPressure(outboundRtp: { kind: string, framesPerSecond?: number, encodeTimePerFrameInMs?: number, qualityLimitationDurationShares?: { cpu: number } }): boolean {
-		if (outboundRtp.kind !== 'video') return false;
-
-		const cpuShareThreshold = this.config.encoderCpuLimitationShareThreshold;
-		const encodeBudgetRatio = this.config.encodeTimeBudgetRatio;
-
-		if (cpuShareThreshold !== undefined) {
-			const cpuShare = outboundRtp.qualityLimitationDurationShares?.cpu;
-
-			if (cpuShare !== undefined && cpuShareThreshold < cpuShare) return true;
-		}
-
-		if (encodeBudgetRatio !== undefined) {
-			const fps = outboundRtp.framesPerSecond;
-			const encodeTimePerFrameInMs = outboundRtp.encodeTimePerFrameInMs;
-
-			if (!fps || fps < 1 || encodeTimePerFrameInMs === undefined) return false;
-			if ((1000 / fps) * encodeBudgetRatio < encodeTimePerFrameInMs) return true;
-		}
-
-		return false;
-	}
-
-	private _raise() {
-		this._startedAlertAt = Date.now();
-
-		this.clientMonitor.raiseIssue<CpuPerformanceIssuePayload>(this.issueKey, {
-				includeInSample: this.includeIssueInSample,
-			type: CpuPerformanceDetector.ISSUE_TYPE,
-			payload: {},
+		this._raise({
+			encoderUtilization: encoder.utilization ?? 0,
+			decoderUtilization: decoder.utilization,
+			minUtilization,
+			hardwareAcceleratedEncoders: encoder.hardwareAccelerated,
+			hardwareAcceleratedDecoders: decoder.hardwareAccelerated,
 		});
+	}
+
+	/**
+	 * Codec time over elapsed time, summed over the video streams that ran on the CPU and reported
+	 * both. The sum is across streams on purpose: three simulcast layers each at a fifth of wall
+	 * time cost the machine the same as one stream at three fifths, so this is unbounded above
+	 * rather than capped at `1`.
+	 *
+	 * This is also why there is no separate per-frame encode budget check: encode time per frame
+	 * over `1000/fps` cancels the frame count and leaves exactly this ratio. Across 4797 captured
+	 * collections the two agreed to machine precision once the frame rate came from the
+	 * `framesEncoded` counter; the only daylight was smoothing in `framesPerSecond`, off by more
+	 * than 20% on 0.4% of them. Reading the counters directly skips that field.
+	 *
+	 * `utilization` is `undefined` when no stream contributed, which is what keeps a receive-only
+	 * client from reading as an idle encoder, and a hardware pipeline from reading as an idle
+	 * machine. `hardwareAccelerated` counts what was skipped for that second reason, so the two
+	 * cases stay tellable apart.
+	 */
+	private _utilization<T extends { kind: string, deltaTime?: number }>(
+		rtps: T[],
+		codecTimeInSec: (rtp: T) => number | undefined,
+		implementation: (rtp: T) => string | undefined,
+		powerEfficient: (rtp: T) => boolean | undefined,
+	): { utilization?: number, hardwareAccelerated: number } {
+		let utilization: number | undefined;
+		let hardwareAccelerated = 0;
+
+		for (const rtp of rtps) {
+			if (rtp.kind !== 'video') continue;
+
+			const codecTime = codecTimeInSec(rtp);
+			const elapsedInMs = rtp.deltaTime;
+
+			if (codecTime === undefined || elapsedInMs === undefined || elapsedInMs <= 0) continue;
+
+			// Counted before the skip, so a hardware stream that reported real work is
+			// distinguishable from one that reported nothing.
+			if (this._runsOffCpu(implementation(rtp), powerEfficient(rtp))) {
+				++hardwareAccelerated;
+
+				continue;
+			}
+
+			utilization = (utilization ?? 0) + (codecTime * 1000) / elapsedInMs;
+		}
+
+		return { utilization, hardwareAccelerated };
+	}
+
+	/**
+	 * Whether this stream's codec work lands somewhere other than the CPU, and so says nothing
+	 * about CPU performance. Two independent tests, either of which is enough: the implementation
+	 * name, and the browser's own power-efficiency hint.
+	 *
+	 * A stream that reports neither is treated as CPU work. That is the deliberate direction to
+	 * fail in — an unknown implementation keeps contributing evidence, where the opposite default
+	 * would silence the detector on every browser whose naming we have not catalogued.
+	 */
+	private _runsOffCpu(implementation?: string, powerEfficient?: boolean): boolean {
+		if (powerEfficient === true) return true;
+		if (implementation === undefined) return false;
+
+		const name = implementation.toLowerCase();
+
+		return OFF_CPU_IMPLEMENTATION_MARKERS.some((marker) => name.includes(marker));
+	}
+
+	private _raise(payload: CpuPerformanceIssuePayload) {
+		this._startedAlertAt = Date.now();
+		// Set here, not at the call sites, so the flag and the finding cannot drift.
+		this.clientMonitor.cpuPerformanceAlertOn = true;
+
+		this.clientMonitor.emit('cpulimitation', {
+			clientMonitor: this.clientMonitor,
+		});
+
+		this.clientMonitor.activeIssues.raise({
+			key: this.issueKey,
+			includeInSample: this.includeIssueInSample,
+			type: CpuPerformanceDetector.ISSUE_TYPE,
+			payload,
+		});
+	}
+
+	/** Closes any open alert. Guarded, because this is a healthy machine's resting state. */
+	private _standDown(comment: string) {
+		if (!this.clientMonitor.cpuPerformanceAlertOn) return;
+
+		this.clientMonitor.cpuPerformanceAlertOn = false;
+		this._resolve(comment);
 	}
 
 	private _resolve(comment?: string) {
@@ -268,7 +279,8 @@ export class CpuPerformanceDetector implements Detector {
 			};
 		}
 
-		this.clientMonitor.resolveIssue<CpuPerformanceIssuePayload>(this.issueKey, {
+		this.clientMonitor.activeIssues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

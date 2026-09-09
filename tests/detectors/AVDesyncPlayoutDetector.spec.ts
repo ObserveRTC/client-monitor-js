@@ -26,10 +26,11 @@ const CONFIG = {
 /** Every other track-level detector off, so a tick runs this one and nothing else. */
 const NO_OTHER_DETECTORS = {
 	dryInboundTrackDetector: null,
+	audioPlayoutSynthesisDetector: null,
+	inboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
 	codecChangeDetector: null,
 	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,
-	keyframeStormDetector: null,
 	videoRecoveryFailedDetector: null,
 	playoutDiscrepancyDetector: null,
 	decoderBottleneckDetector: null,
@@ -84,6 +85,8 @@ function setup(options: SetupOptions = {}) {
 		kind: 'audio',
 		deltaTime: 1000,
 		estimatedPlayoutTimestamp: undefined as number | undefined,
+		statsClockTime: 0,
+		getMediaPlayout: () => undefined,
 		getPeerConnection: () => peerConnection,
 	};
 	const audioTrack = new InboundTrackMonitor(createTrack('audio', 'audio-1') as any, audioRtp);
@@ -97,7 +100,9 @@ function setup(options: SetupOptions = {}) {
 			kind: otherTrack.kind,
 			deltaTime: 1000,
 			estimatedPlayoutTimestamp: undefined as number | undefined,
-			getPeerConnection: () => peerConnection,
+			statsClockTime: 0,
+		getMediaPlayout: () => undefined,
+		getPeerConnection: () => peerConnection,
 		};
 
 		const monitor = new InboundTrackMonitor(createTrack(otherTrack.kind, otherTrack.id) as any, otherRtp);
@@ -149,8 +154,12 @@ describe('AVDesyncPlayoutDetector', () => {
 			clientMonitor.config = { ...NO_OTHER_DETECTORS, avDesyncPlayoutDetector: { ...CONFIG } };
 
 			const peerConnection = new MockPeerConnectionMonitor(clientMonitor);
-			const audioRtp: any = { kind: 'audio', getPeerConnection: () => peerConnection };
-			const videoRtp: any = { kind: 'video', getPeerConnection: () => peerConnection };
+			const audioRtp: any = { kind: 'audio', statsClockTime: 0,
+		getMediaPlayout: () => undefined,
+		getPeerConnection: () => peerConnection };
+			const videoRtp: any = { kind: 'video', statsClockTime: 0,
+		getMediaPlayout: () => undefined,
+		getPeerConnection: () => peerConnection };
 
 			expect(new InboundTrackMonitor(createTrack('audio', 'a') as any, audioRtp).detectors.listOfNames)
 				.toEqual([ 'av-desync-playout-detector' ]);

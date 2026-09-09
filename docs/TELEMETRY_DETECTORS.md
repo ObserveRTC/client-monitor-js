@@ -481,7 +481,7 @@ event.** This fact does not reach the sample through this detector at all.
 
 **Config.** `iceTraversalDetector`, with nothing in it: no threshold on tuple
 changes would be defensible, so the block exists only to decide whether the class
-is constructed — `{}` enables it, `null` disables it. Until 4.10.0 it had no key at
+is constructed — `{}` enables it, `null` disables it. Until 4.9.0 it had no key at
 all and was the one detector in the library registered unconditionally.
 
 It stays deliberately the low-level primitive. The classification of *what kind*
