@@ -596,6 +596,12 @@ function reduceScoreReasons(
  *
  * An open finding still reports, even where the continuous charge came to nothing this collection,
  * so a detector's verdict is never contradicted by an empty reason list.
+ *
+ * Continuous charges alone have to come to more than a point before they are published. `reasons`
+ * is read as what to act on, and a charge that did not move the score by a point is not that — the
+ * score still carries it. Note where this floor bites hardest: `transport-loss-sustained` is
+ * charged at most one point by the continuous path, so it can only ever be published when its
+ * detector has raised.
  */
 function reasonsOf(subtractions: DefaultScoreCalculatorSubtractions, hasIssues: boolean) {
 	let totalSubtractions = 0;
