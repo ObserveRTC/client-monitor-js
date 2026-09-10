@@ -671,7 +671,8 @@ captureTrackEndedDetector: { createEvent: true }, // also buffer CAPTURE_SOURCE_
 captureTrackMutedDetector: { createEvent: true }, // also buffer CAPTURE_TRACK_MUTED into samples
 silentAudioSourceDetector: {
     silenceThresholdInMs: 60000, // long on purpose: silence ≠ broken until it persists
-    silenceRmsThreshold: 0.0001, // interval-integrated RMS, not the flickery audioLevel
+    silenceRmsThreshold: 0.0001,   // interval-integrated RMS, not the flickery audioLevel
+    recoveryRmsThreshold: 0.0003,  // higher, so one dither blip cannot close a finding
 }
 ```
 

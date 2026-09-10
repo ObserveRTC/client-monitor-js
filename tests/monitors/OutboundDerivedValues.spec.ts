@@ -6,8 +6,12 @@ import { OutboundTrackMonitor } from "../../src/monitors/OutboundTrackMonitor";
  * `highestLayer` and `detectionRecoveryWindow` on `OutboundTrackMonitor`: the two values derived from the
  * outbound RTPs and the media source on every `update()`, before the detectors run.
  */
-const DETECTION = 10_000;
-const RECOVERY = 10_000;
+/** Counted in values: four in front, three behind, and a generous gap so a spec never trips it. */
+const WINDOW = {
+	numberOfDetectionSamples: 4,
+	numberOfRecoverySamples: 3,
+	maxAllowedGapInMs: 60_000,
+};
 
 const noDetectorsConfig = {
 	dryOutboundTrackDetector: null,
@@ -19,7 +23,7 @@ const noDetectorsConfig = {
 	encoderBottleneckDetector: null,
 	simulcastLayerDetector: null,
 	videoResolutionChangeDetector: null,
-	outboundTrackDetectionRecoveryWindow: { detectionWindowMs: DETECTION, recoveryWindowMs: RECOVERY },
+	outboundTrackDetectionRecoveryWindow: WINDOW,
 };
 
 /** One outbound RTP, as far as these two derived values are concerned. */
@@ -287,29 +291,46 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		expect(h.monitor.detectionRecoveryWindow.detectionDurationInMs).toBe(3000);
 	});
 
-	it('ages entries out of the detection window into the recovery window', () => {
+	it('leaks entries out of the detection window into the recovery window', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(900_000, 10));
 
-		// 12 collections a second apart: the newest 11 are inside the 10s detection window and the
-		// first has aged into recovery, where a single entry measures nothing.
+		// Four in front and three behind, so the fifth collection starts filling recovery and the
+		// seventh fills it. One frame per collection makes each delta the count of its intervals.
+		for (let i = 0; i < 7; ++i) h.tick({ deltaFrames: 1 });
+
+		const window = h.monitor.detectionRecoveryWindow;
+
+		expect(window.detectionDelta.mediaSourceTotalProducedFrames).toBe(3);
+		expect(window.recoveryDelta.mediaSourceTotalProducedFrames).toBe(2);
+	});
+
+	/**
+	 * The two halves cover one unbroken stretch, which is what lets a detector compare a recent
+	 * span against the span behind it rather than against a hole.
+	 */
+	it('keeps the recovery half immediately behind the detection half', () => {
+		const h = createMonitor();
+
+		h.setLayers(createLayer(900_000, 10));
 		for (let i = 0; i < 12; ++i) h.tick({ deltaFrames: 1 });
 
 		const window = h.monitor.detectionRecoveryWindow;
 
-		expect(window.detectionDelta.mediaSourceTotalProducedFrames).toBe(10);
-		expect(window.recoveryDelta.mediaSourceTotalProducedFrames).toBeNull();
+		expect(window.detectionDurationInMs).toBe(3000);
+		expect(window.recoveryDurationInMs).toBe(2000);
 	});
 
-	it('drops entries once they are past both windows', () => {
+	it('drops everything and starts again after a gap wider than it allows', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(900_000, 10));
-		h.tick({ deltaFrames: 7 });
+		for (let i = 0; i < 7; ++i) h.tick({ deltaFrames: 1 });
 
-		// One collection far enough ahead to leave the first outside detection and recovery.
-		h.tick({ elapsedInMs: DETECTION + RECOVERY + 1, deltaFrames: 1 });
+		// A blackout: differencing across it would report the blackout as though it were the
+		// interval, so nothing that came before it is kept.
+		h.tick({ elapsedInMs: WINDOW.maxAllowedGapInMs + 1, deltaFrames: 1 });
 
 		const window = h.monitor.detectionRecoveryWindow;
 
@@ -320,9 +341,6 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 	it('takes its windows from the client monitor config', () => {
 		const h = createMonitor();
 
-		expect(h.monitor.detectionRecoveryWindow.config).toEqual({
-			detectionWindowMs: DETECTION,
-			recoveryWindowMs: RECOVERY,
-		});
+		expect(h.monitor.detectionRecoveryWindow.config).toEqual(WINDOW);
 	});
 });

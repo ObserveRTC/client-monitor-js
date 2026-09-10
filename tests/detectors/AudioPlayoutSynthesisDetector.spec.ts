@@ -58,7 +58,15 @@ function createHarness(configOverrides: Partial<{
 		totalPlayoutSynthesisEvents: number | null;
 		totalPlayoutDelayInMs: number | null;
 		totalPlayoutSamplesCount: number | null;
-	}>({ detectionWindowMs: DETECTION_MS, recoveryWindowMs: RECOVERY_MS });
+	}>({
+		// Counted in values now: N values span N-1 ticks, so this is the same stretch as the
+		// millisecond windows these constants used to configure.
+		// N values in front span N-1 ticks, and the values behind them span one fewer again,
+		// which is the same pair of stretches the millisecond windows used to cover.
+		numberOfDetectionSamples: Math.round(DETECTION_MS / TICK_MS) + 1,
+		numberOfRecoverySamples: Math.round(RECOVERY_MS / TICK_MS),
+		maxAllowedGapInMs: TICK_MS * 3,
+	});
 
 	const trackMonitor = {
 		direction: 'inbound' as const,

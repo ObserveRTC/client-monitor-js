@@ -20,7 +20,7 @@ const noDetectorsConfig = {
 	encoderBottleneckDetector: null,
 	simulcastLayerDetector: null,
 	videoResolutionChangeDetector: null,
-	outboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
+	outboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
 };
 
 function createMonitor(settings: Record<string, unknown> | (() => Record<string, unknown>)) {

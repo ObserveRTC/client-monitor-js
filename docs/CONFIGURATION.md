@@ -123,7 +123,8 @@ const monitor = new ClientMonitor({
     captureTrackMutedDetector: {},    // the OS or another app took it
     silentAudioSourceDetector: {
         silenceThresholdInMs: 60000,  // long on purpose: silence != a broken mic
-        silenceRmsThreshold: 0.0001,  // interval-integrated RMS, not the flickery audioLevel
+        silenceRmsThreshold: 0.0001,   // interval-integrated RMS, not the flickery audioLevel
+        recoveryRmsThreshold: 0.0003,  // higher, so one dither blip cannot close a finding
     },
     // Frame supply: is whatever produces this track's frames delivering what it
     // should? Average over a duration, compare, judge.

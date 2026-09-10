@@ -268,7 +268,7 @@ export class MockInboundTrackMonitor {
 		totalFramesReceived: number | null;
 		totalFramesRendered: number | null;
 		totalFramesDecoded: number | null;
-	}>({ detectionWindowMs: 1000, recoveryWindowMs: 1000 });
+	}>({ numberOfDetectionSamples: 2, numberOfRecoverySamples: 2, maxAllowedGapInMs: 60_000 });
 
 	private _inboundRtp: any = null;
 	private _statsClockTime = 0;
@@ -370,6 +370,11 @@ export class MockOutboundTrackMonitor {
 	 * ticks, and saves the mock a refresh hook.
 	 */
 	public get trackSettings(): Record<string, unknown> | undefined {
+		return this.track.getSettings();
+	}
+
+	/** The name the real monitor uses for the same cache; both read the track's own settings. */
+	public get settings(): Record<string, unknown> | undefined {
 		return this.track.getSettings();
 	}
 

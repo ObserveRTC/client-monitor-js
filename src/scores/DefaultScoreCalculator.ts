@@ -85,6 +85,36 @@ export class DefaultScoreCalculator {
 	public static QP_CLEAN_RATIO = 0.5;
 	public static QP_COARSE_RATIO = 0.8;
 
+	// ---- continuous penalty ramps: 0 at the activation point, 1 at saturation ----
+	//
+	// These are what keep a healthy call off a flat 5.0. A detector only speaks once its
+	// threshold is crossed; below that everything reads perfect, which is not what a call
+	// actually looks like. Each ramp below is worth at most one of the five points.
+
+	/** Frame-rate spread as a share of the mean, below which it is noise. */
+	public static FPS_VOLATILITY_ACTIVATION = 0.1;
+	public static FPS_VOLATILITY_SATURATION = 0.2;
+
+	/** Share of arrived frames dropped before rendering. */
+	public static DROPPED_FRAMES_ACTIVATION = 0.1;
+	public static DROPPED_FRAMES_SATURATION = 0.2;
+
+	/** How far the payload may fall under the encoder's own target, as a share of it. */
+	public static TARGET_BITRATE_DEVIATION_ACTIVATION = 0.05;
+	public static TARGET_BITRATE_DEVIATION_SATURATION = 0.15;
+
+	/**
+	 * Screen share is judged on sharpness rather than smoothness: what hurts is the encoder
+	 * sending a downscaled surface, because text stops being readable. Expressed as the share
+	 * of the captured area that was dropped.
+	 */
+	public static SCREENSHARE_DOWNSCALE_ACTIVATION = 0.5;
+	public static SCREENSHARE_DOWNSCALE_SATURATION = 0.75;
+
+	/** Inter-arrival jitter, the one path property no detector thresholds. */
+	public static JITTER_ACTIVATION_IN_MS = 30;
+	public static JITTER_SATURATION_IN_MS = 100;
+
 	/** What reduced scores on the most recent update, and across the call so far. */
 	public currentReasons: DefaultScoreCalculatorSubtractions = {};
 	public totalReasons: DefaultScoreCalculatorSubtractions = {};
@@ -159,19 +189,54 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
+		const inboundRtp = trackMonitor.getInboundRtp();
+
+		// Screen share legitimately runs at a low and bursty frame rate — nothing changes between
+		// keystrokes — so the two frame-rate ramps below would read healthy content as broken.
+		const isScreenShare = trackMonitor.isScreenShare;
+
+		if (!isScreenShare && inboundRtp?.ewmaFps && 2 <= (inboundRtp.lastNFramesPerSec?.length ?? 0)) {
+			const samples = inboundRtp.lastNFramesPerSec;
+			const mean = samples.reduce((sum, fps) => sum + fps, 0) / samples.length;
+			const variance = samples.reduce((sum, fps) => sum + ((fps - mean) ** 2), 0) / samples.length;
+			const volatility = Math.sqrt(variance) / inboundRtp.ewmaFps;
+			const penalty = this._normalizedPenalty(
+				volatility,
+				DefaultScoreCalculator.FPS_VOLATILITY_ACTIVATION,
+				DefaultScoreCalculator.FPS_VOLATILITY_SATURATION,
+			);
+
+			if (0 < penalty) subtractions['volatile-fps'] = penalty;
+		}
+
+		if (inboundRtp?.framesDropped && inboundRtp.framesRendered) {
+			const droppedShare = inboundRtp.framesDropped
+				/ (inboundRtp.framesDropped + inboundRtp.framesRendered);
+			const penalty = this._normalizedPenalty(
+				droppedShare,
+				DefaultScoreCalculator.DROPPED_FRAMES_ACTIVATION,
+				DefaultScoreCalculator.DROPPED_FRAMES_SATURATION,
+			);
+
+			if (0 < penalty) subtractions['dropped-video-frames'] = penalty;
+		}
+
 		// Weighted by how large the picture is actually being shown: blown up, the coded blocks are
-		// what the viewer complains about; in a thumbnail nobody can see them.
+		// what the viewer complains about; in a thumbnail nobody can see them. Held to one point
+		// like every other continuous reading, so the weighting shifts the cost without doubling it.
 		const qpScore = this._inboundQpSeverity(trackMonitor);
 
 		if (qpScore) {
-			subtractions['blocky-video'] = qpScore * this._pixelationWeight(trackMonitor.displayMagnification);
+			subtractions['blocky-video'] = clamp(
+				qpScore * this._pixelationWeight(trackMonitor.displayMagnification),
+				0,
+				1,
+			);
 		}
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
 
-		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
-			trackMonitor.calculatedScore.reasons = subtractions;
-		}
+		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
 	private _calculateInboundAudioTrackScore(trackMonitor: InboundTrackMonitor): void {
@@ -199,9 +264,7 @@ export class DefaultScoreCalculator {
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
 
-		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
-			trackMonitor.calculatedScore.reasons = subtractions;
-		}
+		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {
@@ -227,11 +290,45 @@ export class DefaultScoreCalculator {
 			subtractions['encoder-bottleneck'] = 2 * Math.max(0, Math.min(1, encoderBottleneck.encodeDegradation));
 		}
 
+		const highestLayer = trackMonitor.highestLayer;
+
+		if (!trackMonitor.isScreenShare) {
+			// The encoder was asked for a bitrate and did not reach it. Not the same as congestion:
+			// the target already accounts for what the path offered, so a shortfall against it is
+			// the encoder falling behind its own instruction.
+			const targetBitrate = highestLayer?.targetBitrate;
+			const payloadBitrate = trackMonitor.getOutboundRtps()
+				.reduce((sum, rtp) => sum + (rtp.payloadBitrate ?? 0), 0);
+
+			if (targetBitrate && 0 < payloadBitrate && payloadBitrate < targetBitrate) {
+				const penalty = this._normalizedPenalty(
+					(targetBitrate - payloadBitrate) / targetBitrate,
+					DefaultScoreCalculator.TARGET_BITRATE_DEVIATION_ACTIVATION,
+					DefaultScoreCalculator.TARGET_BITRATE_DEVIATION_SATURATION,
+				);
+
+				if (0 < penalty) subtractions['high-deviation-from-target-bitrate'] = penalty;
+			}
+		} else {
+			// Sharpness is the quality on a screen share: a downscaled surface is unreadable text.
+			const source = trackMonitor.getMediaSource();
+			const sourceArea = (source?.width ?? 0) * (source?.height ?? 0);
+			const sentArea = (highestLayer?.frameWidth ?? 0) * (highestLayer?.frameHeight ?? 0);
+
+			if (0 < sourceArea && 0 < sentArea) {
+				const penalty = this._normalizedPenalty(
+					1 - (sentArea / sourceArea),
+					DefaultScoreCalculator.SCREENSHARE_DOWNSCALE_ACTIVATION,
+					DefaultScoreCalculator.SCREENSHARE_DOWNSCALE_SATURATION,
+				);
+
+				if (0 < penalty) subtractions['downscaled-screenshare'] = penalty;
+			}
+		}
+
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
 
-		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
-			trackMonitor.calculatedScore.reasons = subtractions;
-		}
+		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
 	private _calculateOutboundAudioTrackScore(trackMonitor: OutboundTrackMonitor): void {
@@ -251,9 +348,7 @@ export class DefaultScoreCalculator {
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
 
-		if (hasIssues || trackMonitor.calculatedScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
-			trackMonitor.calculatedScore.reasons = subtractions;
-		}
+		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
 	/**
@@ -269,16 +364,16 @@ export class DefaultScoreCalculator {
 
 		// Congestion distorts significantly but does not make the path useless, so it is worth at
 		// most two of the five points: the severity is a 0..1 reading, doubled to reach that.
-		subtractions['uplink-congestion'] = 2 * normalizedClamp(pcMonitor.uplinkVideoCongestionSeverity);
+		charge(subtractions, 'uplink-congestion', 2 * normalizedClamp(pcMonitor.uplinkVideoCongestionSeverity));
 		hasIssues ||= pcMonitor.issues.hasType('uplink-congestion');
 
-		subtractions['downlink-congestion'] = 2 * normalizedClamp(pcMonitor.downlinkVideoCongestionSeverity);
+		charge(subtractions, 'downlink-congestion', 2 * normalizedClamp(pcMonitor.downlinkVideoCongestionSeverity));
 		hasIssues ||= pcMonitor.issues.hasType('downlink-congestion');
 
-		subtractions['transport-loss-sustained'] = normalizedClamp(Math.max(
+		charge(subtractions, 'transport-loss-sustained', normalizedClamp(Math.max(
 			pcMonitor.avgInboundFractionLost ?? 0,
 			pcMonitor.avgOutboundFractionLost ?? 0,
-		));
+		)));
 		hasIssues ||= pcMonitor.issues.hasType('transport-loss-sustained');
 
 		if (pcMonitor.issues.hasType('transport-delay-degraded')) {
@@ -286,11 +381,20 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
+		// Jitter has no detector of its own — it is published and nothing thresholds it — so this
+		// is the only place an uneven path shows up at all. Round trip and loss are deliberately
+		// left to their detectors above rather than charged twice.
+		const jitterPenalty = this._normalizedPenalty(
+			pcMonitor.avgInboundJitterInMs ?? 0,
+			DefaultScoreCalculator.JITTER_ACTIVATION_IN_MS,
+			DefaultScoreCalculator.JITTER_SATURATION_IN_MS,
+		);
+
+		if (0 < jitterPenalty) subtractions['high-jitter'] = jitterPenalty;
+
 		pcMonitor.calculatedStabilityScore.value = reduceScoreReasons(subtractions);
 
-		if (hasIssues || pcMonitor.calculatedStabilityScore.value < DefaultScoreCalculator.MAX_SCORE - 1) {
-			pcMonitor.calculatedStabilityScore.reasons = subtractions;
-		}
+		pcMonitor.calculatedStabilityScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
 	/**
@@ -401,6 +505,18 @@ export class DefaultScoreCalculator {
 	}
 
 	/**
+	 * A reading turned into a `0..1` penalty: nothing at or below `activation`, the whole point at
+	 * or beyond `saturation`, proportional in between. Every continuous subtraction goes through
+	 * here, so no one of them can ever be worth more than a single point of the five.
+	 */
+	private _normalizedPenalty(value: number, activation: number, saturation: number): number {
+		if (value <= activation) return 0;
+		if (saturation <= value) return 1;
+
+		return (value - activation) / (saturation - activation);
+	}
+
+	/**
 	 * The multiplier for a `pixelated-video` cost at this track's magnification.
 	 *
 	 * `1` whenever the track could not measure the size — an unmeasurable magnification means "no
@@ -490,6 +606,34 @@ function reduceScoreReasons(
 	}
 
 	return score;
+}
+
+/**
+ * What a monitor's `reasons` should be after this collection, and `undefined` when nothing was
+ * charged.
+ *
+ * Assigned on every collection, never only on the bad ones. Writing it conditionally left the last
+ * unhealthy collection's object attached to the monitor for the rest of the call: a connection back
+ * at a clean 5.0 went on shipping `transport-loss-sustained` and both congestion keys in every
+ * sample, which reads as a fault that was detected and never went away.
+ *
+ * An open finding still reports, even where the continuous charge came to nothing this collection,
+ * so a detector's verdict is never contradicted by an empty reason list.
+ */
+function reasonsOf(subtractions: DefaultScoreCalculatorSubtractions, hasIssues: boolean) {
+	return hasIssues || 0 < Object.keys(subtractions).length ? subtractions : undefined;
+}
+
+/**
+ * Records what a condition cost, and records nothing when it cost nothing.
+ *
+ * `reasons` is read as the list of what reduced this score, so a key sitting at `0` is not a
+ * harmless zero — it reads as a finding. A connection with no congestion at all was reporting
+ * `uplink-congestion: 0` and `downlink-congestion: 0` on every collection for the life of the
+ * call, which is indistinguishable from congestion that was detected and never went away.
+ */
+function charge(target: DefaultScoreCalculatorSubtractions, reason: string, value: number) {
+	if (0 < value) target[reason] = value;
 }
 
 /** Adds one set of subtractions into another, keyed by issue type. */

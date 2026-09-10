@@ -35,6 +35,9 @@ describe('detectors stand down on a paused track', () => {
 					createEvent: false,
 				},
 			};
+			// A real capture device: the detector judges microphones only, and stands down on a
+			// track that names none (screen-share audio, a WebAudio node, a media file).
+			trackMonitor.track.setSettings({ deviceId: 'mic-1' });
 			trackMonitor.setMediaSource({ rmsAudioLevel: 0, deltaTime: 2_000 });
 
 			return {

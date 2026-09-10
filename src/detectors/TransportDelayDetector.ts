@@ -91,14 +91,22 @@ export class TransportDelayDetector implements Detector {
 
 		const window = this.peerConnection.detectionRecoveryWindow;
 
-		// Not enough stats time yet is not a verdict either way, and it is not blindness: the
-		// window is filling and will have an answer shortly.
-		if (!window.detectionWindowIsReady) return;
+		// Not enough values yet is not a verdict either way, and it is not blindness: the window is
+		// filling and will have an answer shortly. The span is checked alongside the count because
+		// a window counts values, not time — ten collections carrying no stats time between them
+		// fill it while measuring nothing, which is a frozen collector rather than a slow path.
+		if (!window.detectionWindowIsReady || window.detectionDurationInMs < 1) return;
 
 		const detection = this._readRtt(window.detectionDelta);
 
 		if (detection === undefined) {
 			this.inputsUnavailable = true;
+
+			// Nothing readable anywhere in the detection window — not one missed collection, since
+			// the window spans several — so the detector can no longer support the claim it made.
+			// An unsupportable claim must not stand for the rest of the call: same rule as the
+			// recovery window below, that a detector able to raise is always able to clear.
+			if (this._raised) this._resolve('round trip no longer measurable');
 
 			return;
 		}
@@ -111,14 +119,17 @@ export class TransportDelayDetector implements Detector {
 
 		if (!this._raised) return;
 
-		// Below the raise threshold with a finding open: the recovery window decides whether it
-		// ends, so a path has to have been good for the stretch behind this one as well.
-		if (!window.recoveryWindowIsReady) return;
+		// Below the raise threshold with a finding open: the recovery window is corroboration, not
+		// a gate. A path has to have been good for the stretch behind this one as well *when that
+		// stretch can be read* — but a window that cannot produce a reading must never be able to
+		// hold a finding open for ever. A detector that can raise has to be able to clear, so with
+		// nothing behind it to consult the detection reading decides on its own.
+		const recovery = window.recoveryWindowIsReady
+			? this._readRtt(window.recoveryDelta)
+			: undefined;
+		const clearing = recovery ?? detection;
 
-		const recovery = this._readRtt(window.recoveryDelta);
-
-		if (recovery === undefined) return;
-		if (this.config.recoveryThresholdInMs <= recovery.rttInMs) return;
+		if (this.config.recoveryThresholdInMs <= clearing.rttInMs) return;
 
 		this._resolve('round trip recovered');
 	}
@@ -144,6 +155,7 @@ export class TransportDelayDetector implements Detector {
 		) => timeInMs !== null && count !== null && 0 < count
 			? { rttInMs: timeInMs / count, source }
 			: undefined;
+
 
 		return mean(deltas.totalRtcpRoundTripTimeInMs, deltas.totalRtcpRoundTripMeasurements, 'rtcp')
 			?? mean(deltas.totalIceRoundTripTimeInMs, deltas.totalIceResponsesReceived, 'ice');

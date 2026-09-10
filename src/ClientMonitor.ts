@@ -1,3 +1,4 @@
+import { DetectionRecoveryWindow } from "./utils/DetectionRecoveryWindow";
 import { ExtensionStat,
     ClientSample,
     ClientEvent as ClientSampleClientEvent,
@@ -129,6 +130,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         const detectorDefault = <T>(value: T | null | undefined, fallback: T): T | null =>
             value === undefined ? fallback : value;
 
+        const collectingPeriodInMs = 0 < (monitorConfig.collectingPeriodInMs ?? 0)
+            ? monitorConfig.collectingPeriodInMs as number
+            : 2000;
+
+
         this.config = {
             ...monitorConfig,
             collectingPeriodInMs: monitorConfig.collectingPeriodInMs ?? 2000,
@@ -138,21 +144,29 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             watchTabVisibility: monitorConfig.watchTabVisibility ?? true,
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
+            // The windows are counted in values, not milliseconds, so that a window asked for N
+            // values holds N at any collecting period. The spans named below are what those counts
+            // come to at the configured period; `samplesSpanning` converts one to the other, and N
+            // values span N-1 intervals. `maxAllowedGapInMs` tolerates a couple of late or missed
+            // collections and treats anything longer as a blackout worth starting again after.
             outboundTrackDetectionRecoveryWindow: monitorConfig.outboundTrackDetectionRecoveryWindow ?? {
-                detectionWindowMs: (monitorConfig.collectingPeriodInMs ?? 2000) * 2 + 1000,
-                recoveryWindowMs: (monitorConfig.collectingPeriodInMs ?? 2000) * 2,
+                numberOfDetectionSamples: 2,
+                numberOfRecoverySamples: 2,
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
             // Wider than the outbound pair: this span was `decoderBottleneckDetector.durationInMs`
             // before the window took it over, and it is kept so that detector judges as it did.
             inboundTrackDetectionRecoveryWindow: monitorConfig.inboundTrackDetectionRecoveryWindow ?? {
-                detectionWindowMs: 15_000,
-                recoveryWindowMs: 10_000,
+                numberOfDetectionSamples: 2,
+                numberOfRecoverySamples: 2,
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
-            // 6s was `transportDelayDetector.durationInMs` before the window took the sustain
-            // over, and is kept so that detector judges over the stretch it always did.
+            // The 6s floor is `transportDelayDetector.durationInMs` from before the window took the
+            // sustain over, kept so that detector judges over the stretch it always did.
             peerConnectionDetectionRecoveryWindow: monitorConfig.peerConnectionDetectionRecoveryWindow ?? {
-                detectionWindowMs: 6000,
-                recoveryWindowMs: 6000,
+                numberOfDetectionSamples: 2,
+                numberOfRecoverySamples: 2,
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
             // Detector defaults, one entry per detector, grouped as in
             // `ClientMonitorConfig` so the two files read side by side.
@@ -247,6 +261,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             silentAudioSourceDetector: detectorDefault(monitorConfig.silentAudioSourceDetector, {
                 silenceThresholdInMs: 60000,
                 silenceRmsThreshold: 0.0001,
+                recoveryRmsThreshold: 0.0003,
             }),
             videoCaptureBottleneckDetector: detectorDefault(monitorConfig.videoCaptureBottleneckDetector, {
                 produceDegradationThreshold: 0.2,

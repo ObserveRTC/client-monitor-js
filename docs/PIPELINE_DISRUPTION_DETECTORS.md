@@ -349,10 +349,30 @@ simply not talking are the same measurement**, and only duration separates them.
 A threshold in single-digit seconds would file every listener in every meeting
 as a broken capture device.
 
-**Raise and resolve.** Any reading strictly above the RMS threshold resolves
-with comment `audio detected` and zeroes the clock. Payload at raise:
-`peerConnectionId`, `trackId`, `rmsAudioLevel`, `silentForInMs`, `deviceLabel`;
-`durationInMs` is added at resolution.
+**Raise and resolve.** With no finding open, any reading strictly above
+`silenceRmsThreshold` resolves with comment `audio detected` and zeroes the
+clock. **Closing an open finding takes the higher `recoveryRmsThreshold`**
+(default `0.0003`, about -70 dBFS), and the gap between the two is a dead band
+in which the finding is held and the clock neither runs nor resets. The band
+exists because the raise threshold sits in empty space between digital silence
+and a real noise floor: a source hovering just under it crosses by a dither bit
+and crosses back, opening and closing the finding every few collections. A
+captured call showed one doing exactly that — four raises and three resolutions
+in eight minutes on an unchanging source. Payload at raise: `peerConnectionId`,
+`trackId`, `silenceKind`, `rmsAudioLevel`, `silentForInMs`, `capturedForInMs`,
+`deviceLabel`; `durationInMs` is added at resolution.
+
+**It judges microphones only.** Screen-share audio, a
+`MediaStreamAudioDestinationNode` and a media file piped into the call are all
+silent whenever nothing is playing, and none of them is the fault this detector
+reports. Two tests stand it down, and both are needed. A track the application
+marked as screen share resolves with
+`screen share audio, not a microphone`; a track whose settings name no capture
+device resolves with `no capture device, not a microphone`. The second is what
+actually catches display-capture audio: `contentType` is auto-detected from
+`getSettings().displaySurface`, which is a **video** track setting, so the audio
+track of the same capture is never auto-marked however plain its device label
+makes it — Chrome labels it `Tab audio` or `System audio`.
 
 **Stand-downs.** A paused sender resolves with `sender paused`; a track that is
 not `live`, or is `muted`, or is not `enabled`, resolves with

@@ -5,11 +5,17 @@ import { MockClientMonitor, MockOutboundTrackMonitor } from "../helpers/detector
 const CONFIG = {
 	silenceThresholdInMs: 30000,
 	silenceRmsThreshold: 0.001,
+	// A dead band above the raise threshold, so one dither blip cannot close a finding.
+	recoveryRmsThreshold: 0.003,
 };
 
 function setup(kind = 'audio') {
 	const trackMonitor = new MockOutboundTrackMonitor(kind);
 	const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
+
+	// A real capture device, which is the only kind of audio track this detector judges. Screen
+	// share audio and WebAudio tracks name no device, and have their own cases below.
+	trackMonitor.track.setSettings({ deviceId: 'mic-1' });
 
 	clientMonitor.config.silentAudioSourceDetector = { ...CONFIG };
 
@@ -44,6 +50,129 @@ function setup(kind = 'audio') {
 }
 
 describe('SilentAudioSourceDetector', () => {
+	/**
+	 * The premise is a *microphone* nobody can hear. Screen-share audio, a WebAudio destination
+	 * node and a media file piped into the call are all silent whenever nothing is playing, and a
+	 * captured call showed the cost of not saying so: a `getDisplayMedia` track labelled
+	 * `Tab audio` sitting at -85 to -95 dBFS raised the finding four times in eight minutes.
+	 */
+	describe('the tracks it will not judge', () => {
+		const silenceFor = (h: ReturnType<typeof setup>, ticks = 5) => {
+			for (let i = 0; i < ticks; ++i) h.tick({ rmsAudioLevel: 0 });
+		};
+
+		it('stands down on a track the application marked as screen share', () => {
+			const h = setup();
+
+			(h.trackMonitor as any).isScreenShare = true;
+			silenceFor(h);
+
+			expect(h.openIssue()).toBeUndefined();
+			expect(h.verdict()).toBeUndefined();
+		});
+
+		/**
+		 * The structural test, and the one that actually catches display-capture audio:
+		 * `contentType` is inferred from `getSettings().displaySurface`, which is a *video* track
+		 * setting, so an audio track from the same capture is never auto-marked as screen share
+		 * however plain its device label makes it.
+		 */
+		it('stands down on an audio track that names no capture device', () => {
+			const h = setup();
+
+			h.trackMonitor.track.setSettings({});
+			silenceFor(h);
+
+			expect(h.openIssue()).toBeUndefined();
+			expect(h.verdict()).toBeUndefined();
+		});
+
+		it('stands down when the settings carry an empty device id', () => {
+			const h = setup();
+
+			h.trackMonitor.track.setSettings({ deviceId: '' });
+			silenceFor(h);
+
+			expect(h.openIssue()).toBeUndefined();
+		});
+
+		// A track that becomes unjudgeable mid-call must not leave its finding standing.
+		it('resolves an open finding once the track turns out not to be a microphone', () => {
+			const h = setup();
+
+			silenceFor(h);
+			expect(h.openIssue()).toBeDefined();
+
+			(h.trackMonitor as any).isScreenShare = true;
+			h.tick({ rmsAudioLevel: 0 });
+
+			expect(h.clientMonitor.activeIssues.size).toBe(0);
+			expect(h.clientMonitor.resolvedIssues.at(-1)?.comment)
+				.toBe('screen share audio, not a microphone');
+		});
+	});
+
+	/**
+	 * The dead band between the two thresholds. A source hovering just under the raise threshold
+	 * crosses it by a dither bit and crosses back, which opened and closed the finding every few
+	 * collections in the captured call. Clearing takes a level a working device could produce.
+	 */
+	describe('the dead band above the silence threshold', () => {
+		const RAISE = CONFIG.silenceRmsThreshold;
+		const RECOVERY = CONFIG.recoveryRmsThreshold;
+		const IN_BAND = (RAISE + RECOVERY) / 2;
+
+		it('does not clear a finding on a level inside the band', () => {
+			const h = setup();
+
+			for (let i = 0; i < 3; ++i) h.tick({ rmsAudioLevel: 0 });
+			expect(h.openIssue()).toBeDefined();
+
+			for (let i = 0; i < 5; ++i) h.tick({ rmsAudioLevel: IN_BAND });
+
+			expect(h.openIssue()).toBeDefined();
+			expect(h.verdict()).toBe(true);
+		});
+
+		it('clears it once the level reaches what a working device produces', () => {
+			const h = setup();
+
+			for (let i = 0; i < 3; ++i) h.tick({ rmsAudioLevel: 0 });
+			h.tick({ rmsAudioLevel: IN_BAND });
+			expect(h.clientMonitor.activeIssues.size).toBe(1);
+
+			h.tick({ rmsAudioLevel: RECOVERY * 2 });
+
+			expect(h.clientMonitor.activeIssues.size).toBe(0);
+			expect(h.verdict()).toBe(false);
+		});
+
+		// With nothing open, the band is not silence: the lower threshold alone decides, exactly
+		// as it did before, so a quiet-but-working device never starts accumulating.
+		it('is not silence when no finding is open', () => {
+			const h = setup();
+
+			for (let i = 0; i < 10; ++i) h.tick({ rmsAudioLevel: IN_BAND });
+
+			expect(h.openIssue()).toBeUndefined();
+			expect(h.verdict()).toBe(false);
+		});
+
+		// The band holds the measurement rather than resetting it: a blip does not buy a dying
+		// device back the whole stretch it already spent silent.
+		it('holds the accumulated silence rather than restarting it', () => {
+			const h = setup();
+
+			for (let i = 0; i < 3; ++i) h.tick({ rmsAudioLevel: 0 });
+			expect(h.openIssue()?.payload.silentForInMs).toBe(30000);
+
+			h.tick({ rmsAudioLevel: IN_BAND });
+			h.tick({ rmsAudioLevel: 0 });
+
+			expect(h.openIssue()?.payload.silentForInMs).toBe(40000);
+		});
+	});
+
 	describe('the finding', () => {
 		it('raises only after the silence has lasted the threshold', () => {
 			const h = setup();

@@ -10,8 +10,8 @@ import { OutboundTrackMonitor } from "../../src/monitors/OutboundTrackMonitor";
 import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 
 const noDetectorsConfig = {
-    inboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
-    outboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
+    inboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
+    outboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
     dryOutboundTrackDetector: null,
     captureSourceLostDetector: null,
     captureTrackMutedDetector: null,
@@ -79,8 +79,8 @@ describe('InboundTrackMonitor contentType', () => {
     const noInboundDetectorsConfig = {
         dryInboundTrackDetector: null,
         encoderBottleneckDetector: null,
-        inboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
-        outboundTrackDetectionRecoveryWindow: { detectionWindowMs: 15_000, recoveryWindowMs: 10_000 },
+        inboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
+        outboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
         codecChangeDetector: null,
         videoRecoveryFailedDetector: null,
         playoutDiscrepancyDetector: null,

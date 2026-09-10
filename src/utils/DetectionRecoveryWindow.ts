@@ -7,11 +7,26 @@ export type TimedValue<T extends Record<string, number | null>> = {
 export type Deltas<T> = { [K in keyof T]: number | null };
 
 export type DetectionRecoveryWindowConfig = {
-	/** The milliseconds of stats time a value stays in the detection window before moving on. */
-	detectionWindowMs: number;
+	/** How many values the detection window holds once it is full. At least 2. */
+	numberOfDetectionSamples: number;
 
-	/** The milliseconds of stats time it then stays in the recovery window before being dropped. */
-	recoveryWindowMs: number;
+	/**
+	 * How many values the recovery window behind it holds once it is full. At least 2, or `0` for
+	 * a window with no recovery half at all.
+	 */
+	numberOfRecoverySamples: number;
+
+	/**
+	 * Milliseconds between two consecutive values above which the stretch is treated as broken and
+	 * the fill starts again.
+	 *
+	 * This is the whole of the staleness policy. A collection that lands a little late is kept,
+	 * because the totals are cumulative and carry across it: the delta still measures exactly the
+	 * stretch its duration reports. A gap wider than this is a blackout — a backgrounded tab, a
+	 * stalled collector, a renegotiation — and differencing across one would report the blackout
+	 * as though it were the interval, so everything held is dropped and the window starts again.
+	 */
+	maxAllowedGapInMs: number;
 }
 
 /**
@@ -30,13 +45,30 @@ export type DetectionRecoveryWindowConfig = {
  * high as the real one. Differencing the endpoints has no such gap, and a collection missed in the
  * middle costs nothing, because the totals carry across it.
  *
- * A value lives in the detection window while `newest.timestamp - entry.timestamp <=
- * detectionWindowMs`, then moves to the recovery window until its total age exceeds
- * `detectionWindowMs + recoveryWindowMs`, then is dropped.
+ * **The windows are counted in values, not in milliseconds, and this is the point.** A delta is the
+ * difference between two endpoints, so a window holding fewer than two values measures nothing and
+ * reports `null` — and a detector reading `null` can never conclude anything from it, including
+ * that a fault has ended. Sizing the windows by duration made that outcome depend on the collecting
+ * period: a 6000ms recovery window at a five-second period held exactly one value, so
+ * `transport-delay-degraded` could be raised and never resolved. A window asked for N values holds
+ * N whatever the period, and is full when it holds them.
+ *
+ * What varies instead is the stretch those values cover, which is why `detectionDurationInMs` and
+ * `recoveryDurationInMs` are published alongside the deltas: a rate is `delta / duration`, and the
+ * two always describe the same stretch. A detector needing a minimum span in real time should read
+ * the duration and say so, rather than assume one.
+ *
+ * A value enters the detection window, is pushed out of it by the `numberOfDetectionSamples`-th
+ * value that follows, spends `numberOfRecoverySamples` values in the recovery window behind it, and
+ * is then dropped. A gap wider than `maxAllowedGapInMs` between two consecutive values drops
+ * everything and starts the fill again.
  *
  * Values must be added in non-decreasing timestamp order.
  */
 export class DetectionRecoveryWindow<T extends Record<string, number | null>> {
+	/** The fewest values that can be differenced, and so the smallest window that measures anything. */
+	public static readonly MIN_SAMPLES = 2;
+
 	/** How far each total moved across the detection window; null where it could not be measured. */
 	public detectionDelta: Deltas<T>;
 	/** How far each total moved across the recovery window; null where it could not be measured. */
@@ -52,55 +84,58 @@ export class DetectionRecoveryWindow<T extends Record<string, number | null>> {
 	private readonly recoveryEntries: TimedValue<T>[] = [];
 
 	private lastTimestamp = Number.NEGATIVE_INFINITY;
-	/** Where {@link fedForInMs} counts from: the entry the current fill started at. */
-	private firstTimestamp?: number;
 
 	public constructor(
 		public readonly config: DetectionRecoveryWindowConfig,
 	) {
-		if (!Number.isFinite(config.detectionWindowMs) || config.detectionWindowMs <= 0)
-			throw new Error('detectionWindowMs must be a positive finite number');
+		const { numberOfDetectionSamples, numberOfRecoverySamples, maxAllowedGapInMs } = config;
+		const { MIN_SAMPLES } = DetectionRecoveryWindow;
 
-		if (!Number.isFinite(config.recoveryWindowMs) || config.recoveryWindowMs < 0)
-			throw new Error('recoveryWindowMs must be a non-negative finite number');
+		if (!Number.isInteger(numberOfDetectionSamples) || numberOfDetectionSamples < MIN_SAMPLES)
+			throw new Error(`numberOfDetectionSamples must be an integer of at least ${MIN_SAMPLES}`);
+
+		// Zero is the one exception, and it means something specific: no recovery window at all.
+		// One would be a window that can never measure, which is the failure this class exists to
+		// make impossible, so it is rejected rather than quietly accepted.
+		if (!Number.isInteger(numberOfRecoverySamples) ||
+			(numberOfRecoverySamples !== 0 && numberOfRecoverySamples < MIN_SAMPLES))
+			throw new Error(`numberOfRecoverySamples must be 0 or an integer of at least ${MIN_SAMPLES}`);
+
+		if (!Number.isFinite(maxAllowedGapInMs) || maxAllowedGapInMs <= 0)
+			throw new Error('maxAllowedGapInMs must be a positive finite number');
 
 		this.detectionDelta = {} as Deltas<T>;
 		this.recoveryDelta = {} as Deltas<T>;
 	}
 
-	/** Whether values have been arriving for at least `detectionWindowMs` without a break. */
+	/** Whether the detection window holds every value it was asked to hold. */
 	public get detectionWindowIsReady(): boolean {
-		return this.fedForInMs >= this.config.detectionWindowMs;
+		return this.config.numberOfDetectionSamples <= this.detectionEntries.length;
 	}
 
 	/**
-	 * Whether values have been arriving for at least `detectionWindowMs + recoveryWindowMs` without
-	 * a break — long enough for the recovery window to hold values reaching back over the whole
-	 * recovery age rather than only part of it.
+	 * Whether the recovery window holds every value it was asked to hold.
+	 *
+	 * Always `false` where `numberOfRecoverySamples` is `0`: a window with no recovery half never
+	 * has one to be ready, and saying otherwise would offer a delta that is permanently `null`.
 	 */
 	public get recoveryWindowIsReady(): boolean {
-		return this.fedForInMs >= this.config.detectionWindowMs + this.config.recoveryWindowMs;
+		return 0 < this.config.numberOfRecoverySamples &&
+			this.config.numberOfRecoverySamples <= this.recoveryEntries.length;
 	}
 
-	/** Whether both windows hold the values they are configured to cover. */
+	/** Whether both windows hold the values they are configured to hold. */
 	public get ready(): boolean {
 		return this.detectionWindowIsReady && this.recoveryWindowIsReady;
 	}
 
-	/**
-	 * Milliseconds of stats time fed in since the windows last started filling, counting values
-	 * already dropped as well as those still held.
-	 *
-	 * Not `detectionDurationInMs` or `recoveryDurationInMs`: those are spans between values that are
-	 * still held, and ageing keeps the oldest survivor inside its own window, so a span approaches
-	 * its window without ever reaching it — a recovery span is strictly under `recoveryWindowMs` by
-	 * construction, so a `>=` test on it could never come true. This counts from the first value
-	 * instead, so it is unaffected by how far apart values land.
-	 */
-	private get fedForInMs(): number {
-		if (this.firstTimestamp === undefined) return 0;
+	/** How many values each window is holding right now, which is what readiness is measured on. */
+	public get numberOfDetectionEntries(): number {
+		return this.detectionEntries.length;
+	}
 
-		return this.lastTimestamp - this.firstTimestamp;
+	public get numberOfRecoveryEntries(): number {
+		return this.recoveryEntries.length;
 	}
 
 	/**
@@ -116,7 +151,6 @@ export class DetectionRecoveryWindow<T extends Record<string, number | null>> {
 		this.detectionDurationInMs = 0;
 		this.recoveryDurationInMs = 0;
 		this.lastTimestamp = Number.NEGATIVE_INFINITY;
-		this.firstTimestamp = undefined;
 
 		if (initial !== undefined) {
 			// Re-keyed from the entry, then added through the normal path: the seed is a held value
@@ -142,37 +176,23 @@ export class DetectionRecoveryWindow<T extends Record<string, number | null>> {
 
 		if (this.keys.length === 0) this.initKeys(item.value);
 
+		// Everything held describes a stretch that this value no longer continues.
+		if (this.lastTimestamp !== Number.NEGATIVE_INFINITY &&
+			this.config.maxAllowedGapInMs < item.timestamp - this.lastTimestamp) {
+			this.reset();
+		}
+
 		this.lastTimestamp = item.timestamp;
 		this.detectionEntries.push(item);
 
-		// Age values out of the detection window into the recovery window behind it.
-		for (;;) {
-			const oldest = this.detectionEntries[0];
-
-			if (oldest === undefined) break;
-			if (item.timestamp - oldest.timestamp <= this.config.detectionWindowMs) break;
-
-			this.detectionEntries.shift();
-			this.recoveryEntries.push(oldest);
+		// Values leak from the detection window into the recovery window behind it, one for one, so
+		// the two halves together always cover an unbroken stretch.
+		while (this.config.numberOfDetectionSamples < this.detectionEntries.length) {
+			this.recoveryEntries.push(this.detectionEntries.shift() as TimedValue<T>);
 		}
 
-		const maxRecoveryAge = this.config.detectionWindowMs + this.config.recoveryWindowMs;
-
-		// Drop values older than both windows together.
-		for (;;) {
-			const oldest = this.recoveryEntries[0];
-
-			if (oldest === undefined) break;
-			if (item.timestamp - oldest.timestamp <= maxRecoveryAge) break;
-
+		while (this.config.numberOfRecoverySamples < this.recoveryEntries.length) {
 			this.recoveryEntries.shift();
-		}
-
-		// A gap wide enough to empty both windows starts the fill again: nothing before it survived
-		// to contribute, so the windows are as cold as new ones and must not report themselves ready
-		// on the strength of history they no longer hold. This is also what sets the first value.
-		if (this.recoveryEntries.length === 0 && this.detectionEntries.length === 1) {
-			this.firstTimestamp = item.timestamp;
 		}
 
 		this.detectionDurationInMs = this.span(this.detectionEntries);

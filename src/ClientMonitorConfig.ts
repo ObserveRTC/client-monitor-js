@@ -127,10 +127,16 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * while the recovery window preserves preceding values for determining when
      * those issues can be cleared.
      *
-     * DEFAULT: {
-     *   detectionWindowMs: 2 * collectingPeriodInMs + 1000,
-     *   recoveryWindowMs: 2 * collectingPeriodInMs
-     * }
+     * Sized in **values, not milliseconds**: a window asked for N values holds N whatever the
+     * collecting period turns out to be, and is full when it holds them. Sizing by duration made
+     * readability depend on the cadence, which is how a finding could once be raised on a window
+     * that could never produce the delta needed to resolve it. The defaults below convert a span
+     * to a count at the configured period; `maxAllowedGapInMs` is what discards a stretch broken
+     * by a blackout.
+     *
+     * DEFAULT: enough values to span `2 * collectingPeriodInMs + 1000` for detection and
+     * `2 * collectingPeriodInMs` for recovery, with `maxAllowedGapInMs` of
+     * `max(6000, 3 * collectingPeriodInMs)`.
      */
     outboundTrackDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
 
@@ -149,7 +155,8 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * expected — so a window gives each detector the true mean over a span it states in
      * milliseconds, rather than an EWMA whose memory depends on how often stats are collected.
      *
-     * DEFAULT: { detectionWindowMs: 6000, recoveryWindowMs: 6000 }
+     * DEFAULT: enough values to span `max(6000, 2 * collectingPeriodInMs + 1000)` for detection
+     * and `max(6000, 2 * collectingPeriodInMs)` for recovery.
      */
     peerConnectionDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
 

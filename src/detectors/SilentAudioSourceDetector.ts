@@ -44,6 +44,18 @@ export type SilentAudioSourceDetectorConfig = {
 
 	/** RMS level at or below which the source counts as silent. */
 	silenceRmsThreshold: number;
+
+	/**
+	 * RMS level a source has to reach before an open finding clears. Keep it above
+	 * `silenceRmsThreshold` and below a working microphone's noise floor.
+	 *
+	 * The gap between the two is a dead band, and it exists because the raise threshold sits in
+	 * the empty space between digital silence and a real noise floor: a source hovering just under
+	 * it will cross by a dither bit or two and cross back, opening and closing the finding every
+	 * few collections. Clearing needs a level a working device could actually produce, not merely
+	 * one above the floor of what counts as silent.
+	 */
+	recoveryRmsThreshold: number;
 }
 
 /**
@@ -71,6 +83,13 @@ export type SilentAudioSourceDetectorConfig = {
  * finding than silence, not a weaker one. It is only when the browser reports no sample clock at
  * all — or reports samples with no energy alongside them — that there is nothing to go on and the
  * detector stands down.
+ *
+ * **It judges microphones only.** A track carrying screen-share audio, a WebAudio destination
+ * node or a media file is silent whenever nothing is playing, which is not a fault and must not be
+ * reported as one. A track the application has marked as screen share stands the check down, and so
+ * does one whose settings name no capture device — the structural test, needed because
+ * `contentType` is inferred from `getSettings().displaySurface`, a *video* track setting, so
+ * display-capture audio is never auto-marked however plain its device label makes it.
  *
  * A paused sender, or a track that is not `live`, muted or disabled, also stands the check down:
  * silence is the correct behaviour there.
@@ -121,6 +140,20 @@ export class SilentAudioSourceDetector implements Detector {
 		// `undefined` is "not judged here", which is right for a track it cannot judge.
 		if (this.trackMonitor.kind !== 'audio') return;
 
+		// **Only a capture device can be a microphone nobody can hear.** Screen-share audio, a
+		// `MediaStreamAudioDestinationNode`, a media file piped into the call: all of them are
+		// legitimately silent most of the time, and reporting that as a fault is noise. Both tests
+		// are needed. The declared one catches a track the application marked, and the structural
+		// one catches what the library can see for itself — `contentType` is auto-detected from
+		// `getSettings().displaySurface`, which is a *video* track setting, so display-capture
+		// audio is never auto-marked as screen share however obvious it looks from its label.
+		if (this.trackMonitor.isScreenShare) return this._clear({
+			comment: 'screen share audio, not a microphone',
+		});
+		if (!this.trackMonitor.settings?.deviceId) return this._clear({
+			comment: 'no capture device, not a microphone',
+		});
+
 		const track = this.trackMonitor.track;
 		const mediaSource = this.trackMonitor.getMediaSource();
 
@@ -144,10 +177,20 @@ export class SilentAudioSourceDetector implements Detector {
 
 		if (rms !== undefined) {
 			// A level was measured, so samples did flow, whatever the sample clock went on to report.
-			if (this.config.silenceRmsThreshold < rms) return this._clear({
+			// An open finding needs the higher of the two thresholds to close; see
+			// `recoveryRmsThreshold` for why one number could not do both jobs.
+			const audibleThreshold = this._raised
+				? this.config.recoveryRmsThreshold
+				: this.config.silenceRmsThreshold;
+
+			if (audibleThreshold < rms) return this._clear({
 				comment: 'audio detected',
 				silentAudioSource: false,
 			});
+
+			// Inside the dead band with a finding open: not silence, and not enough to call the
+			// device working either, so whatever state exists is held and nothing accumulates.
+			if (this.config.silenceRmsThreshold < rms) return;
 
 			silenceKind = rms === 0 ? 'digital-silence' : 'below-threshold';
 		} else if (capturedInSec === 0) {

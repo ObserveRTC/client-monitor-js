@@ -8,10 +8,11 @@ const CONFIG = {
 	recoveryThresholdInMs: 200,
 };
 
-/** 6s of stats time each, so three 2s collections fill the detection window exactly. */
+/** Counted in values: four in front and three behind, at the 2s cadence the ticks below use. */
 const WINDOW = {
-	detectionWindowMs: 6000,
-	recoveryWindowMs: 6000,
+	numberOfDetectionSamples: 4,
+	numberOfRecoverySamples: 3,
+	maxAllowedGapInMs: 60_000,
 };
 
 const ISSUE_TYPE = 'transport-delay-degraded';
@@ -311,6 +312,53 @@ describe('TransportDelayDetector', () => {
 		for (let i = 0; i < 4; ++i) tick(100);
 
 		expect(detector.inputsUnavailable).toBe(false);
+	});
+
+	/**
+	 * The regression this detector actually shipped with. At a five-second collecting period the
+	 * 6000ms recovery window held exactly one value — ages 0 and 5000 sit in the detection
+	 * half, 10000 is the only one left inside `detection + recovery` — and one value cannot be
+	 * differenced, so `recoveryDelta` was `null` on every collection and the finding could never
+	 * close. It stayed open for the remaining forty minutes of the call while the round trip sat
+	 * at 3ms.
+	 *
+	 * `DetectionRecoveryWindow` now keeps two values in each half whatever its durations come to,
+	 * so that shape is gone at the source. This pins the detector's own half of the rule, for the
+	 * cases a retention floor cannot reach: a window configured with no recovery half at all, or
+	 * one whose endpoints never carried the total. A detector that can raise can always clear.
+	 */
+	it('clears the finding when the recovery window has nothing to say', () => {
+		const { clientMonitor, peerConnection, tick } = setup();
+
+		// No recovery half at all, which is the one shape a full window cannot rescue.
+		(peerConnection as any).detectionRecoveryWindow.config.numberOfRecoverySamples = 0;
+
+		for (let i = 0; i < 4; ++i) tick(900);
+		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
+
+		for (let i = 0; i < 4; ++i) tick(3);
+
+		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(false);
+		expect(clientMonitor.resolvedIssues).toHaveLength(1);
+	});
+
+	/**
+	 * The last way a finding could have been raised and never cleared. Losing the measurement is
+	 * not the same as recovering, but it does mean the detector can no longer support what it
+	 * reported, and a claim it cannot see must not stand for the rest of the call.
+	 */
+	it('clears the finding when the round trip stops being measurable at all', () => {
+		const { detector, clientMonitor, tick } = setup();
+
+		for (let i = 0; i < 4; ++i) tick(900);
+		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
+
+		// Neither source reports anything, for longer than the window spans.
+		for (let i = 0; i < 4; ++i) tick(undefined);
+
+		expect(detector.inputsUnavailable).toBe(true);
+		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(false);
+		expect(clientMonitor.resolvedIssues.at(-1)?.comment).toBe('round trip no longer measurable');
 	});
 
 	it('stays silent while disabled', () => {

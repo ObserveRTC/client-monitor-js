@@ -148,7 +148,11 @@ class MockInboundTrackMonitor {
     public readonly detectionRecoveryWindow = new DetectionRecoveryWindow<{
         totalFramesReceived: number | null;
         totalFramesRendered: number | null;
-    }>({ detectionWindowMs: COLLECTION_MS, recoveryWindowMs: COLLECTION_MS });
+    }>({
+        numberOfDetectionSamples: 2,
+        numberOfRecoverySamples: 2,
+        maxAllowedGapInMs: COLLECTION_MS * 3,
+    });
 
     private peerConnection = new MockPeerConnectionMonitor();
     private inboundRtp: InboundRtpStats | null = null;
