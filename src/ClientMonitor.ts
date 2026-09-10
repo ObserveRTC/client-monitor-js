@@ -1,4 +1,3 @@
-import { DetectionRecoveryWindow } from "./utils/DetectionRecoveryWindow";
 import { ExtensionStat,
     ClientSample,
     ClientEvent as ClientSampleClientEvent,

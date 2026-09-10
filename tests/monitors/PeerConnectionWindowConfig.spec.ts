@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ClientMonitor } from "../../src/ClientMonitor";
 import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
 
