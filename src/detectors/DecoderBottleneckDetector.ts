@@ -75,7 +75,7 @@ export type DecoderBottleneckDetectorConfig = {
  * that arrived against frames the decoder produced. The difference is frames the decoder was handed
  * and never got through, and the viewer sees a stuttering tile.
  *
- * Both counters come from `InboundTrackMonitor.detectionRecoveryWindow`. The detection window
+ * Both counters come from `InboundTrackMonitor.slicedWindow`. The detection window
  * raises — leaving more than `decodeDegradationThreshold` of the arriving frames undecoded opens
  * the issue, and every later collection still short of it updates that issue rather than opening
  * another. The recovery window resolves: the issue ends only once the stretch *before* the
@@ -166,10 +166,13 @@ export class DecoderBottleneckDetector implements Detector {
 			comment: 'track not playing',
 		});
 
-		const detectionRecoveryWindow = this.trackMonitor.detectionRecoveryWindow;
-		const receivedFramesForDetection = detectionRecoveryWindow.detectionDelta.totalFramesReceived;
-		const decodedFramesForDetection = detectionRecoveryWindow.detectionDelta.totalFramesDecoded;
-		const detectionWindowInMs = detectionRecoveryWindow.detectionDurationInMs;
+		const {
+			detection: detectionWindow,
+			recovery: recoveryWindow,
+		} = this.trackMonitor.slicedWindow.slices;
+		const receivedFramesForDetection = detectionWindow.deltaTotalFramesReceived;
+		const decodedFramesForDetection = detectionWindow.deltaTotalFramesDecoded;
+		const detectionWindowInMs = detectionWindow.durationInMs;
 
 		if (receivedFramesForDetection === null) return this._clear({
 			comment: 'no arriving frame count',
@@ -177,7 +180,7 @@ export class DecoderBottleneckDetector implements Detector {
 		if (decodedFramesForDetection === null) return this._clear({
 			comment: 'no decoded frame count',
 		});
-		if (!detectionRecoveryWindow.detectionWindowIsReady || detectionWindowInMs < 1) return;
+		if (!detectionWindow.isReady || detectionWindowInMs < 1) return;
 
 		const receivedFpsForDetection = receivedFramesForDetection / (detectionWindowInMs / 1000);
 		const decodedFpsForDetection = decodedFramesForDetection / (detectionWindowInMs / 1000);
@@ -226,12 +229,12 @@ export class DecoderBottleneckDetector implements Detector {
 
 		// Below the threshold with a finding open: the recovery window decides whether it ends.
 
-		const receivedFramesForRecovery = detectionRecoveryWindow.recoveryDelta.totalFramesReceived;
-		const decodedFramesForRecovery = detectionRecoveryWindow.recoveryDelta.totalFramesDecoded;
-		const recoveryWindowInMs = detectionRecoveryWindow.recoveryDurationInMs;
+		const receivedFramesForRecovery = recoveryWindow.deltaTotalFramesReceived;
+		const decodedFramesForRecovery = recoveryWindow.deltaTotalFramesDecoded;
+		const recoveryWindowInMs = recoveryWindow.durationInMs;
 
 		if (
-			!detectionRecoveryWindow.recoveryWindowIsReady ||
+			!recoveryWindow.isReady ||
 			receivedFramesForRecovery === null ||
 			decodedFramesForRecovery === null ||
 			recoveryWindowInMs < 1

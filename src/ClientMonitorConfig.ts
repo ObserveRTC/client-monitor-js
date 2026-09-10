@@ -45,7 +45,9 @@ import type { TransportLossDetectorConfig } from "./detectors/TransportLossDetec
 import type { UnstableIcePathDetectorConfig } from "./detectors/UnstableIcePathDetector";
 import type { VideoRecoveryFailedDetectorConfig } from "./detectors/VideoRecoveryFailedDetector";
 import type { VideoResolutionChangeDetectorConfig } from "./detectors/VideoResolutionChangeDetector";
-import { DetectionRecoveryWindowConfig } from "./utils/DetectionRecoveryWindow";
+import type { OutboundTrackWindowConfig } from "./monitors/OutboundTrackMonitor";
+import type { InboundTrackWindowConfig } from "./monitors/InboundTrackMonitor";
+import type { PeerConnectionWindowConfig } from "./monitors/PeerConnectionMonitor";
 
 export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
@@ -120,45 +122,22 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     addClientLeftEventOnClose?: boolean;
 
     /**
-     * Detection and recovery window configuration shared by multiple outbound track detectors.
-     *
-     * Many detectors require values to be held across two separate time windows.
-     * The detection window provides recent values for detecting and raising issues,
-     * while the recovery window preserves preceding values for determining when
-     * those issues can be cleared.
-     *
-     * Sized in **values, not milliseconds**: a window asked for N values holds N whatever the
-     * collecting period turns out to be, and is full when it holds them. Sizing by duration made
-     * readability depend on the cadence, which is how a finding could once be raised on a window
-     * that could never produce the delta needed to resolve it. The defaults below convert a span
-     * to a count at the configured period; `maxAllowedGapInMs` is what discards a stretch broken
-     * by a blackout.
-     *
-     * DEFAULT: enough values to span `2 * collectingPeriodInMs + 1000` for detection and
-     * `2 * collectingPeriodInMs` for recovery, with `maxAllowedGapInMs` of
-     * `max(6000, 3 * collectingPeriodInMs)`.
+     * Sizes for `OutboundTrackMonitor.slicedWindow`, shared by every detector on an outbound track.
+     * Detectors judging the same track judge the same stretch of time.
      */
-    outboundTrackDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
+    outboundTrackWindow: OutboundTrackWindowConfig;
 
     /**
-     * Window sizes for `InboundTrackMonitor.detectionRecoveryWindow`, shared by every detector on
-     * an inbound track. Detectors judging the same track judge the same stretch of time.
+     * Sizes for `InboundTrackMonitor.slicedWindow`, shared by every detector on an inbound track.
+     * Detectors judging the same thing judge the same stretch of time.
      */
-    inboundTrackDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
+    inboundTrackWindow: InboundTrackWindowConfig;
 
     /**
-     * Window sizes for `PeerConnectionMonitor.detectionRecoveryWindow`, shared by every detector
-     * bound to the connection rather than to a track.
-     *
-     * The path-level measurements are ratios of running totals — round trip is
-     * `totalRoundTripTime` over the number of measurements, loss is packets lost over packets
-     * expected — so a window gives each detector the true mean over a span it states in
-     * milliseconds, rather than an EWMA whose memory depends on how often stats are collected.
-     *
-     * DEFAULT: enough values to span `max(6000, 2 * collectingPeriodInMs + 1000)` for detection
-     * and `max(6000, 2 * collectingPeriodInMs)` for recovery.
+     * Sizes for `PeerConnectionMonitor.slicedWindow`, shared by every detector on a peer connection.
+     * Detectors judging the same thing judge the same stretch of time.
      */
-    peerConnectionDetectionRecoveryWindow: DetectionRecoveryWindowConfig;
+    peerConnectionWindow: PeerConnectionWindowConfig;
 
     // =========================================================================
     // Detector configuration. One block per detector, keyed by the detector's
@@ -505,7 +484,7 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * counts as frozen rather than choppy. `minFreezeCountForChoppy` (2, floored
      * there): freezes across the track's detection window needed to call it
      * choppy. The stretch both verdicts are measured over comes from
-     * `inboundTrackDetectionRecoveryWindow`, not from here. (was: how long the picture must run
+     * `inboundTrackWindow`, not from here. (was: how long the picture must run
      * continuous before a choppy finding closes; a frozen one closes on the next
      * rendered frame.
      *

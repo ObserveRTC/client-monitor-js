@@ -20,7 +20,7 @@ import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChang
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
 import { AudioPlayoutSynthesisDetector, AudioPlayoutSynthesisIssuePayload } from "../detectors/AudioPlayoutSynthesisDetector";
 import type { TrackContentType } from "./TrackMonitor";
-import { DetectionRecoveryWindow } from "../utils/DetectionRecoveryWindow";
+import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
 
 /**
  * How the picture on an inbound video track is arriving: `frozen` is not moving at all,
@@ -65,6 +65,81 @@ export type InboundTrackContext = {
 }
 
 /**
+ * The running totals every detector on an inbound track differences, and so the type of every
+ * delta the window hands back.
+ *
+ * Read by name in the detectors, so the set of them is settled here rather than configured: adding
+ * one is a code change on both sides at once.
+ */
+export type InboundTrackWindowValues = {
+	totalFramesReceived: number | null;
+	totalFramesDecoded: number | null;
+	totalFramesDropped: number | null;
+	totalFramesRendered: number | null;
+	totalKeyFramesDecoded: number | null;
+	totalPacketsReceived: number | null;
+	totalBytesReceived: number | null;
+	totalPliCount: number | null;
+	totalFreezeCount: number | null;
+	totalFreezesDurationInMs: number | null;
+
+	// From the playout device this track's inbound RTP feeds, which several tracks may share.
+	// Carried on the track so a per-track detector judges them over the same stretch as the rest.
+	totalPlayoutSynthesizedDurationInMs: number | null;
+	totalPlayoutSamplesDurationInMs: number | null;
+	totalPlayoutSynthesisEvents: number | null;
+	totalPlayoutDelayInMs: number | null;
+	totalPlayoutSamplesCount: number | null;
+}
+
+/** Placeholders. Only the keys matter; `null` is what a delta reads before the window fills. */
+const INBOUND_TRACK_WINDOW_VALUES: InboundTrackWindowValues = {
+	totalFramesReceived: null,
+	totalFramesDecoded: null,
+	totalFramesDropped: null,
+	totalFramesRendered: null,
+	totalKeyFramesDecoded: null,
+	totalPacketsReceived: null,
+	totalBytesReceived: null,
+	totalPliCount: null,
+	totalFreezeCount: null,
+	totalFreezesDurationInMs: null,
+	totalPlayoutSynthesizedDurationInMs: null,
+	totalPlayoutSamplesDurationInMs: null,
+	totalPlayoutSynthesisEvents: null,
+	totalPlayoutDelayInMs: null,
+	totalPlayoutSamplesCount: null,
+};
+
+/**
+ * How many values each stretch covers, and when a gap breaks the run.
+ *
+ * The names are the library's and the sizes are the integrator's — this is the whole of what an
+ * application configures about the window. It does not set `offset` or `capacity`: those are the
+ * geometry that makes `recovery` sit behind `detection` rather than overlap it, and a window whose
+ * halves overlapped would resolve a fault on the same values that raised it.
+ */
+export type InboundTrackWindowConfig = {
+	/**
+	 * Milliseconds between two collections above which the run is treated as broken and the fill
+	 * starts again — a backgrounded tab, a stalled collector, a renegotiation. Wider than the
+	 * collecting period, or every collection is discarded as a blackout.
+	 */
+	maxAllowedGapInMs: number;
+
+	/**
+	 * Values per stretch. At least 2 each, since a delta needs two endpoints.
+	 *
+	 * `detection` and `recovery` are the pair most detectors on the track read. `flowDetection`
+	 * and `flowRecovery` are a second, wider pair for `InboundVideoFlowStateDetector`, which asks
+	 * a question the others do not: whether *nothing at all* rendered across the whole stretch.
+	 * That claim is only worth making over several collections — at the narrow pair it comes to a
+	 * single interval, and one empty interval is a stutter, not a frozen picture.
+	 */
+	numberOfSamples: Record<'detection' | 'recovery' | 'flowDetection' | 'flowRecovery', number>;
+}
+
+/**
  * Every issue an inbound track can carry, keyed by the detector that raises it. This is what
  * `issues` is typed to, so a detector cannot raise a type this monitor has no business reporting,
  * and adding a detector without adding it here fails to compile at that detector's `raise`.
@@ -106,26 +181,12 @@ export class InboundTrackMonitor {
 	 * own copy. What a detector reads is `detectionDelta` to raise on and `recoveryDelta` to resolve
 	 * on; it holds no history of its own.
 	 */
-	public readonly detectionRecoveryWindow: DetectionRecoveryWindow<{
-		totalFramesReceived: number | null;
-		totalFramesDecoded: number | null;
-		totalFramesDropped: number | null;
-		totalFramesRendered: number | null;
-		totalKeyFramesDecoded: number | null;
-		totalPacketsReceived: number | null;
-		totalBytesReceived: number | null;
-		totalPliCount: number | null;
-		totalFreezeCount: number | null;
-		totalFreezesDurationInMs: number | null;
-
-		// From the playout device this track's inbound RTP feeds, which several tracks may share.
-		// Carried on the track so a per-track detector judges them over the same stretch as the rest.
-		totalPlayoutSynthesizedDurationInMs: number | null;
-		totalPlayoutSamplesDurationInMs: number | null;
-		totalPlayoutSynthesisEvents: number | null;
-		totalPlayoutDelayInMs: number | null;
-		totalPlayoutSamplesCount: number | null;
-	}>;
+	public readonly slicedWindow: SlicedWindow<
+		InboundTrackWindowValues,
+		// A slice for every stretch the config sizes, so the names are declared once. Only the
+		// names matter here: how many samples each covers, and where it sits, are runtime.
+		Record<keyof InboundTrackWindowConfig['numberOfSamples'], SliceConfig>
+	>;
 
 
 	public dtxMode = false;
@@ -279,9 +340,33 @@ export class InboundTrackMonitor {
 		this.issues = new IssueRegistry<InboundTrackIssues>(
 			this.getPeerConnection().parent.activeIssues.asSink,
 		);
-		this.detectionRecoveryWindow = new DetectionRecoveryWindow(
-			monitorConfig.inboundTrackDetectionRecoveryWindow
-		);
+		const windowConfig = monitorConfig.inboundTrackWindow;
+
+		// `capacity` is left out on purpose: it defaults to the furthest reach of the slices, so
+		// the buffer and the stretches read off it cannot disagree.
+		this.slicedWindow = new SlicedWindow({
+			maxAllowedGapInMs: windowConfig.maxAllowedGapInMs,
+			totals: INBOUND_TRACK_WINDOW_VALUES,
+			// Each recovery slice sits at its own detection slice's size, so it covers the stretch
+			// that ends where that detection stretch begins. The two pairs are independent: a
+			// detector reads one pair or the other, never one half of each.
+			slices: {
+				detection: {
+					numberOfSamples: windowConfig.numberOfSamples.detection,
+				},
+				recovery: {
+					numberOfSamples: windowConfig.numberOfSamples.recovery,
+					offset: windowConfig.numberOfSamples.detection,
+				},
+				flowDetection: {
+					numberOfSamples: windowConfig.numberOfSamples.flowDetection,
+				},
+				flowRecovery: {
+					numberOfSamples: windowConfig.numberOfSamples.flowRecovery,
+					offset: windowConfig.numberOfSamples.flowDetection,
+				},
+			},
+		});
 		this.detectors = new Detectors();
 		if (monitorConfig.dryInboundTrackDetector !== null) {
 			this.detectors.add(new DryInboundTrackDetector(this));
@@ -409,7 +494,7 @@ export class InboundTrackMonitor {
 		this._refreshPresentedResolution();
 		this._refreshDisplayMagnification();
 		this._refreshLinkedVideoPlayoutDiff();
-		this._feedDetectionRecoveryWindow();
+		this._feedSlicedWindow();
 
 		this.detectors.update();
 	}
@@ -422,14 +507,14 @@ export class InboundTrackMonitor {
 	 * costs nothing. `totalFreezesDuration` is the one conversion, from seconds to the milliseconds
 	 * everything else here is counted in.
 	 */
-	private _feedDetectionRecoveryWindow() {
+	private _feedSlicedWindow() {
 		const inboundRtp = this._inboundRtp;
 		const freezesDuration = inboundRtp.totalFreezesDuration;
 		// Absent on Firefox and WebKit, which produce no `media-playout` reports at all.
 		const playout = inboundRtp.getMediaPlayout();
 		const inMs = (seconds?: number) => seconds === undefined ? null : seconds * 1000;
 
-		this.detectionRecoveryWindow.add({
+		this.slicedWindow.add({
 			timestamp: inboundRtp.statsClockTime,
 			value: {
 				totalFramesReceived: inboundRtp.framesReceived ?? null,

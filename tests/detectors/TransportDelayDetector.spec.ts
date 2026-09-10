@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { TransportDelayDetector } from "../../src/detectors/TransportDelayDetector";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SlicedWindow } from "../../src/utils/SlicedWindow";
 import { MockClientMonitor, MockPeerConnectionMonitor } from "../helpers/detectorMocks";
 
 const CONFIG = {
@@ -10,8 +10,21 @@ const CONFIG = {
 
 /** Counted in values: four in front and three behind, at the 2s cadence the ticks below use. */
 const WINDOW = {
-	numberOfDetectionSamples: 4,
-	numberOfRecoverySamples: 3,
+	totals: {
+		totalRtcpRoundTripTimeInMs: null,
+		totalRtcpRoundTripMeasurements: null,
+		totalIceRoundTripTimeInMs: null,
+		totalIceResponsesReceived: null,
+	} as {
+		totalRtcpRoundTripTimeInMs: number | null;
+		totalRtcpRoundTripMeasurements: number | null;
+		totalIceRoundTripTimeInMs: number | null;
+		totalIceResponsesReceived: number | null;
+	},
+	slices: {
+		detection: { numberOfSamples: 4 },
+		recovery: { numberOfSamples: 3, offset: 4 },
+	},
 	maxAllowedGapInMs: 60_000,
 };
 
@@ -26,12 +39,7 @@ const ISSUE_KEY = `${ISSUE_TYPE}-pc-pc-1`;
 class MockTransportPeerConnection extends MockPeerConnectionMonitor {
 	public statsClockTime = 0;
 
-	public readonly detectionRecoveryWindow = new DetectionRecoveryWindow<{
-		totalRtcpRoundTripTimeInMs: number | null;
-		totalRtcpRoundTripMeasurements: number | null;
-		totalIceRoundTripTimeInMs: number | null;
-		totalIceResponsesReceived: number | null;
-	}>(WINDOW);
+	public readonly slicedWindow = new SlicedWindow(WINDOW);
 }
 
 function setup() {
@@ -52,7 +60,7 @@ function setup() {
 	// Both totals are reported every collection, as a browser reports them: they are cumulative
 	// and keep being served whether or not a new measurement landed. `reported: false` is the
 	// other case entirely - a connection measuring no round trip at all.
-	const feed = (reported: boolean) => peerConnection.detectionRecoveryWindow.add({
+	const feed = (reported: boolean) => peerConnection.slicedWindow.add({
 		timestamp: peerConnection.statsClockTime,
 		value: {
 			totalRtcpRoundTripTimeInMs: reported ? rtcpTimeInMs : null,
@@ -322,7 +330,7 @@ describe('TransportDelayDetector', () => {
 	 * close. It stayed open for the remaining forty minutes of the call while the round trip sat
 	 * at 3ms.
 	 *
-	 * `DetectionRecoveryWindow` now keeps two values in each half whatever its durations come to,
+	 * `SlicedWindow` now keeps at least two values in every slice whatever its durations come to,
 	 * so that shape is gone at the source. This pins the detector's own half of the rule, for the
 	 * cases a retention floor cannot reach: a window configured with no recovery half at all, or
 	 * one whose endpoints never carried the total. A detector that can raise can always clear.
@@ -330,8 +338,12 @@ describe('TransportDelayDetector', () => {
 	it('clears the finding when the recovery window has nothing to say', () => {
 		const { clientMonitor, peerConnection, tick } = setup();
 
-		// No recovery half at all, which is the one shape a full window cannot rescue.
-		(peerConnection as any).detectionRecoveryWindow.config.numberOfRecoverySamples = 0;
+		// A recovery slice that never becomes readable — the shape a full window cannot rescue.
+		// `numberOfRecoverySamples: 0` used to express this; a slice is always declared now, so
+		// the case is staged directly on the slice the detector reads.
+		Object.defineProperty(peerConnection.slicedWindow.slices.recovery, 'isReady', {
+			get: () => false,
+		});
 
 		for (let i = 0; i < 4; ++i) tick(900);
 		expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);

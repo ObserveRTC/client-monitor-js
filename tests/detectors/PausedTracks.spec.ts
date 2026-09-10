@@ -105,8 +105,12 @@ describe('detectors stand down on a paused track', () => {
 
 	describe('InboundVideoFlowStateDetector', () => {
 		const WINDOW = {
-			numberOfDetectionSamples: 3,
-			numberOfRecoverySamples: 2,
+			numberOfSamples: {
+				detection: 2,
+				recovery: 2,
+				flowDetection: 3,
+				flowRecovery: 2,
+			},
 			maxAllowedGapInMs: 60_000,
 		};
 
@@ -140,7 +144,7 @@ describe('detectors stand down on a paused track', () => {
 
 			/** Enough clean collections for the detector to have a window of its own to read. */
 			const settle = () => {
-				for (let i = 0; i < WINDOW.numberOfDetectionSamples; ++i) collect(30);
+				for (let i = 0; i < WINDOW.numberOfSamples.flowDetection; ++i) collect(30);
 			};
 
 			return { trackMonitor, detector, collect, settle };

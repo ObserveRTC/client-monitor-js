@@ -21,13 +21,43 @@ import {
 	CaptureSourceLostDetector,
 	CaptureSourceLostIssuePayload
 } from "../detectors/CaptureSourceLostDetector";
-import { DetectionRecoveryWindow } from "../utils/DetectionRecoveryWindow";
-
-
+import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
 
 /** Narrower than its inbound counterpart: the sender cannot know how a track is watched. */
 export type OutboundTrackContext = {
 	contentType?: TrackContentType;
+}
+
+/**
+ * The running totals every detector on an outbound track differences, and so the type of every
+ * delta the window hands back.
+ *
+ * Read by name in the detectors, so the set of them is settled here rather than configured: adding
+ * one is a code change on both sides at once.
+ */
+export type OutboundTrackWindowValues = {
+	mediaSourceTotalProducedFrames: number | null;
+	highestLayerTotalEncodedFrames: number | null;
+}
+
+/**
+ * How many values each stretch covers, and when a gap breaks the run.
+ *
+ * The names are the library's and the sizes are the integrator's — this is the whole of what an
+ * application configures about the window. It does not set `offset` or `capacity`: those are the
+ * geometry that makes `recovery` sit behind `detection` rather than overlap it, and a window whose
+ * halves overlapped would resolve a fault on the same values that raised it.
+ */
+export type OutboundTrackWindowConfig = {
+	/**
+	 * Milliseconds between two collections above which the run is treated as broken and the fill
+	 * starts again — a backgrounded tab, a stalled collector, a renegotiation. Wider than the
+	 * collecting period, or every collection is discarded as a blackout.
+	 */
+	maxAllowedGapInMs: number;
+
+	/** Values per stretch. At least 2 each, since a delta needs two endpoints. */
+	numberOfSamples: Record<'detection' | 'recovery', number>;
 }
 
 /**
@@ -52,13 +82,19 @@ export class OutboundTrackMonitor {
 	public readonly detectors: Detectors;
 	public readonly issues: IssueRegistry<OutboundTrackIssues>;
 	/**
-	 * Retains frame deltas used by pipeline detectors to evaluate current activity
-	 * and determine when detected issues can be raised or cleared.
+	 * Frame counters every pipeline detector on this track reads, over the stretches
+	 * {@link OutboundTrackWindowConfig.numberOfSamples} names.
+	 *
+	 * One buffer of running totals with a slice per stretch, so detectors judging the same track
+	 * judge the same values without any of them keeping history of its own. A detector raises on
+	 * `slices.detection` and resolves on `slices.recovery`; neither is read before `isReady`.
 	 */
-	public readonly detectionRecoveryWindow: DetectionRecoveryWindow<{
-		mediaSourceTotalProducedFrames: number | null;
-		highestLayerTotalEncodedFrames: number | null;
-	}>;
+	public readonly slicedWindow: SlicedWindow<
+		OutboundTrackWindowValues,
+		// A slice for every stretch the config sizes, so the names are declared once. Only the
+		// names matter here: how many samples each covers, and where it sits, are runtime.
+		Record<keyof OutboundTrackWindowConfig['numberOfSamples'], SliceConfig>
+	>;
 
 	/**
 	 * Frames encoded by whichever layer was the highest at the time, accumulated across collections.
@@ -217,10 +253,26 @@ export class OutboundTrackMonitor {
 			}
 		}
 
-		this.detectionRecoveryWindow = new DetectionRecoveryWindow(
-			_mediaSource.getPeerConnection().parent.config.outboundTrackDetectionRecoveryWindow
-		);
+		const windowConfig = _mediaSource.getPeerConnection().parent.config.outboundTrackWindow;
 
+		// `capacity` is left out on purpose: it defaults to the furthest reach of the slices, so
+		// the buffer and the stretches read off it cannot disagree.
+		this.slicedWindow = new SlicedWindow({
+			maxAllowedGapInMs: windowConfig.maxAllowedGapInMs,
+			totals: {
+				highestLayerTotalEncodedFrames: null,
+				mediaSourceTotalProducedFrames: null,
+			},
+			slices: {
+				detection: {
+					numberOfSamples: windowConfig.numberOfSamples.detection,
+				},
+				recovery: {
+					numberOfSamples: windowConfig.numberOfSamples.recovery,
+					offset: windowConfig.numberOfSamples.detection,
+				}
+			}
+		});
 	}
 
 
@@ -277,7 +329,7 @@ export class OutboundTrackMonitor {
 
 		this._highestLayerTotalEncodedFrames += this.highestLayer?.deltaFramesEncoded ?? 0;
 
-		this.detectionRecoveryWindow.add({
+		this.slicedWindow.add({
 			timestamp: this._mediaSource.statsClockTime,
 			value: {
 				mediaSourceTotalProducedFrames: this._mediaSource.frames ?? null,

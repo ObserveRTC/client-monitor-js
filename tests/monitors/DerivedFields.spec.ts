@@ -197,7 +197,7 @@ describe('InboundRtpMonitor derived fields', () => {
 		} as any);
 
 		expect(monitor.decodeTimePerFrameInMs).toBeCloseTo(10);
-		expect(monitor.dropRatio).toBeCloseTo(6 / 66);
+		expect(monitor.droppedFrameRatio).toBeCloseTo(6 / 66);
 		expect(monitor.renderRatio).toBeCloseTo(54 / 60);
 		expect(monitor.keyFrameRate).toBeCloseTo(1);
 		expect(monitor.pliRate).toBeCloseTo(2);

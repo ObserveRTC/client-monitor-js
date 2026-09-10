@@ -1,10 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { EncoderBottleneckDetector } from "../../src/detectors/EncoderBottleneckDetector";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SlicedWindow } from "../../src/utils/SlicedWindow";
+import { OutboundTrackWindowValues } from "../../src/monitors/OutboundTrackMonitor";
+
+/** Placeholders: only the keys matter, and they are the monitor's, not this spec's. */
+const OUTBOUND_TRACK_WINDOW_VALUES: OutboundTrackWindowValues = {
+	mediaSourceTotalProducedFrames: null,
+	highestLayerTotalEncodedFrames: null,
+};
 import { IssueRegistry } from "../../src/utils/IssueRegistry";
 
 /**
- * The detector against a real `DetectionRecoveryWindow` rather than a stubbed one, fed the way
+ * The detector against a real `SlicedWindow` rather than a stubbed one, fed the way
  * `OutboundTrackMonitor.update()` feeds it: two running totals, one entry per collection. A stub
  * would let the spec assert whatever it liked about deltas and readiness, which is the part the
  * detector's correctness rests on.
@@ -47,16 +54,18 @@ function createHarness(configOverrides: Partial<{ encodeDegradationThreshold: nu
 		activeTab: true,
 	};
 
-	const detectionRecoveryWindow = new DetectionRecoveryWindow<{
-		mediaSourceTotalProducedFrames: number | null;
-		highestLayerTotalEncodedFrames: number | null;
-	}>({
-		// Counted in values now: N values span N-1 ticks, so this is the same stretch as the
-		// millisecond windows these constants used to configure.
-		// N values in front span N-1 ticks, and the values behind them span one fewer again,
-		// which is the same pair of stretches the millisecond windows used to cover.
-		numberOfDetectionSamples: Math.round(DETECTION_MS / TICK_MS) + 1,
-		numberOfRecoverySamples: Math.round(RECOVERY_MS / TICK_MS),
+	const slicedWindow = new SlicedWindow({
+		totals: OUTBOUND_TRACK_WINDOW_VALUES,
+		// Counted in values now: N values span N-1 ticks, so this is the same stretch as
+		// the millisecond windows these constants used to configure. `recovery` sits at the
+		// detection size, so it covers the stretch that ends where detection begins.
+		slices: {
+			detection: { numberOfSamples: Math.round(DETECTION_MS / TICK_MS) + 1 },
+			recovery: {
+				numberOfSamples: Math.round(RECOVERY_MS / TICK_MS),
+				offset: Math.round(DETECTION_MS / TICK_MS) + 1,
+			},
+		},
 		maxAllowedGapInMs: TICK_MS * 3,
 	});
 
@@ -74,7 +83,7 @@ function createHarness(configOverrides: Partial<{ encodeDegradationThreshold: nu
 			powerEfficientEncoder: false,
 		} as any,
 		degradedEncodingPerformance: undefined as boolean | undefined,
-		detectionRecoveryWindow,
+		slicedWindow,
 		issues: new IssueRegistry({
 			notify: () => { /* one-shots are not this detector's business */ },
 			raise: (input: any) => {
@@ -99,7 +108,7 @@ function createHarness(configOverrides: Partial<{ encodeDegradationThreshold: nu
 	let encodedTotal = 0;
 
 	return {
-		detector, raised, resolved, warnings, track, trackMonitor, clientMonitor, detectionRecoveryWindow,
+		detector, raised, resolved, warnings, track, trackMonitor, clientMonitor, slicedWindow,
 		config: clientMonitor.config.encoderBottleneckDetector,
 		/**
 		 * One collection: the source hands over `produced` frames and the highest layer gets through
@@ -110,7 +119,7 @@ function createHarness(configOverrides: Partial<{ encodeDegradationThreshold: nu
 			producedTotal += produced;
 			encodedTotal += encoded;
 
-			detectionRecoveryWindow.add({
+			slicedWindow.add({
 				timestamp: statsClockTime,
 				value: {
 					mediaSourceTotalProducedFrames: producedTotal,
@@ -124,7 +133,7 @@ function createHarness(configOverrides: Partial<{ encodeDegradationThreshold: nu
 		tickWithoutSourceTotal(elapsedMs = TICK_MS) {
 			statsClockTime += elapsedMs;
 
-			detectionRecoveryWindow.add({
+			slicedWindow.add({
 				timestamp: statsClockTime,
 				value: {
 					mediaSourceTotalProducedFrames: null,
@@ -200,7 +209,7 @@ describe('EncoderBottleneckDetector', () => {
 			h.tick(NOMINAL, 0);
 			h.tick(NOMINAL, 0);
 
-			expect(h.detectionRecoveryWindow.detectionWindowIsReady).toBe(false);
+			expect(h.slicedWindow.slices.detection.isReady).toBe(false);
 			expect(h.issues()).toHaveLength(0);
 			expect(h.trackMonitor.degradedEncodingPerformance).toBeUndefined();
 		});

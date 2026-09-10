@@ -34,7 +34,7 @@ export type PlayoutDiscrepancyDetectorConfig = {
  * element, a compositor under load, or a renderer that cannot keep up with the machine it is on.
  * Nothing about the call needs fixing; the page or the device does.
  *
- * Both frame counters come from `InboundTrackMonitor.detectionRecoveryWindow` rather than from one
+ * Both frame counters come from `InboundTrackMonitor.slicedWindow` rather than from one
  * collection's deltas, so the ratio is an average over the window the whole inbound cluster judges
  * on. That is what catches a renderer dropping in bursts: interleave a stalled second with a clean
  * one and no single collection need cross the bar, while the window still shows a tenth of the
@@ -127,9 +127,9 @@ export class PlayoutDiscrepancyDetector implements Detector {
 			return this._standDown('remote track paused');
 		}
 
-		const window = this.trackMonitor.detectionRecoveryWindow;
-		const framesReceived = window.detectionDelta.totalFramesReceived;
-		const framesRendered = window.detectionDelta.totalFramesRendered;
+		const { detection: detectionWindow } = this.trackMonitor.slicedWindow.slices;
+		const framesReceived = detectionWindow.deltaTotalFramesReceived;
+		const framesRendered = detectionWindow.deltaTotalFramesRendered;
 
 		// No render counter over the window: the comparison cannot be made at all.
 		if (framesReceived === null || framesRendered === null) {
@@ -140,7 +140,7 @@ export class PlayoutDiscrepancyDetector implements Detector {
 		}
 
 		// Not judged before the window says it holds the stretch it is configured to cover.
-		if (!window.detectionWindowIsReady) {
+		if (!detectionWindow.isReady) {
 			this.trackMonitor.playoutDiscrepancy = undefined;
 			this.trackMonitor.videoPlayoutSkew = undefined;
 

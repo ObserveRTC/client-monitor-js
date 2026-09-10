@@ -1,17 +1,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { VideoCaptureBottleneckDetector } from "../../src/detectors/VideoCaptureBottleneckDetector";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SlicedWindow } from "../../src/utils/SlicedWindow";
+import { OutboundTrackWindowValues } from "../../src/monitors/OutboundTrackMonitor";
 import { IssueRegistry } from "../../src/utils/IssueRegistry";
 
 /**
  * The camera is not delivering the frames it was asked for.
  *
  * The detector owns no window of its own: `OutboundTrackMonitor` folds every collection into a
- * shared `DetectionRecoveryWindow`, and this reads two spans off it — the recent one it judges,
+ * shared `SlicedWindow`, and this reads two slices off it — the recent one it judges,
  * and the older one a finding has to clear before it closes. The harness below feeds that window
  * exactly as the track monitor does, with a cumulative frame counter on the media source's own
  * stats clock, so nothing here asserts against a level a test assigned.
  */
+/** Placeholders: only the keys matter, and they are the monitor's, not this spec's. */
+const OUTBOUND_TRACK_WINDOW_VALUES: OutboundTrackWindowValues = {
+	mediaSourceTotalProducedFrames: null,
+	highestLayerTotalEncodedFrames: null,
+};
+
 const TICK_MS = 5000;
 const DETECTION_WINDOW_MS = TICK_MS * 2 + 1000;
 const RECOVERY_WINDOW_MS = TICK_MS * 2;
@@ -67,15 +74,18 @@ function createHarness(configOverrides: Partial<typeof CONFIG> = {}) {
 		},
 	};
 
-	const detectionRecoveryWindow = new DetectionRecoveryWindow<{
-		mediaSourceTotalProducedFrames: number | null,
-	}>({
-		// Counted in values now: N values span N-1 ticks, so this is the same stretch as the
-		// millisecond windows these constants used to configure.
-		// N values in front span N-1 ticks, and the values behind them span one fewer again,
-		// which is the same pair of stretches the millisecond windows used to cover.
-		numberOfDetectionSamples: Math.round(DETECTION_WINDOW_MS / TICK_MS) + 1,
-		numberOfRecoverySamples: Math.round(RECOVERY_WINDOW_MS / TICK_MS),
+	const slicedWindow = new SlicedWindow({
+		totals: OUTBOUND_TRACK_WINDOW_VALUES,
+		// Counted in values now: N values span N-1 ticks, so this is the same stretch as
+		// the millisecond windows these constants used to configure. `recovery` sits at the
+		// detection size, so it covers the stretch that ends where detection begins.
+		slices: {
+			detection: { numberOfSamples: Math.round(DETECTION_WINDOW_MS / TICK_MS) + 1 },
+			recovery: {
+				numberOfSamples: Math.round(RECOVERY_WINDOW_MS / TICK_MS),
+				offset: Math.round(DETECTION_WINDOW_MS / TICK_MS) + 1,
+			},
+		},
 		maxAllowedGapInMs: TICK_MS * 3,
 	});
 
@@ -84,7 +94,7 @@ function createHarness(configOverrides: Partial<typeof CONFIG> = {}) {
 		isScreenShare: false,
 		paused: false,
 		track,
-		detectionRecoveryWindow,
+		slicedWindow,
 		// What `OutboundTrackMonitor` derives once per tick for every detector on the track.
 		settings: undefined as Record<string, unknown> | undefined,
 		videoCaptureSettingsChanged: undefined as boolean | undefined,
@@ -107,7 +117,7 @@ function createHarness(configOverrides: Partial<typeof CONFIG> = {}) {
 
 	return {
 		detector, raised, resolved, track, settings, clientMonitor, trackMonitor, warnings,
-		detectionRecoveryWindow,
+		slicedWindow,
 		config: clientMonitor.config.videoCaptureBottleneckDetector,
 
 		/** One collection, fed the way `OutboundTrackMonitor.update()` feeds it. */
@@ -124,10 +134,12 @@ function createHarness(configOverrides: Partial<typeof CONFIG> = {}) {
 			statsClockTime += elapsedMs;
 			totalProducedFrames += framesThisTick;
 
-			detectionRecoveryWindow.add({
+			slicedWindow.add({
 				timestamp: statsClockTime,
 				value: {
 					mediaSourceTotalProducedFrames: counterReset ? null : totalProducedFrames,
+					// Carried but never read here: this detector judges the camera, not the encoder.
+					highestLayerTotalEncodedFrames: null,
 				},
 			});
 			counterReset = false;

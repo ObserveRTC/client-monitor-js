@@ -1,3 +1,5 @@
+import { WindowSlice } from "../utils/SlicedWindow";
+import type { PeerConnectionWindowValues } from "../monitors/PeerConnectionMonitor";
 import { Detector } from "./Detector";
 import { PeerConnectionMonitor } from "../monitors/PeerConnectionMonitor";
 
@@ -35,14 +37,14 @@ export type TransportDelayDetectorConfig = {
  * out of room", a different fault with a different fix. Both can be true at once, and none of them
  * reads the others.
  *
- * **It reads the mean round trip over `PeerConnectionMonitor.detectionRecoveryWindow`**, which is
+ * **It reads the mean round trip over `PeerConnectionMonitor.slicedWindow`**, which is
  * `totalRoundTripTime` divided by the number of measurements that produced it, across a span the
  * window states in milliseconds. That is deliberately not the EWMA this detector used to read: an
  * EWMA at a fixed smoothing factor has a memory set by how often stats are collected — roughly a
  * minute at a five-second period, under half that at two — so the same configuration meant
  * different things in different deployments. The window's span is the same everywhere, which is
  * also why the detector no longer counts a `durationInMs` of its own: the sustain *is* the
- * detection window, and `peerConnectionDetectionRecoveryWindow` is where its length now lives.
+ * detection slice, and `peerConnectionWindow` is where its length now lives.
  *
  * **RTCP is preferred over ICE, per reading rather than once per call.** RTCP measures out to the
  * far endpoint and ICE only as far as the peer this connection talks to, so they answer different
@@ -89,15 +91,18 @@ export class TransportDelayDetector implements Detector {
 	public update() {
 		if (this.disabled) return;
 
-		const window = this.peerConnection.detectionRecoveryWindow;
+		const {
+			detection: detectionWindow,
+			recovery: recoveryWindow,
+		} = this.peerConnection.slicedWindow.slices;
 
 		// Not enough values yet is not a verdict either way, and it is not blindness: the window is
 		// filling and will have an answer shortly. The span is checked alongside the count because
 		// a window counts values, not time — ten collections carrying no stats time between them
 		// fill it while measuring nothing, which is a frozen collector rather than a slow path.
-		if (!window.detectionWindowIsReady || window.detectionDurationInMs < 1) return;
+		if (!detectionWindow.isReady || detectionWindow.durationInMs < 1) return;
 
-		const detection = this._readRtt(window.detectionDelta);
+		const detection = this._readRtt(detectionWindow);
 
 		if (detection === undefined) {
 			this.inputsUnavailable = true;
@@ -114,7 +119,7 @@ export class TransportDelayDetector implements Detector {
 		this.inputsUnavailable = false;
 
 		if (this.config.thresholdInMs <= detection.rttInMs) {
-			return this._raise(detection, window.detectionDurationInMs);
+			return this._raise(detection, detectionWindow.durationInMs);
 		}
 
 		if (!this._raised) return;
@@ -124,8 +129,8 @@ export class TransportDelayDetector implements Detector {
 		// stretch can be read* — but a window that cannot produce a reading must never be able to
 		// hold a finding open for ever. A detector that can raise has to be able to clear, so with
 		// nothing behind it to consult the detection reading decides on its own.
-		const recovery = window.recoveryWindowIsReady
-			? this._readRtt(window.recoveryDelta)
+		const recovery = recoveryWindow.isReady
+			? this._readRtt(recoveryWindow)
 			: undefined;
 		const clearing = recovery ?? detection;
 
@@ -142,12 +147,9 @@ export class TransportDelayDetector implements Detector {
 	 * new measurement landed in this window, so dividing would resurrect the last mean instead of
 	 * saying there is nothing new to read.
 	 */
-	private _readRtt(deltas: {
-		totalRtcpRoundTripTimeInMs: number | null;
-		totalRtcpRoundTripMeasurements: number | null;
-		totalIceRoundTripTimeInMs: number | null;
-		totalIceResponsesReceived: number | null;
-	}): { rttInMs: number, source: TransportDelayRttSource } | undefined {
+	private _readRtt(
+		slice: WindowSlice<PeerConnectionWindowValues>,
+	): { rttInMs: number, source: TransportDelayRttSource } | undefined {
 		const mean = (
 			timeInMs: number | null,
 			count: number | null,
@@ -157,8 +159,8 @@ export class TransportDelayDetector implements Detector {
 			: undefined;
 
 
-		return mean(deltas.totalRtcpRoundTripTimeInMs, deltas.totalRtcpRoundTripMeasurements, 'rtcp')
-			?? mean(deltas.totalIceRoundTripTimeInMs, deltas.totalIceResponsesReceived, 'ice');
+		return mean(slice.deltaTotalRtcpRoundTripTimeInMs, slice.deltaTotalRtcpRoundTripMeasurements, 'rtcp')
+			?? mean(slice.deltaTotalIceRoundTripTimeInMs, slice.deltaTotalIceResponsesReceived, 'ice');
 	}
 
 	private _raise(

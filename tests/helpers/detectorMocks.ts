@@ -1,6 +1,23 @@
 import { IssueRegistry, IssueRegistrySink } from "../../src/utils/IssueRegistry";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SliceConfig, SlicedWindow } from "../../src/utils/SlicedWindow";
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+/** The subset of an inbound track's totals these mocks feed. */
+type MockWindowValues = {
+	totalFramesReceived: number | null;
+	totalFramesRendered: number | null;
+	totalFramesDecoded: number | null;
+	totalFreezeCount: number | null;
+	totalFreezesDurationInMs: number | null;
+}
+
+const MOCK_WINDOW_VALUES: MockWindowValues = {
+	totalFramesReceived: null,
+	totalFramesRendered: null,
+	totalFramesDecoded: null,
+	totalFreezeCount: null,
+	totalFreezesDurationInMs: null,
+};
 
 /**
  * Minimal stand-ins for the monitor hierarchy, shared by the detector specs.
@@ -264,12 +281,9 @@ export class MockInboundTrackMonitor {
 	 * half holds exactly the last one — so a spec that says "this collection carried these frames"
 	 * still means that, whether the detector reads the window or the RTP's own deltas.
 	 */
-	public readonly detectionRecoveryWindow: DetectionRecoveryWindow<{
-		totalFramesReceived: number | null;
-		totalFramesRendered: number | null;
-		totalFramesDecoded: number | null;
-		totalFreezeCount: number | null;
-		totalFreezesDurationInMs: number | null;
+	public readonly slicedWindow: SlicedWindow<MockWindowValues, {
+		detection: SliceConfig,
+		recovery: SliceConfig,
 	}>;
 
 	private _inboundRtp: any = null;
@@ -280,11 +294,29 @@ export class MockInboundTrackMonitor {
 		kind: string,
 		public readonly peerConnection = new MockPeerConnectionMonitor(),
 		/** Widened by a spec whose detector needs more than one collection to judge. */
-		windowConfig = { numberOfDetectionSamples: 2, numberOfRecoverySamples: 2, maxAllowedGapInMs: 60_000 },
+		windowConfig = {
+			numberOfSamples: { detection: 2, recovery: 2, flowDetection: 2, flowRecovery: 2 },
+			maxAllowedGapInMs: 60_000,
+		},
 	) {
 		this.track = new MockMediaStreamTrack(kind);
 		this.issues = new IssueRegistry(this.peerConnection.parent.issueUplink);
-		this.detectionRecoveryWindow = new DetectionRecoveryWindow(windowConfig);
+		this.slicedWindow = new SlicedWindow({
+			maxAllowedGapInMs: windowConfig.maxAllowedGapInMs,
+			totals: MOCK_WINDOW_VALUES,
+			slices: {
+				detection: { numberOfSamples: windowConfig.numberOfSamples.detection },
+				recovery: {
+					numberOfSamples: windowConfig.numberOfSamples.recovery,
+					offset: windowConfig.numberOfSamples.detection,
+				},
+				flowDetection: { numberOfSamples: windowConfig.numberOfSamples.flowDetection },
+				flowRecovery: {
+					numberOfSamples: windowConfig.numberOfSamples.flowRecovery,
+					offset: windowConfig.numberOfSamples.flowDetection,
+				},
+			},
+		});
 		// One entry to difference the first collection against, as a real track always has.
 		this._addWindowEntry();
 	}
@@ -323,7 +355,7 @@ export class MockInboundTrackMonitor {
 	}
 
 	private _addWindowEntry(options: { unreported?: boolean, spanInMs?: number } = {}) {
-		this.detectionRecoveryWindow.add({
+		this.slicedWindow.add({
 			timestamp: this._statsClockTime,
 			value: options.unreported
 				? {

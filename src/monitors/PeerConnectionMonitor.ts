@@ -1,6 +1,6 @@
 import { BlockedStunRequestsDetector, BlockedTransportIssuePayload } from "../detectors/BlockedStunRequestsDetector";
 import { IssueRegistry } from "../utils/IssueRegistry";
-import { DetectionRecoveryWindow } from "../utils/DetectionRecoveryWindow";
+import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
 import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
@@ -76,6 +76,58 @@ export type PeerConnectionMonitorEvents = {
 }
 
 export type PeerConnectionQualityLimitationReason = keyof QualityLimitationDurations;
+
+/**
+ * The running totals every detector on a peer connection differences, and so the type of every
+ * delta the window hands back.
+ *
+ * **RTCP and ICE round trips are kept apart and never summed into one total.** They span different
+ * paths — RTCP reaches the far endpoint, ICE only the peer this connection talks to, which in an
+ * SFU topology is the SFU — so a detector picks one and reads it, and a delta can never be half of
+ * one and half of the other.
+ *
+ * Each total is a sum over the reports present in a collection, so a renegotiation that removes a
+ * stream or an ICE restart that selects a different pair makes the sum fall. A slice reports a
+ * counter that went backwards as `null`, which is the honest answer: no reading for this stretch
+ * rather than a wrong one.
+ */
+export type PeerConnectionWindowValues = {
+	/** Seconds of RTCP round trip summed over the reports, times 1000. */
+	totalRtcpRoundTripTimeInMs: number | null;
+	/** How many RTCP round trip measurements those milliseconds are spread over. */
+	totalRtcpRoundTripMeasurements: number | null;
+	/** The same for the round trip ICE measures with its connectivity checks. */
+	totalIceRoundTripTimeInMs: number | null;
+	totalIceResponsesReceived: number | null;
+}
+
+/** Placeholders. Only the keys matter; `null` is what a delta reads before the window fills. */
+const PEER_CONNECTION_WINDOW_VALUES: PeerConnectionWindowValues = {
+	totalRtcpRoundTripTimeInMs: null,
+	totalRtcpRoundTripMeasurements: null,
+	totalIceRoundTripTimeInMs: null,
+	totalIceResponsesReceived: null,
+};
+
+/**
+ * How many values each stretch covers, and when a gap breaks the run.
+ *
+ * The names are the library's and the sizes are the integrator's — this is the whole of what an
+ * application configures about the window. It does not set `offset` or `capacity`: those are the
+ * geometry that makes `recovery` sit behind `detection` rather than overlap it, and a window whose
+ * halves overlapped would resolve a fault on the same values that raised it.
+ */
+export type PeerConnectionWindowConfig = {
+	/**
+	 * Milliseconds between two collections above which the run is treated as broken and the fill
+	 * starts again — a backgrounded tab, a stalled collector, a renegotiation. Wider than the
+	 * collecting period, or every collection is discarded as a blackout.
+	 */
+	maxAllowedGapInMs: number;
+
+	/** Values per stretch. At least 2 each, since a delta needs two endpoints. */
+	numberOfSamples: Record<'detection' | 'recovery', number>;
+}
 
 /**
  * Every issue a peer connection can carry, keyed by the detector that raises it. This is what
@@ -212,15 +264,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	 * reports a counter that went backwards as `null`, which is the honest answer: no reading for
 	 * this window rather than a wrong one.
 	 */
-	public readonly detectionRecoveryWindow: DetectionRecoveryWindow<{
-		/** Seconds of RTCP round trip summed over the reports, times 1000. */
-		totalRtcpRoundTripTimeInMs: number | null;
-		/** How many RTCP round trip measurements those milliseconds are spread over. */
-		totalRtcpRoundTripMeasurements: number | null;
-		/** The same for the round trip ICE measures with its connectivity checks. */
-		totalIceRoundTripTimeInMs: number | null;
-		totalIceResponsesReceived: number | null;
-	}>;
+	public readonly slicedWindow: SlicedWindow<
+		PeerConnectionWindowValues,
+		// A slice for every stretch the config sizes, so the names are declared once. Only the
+		// names matter here: how many samples each covers, and where it sits, are runtime.
+		Record<keyof PeerConnectionWindowConfig['numberOfSamples'], SliceConfig>
+	>;
 
 	/** The newest stats timestamp seen in the previous collection, for `deltaTime`. */
 	private _previousNewestTimestamp?: number;
@@ -361,9 +410,23 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		super();
 		this.statsAdapters = new StatsAdapters(logger);
 		this.issues = new IssueRegistry<PeerConnectionIssues>(parent.activeIssues.asSink);
-		this.detectionRecoveryWindow = new DetectionRecoveryWindow(
-			parent.config.peerConnectionDetectionRecoveryWindow
-		);
+		const windowConfig = parent.config.peerConnectionWindow;
+
+		// `capacity` is left out on purpose: it defaults to the furthest reach of the slices, so
+		// the buffer and the stretches read off it cannot disagree.
+		this.slicedWindow = new SlicedWindow({
+			maxAllowedGapInMs: windowConfig.maxAllowedGapInMs,
+			totals: PEER_CONNECTION_WINDOW_VALUES,
+			slices: {
+				detection: {
+					numberOfSamples: windowConfig.numberOfSamples.detection,
+				},
+				recovery: {
+					numberOfSamples: windowConfig.numberOfSamples.recovery,
+					offset: windowConfig.numberOfSamples.detection,
+				},
+			},
+		});
 		this.detectors = new Detectors();
 		// Registered in connectivity-layer order for readability only. Every detector reaches
 		// its verdict from raw stats rather than from what another concluded, so the run order
@@ -794,7 +857,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.totalInboundPacketsLost = accumulatedValue(this.totalInboundPacketsLost, this.deltaInboundPacketsLost);
 		this.totalInboundPacketsReceived = accumulatedValue(this.totalInboundPacketsReceived, this.deltaInboundPacketsReceived);
 
-		this._feedDetectionRecoveryWindow();
+		this._feedSlicedWindow();
 
 		this.detectors.update();
 
@@ -886,7 +949,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	 * `null` where nothing reported the pair at all, which the window carries through to a `null`
 	 * delta — a detector then knows it could not see, instead of reading a zero.
 	 */
-	private _feedDetectionRecoveryWindow() {
+	private _feedSlicedWindow() {
 		let rtcpTimeInMs: number | null = null;
 		let rtcpMeasurements: number | null = null;
 		let iceTimeInMs: number | null = null;
@@ -912,7 +975,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			iceResponses = (iceResponses ?? 0) + responsesReceived;
 		}
 
-		this.detectionRecoveryWindow.add({
+		this.slicedWindow.add({
 			timestamp: this.statsClockTime,
 			value: {
 				totalRtcpRoundTripTimeInMs: rtcpTimeInMs,

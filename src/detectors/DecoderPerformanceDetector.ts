@@ -12,7 +12,7 @@ export type DecoderPerformanceIssuePayload = {
 	 * Delta `framesDropped` over delta `framesReceived` in the interval. Context only — frames
 	 * lost after arrival are `DecoderBottleneckDetector`'s finding, never this one's trigger.
 	 */
-	dropRatio?: number;
+	droppedFrameRatio?: number;
 	/** Delta `framesRendered` over delta `framesDecoded` in the interval. */
 	renderRatio?: number;
 	/** Frames that arrived in the interval — the evidence the decoder had something to do. */
@@ -213,7 +213,7 @@ export class DecoderPerformanceDetector implements Detector {
 				trackId: this.trackMonitor.track.id,
 				decodeTimePerFrameInMs,
 				frameBudgetInMs,
-				dropRatio: inboundRtp.dropRatio,
+				droppedFrameRatio: inboundRtp.droppedFrameRatio,
 				renderRatio: inboundRtp.renderRatio,
 				framesReceived,
 				decoderImplementation: inboundRtp.decoderImplementation,

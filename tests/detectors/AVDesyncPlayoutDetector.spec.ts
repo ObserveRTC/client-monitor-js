@@ -27,7 +27,7 @@ const CONFIG = {
 const NO_OTHER_DETECTORS = {
 	dryInboundTrackDetector: null,
 	audioPlayoutSynthesisDetector: null,
-	inboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
+	inboundTrackWindow: { numberOfSamples: { detection: 4, recovery: 3, flowDetection: 4, flowRecovery: 3 }, maxAllowedGapInMs: 60_000 },
 	codecChangeDetector: null,
 	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,

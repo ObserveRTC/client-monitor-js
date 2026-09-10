@@ -77,7 +77,7 @@ export type EncoderBottleneckDetectorConfig = {
  * struggling encoder apart from a starving camera, which is `VideoCaptureBottleneckDetector`'s
  * subject. The send-side mirror of `DecoderPerformanceDetector`.
  *
- * Both counters come from `OutboundTrackMonitor.detectionRecoveryWindow`: the frames the media
+ * Both counters come from `OutboundTrackMonitor.slicedWindow`: the frames the media
  * source produced and the frames the highest layer encoded, each measured across the same stretch.
  * The detection window raises — leaving more than `encodeDegradationThreshold` of the frames handed
  * over unencoded opens the issue, and every later collection still short of it updates that issue
@@ -179,10 +179,13 @@ export class EncoderBottleneckDetector implements Detector {
 			comment: 'no active layer',
 		});
 
-		const detectionRecoveryWindow = this.trackMonitor.detectionRecoveryWindow;
-		const producedFramesForDetection = detectionRecoveryWindow.detectionDelta.mediaSourceTotalProducedFrames;
-		const encodedFramesForDetection = detectionRecoveryWindow.detectionDelta.highestLayerTotalEncodedFrames;
-		const detectionWindowInMs = detectionRecoveryWindow.detectionDurationInMs;
+		const {
+			detection: detectionWindow,
+			recovery: recoveryWindow,
+		} = this.trackMonitor.slicedWindow.slices;
+		const producedFramesForDetection = detectionWindow.deltaMediaSourceTotalProducedFrames;
+		const encodedFramesForDetection = detectionWindow.deltaHighestLayerTotalEncodedFrames;
+		const detectionWindowInMs = detectionWindow.durationInMs;
 
 		if (producedFramesForDetection === null) return this._clear({
 			comment: 'no source frames in window',
@@ -190,7 +193,7 @@ export class EncoderBottleneckDetector implements Detector {
 		if (encodedFramesForDetection === null) return this._clear({
 			comment: 'no encoded frames in window',
 		});
-		if (!detectionRecoveryWindow.detectionWindowIsReady || detectionWindowInMs < 1) return;
+		if (!detectionWindow.isReady || detectionWindowInMs < 1) return;
 
 		const producedFpsForDetection = producedFramesForDetection / (detectionWindowInMs / 1000);
 		const encodedFpsForDetection = encodedFramesForDetection / (detectionWindowInMs / 1000);
@@ -238,12 +241,12 @@ export class EncoderBottleneckDetector implements Detector {
 
 		// Below the threshold with a finding open: the recovery window decides whether it ends.
 
-		const producedFramesForRecovery = detectionRecoveryWindow.recoveryDelta.mediaSourceTotalProducedFrames;
-		const encodedFramesForRecovery = detectionRecoveryWindow.recoveryDelta.highestLayerTotalEncodedFrames;
-		const recoveryWindowInMs = detectionRecoveryWindow.recoveryDurationInMs;
+		const producedFramesForRecovery = recoveryWindow.deltaMediaSourceTotalProducedFrames;
+		const encodedFramesForRecovery = recoveryWindow.deltaHighestLayerTotalEncodedFrames;
+		const recoveryWindowInMs = recoveryWindow.durationInMs;
 
 		if (
-			!detectionRecoveryWindow.recoveryWindowIsReady ||
+			!recoveryWindow.isReady ||
 			producedFramesForRecovery === null ||
 			encodedFramesForRecovery === null ||
 			recoveryWindowInMs < 1

@@ -11,13 +11,19 @@ const ISSUE_TYPE = 'video-flow-disrupted';
 const INTERVAL = 1_000;
 
 /**
- * Three values in front and two behind, at a one-second collecting period: the detection window
- * spans two seconds, which is exactly `frozenAfterInMs`, so a stop has to last the window before it
- * is called frozen. The window is the sustain, and this is where a spec chooses how much of one.
+ * Three values in front and two behind on the *flow* pair, at a one-second collecting period: the
+ * detection slice spans two seconds, which is exactly `frozenAfterInMs`, so a stop has to last the
+ * slice before it is called frozen. The slice is the sustain, and this is where a spec chooses how
+ * much of one. The narrow `detection`/`recovery` pair beside it is what the track's other
+ * detectors read; this one does not touch it.
  */
 const WINDOW = {
-	numberOfDetectionSamples: 3,
-	numberOfRecoverySamples: 2,
+	numberOfSamples: {
+		detection: 2,
+		recovery: 2,
+		flowDetection: 3,
+		flowRecovery: 2,
+	},
 	maxAllowedGapInMs: 60_000,
 };
 
@@ -71,7 +77,7 @@ function setup(kind = 'video') {
 	};
 
 	/** Enough clean collections for the detector to have a window of its own to read. */
-	const settle = () => continuous(WINDOW.numberOfDetectionSamples);
+	const settle = () => continuous(WINDOW.numberOfSamples.flowDetection);
 
 	return { detector, trackMonitor, clientMonitor, collect, continuous, stopped, settle, FULL };
 }
@@ -271,7 +277,7 @@ describe('InboundVideoFlowStateDetector', () => {
 			h.continuous(1);
 			expect(h.clientMonitor.activeIssues.size).toBe(1);
 
-			h.continuous(WINDOW.numberOfDetectionSamples + WINDOW.numberOfRecoverySamples);
+			h.continuous(WINDOW.numberOfSamples.flowDetection + WINDOW.numberOfSamples.flowRecovery);
 
 			expect(h.clientMonitor.activeIssues.size).toBe(0);
 			expect(h.clientMonitor.resolvedIssues.at(-1)?.comment)
@@ -381,7 +387,7 @@ describe('InboundVideoFlowStateDetector', () => {
 			expect(h.detector.inputsUnavailable).toBe(true);
 
 			// Enough clean collections to push the unreported one out of the window entirely.
-			h.continuous(WINDOW.numberOfDetectionSamples);
+			h.continuous(WINDOW.numberOfSamples.flowDetection);
 
 			expect(h.detector.inputsUnavailable).toBe(false);
 		});

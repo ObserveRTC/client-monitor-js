@@ -45,8 +45,9 @@ export type InboundVideoFlowStateDetectorConfig = {
  * for long (`frozen`). Use it to answer "is this person watching moving video right now" — the
  * complaint behind most "you're breaking up" reports, and one no single stat answers.
  *
- * **The evidence is `InboundTrackMonitor.detectionRecoveryWindow`**, the same window every other
- * detector on the track reads, so this one keeps no history of its own. `totalFramesRendered`,
+ * **The evidence is `InboundTrackMonitor.slicedWindow`**, the same buffer every other detector on
+ * the track reads, so this one keeps no history of its own — but over its own pair of slices,
+ * `flowDetection` and `flowRecovery`, which are wider than the pair the others use. `totalFramesRendered`,
  * `totalFreezeCount` and `totalFreezesDurationInMs` are differenced across the detection window to
  * make the verdict, and across the recovery window behind it to decide when a choppy finding may
  * close. That replaces two private windows and a private clock, and it is what fixed the
@@ -55,9 +56,12 @@ export type InboundVideoFlowStateDetectorConfig = {
  * closed. On one captured call that produced eleven findings on a track that was moving 95% of the
  * time.
  *
- * The window is the sustain, so how much evidence a verdict rests on is set by
- * `inboundTrackDetectionRecoveryWindow`, not here — a wider window is a slower, surer detector, and
- * `windowInMs` on the payload always says which stretch a given finding was measured over.
+ * The slice is the sustain, so how much evidence a verdict rests on is set by
+ * `inboundTrackWindow.numberOfSamples.flowDetection`, not here — a wider slice is a slower, surer
+ * detector, and `windowInMs` on the payload always says which stretch a given finding was measured
+ * over. It is sized apart from the rest of the track's detectors because `frozen` is a claim about
+ * *nothing at all* happening, which one interval cannot support: at the narrow pair a single empty
+ * collection was a freeze, and the next rendered frame closed it again.
  *
  * `frozen` is **nothing rendered across the whole detection window**, which is a stronger claim
  * than one empty collection and takes as long to make as the window spans. A freeze that has
@@ -146,12 +150,17 @@ export class InboundVideoFlowStateDetector implements Detector {
 			return this._standDown('not judging playback right now');
 		}
 
-		const window = this.trackMonitor.detectionRecoveryWindow;
-		const renderedFrames = window.detectionDelta.totalFramesRendered
-			?? window.detectionDelta.totalFramesDecoded;
-		const freezes = window.detectionDelta.totalFreezeCount;
-		const frozenInMs = window.detectionDelta.totalFreezesDurationInMs;
-		const windowInMs = window.detectionDurationInMs;
+		// Its own pair, wider than the one the rest of the track's detectors read: see
+		// `InboundTrackWindowConfig.numberOfSamples`.
+		const {
+			flowDetection: detectionWindow,
+			flowRecovery: recoveryWindow,
+		} = this.trackMonitor.slicedWindow.slices;
+		const renderedFrames = detectionWindow.deltaTotalFramesRendered
+			?? detectionWindow.deltaTotalFramesDecoded;
+		const freezes = detectionWindow.deltaTotalFreezeCount;
+		const frozenInMs = detectionWindow.deltaTotalFreezesDurationInMs;
+		const windowInMs = detectionWindow.durationInMs;
 
 		// All three are load-bearing; missing any of them makes this stretch unjudgeable.
 		if (renderedFrames === null || freezes === null || frozenInMs === null) {
@@ -164,7 +173,7 @@ export class InboundVideoFlowStateDetector implements Detector {
 
 		// A window still filling is not a verdict, and a window spanning no stats time measures
 		// nothing however many values it holds.
-		if (!window.detectionWindowIsReady || windowInMs < 1) return;
+		if (!detectionWindow.isReady || windowInMs < 1) return;
 
 		// Once, when judging starts, so `undefined` keeps meaning "no answer" rather than "healthy".
 		if (!this._watching) {
@@ -175,7 +184,7 @@ export class InboundVideoFlowStateDetector implements Detector {
 		this._judgedCollections += 1;
 
 		// The window may be full of collections this detector was not looking at; see the field.
-		if (this._judgedCollections < window.config.numberOfDetectionSamples) return;
+		if (this._judgedCollections < detectionWindow.numberOfSamples) return;
 
 		// Nothing rendered across the whole window: the picture is stopped, and has been for as
 		// long as the window spans.
@@ -217,9 +226,9 @@ export class InboundVideoFlowStateDetector implements Detector {
 		// Under the floor is not the same as clean, and the stretch behind this one has to be
 		// clean too before a stutter is called over.
 		if (0 < freezes) return;
-		if (!window.recoveryWindowIsReady) return;
+		if (!recoveryWindow.isReady) return;
 
-		const recoveryFreezes = window.recoveryDelta.totalFreezeCount;
+		const recoveryFreezes = recoveryWindow.deltaTotalFreezeCount;
 
 		// No reading behind this one to corroborate with: the detection half decides alone rather
 		// than holding a finding open on evidence that does not exist.

@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { AudioPlayoutSynthesisDetector } from "../../src/detectors/AudioPlayoutSynthesisDetector";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SlicedWindow } from "../../src/utils/SlicedWindow";
 import { IssueRegistry } from "../../src/utils/IssueRegistry";
 
 /**
- * The detector against a real `DetectionRecoveryWindow`, fed the way `InboundTrackMonitor.update()`
+ * The detector against a real `SlicedWindow`, fed the way `InboundTrackMonitor.update()`
  * feeds it: the playout device's running totals, one entry per collection, carried on the track that
  * plays through it.
  *
@@ -52,19 +52,27 @@ function createHarness(configOverrides: Partial<{
 		addEvent(event: { type: string, payload?: Record<string, unknown> }) { clientEvents.push(event); },
 	};
 
-	const detectionRecoveryWindow = new DetectionRecoveryWindow<{
-		totalPlayoutSynthesizedDurationInMs: number | null;
-		totalPlayoutSamplesDurationInMs: number | null;
-		totalPlayoutSynthesisEvents: number | null;
-		totalPlayoutDelayInMs: number | null;
-		totalPlayoutSamplesCount: number | null;
-	}>({
-		// Counted in values now: N values span N-1 ticks, so this is the same stretch as the
-		// millisecond windows these constants used to configure.
-		// N values in front span N-1 ticks, and the values behind them span one fewer again,
-		// which is the same pair of stretches the millisecond windows used to cover.
-		numberOfDetectionSamples: Math.round(DETECTION_MS / TICK_MS) + 1,
-		numberOfRecoverySamples: Math.round(RECOVERY_MS / TICK_MS),
+	const slicedWindow = new SlicedWindow({
+		totals: {
+				totalPlayoutSynthesizedDurationInMs: null,
+				totalPlayoutSamplesDurationInMs: null,
+				totalPlayoutSynthesisEvents: null,
+				totalPlayoutDelayInMs: null,
+				totalPlayoutSamplesCount: null,
+		} as {
+				totalPlayoutSynthesizedDurationInMs: number | null;
+				totalPlayoutSamplesDurationInMs: number | null;
+				totalPlayoutSynthesisEvents: number | null;
+				totalPlayoutDelayInMs: number | null;
+				totalPlayoutSamplesCount: number | null;
+		},
+		// Counted in values: N values span N-1 ticks, so this is the same stretch as the
+		// millisecond windows these constants used to configure. `recovery` sits at the
+		// detection size, so it covers the stretch that ends where detection begins.
+		slices: {
+			detection: { numberOfSamples: Math.round(DETECTION_MS / TICK_MS) + 1 },
+			recovery: { numberOfSamples: Math.round(RECOVERY_MS / TICK_MS), offset: Math.round(DETECTION_MS / TICK_MS) + 1 },
+		},
 		maxAllowedGapInMs: TICK_MS * 3,
 	});
 
@@ -72,7 +80,7 @@ function createHarness(configOverrides: Partial<{
 		direction: 'inbound' as const,
 		kind: 'audio',
 		track,
-		detectionRecoveryWindow,
+		slicedWindow,
 		getInboundRtp: () => ({ getMediaPlayout: () => mediaPlayout }),
 		issues: new IssueRegistry({
 			notify: () => { /* one-shots are not this detector's business */ },
@@ -102,7 +110,7 @@ function createHarness(configOverrides: Partial<{
 
 	return {
 		detector, raised, resolved, warnings, emitted, clientEvents, trackMonitor, clientMonitor,
-		detectionRecoveryWindow,
+		slicedWindow,
 		config: clientMonitor.config.audioPlayoutSynthesisDetector,
 		/**
 		 * One collection: the device played `played` ms of audio, `synthesized` of which the browser
@@ -127,7 +135,7 @@ function createHarness(configOverrides: Partial<{
 			samplesTotal += played * 48;
 			delayTotal += played * 48 * 0.1;
 
-			detectionRecoveryWindow.add({
+			slicedWindow.add({
 				timestamp: statsClockTime,
 				value: reportPlayout ? {
 					totalPlayoutSynthesizedDurationInMs: synthesizedTotal,
@@ -200,7 +208,7 @@ describe('AudioPlayoutSynthesisDetector', () => {
 			h.tick({ synthesized: PLAYED });
 			h.tick({ synthesized: PLAYED });
 
-			expect(h.detectionRecoveryWindow.detectionWindowIsReady).toBe(false);
+			expect(h.slicedWindow.slices.detection.isReady).toBe(false);
 			expect(h.issues()).toHaveLength(0);
 		});
 

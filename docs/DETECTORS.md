@@ -333,7 +333,7 @@ audioPlayoutSynthesisDetector: {
 
 Reports an inbound picture that stopped moving: repeatedly and briefly (`choppy`), or once and for long (`frozen`). Use it to answer "is this person watching moving video right now" — the complaint behind most "you're breaking up" reports, and one no single stat answers.
 
-Two mutually exclusive states with one configured duration between them, judged over the track's shared `detectionRecoveryWindow`: the detection half makes the verdict and the recovery half behind it decides only when a choppy finding may close. `frozen` is nothing rendered across the whole detection window, which is a stronger claim than one empty collection and takes as long to make as the window spans. Frozen wins wherever both would fit, and closes the moment frames render again.
+Two mutually exclusive states with one configured duration between them, judged over the `flowDetection` and `flowRecovery` slices of the track's shared `slicedWindow` — wider than the pair the other detectors read, because `frozen` is a claim about *nothing at all* happening and one interval cannot support it. The detection slice makes the verdict and the recovery slice behind it decides only when a choppy finding may close. `frozen` is nothing rendered across the whole detection window, which is a stronger claim than one empty collection and takes as long to make as the window spans. Frozen wins wherever both would fit, and closes the moment frames render again.
 
 `frozen` usually means delivery stopped or the decoder wedged; `choppy` usually means frames are arriving late or in bursts. Both are what the viewer actually sees, so they are the right thing to count when asking how a call went. It describes the picture, not the network — pair it with the transport detectors for a cause.
 
@@ -343,7 +343,7 @@ Two mutually exclusive states with one configured duration between them, judged 
 
 ```javascript
 inboundVideoFlowStateDetector: {
-    // the stretch both verdicts are measured over is inboundTrackDetectionRecoveryWindow
+    // the stretch both verdicts are measured over is inboundTrackWindow
 }
 ```
 
@@ -468,16 +468,21 @@ monitor.on('video-decoder-overloaded', ({ trackMonitor, decodeTimePerFrameInMs, 
 
 The receive-side counterpart of `video-capture-bottleneck`: frames arrived and the decoder did not turn enough of them into pictures. Raises `decoder-bottleneck`.
 
-**The rule, in full:** the frames that arrived and the frames that were decoded both come from `InboundTrackMonitor.detectionRecoveryWindow`, differenced across the same stretch. Leaving more than `decodeDegradationThreshold` of them undecoded raises; the finding ends only once the older recovery span is back within the threshold too.
+**The rule, in full:** the frames that arrived and the frames that were decoded both come from `InboundTrackMonitor.slicedWindow`, differenced across the same stretch. Leaving more than `decodeDegradationThreshold` of them undecoded raises; the finding ends only once the older recovery span is back within the threshold too.
 
 ```javascript
 decoderBottleneckDetector: {
     decodeDegradationThreshold: 0.1, // 10% of arriving frames left undecoded
     minReceivedFps: 5,               // too thin a stream to judge a decoder on
 },
-inboundTrackDetectionRecoveryWindow: {
-    detectionWindowMs: 15000,        // the span that raises ...
-    recoveryWindowMs: 10000,         // ... and the span behind it that has to agree to clear
+inboundTrackWindow: {
+    numberOfSamples: {
+        detection: 2,                // the collections that raise ...
+        recovery: 2,                 // ... and the ones behind them that have to agree to clear
+        flowDetection: 4,            // the wider pair video-flow-disrupted reads instead,
+        flowRecovery: 3,             // because "nothing rendered" needs more than one interval
+    },
+    maxAllowedGapInMs: 4000,         // longer than this between collections and the run restarts
 }
 ```
 
@@ -579,21 +584,24 @@ monitor.on('dry-inbound-track', async ({ trackMonitor }) => {
 
 Is the capture device delivering the frames the track was configured to capture? The send-side mirror of [`DecoderBottleneckDetector`](#decoderbottleneckdetector), which asks the same of the decoder. Raises `video-capture-bottleneck`.
 
-**The rule, in full:** the frames the source delivered and the span it had to deliver them in both come from `OutboundTrackMonitor.detectionRecoveryWindow`. Compare the resulting rate against `getSettings().frameRate`: falling more than `produceDegradationThreshold` short raises. It resolves only once the *older* recovery span is back within the threshold too, so a camera sitting on the line cannot flap one long fault into a stream of short episodes. Neither span is read before it says it is ready.
+**The rule, in full:** the frames the source delivered and the span it had to deliver them in both come from `OutboundTrackMonitor.slicedWindow`. Compare the resulting rate against `getSettings().frameRate`: falling more than `produceDegradationThreshold` short raises. It resolves only once the *older* recovery span is back within the threshold too, so a camera sitting on the line cannot flap one long fault into a stream of short episodes. Neither span is read before it says it is ready.
 
 ```javascript
 videoCaptureBottleneckDetector: {
     produceDegradationThreshold: 0.2,  // more than 20% short of the configured frame rate
 },
-outboundTrackDetectionRecoveryWindow: {
-    detectionWindowMs: 5000,           // the span that raises ...
-    recoveryWindowMs: 4000,            // ... and the span behind it that has to agree to clear
+outboundTrackWindow: {
+    numberOfSamples: {
+        detection: 2,                  // the collections that raise ...
+        recovery: 2,                   // ... and the ones behind them that have to agree to clear
+    },
+    maxAllowedGapInMs: 4000,           // longer than this between collections and the run restarts
 }
 ```
 
 **Why a span rather than a per-tick threshold.** A camera that is failing rather than merely busy dips and recovers: 150 frames per 5s tick becomes 132, back to 150, then 97. Tick by tick most of it looks fine; differenced across the window it does not, so the finding opens while the camera is still delivering rather than after it stops. Differencing the endpoints also weights *how far* the source fell short rather than merely how often, and a collection missed in the middle costs nothing, because the totals carry across it.
 
-**Why a span and not a tick count.** What matters here is that the device stayed short for a stretch of time that means something. A tick count would mean six seconds at a 2s collecting period and thirty at a 10s one. The span is shared with [`EncoderBottleneckDetector`](#encoderbottleneckdetector), so the two are judged over the same stretch.
+**Why a count and not a span.** A slice is asked for N collections and is ready when it holds them, so it is readable at any collecting period — where a millisecond span could leave a window permanently short of the values it needs to difference. What varies instead is the stretch those collections cover, which is published beside every delta as `durationInMs`, so the rate is always measured over the stretch it was actually measured on. The slice is shared with [`EncoderBottleneckDetector`](#encoderbottleneckdetector), so the two are judged over the same collections.
 
 **The rate is always the counter, never `mediaSource.framesPerSecond`.** It is `mediaSource.frames` differenced across the window against *measured* elapsed time. The browser's own figure is coarse and smooths this exact stutter away — it can read `30` across an interval that actually delivered 132 frames in five seconds. Where the counter restarted the window reports no delta, and a restart is not a measurement.
 
@@ -617,15 +625,18 @@ monitor.on('issue', (issue) => {
 
 Given a capture source that *is* delivering, is the encoder keeping up with it? Use it to tell a struggling encoder apart from a starving camera, which is [`VideoCaptureBottleneckDetector`](#videocapturebottleneckdetector)'s subject. The send-side mirror of [`DecoderPerformanceDetector`](#decoderperformancedetector). Raises `encoder-bottleneck`.
 
-Both counters come from `OutboundTrackMonitor.detectionRecoveryWindow` — the frames the media source produced and the frames the highest layer encoded, measured across the same stretch. Leaving more than `encodeDegradationThreshold` of the frames handed over unencoded opens the issue, and every later collection still short of it *updates* that issue rather than opening another.
+Both counters come from `OutboundTrackMonitor.slicedWindow` — the frames the media source produced and the frames the highest layer encoded, measured across the same stretch. Leaving more than `encodeDegradationThreshold` of the frames handed over unencoded opens the issue, and every later collection still short of it *updates* that issue rather than opening another.
 
 ```javascript
 encoderBottleneckDetector: {
     encodeDegradationThreshold: 0.3,   // 30% of handed-over frames left unencoded
 },
-outboundTrackDetectionRecoveryWindow: {
-    detectionWindowMs: 5000,           // the span the raise is judged over ...
-    recoveryWindowMs: 4000,            // ... and the span behind it that has to agree to clear
+outboundTrackWindow: {
+    numberOfSamples: {
+        detection: 2,                  // the collections that raise ...
+        recovery: 2,                   // ... and the ones behind them that have to agree to clear
+    },
+    maxAllowedGapInMs: 4000,           // longer than this between collections and the run restarts
 }
 ```
 

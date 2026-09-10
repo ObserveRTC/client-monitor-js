@@ -28,6 +28,19 @@ export type DryOutboundTrackDetectorConfig = {
 }
 
 /**
+ * Reasons the browser gives for holding an encoder back that *explain* silence, and so stand this
+ * detector down.
+ *
+ * A sender that has stopped because there is no bandwidth, or no CPU, has not broken: it is doing
+ * what it is supposed to do under pressure, and the pressure itself is already reported by
+ * `uplink-congestion` and `cpulimitation`. Calling it a pipeline disruption on top would price the
+ * same condition twice — and worse, point an operator at the capture chain when the answer is the
+ * uplink. `other` is deliberately not here: it is the browser declining to say why, which is not an
+ * explanation.
+ */
+const EXPLAINED_LIMITATIONS: ReadonlySet<string> = new Set([ 'bandwidth', 'cpu' ]);
+
+/**
  * The sending-side counterpart: reports one outbound track sending zero bytes tick after tick — a
  * stalled encoder, a capture source that quietly stopped feeding it, or a sender that never really
  * started. Use it for the one failure the local user cannot see for themselves, since their own
@@ -47,8 +60,11 @@ export type DryOutboundTrackDetectorConfig = {
  * not a fault — and it is also what keeps this detector able to close a finding it opened, since a
  * frozen counter can never differ from itself.
  *
- * A paused sender, a muted track or a track no longer `live` explains the silence: any of them
- * discards the timer and resolves an open issue. A stall must last `thresholdInMs` of the sender's
+ * A paused sender, a muted track, a track no longer `live`, or the browser reporting the encoder
+ * limited by `bandwidth` or `cpu` all explain the silence: any of them discards the timer and
+ * resolves an open issue. The limitation cases matter most on a bad network, where the sender stops
+ * because it has been told to rather than because anything broke — and where `uplink-congestion`
+ * and `cpulimitation` are already reporting the real condition. A stall must last `thresholdInMs` of the sender's
  * own stats time — a busy main thread that collects late would otherwise be counted as evidence for
  * a stalled encoder — and is raised once per episode, not once per tick.
  *
@@ -109,6 +125,24 @@ export class DryOutboundTrackDetector implements Detector {
 		// finding it invents impossible to close.
 		const activeRtps = this.trackMonitor.getOutboundRtps()
 			.filter((outboundRtp) => outboundRtp.active !== false);
+
+		// The browser saying why it is holding the encoder back is an explanation for the silence,
+		// and this detector only reports silence that has none. Read from the layers rather than
+		// from the connection: another track on the same peer connection may be the limited one.
+		const limitation = activeRtps
+			.map((outboundRtp) => outboundRtp.qualityLimitationReason)
+			.find((reason) => reason !== undefined && EXPLAINED_LIMITATIONS.has(reason));
+
+		if (limitation !== undefined) {
+			this.trackMonitor.dry = undefined;
+			this._dryForInMs = 0;
+
+			if (this._startedDryAt !== undefined) {
+				this._resolve(`the encoder is limited by ${limitation}`);
+			}
+
+			return;
+		}
 
 		if (activeRtps.length === 0) {
 			this.trackMonitor.dry = undefined;

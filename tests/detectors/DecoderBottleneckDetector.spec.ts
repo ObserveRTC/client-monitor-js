@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { DecoderBottleneckDetector } from "../../src/detectors/DecoderBottleneckDetector";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SlicedWindow } from "../../src/utils/SlicedWindow";
 import { IssueRegistry } from "../../src/utils/IssueRegistry";
 
 /**
  * The receive-side mirror of the encoder spec, and built the same way: a real
- * `DetectionRecoveryWindow` fed as `InboundTrackMonitor.update()` feeds it — running totals, one
+ * `SlicedWindow` fed as `InboundTrackMonitor.update()` feeds it — running totals, one
  * entry per collection — rather than a stub that would let the spec assert whatever it liked about
  * deltas and readiness.
  *
@@ -55,16 +55,21 @@ function createHarness(configOverrides: Partial<{
 		emit(name: string) { emitted.push(name); },
 	};
 
-	const detectionRecoveryWindow = new DetectionRecoveryWindow<{
-		totalFramesReceived: number | null;
-		totalFramesDecoded: number | null;
-	}>({
-		// Counted in values now: N values span N-1 ticks, so this is the same stretch as the
-		// millisecond windows these constants used to configure.
-		// N values in front span N-1 ticks, and the values behind them span one fewer again,
-		// which is the same pair of stretches the millisecond windows used to cover.
-		numberOfDetectionSamples: Math.round(DETECTION_MS / TICK_MS) + 1,
-		numberOfRecoverySamples: Math.round(RECOVERY_MS / TICK_MS),
+	const slicedWindow = new SlicedWindow({
+		totals: {
+				totalFramesReceived: null,
+				totalFramesDecoded: null,
+		} as {
+				totalFramesReceived: number | null;
+				totalFramesDecoded: number | null;
+		},
+		// Counted in values: N values span N-1 ticks, so this is the same stretch as the
+		// millisecond windows these constants used to configure. `recovery` sits at the
+		// detection size, so it covers the stretch that ends where detection begins.
+		slices: {
+			detection: { numberOfSamples: Math.round(DETECTION_MS / TICK_MS) + 1 },
+			recovery: { numberOfSamples: Math.round(RECOVERY_MS / TICK_MS), offset: Math.round(DETECTION_MS / TICK_MS) + 1 },
+		},
 		maxAllowedGapInMs: TICK_MS * 3,
 	});
 
@@ -75,7 +80,7 @@ function createHarness(configOverrides: Partial<{
 		paused: false,
 		remoteOutboundTrackPaused: false,
 		degradedFrameSupply: undefined as boolean | undefined,
-		detectionRecoveryWindow,
+		slicedWindow,
 		getInboundRtp: () => ({ frameWidth: 1280, frameHeight: 720 }),
 		issues: new IssueRegistry({
 			notify: () => { /* one-shots are not this detector's business */ },
@@ -102,7 +107,7 @@ function createHarness(configOverrides: Partial<{
 
 	return {
 		detector, raised, resolved, warnings, emitted, track, trackMonitor, clientMonitor,
-		detectionRecoveryWindow,
+		slicedWindow,
 		config: clientMonitor.config.decoderBottleneckDetector,
 		/** One collection: `received` frames arrive and the decoder gets through `decoded` of them. */
 		tick(received: number, decoded: number, elapsedMs = TICK_MS) {
@@ -110,7 +115,7 @@ function createHarness(configOverrides: Partial<{
 			receivedTotal += received;
 			decodedTotal += decoded;
 
-			detectionRecoveryWindow.add({
+			slicedWindow.add({
 				timestamp: statsClockTime,
 				value: {
 					totalFramesReceived: receivedTotal,
@@ -184,7 +189,7 @@ describe('DecoderBottleneckDetector', () => {
 			h.tick(ARRIVING, 0);
 			h.tick(ARRIVING, 0);
 
-			expect(h.detectionRecoveryWindow.detectionWindowIsReady).toBe(false);
+			expect(h.slicedWindow.slices.detection.isReady).toBe(false);
 			expect(h.issues()).toHaveLength(0);
 			expect(h.trackMonitor.degradedFrameSupply).toBeUndefined();
 		});

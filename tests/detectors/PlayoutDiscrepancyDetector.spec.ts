@@ -1,7 +1,7 @@
 import { mockIssueRegistry } from "../helpers/detectorMocks";
 import { IssueRegistry } from "../../src/utils/IssueRegistry";
 import { PlayoutDiscrepancyDetector } from "../../src/detectors/PlayoutDiscrepancyDetector";
-import { DetectionRecoveryWindow } from "../../src/utils/DetectionRecoveryWindow";
+import { SlicedWindow } from "../../src/utils/SlicedWindow";
 
 // Types for test mocks
 interface PlayoutDiscrepancyConfig {
@@ -128,7 +128,7 @@ class MockPeerConnectionMonitor {
 }
 
 /**
- * The detector reads its frame counters from the track's `detectionRecoveryWindow` rather than from
+ * The detector reads its frame counters from the track's `slicedWindow` rather than from
  * one collection's deltas, so the mock turns each `setInboundRtp` into one collection's worth of
  * window entries: the running totals advance by the deltas the test names, and the window is sized
  * so its detection half holds exactly the last collection. That keeps every test below reading as
@@ -145,12 +145,15 @@ class MockInboundTrackMonitor {
 
     public track = { id: 'test-track-id' };
 
-    public readonly detectionRecoveryWindow = new DetectionRecoveryWindow<{
-        totalFramesReceived: number | null;
-        totalFramesRendered: number | null;
-    }>({
-        numberOfDetectionSamples: 2,
-        numberOfRecoverySamples: 2,
+    public readonly slicedWindow = new SlicedWindow({
+        totals: { totalFramesReceived: null, totalFramesRendered: null } as {
+            totalFramesReceived: number | null;
+            totalFramesRendered: number | null;
+        },
+        slices: {
+            detection: { numberOfSamples: 2 },
+            recovery: { numberOfSamples: 2, offset: 2 },
+        },
         maxAllowedGapInMs: COLLECTION_MS * 3,
     });
 
@@ -193,7 +196,7 @@ class MockInboundTrackMonitor {
     }
 
     private _addWindowEntry(options: { unreported?: boolean } = {}) {
-        this.detectionRecoveryWindow.add({
+        this.slicedWindow.add({
             timestamp: this._statsClockTime,
             value: options.unreported
                 ? { totalFramesReceived: null, totalFramesRendered: null }

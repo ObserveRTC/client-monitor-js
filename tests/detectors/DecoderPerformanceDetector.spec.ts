@@ -24,7 +24,7 @@ function tick(options: {
 	framesReceived?: number,
 	fps?: number,
 	decodeTimePerFrameInMs?: number,
-	dropRatio?: number,
+	droppedFrameRatio?: number,
 	fractionLost?: number,
 } = {}) {
 	return {
@@ -32,7 +32,7 @@ function tick(options: {
 		deltaFramesReceived: options.framesReceived ?? 60,
 		framesPerSecond: options.fps ?? 30,
 		decodeTimePerFrameInMs: options.decodeTimePerFrameInMs ?? 5,
-		dropRatio: options.dropRatio ?? 0,
+		droppedFrameRatio: options.droppedFrameRatio ?? 0,
 		renderRatio: 1,
 		deltaFractionLost: options.fractionLost ?? 0,
 		decoderImplementation: 'libvpx',
@@ -138,7 +138,7 @@ describe('DecoderPerformanceDetector', () => {
 	it('says nothing about frames dropped after arriving', () => {
 		const { detector, trackMonitor, clientMonitor } = setup();
 
-		trackMonitor.setInboundRtp(tick({ dropRatio: 0.3 }));
+		trackMonitor.setInboundRtp(tick({ droppedFrameRatio: 0.3 }));
 		detector.update();
 		detector.update();
 
@@ -149,11 +149,11 @@ describe('DecoderPerformanceDetector', () => {
 	it('reports the drop ratio alongside a decode-cost finding', () => {
 		const { detector, trackMonitor, clientMonitor } = setup();
 
-		trackMonitor.setInboundRtp(tick({ decodeTimePerFrameInMs: 30, dropRatio: 0.3 }));
+		trackMonitor.setInboundRtp(tick({ decodeTimePerFrameInMs: 30, droppedFrameRatio: 0.3 }));
 		detector.update();
 		detector.update();
 
-		expect(clientMonitor.issueOfType('video-decoder-overloaded')?.payload.dropRatio).toBeCloseTo(0.3);
+		expect(clientMonitor.issueOfType('video-decoder-overloaded')?.payload.droppedFrameRatio).toBeCloseTo(0.3);
 	});
 
 	// The distinction the detector exists for: frames that never arrived are

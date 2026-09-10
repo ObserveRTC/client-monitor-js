@@ -65,7 +65,7 @@ export type VideoCaptureBottleneckDetectorConfig = {
  * contending for the device, thermal throttling. Use it to place a stuttery outgoing picture at the
  * capture stage rather than at the encoder (`EncoderBottleneckDetector`) or on the network.
  *
- * The frames the media source produced are summed by `OutboundTrackMonitor.detectionRecoveryWindow`
+ * The frames the media source produced are summed by `OutboundTrackMonitor.slicedWindow`
  * over two windows, and this compares each average against `getSettings().frameRate`. The detection
  * window raises: falling short by more than `produceDegradationThreshold` of the configured rate
  * opens the issue, and every later collection still short of it updates the issue rather than
@@ -152,11 +152,14 @@ export class VideoCaptureBottleneckDetector implements Detector {
 			comment: 'capture settings changed',
 		});
 
-		const detectionRecoveryWindow = this.trackMonitor.detectionRecoveryWindow;
+		const {
+			detection: detectionWindow,
+			recovery: recoveryWindow,
+		} = this.trackMonitor.slicedWindow.slices;
 		const trackSettings = this.trackMonitor.settings;
 		const expectedFps = trackSettings?.frameRate;
-		const producedFramesForDetection = detectionRecoveryWindow.detectionDelta.mediaSourceTotalProducedFrames;
-		const detectionWindowInMs = detectionRecoveryWindow.detectionDurationInMs;
+		const producedFramesForDetection = detectionWindow.deltaMediaSourceTotalProducedFrames;
+		const detectionWindowInMs = detectionWindow.durationInMs;
 
 		if (expectedFps === undefined) return this._clear({
 			comment: 'no configured frame rate',
@@ -164,7 +167,7 @@ export class VideoCaptureBottleneckDetector implements Detector {
 		if (producedFramesForDetection === null) return this._clear({
 			comment: 'no source frames in window',
 		});
-		if (!detectionRecoveryWindow.detectionWindowIsReady || detectionWindowInMs < 1) return;
+		if (!detectionWindow.isReady || detectionWindowInMs < 1) return;
 
 		const producedFpsForDetection = producedFramesForDetection / (detectionWindowInMs / 1000);
 		const produceDegradation = 1 - (producedFpsForDetection / expectedFps);
@@ -197,16 +200,16 @@ export class VideoCaptureBottleneckDetector implements Detector {
 		// Below the threshold with a finding open: the recovery window decides whether it ends.
 
 		if (
-			!detectionRecoveryWindow.recoveryWindowIsReady ||
-			detectionRecoveryWindow.recoveryDelta.mediaSourceTotalProducedFrames === null ||
-			detectionRecoveryWindow.recoveryDurationInMs < 1
+			!recoveryWindow.isReady ||
+			recoveryWindow.deltaMediaSourceTotalProducedFrames === null ||
+			recoveryWindow.durationInMs < 1
 		)
 		{
 				return;
 		}
 
-		const recoveryWindowInMs = detectionRecoveryWindow.recoveryDurationInMs;
-		const producedFramesForRecovery = detectionRecoveryWindow.recoveryDelta.mediaSourceTotalProducedFrames;
+		const recoveryWindowInMs = recoveryWindow.durationInMs;
+		const producedFramesForRecovery = recoveryWindow.deltaMediaSourceTotalProducedFrames;
 		const producedFpsForRecovery = producedFramesForRecovery / (recoveryWindowInMs / 1000);
 		const recoveryDegradation = 1 - (producedFpsForRecovery / expectedFps);
 

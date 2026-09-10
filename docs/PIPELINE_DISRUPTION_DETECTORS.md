@@ -719,8 +719,19 @@ stopped feeding it, a sender that never really started. **It is the one failure
 the local user cannot see for themselves**, because their own preview keeps
 rendering from the capture stream and looks perfect.
 
-**Signals read.** `deltaBytesSent`, `deltaTime` and `active` on **every** outbound
-RTP of the track; `trackMonitor.paused`, `track.muted`, `track.readyState`.
+**Signals read.** `deltaBytesSent`, `deltaTime`, `active` and
+`qualityLimitationReason` on **every** outbound RTP of the track;
+`trackMonitor.paused`, `track.muted`, `track.readyState`.
+
+**It reports only silence the browser has not already explained.** An encoder held
+back by `bandwidth` or `cpu` has stopped because it was told to, not because
+anything broke, and the pressure itself is already reported by
+`uplink-congestion` and `cpulimitation`. Firing here as well would price one
+condition twice — and this is Pipeline Disruption, which caps a track score at
+zero, so it would also send an operator to the capture chain when the answer is
+the uplink. Either reason on any layer the sender is driving stands the detector
+down with `the encoder is limited by <reason>`. `other` does not: it is the
+browser declining to say why, which is not an explanation.
 
 **It judges the track, not one of its layers.** A simulcast track is sent over
 several RTP streams and the sender moves between them constantly: congestion
@@ -1089,7 +1100,7 @@ fixes.
 
 **Signals read.** `deltaFramesReceived`, `deltaFractionLost`,
 `decodeTimePerFrameInMs` (derived on the monitor as
-`deltaTotalDecodeTime / deltaFramesDecoded`), `dropRatio` (`deltaFramesDropped /
+`deltaTotalDecodeTime / deltaFramesDecoded`), `droppedFrameRatio` (`deltaFramesDropped /
 deltaFramesReceived`), `framesPerSecond` falling back to `avgFramesPerSec`, plus
 `renderRatio`, `decoderImplementation` and `powerEfficientDecoder` for the
 payload.
@@ -1108,8 +1119,8 @@ cannot exonerate the network**, so a missing `deltaFractionLost` stands the
 detector down rather than letting it proceed on an assumption. Past the gates,
 either of two symptoms qualifies a tick — decode time per frame above
 `decodeTimeBudgetRatio` (default **0.8**) of the budget the stream's own frame
-rate implies (`1000 / fps`: 33 ms at 30 fps, 66 ms at 15 fps), or `dropRatio`
-above `dropRatioThreshold` (default **0.1**), frames being thrown away *after*
+rate implies (`1000 / fps`: 33 ms at 30 fps, 66 ms at 15 fps), or `droppedFrameRatio`
+above `droppedFrameRatioThreshold` (default **0.1**), frames being thrown away *after*
 they had already arrived. `minConsecutiveTicks` (default **2**) qualifying ticks
 in a row raise; any non-qualifying tick clears the count and resolves.
 

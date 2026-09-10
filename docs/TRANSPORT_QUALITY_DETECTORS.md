@@ -205,7 +205,7 @@ operationally except the object they describe.
 ## The threshold-and-stats-clock shape
 
 `TransportLossDetector` has this shape, and `TransportDelayDetector` had it until
-4.9.0 moved that class onto `PeerConnectionMonitor.detectionRecoveryWindow`
+4.9.0 moved that class onto the peer connection's shared window
 (described under [Delay](#transportdelaydetector--transport-delay-degraded)
 below). It is documented here because loss still works this way, and because the
 comparison is the clearest statement of what the window changed.
@@ -439,7 +439,7 @@ A path that works and takes too long: the round trip stays high enough, for long
 enough, that conversation stops being conversation and becomes turn-taking.
 
 **The signal it reads** is the mean round trip over
-`PeerConnectionMonitor.detectionRecoveryWindow`: `totalRoundTripTime` divided by
+`PeerConnectionMonitor.slicedWindow`: `totalRoundTripTime` divided by
 the number of measurements that produced it, across a span the window states in
 milliseconds. A single inflated RTT sample is common and means nothing — one
 retransmission, one scheduling hiccup at the far end, one RTCP report that sat in
@@ -453,7 +453,7 @@ cadence therefore meant something else on another, and the two numbers had no wa
 to stay consistent. A window states its span in milliseconds and means the same
 thing everywhere, which is why this detector no longer counts a duration of its
 own — the sustain *is* the detection window, configured under
-`peerConnectionDetectionRecoveryWindow`.
+`peerConnectionWindow`.
 
 **RTCP is preferred over ICE per reading, not once per call.** The two span
 different paths and are held as separate totals that are never summed. Each
@@ -471,7 +471,7 @@ as `rttSource`.
 |---|---|---|
 | `thresholdInMs` | `300` | Mean round trip at or above this over the detection window: the path counts as slow |
 | `recoveryThresholdInMs` | `200` | The *recovery* window must read below this before the issue resolves |
-| `peerConnectionDetectionRecoveryWindow` | `6000` / `6000` | The spans the two means are taken over |
+| `peerConnectionWindow` | `2` / `2` collections | The slices the two means are taken over |
 
 A finding clears only when the recovery window — the stretch *behind* the
 detection window — also reads below `recoveryThresholdInMs`, so a path has to

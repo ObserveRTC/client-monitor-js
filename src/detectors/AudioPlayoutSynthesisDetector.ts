@@ -79,7 +79,7 @@ export type AudioPlayoutSynthesisDetectorConfig = {
  * `InventedSpeechDetector` sits alongside on the same track and answers a narrower question: how
  * much of *that stream* was invented. This one answers what the output device did.
  *
- * Both counters reach it through `InboundTrackMonitor.detectionRecoveryWindow`, which carries the
+ * Both counters reach it through `InboundTrackMonitor.slicedWindow`, which carries the
  * playout totals alongside the track's own so every detector on the track judges the same stretch.
  * The verdict is a
  * **share of what was played**, never a duration per collection. An absolute per-tick threshold
@@ -152,10 +152,13 @@ export class AudioPlayoutSynthesisDetector implements Detector {
 		if (this.disabled) return;
 		if (this.trackMonitor.kind !== 'audio') return;
 
-		const window = this.trackMonitor.detectionRecoveryWindow;
-		const synthesizedForDetectionInMs = window.detectionDelta.totalPlayoutSynthesizedDurationInMs;
-		const playedOutForDetectionInMs = window.detectionDelta.totalPlayoutSamplesDurationInMs;
-		const detectionWindowInMs = window.detectionDurationInMs;
+		const {
+			detection: detectionWindow,
+			recovery: recoveryWindow,
+		} = this.trackMonitor.slicedWindow.slices;
+		const synthesizedForDetectionInMs = detectionWindow.deltaTotalPlayoutSynthesizedDurationInMs;
+		const playedOutForDetectionInMs = detectionWindow.deltaTotalPlayoutSamplesDurationInMs;
+		const detectionWindowInMs = detectionWindow.durationInMs;
 
 		// Both stand-downs blank the measurement as well as resolving: nothing was measured, which
 		// is not the same as measuring nothing.
@@ -164,7 +167,7 @@ export class AudioPlayoutSynthesisDetector implements Detector {
 
 			return this._clear('no playout measurement');
 		}
-		if (!window.detectionWindowIsReady || detectionWindowInMs < 1) return;
+		if (!detectionWindow.isReady || detectionWindowInMs < 1) return;
 
 		// Nothing played is nothing to take a share of. A device that played no audio at all is not
 		// a device playing fabricated audio.
@@ -188,7 +191,7 @@ export class AudioPlayoutSynthesisDetector implements Detector {
 				synthesizedForDetectionInMs,
 				playedOutForDetectionInMs,
 				detectionWindowInMs,
-				synthesisEvents: window.detectionDelta.totalPlayoutSynthesisEvents ?? undefined,
+				synthesisEvents: detectionWindow.deltaTotalPlayoutSynthesisEvents ?? undefined,
 				playoutDelayPerSampleInMs: this._playoutDelayPerSample(),
 			});
 
@@ -204,12 +207,12 @@ export class AudioPlayoutSynthesisDetector implements Detector {
 
 		// Below the threshold with a finding open: the recovery window decides whether it ends.
 
-		const synthesizedForRecoveryInMs = window.recoveryDelta.totalPlayoutSynthesizedDurationInMs;
-		const playedOutForRecoveryInMs = window.recoveryDelta.totalPlayoutSamplesDurationInMs;
-		const recoveryWindowInMs = window.recoveryDurationInMs;
+		const synthesizedForRecoveryInMs = recoveryWindow.deltaTotalPlayoutSynthesizedDurationInMs;
+		const playedOutForRecoveryInMs = recoveryWindow.deltaTotalPlayoutSamplesDurationInMs;
+		const recoveryWindowInMs = recoveryWindow.durationInMs;
 
 		if (
-			!window.recoveryWindowIsReady ||
+			!recoveryWindow.isReady ||
 			synthesizedForRecoveryInMs === null ||
 			playedOutForRecoveryInMs === null ||
 			playedOutForRecoveryInMs <= 0 ||
@@ -244,9 +247,9 @@ export class AudioPlayoutSynthesisDetector implements Detector {
 
 	/** The average per-sample delay across the detection window, from the two totals that define it. */
 	private _playoutDelayPerSample(): number | undefined {
-		const window = this.trackMonitor.detectionRecoveryWindow;
-		const delayInMs = window.detectionDelta.totalPlayoutDelayInMs;
-		const samples = window.detectionDelta.totalPlayoutSamplesCount;
+		const { detection: detectionWindow } = this.trackMonitor.slicedWindow.slices;
+		const delayInMs = detectionWindow.deltaTotalPlayoutDelayInMs;
+		const samples = detectionWindow.deltaTotalPlayoutSamplesCount;
 
 		if (delayInMs === null || samples === null || samples <= 0) return undefined;
 

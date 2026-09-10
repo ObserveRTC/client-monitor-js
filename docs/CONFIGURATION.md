@@ -105,7 +105,7 @@ const monitor = new ClientMonitor({
     transportDelayDetector: {
         thresholdInMs: 300,           // mean RTT at or above which the path counts as slow
         recoveryThresholdInMs: 200,   // RTT below which it resolves (hysteresis)
-        // the sustain is peerConnectionDetectionRecoveryWindow, not a duration here
+        // the sustain is peerConnectionWindow, not a duration here
     },
     // Delivery stopping completely, which is a policy fault rather than a quality one.
     // One instance per ICE transport, on `IceTransportMonitor.detectors`.
@@ -128,8 +128,9 @@ const monitor = new ClientMonitor({
     },
     // Frame supply: is whatever produces this track's frames delivering what it
     // should? Average over a duration, compare, judge.
-    // Both average over `outboundTrackDetectionRecoveryWindow` rather than holding
-    // a window each, so the sustain and the hysteresis are configured in one place.
+    // Both average over the `detection` and `recovery` slices of
+    // `outboundTrackWindow` rather than holding a window each, so the sustain and
+    // the hysteresis are configured in one place.
     videoCaptureBottleneckDetector: {
         produceDegradationThreshold: 0.2,  // camera more than 20% short of the configured fps
     },
@@ -154,7 +155,7 @@ const monitor = new ClientMonitor({
     decoderBottleneckDetector: {
         decodeDegradationThreshold: 0.1, // 10% of arriving frames left undecoded
         minReceivedFps: 5,               // too thin a stream to judge a decoder on
-    },                                   // (the span is inboundTrackDetectionRecoveryWindow)
+    },                                   // (the span is inboundTrackWindow)
     decoderPerformanceDetector: {
         decodeTimeBudgetRatio: 0.8,  // share of the per-frame budget decoding may use
         minFramesReceived: 10,
@@ -190,7 +191,7 @@ const monitor = new ClientMonitor({
         durationInMs: 8000,
     },
     inboundVideoFlowStateDetector: {
-        // the stretch both verdicts are measured over is inboundTrackDetectionRecoveryWindow
+        // the stretch both verdicts are measured over is inboundTrackWindow
     },
     inventedSpeechDetector: {
         allowedInventedRatio: 0.05,  // RFC 7294 calls a second above 5% concealment severely concealed

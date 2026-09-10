@@ -143,28 +143,37 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             watchTabVisibility: monitorConfig.watchTabVisibility ?? true,
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
-            // The windows are counted in values, not milliseconds, so that a window asked for N
-            // values holds N at any collecting period. The spans named below are what those counts
-            // come to at the configured period; `samplesSpanning` converts one to the other, and N
-            // values span N-1 intervals. `maxAllowedGapInMs` tolerates a couple of late or missed
-            // collections and treats anything longer as a blackout worth starting again after.
-            outboundTrackDetectionRecoveryWindow: monitorConfig.outboundTrackDetectionRecoveryWindow ?? {
-                numberOfDetectionSamples: 2,
-                numberOfRecoverySamples: 2,
+            // The slices are counted in values, not milliseconds, so that a slice asked for N
+            // values holds N at any collecting period and is readable at any cadence. What varies
+            // is the stretch those values span: N values span N-1 intervals, so at the default
+            // 2000ms period a slice of 2 covers 2s and one of 4 covers 6s. `maxAllowedGapInMs`
+            // tolerates a couple of late or missed collections and treats anything longer as a
+            // blackout worth starting again after.
+            outboundTrackWindow: monitorConfig.outboundTrackWindow ?? {
+                numberOfSamples: {
+                    detection: 2,
+                    recovery: 2,
+                },
                 maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
             // Wider than the outbound pair: this span was `decoderBottleneckDetector.durationInMs`
             // before the window took it over, and it is kept so that detector judges as it did.
-            inboundTrackDetectionRecoveryWindow: monitorConfig.inboundTrackDetectionRecoveryWindow ?? {
-                numberOfDetectionSamples: 2,
-                numberOfRecoverySamples: 2,
+            inboundTrackWindow: monitorConfig.inboundTrackWindow ?? {
+                numberOfSamples: {
+                    detection: 2,
+                    recovery: 2,
+                    flowDetection: 4,
+                    flowRecovery: 3,
+                },
                 maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
             // The 6s floor is `transportDelayDetector.durationInMs` from before the window took the
             // sustain over, kept so that detector judges over the stretch it always did.
-            peerConnectionDetectionRecoveryWindow: monitorConfig.peerConnectionDetectionRecoveryWindow ?? {
-                numberOfDetectionSamples: 2,
-                numberOfRecoverySamples: 2,
+            peerConnectionWindow: monitorConfig.peerConnectionWindow ?? {
+                numberOfSamples: {
+                    detection: 2,
+                    recovery: 2,
+                },
                 maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
             // Detector defaults, one entry per detector, grouped as in
@@ -235,7 +244,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 // ~300ms round trip is where turn-taking starts to break down.
                 thresholdInMs: 300,
                 recoveryThresholdInMs: 200,
-                // The sustain lives in `peerConnectionDetectionRecoveryWindow`, not here.
+                // The sustain lives in `peerConnectionWindow`, not here.
             }),
             transportLossDetector: detectorDefault(monitorConfig.transportLossDetector, {
                 threshold: 0.05,
@@ -335,7 +344,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 frozenAfterInMs: 2000,
                 minFreezeCountForChoppy: 2,
                 // The stretch both verdicts are measured over is the track's shared window, not a
-                // duration here: see `inboundTrackDetectionRecoveryWindow`.
+                // duration here: see `inboundTrackWindow`.
             }),
             inventedSpeechDetector: detectorDefault(monitorConfig.inventedSpeechDetector, {
                 // Share of concealed audio tolerated before it counts against the budget.

@@ -5,7 +5,7 @@ import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 const noDetectorsConfig = {
 	avDesyncPlayoutDetector: null,
 	dryInboundTrackDetector: null,
-	inboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
+	inboundTrackWindow: { numberOfSamples: { detection: 4, recovery: 3, flowDetection: 4, flowRecovery: 3 }, maxAllowedGapInMs: 60_000 },
 	playoutDiscrepancyDetector: null,
 	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,

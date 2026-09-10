@@ -85,6 +85,15 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	// derived fields
 	bitrate?: number;
 	avgFramesPerSec?: number;
+	/**
+	 * Mean absolute deviation of the last ten `framesPerSecond` readings over their mean.
+	 *
+	 * @deprecated Read {@link interFrameDelayVariation} instead. This measures the spread of the
+	 * browser's own smoothed per-collection figure, so it reports the smoothing as much as the
+	 * stream, and the ten readings span ten seconds at a 1s collecting period and a hundred at a
+	 * 10s one. The scoring moved off it in 4.10.0; on a captured call the two agreed on only 18 of
+	 * the ~58 collections either one called volatile.
+	 */
 	fpsVolatility?: number;
 	lastNFramesPerSec: number[] = [];
 	receivingAudioSamples?: number;
@@ -188,7 +197,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	/** Share of the bytes received in this interval that were retransmissions. */
 	public retransmissionRatio?: number;
 	public decodeTimePerFrameInMs?: number;
-	public dropRatio?: number;
+	public droppedFrameRatio?: number;
 	public renderRatio?: number;
 	public keyFrameRate?: number;
 	public pliRate?: number;
@@ -461,7 +470,7 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		// ---- video: decode cost and recovery pressure ----
 		this.decodeTimePerFrameInMs = 0 < (this.deltaFramesDecoded ?? 0) && this.deltaTotalDecodeTime !== undefined
 			? (this.deltaTotalDecodeTime / (this.deltaFramesDecoded as number)) * 1000 : undefined;
-		this.dropRatio = 0 < (this.deltaFramesReceived ?? 0) && this.deltaFramesDropped !== undefined
+		this.droppedFrameRatio = 0 < (this.deltaFramesReceived ?? 0) && this.deltaFramesDropped !== undefined
 			? this.deltaFramesDropped / (this.deltaFramesReceived as number) : undefined;
 		this.renderRatio = 0 < (this.deltaFramesDecoded ?? 0) && this.deltaFramesRendered !== undefined
 			? this.deltaFramesRendered / (this.deltaFramesDecoded as number) : undefined;

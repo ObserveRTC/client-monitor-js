@@ -133,7 +133,8 @@ console.log(inboundRtp.bitPerPixel);            // Video: bits per pixel efficie
 // Video-specific derived metrics
 console.log(inboundRtp.avgFramesPerSec);        // Average FPS over recent samples
 console.log(inboundRtp.ewmaFps);                // EWMA smoothed FPS
-console.log(inboundRtp.fpsVolatility);          // FPS stability (lower is better)
+console.log(inboundRtp.fpsVolatility);          // deprecated: prefer interFrameDelayVariation
+console.log(inboundRtp.interFrameDelayVariation);  // frame-timing stability (lower is better)
 console.log(inboundRtp.isFreezed);              // Boolean: video appears frozen
 
 // Audio-specific metrics
@@ -162,7 +163,7 @@ console.log(inboundRtp.discardRate);                // Packets that arrived too 
 
 // Video decode cost and recovery pressure
 console.log(inboundRtp.decodeTimePerFrameInMs);     // Decode cost per frame
-console.log(inboundRtp.dropRatio);                  // Frames dropped after arriving
+console.log(inboundRtp.droppedFrameRatio);          // Frames dropped after arriving
 console.log(inboundRtp.renderRatio);                // Frames rendered vs decoded
 console.log(inboundRtp.keyFrameRate);               // Keyframes decoded per second
 console.log(inboundRtp.pliRate);                    // PLIs sent per second

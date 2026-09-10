@@ -120,7 +120,7 @@ The path is established, ICE is connected, DTLS completed — and the transport 
 | Delivery reliability | `TransportLossDetector` | `transport-loss-sustained` | Are packets being dropped? |
 | Delivery, at all | [`BlockedInboundMediaDetector`](#the-blocked-media-detectors), [`BlockedOutboundMediaDetector`](#the-blocked-media-detectors), [`BlockedStunRequestsDetector`](#the-blocked-media-detectors) | `blocked-inbound-media-transport`, `blocked-outbound-media-transport`, `blocked-stun-requests` | Are they being dropped *completely*, by policy? |
 
-**`transport-delay-degraded`** reads the mean round trip over `pcMonitor.detectionRecoveryWindow` — `totalRoundTripTime` over the measurements that produced it — because a single inflated RTT sample is common and means nothing. It prefers the RTCP round trip and falls back to ICE, deciding that per reading rather than latching it, so an RTCP stream that stops being reported does not leave the detector thresholding a frozen number. The detection window is the sustain and the recovery window behind it is the hysteresis: the mean must reach `thresholdInMs` to raise, and the preceding span must read below `recoveryThresholdInMs` to clear, so a call sitting on the line does not flap the issue open and shut. Round trip around 300 ms is where turn-taking starts to break down; ITU-T G.114 puts one-way "generally acceptable" at 150 ms. Note that **RTT to an SFU is a half-path measurement** and never sees the far leg — this is evidence about *this endpoint's* path and must not be presented as end-to-end latency.
+**`transport-delay-degraded`** reads the mean round trip over `pcMonitor.slicedWindow` — `totalRoundTripTime` over the measurements that produced it — because a single inflated RTT sample is common and means nothing. It prefers the RTCP round trip and falls back to ICE, deciding that per reading rather than latching it, so an RTCP stream that stops being reported does not leave the detector thresholding a frozen number. The detection window is the sustain and the recovery window behind it is the hysteresis: the mean must reach `thresholdInMs` to raise, and the preceding span must read below `recoveryThresholdInMs` to clear, so a call sitting on the line does not flap the issue open and shut. Round trip around 300 ms is where turn-taking starts to break down; ITU-T G.114 puts one-way "generally acceptable" at 150 ms. Note that **RTT to an SFU is a half-path measurement** and never sees the far leg — this is evidence about *this endpoint's* path and must not be presented as end-to-end latency.
 
 **`transport-loss-sustained`** watches both directions with one threshold and reports whichever is worse, with the direction in the payload. Loss has always been visible to this library, but only as somebody else's qualifier: it gated the old `CongestionDetector`'s low-sensitivity mode and stands `DecoderPerformanceDetector` down so it does not blame a decoder for a network fault. Neither makes a claim *about the loss*, so nothing could raise it, resolve it, or count it. The means it reads — `avgInboundFractionLost` and `avgOutboundFractionLost` — exclude streams that carried nothing this tick rather than counting them as healthy; without that gating, a call with eight muted tracks and one bleeding one looks fine.
 
@@ -131,9 +131,12 @@ transportDelayDetector: {
     thresholdInMs: 300,          // mean RTT at or above which the path counts as slow
     recoveryThresholdInMs: 200,  // RTT below which it resolves
 },
-peerConnectionDetectionRecoveryWindow: {
-    detectionWindowMs: 6000,     // the span the raise mean is taken over
-    recoveryWindowMs: 6000,      // and the span behind it that has to agree before it clears
+peerConnectionWindow: {
+    numberOfSamples: {
+        detection: 2,            // the collections the raise mean is taken over ...
+        recovery: 2,             // ... and the ones behind them that have to agree to clear
+    },
+    maxAllowedGapInMs: 4000,     // longer than this between collections and the run restarts
 },
 transportLossDetector: {
     threshold: 0.05,             // mean interval loss fraction (0..1)

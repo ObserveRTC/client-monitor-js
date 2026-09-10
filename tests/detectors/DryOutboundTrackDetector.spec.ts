@@ -25,6 +25,8 @@ interface OutboundRtpStats {
     /** A simulcast layer the sender has switched off; its counters never move again. */
     active?: boolean;
     rid?: string;
+    /** What the browser says is holding the encoder back, if anything. */
+    qualityLimitationReason?: string;
     /**
      * The gap between the two stats reports this delta came from, as
      * `OutboundRtpMonitor` derives it. The dry stretch is measured by accumulating
@@ -165,11 +167,15 @@ describe('DryOutboundTrackDetector', () => {
         detector = new DryOutboundTrackDetector(mockTrackMonitor as any);
     });
 
-    /** One collection, describing `deltaTime` milliseconds of the sender's own time. */
+    /**
+     * One collection, describing `deltaTime` milliseconds of the sender's own time. Set on every
+     * layer, as a real collection does: the detector takes the interval from the layers it is
+     * actually judging, which are not necessarily the first in the list.
+     */
     const tick = (deltaTime = 0) => {
-        const outboundRtp = mockTrackMonitor.getOutboundRtps()[0];
-
-        if (outboundRtp) outboundRtp.deltaTime = deltaTime;
+        for (const outboundRtp of mockTrackMonitor.getOutboundRtps()) {
+            outboundRtp.deltaTime = deltaTime;
+        }
 
         detector.update();
     };
@@ -340,6 +346,83 @@ describe('DryOutboundTrackDetector', () => {
 
                 expect(mockClientMonitor.getIssues()).toHaveLength(0);
                 expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+        });
+
+        /**
+         * Silence the browser has already explained is not this detector's fault to report. A
+         * sender held back by bandwidth or CPU is doing what it is supposed to under pressure, and
+         * `uplink-congestion` and `cpulimitation` are already reporting the pressure itself — so
+         * calling it a broken pipeline on top prices the same condition twice and sends an
+         * operator to the capture chain when the answer is the uplink.
+         */
+        describe('when the browser says why the encoder is held back', () => {
+            it.each([ 'bandwidth', 'cpu' ])('stands down while the encoder is limited by %s', (reason) => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: reason, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+
+            it('closes an open finding once the limitation appears', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: 'none', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: 'bandwidth', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+                tick(5000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+
+            // `other` is the browser declining to say why, which is not an explanation.
+            it.each([ 'none', 'other' ])('still reports a track held back by nothing it names (%s)', (reason) => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: reason, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            });
+
+            // The limitation is read from the track's own layers, and one naming it is enough.
+            it('stands down when any layer of the track names a limitation', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: true, qualityLimitationReason: 'bandwidth', bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, qualityLimitationReason: 'none', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            });
+
+            // A switched-off layer keeps reporting whatever limited it when it stopped.
+            it('ignores a limitation reported by a layer that is no longer being sent', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: false, qualityLimitationReason: 'bandwidth', bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, qualityLimitationReason: 'none', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
             });
         });
 

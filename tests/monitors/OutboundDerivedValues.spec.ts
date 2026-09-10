@@ -3,13 +3,15 @@ import { stubClientIssues } from "../helpers/detectorMocks";
 import { OutboundTrackMonitor } from "../../src/monitors/OutboundTrackMonitor";
 
 /**
- * `highestLayer` and `detectionRecoveryWindow` on `OutboundTrackMonitor`: the two values derived from the
+ * `highestLayer` and `slicedWindow` on `OutboundTrackMonitor`: the two values derived from the
  * outbound RTPs and the media source on every `update()`, before the detectors run.
  */
 /** Counted in values: four in front, three behind, and a generous gap so a spec never trips it. */
-const WINDOW = {
-	numberOfDetectionSamples: 4,
-	numberOfRecoverySamples: 3,
+const OUTBOUND_WINDOW = {
+	numberOfSamples: {
+		detection: 4,
+		recovery: 3,
+	},
 	maxAllowedGapInMs: 60_000,
 };
 
@@ -23,7 +25,7 @@ const noDetectorsConfig = {
 	encoderBottleneckDetector: null,
 	simulcastLayerDetector: null,
 	videoResolutionChangeDetector: null,
-	outboundTrackDetectionRecoveryWindow: WINDOW,
+	outboundTrackWindow: OUTBOUND_WINDOW,
 };
 
 /** One outbound RTP, as far as these two derived values are concerned. */
@@ -177,38 +179,41 @@ describe('OutboundTrackMonitor.highestLayer', () => {
 	});
 });
 
-describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
-	it('starts empty', () => {
+describe('OutboundTrackMonitor.slicedWindow', () => {
+	// Null rather than absent, because the totals are declared: a detector guarding on `=== null`
+	// has nothing to fall through before the first collection arrives.
+	it('starts with every total reading null', () => {
 		const h = createMonitor();
 
-		expect(h.monitor.detectionRecoveryWindow.detectionDelta).toEqual({});
-		expect(h.monitor.detectionRecoveryWindow.detectionDurationInMs).toBe(0);
+		const { detection: detectionWindow } = h.monitor.slicedWindow.slices;
+
+		expect(detectionWindow.deltaMediaSourceTotalProducedFrames).toBeNull();
+		expect(detectionWindow.deltaHighestLayerTotalEncodedFrames).toBeNull();
+		expect(detectionWindow.durationInMs).toBe(0);
 	});
 
 	it('takes one entry per collection, not one per simulcast layer', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(100_000, 10), createLayer(400_000, 20), createLayer(900_000, 30));
-		h.tick({ deltaFrames: 30 });
-		h.tick({ deltaFrames: 30 });
-		h.tick({ deltaFrames: 30 });
+		for (let i = 0; i < 4; ++i) h.tick({ deltaFrames: 30 });
 
-		// Three layers, three collections. The add sits outside the loop that picks the highest
-		// layer, so the top layer's running total advanced three times, not nine.
-		expect(h.monitor.detectionRecoveryWindow.detectionDelta.highestLayerTotalEncodedFrames).toBe(60);
+		// Three layers, four collections. The add sits outside the loop that picks the highest
+		// layer, so the top layer's running total advanced once per collection, not once per layer.
+		expect(h.monitor.slicedWindow.slices.detection.deltaHighestLayerTotalEncodedFrames).toBe(90);
 	});
 
 	it('carries the frames the source produced and the frames the highest layer encoded', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(100_000, 5), createLayer(900_000, 28));
-		h.tick({ deltaFrames: 30 });
-		h.tick({ deltaFrames: 30 });
+		for (let i = 0; i < 4; ++i) h.tick({ deltaFrames: 30 });
 
-		const deltas = h.monitor.detectionRecoveryWindow.detectionDelta;
+		const deltas = h.monitor.slicedWindow.slices.detection;
 
-		expect(deltas.mediaSourceTotalProducedFrames).toBe(30);
-		expect(deltas.highestLayerTotalEncodedFrames).toBe(28);
+		// Four values, three intervals between the endpoints.
+		expect(deltas.deltaMediaSourceTotalProducedFrames).toBe(90);
+		expect(deltas.deltaHighestLayerTotalEncodedFrames).toBe(84);
 	});
 
 	it('measures across the whole stretch it holds', () => {
@@ -220,11 +225,11 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		h.tick({ deltaFrames: 30 });
 		h.tick({ deltaFrames: 30 });
 
-		const deltas = h.monitor.detectionRecoveryWindow.detectionDelta;
+		const deltas = h.monitor.slicedWindow.slices.detection;
 
 		// Four collections, three intervals between the endpoints.
-		expect(deltas.mediaSourceTotalProducedFrames).toBe(90);
-		expect(deltas.highestLayerTotalEncodedFrames).toBe(84);
+		expect(deltas.deltaMediaSourceTotalProducedFrames).toBe(90);
+		expect(deltas.deltaHighestLayerTotalEncodedFrames).toBe(84);
 	});
 
 	it('gives a rate that matches what the source actually produced', () => {
@@ -233,9 +238,9 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		h.setLayers(createLayer(900_000, 28));
 		for (let i = 0; i < 6; ++i) h.tick({ deltaFrames: 15 });
 
-		const window = h.monitor.detectionRecoveryWindow;
-		const fps = window.detectionDelta.mediaSourceTotalProducedFrames! /
-			(window.detectionDurationInMs / 1000);
+		const window = h.monitor.slicedWindow.slices.detection;
+		const fps = window.deltaMediaSourceTotalProducedFrames! /
+			(window.durationInMs / 1000);
 
 		// 15 frames per 1000ms collection. The delta and the duration span the same two entries,
 		// so the rate is the real one however many collections are held.
@@ -246,24 +251,22 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(900_000, 28));
-		h.tick({ deltaFrames: 30 });
-		h.tick({ deltaFrames: 30 });
+		for (let i = 0; i < 3; ++i) h.tick({ deltaFrames: 30 });
 		h.tick({ frames: undefined });
 
 		// The newest endpoint carries no total, so nothing can be differenced against it.
-		expect(h.monitor.detectionRecoveryWindow.detectionDelta.mediaSourceTotalProducedFrames).toBeNull();
+		expect(h.monitor.slicedWindow.slices.detection.deltaMediaSourceTotalProducedFrames).toBeNull();
 	});
 
 	it('advances the encoded total by nothing when the track carries no layer', () => {
 		const h = createMonitor();
 
-		h.tick({ deltaFrames: 30 });
-		h.tick({ deltaFrames: 30 });
+		for (let i = 0; i < 4; ++i) h.tick({ deltaFrames: 30 });
 
-		const deltas = h.monitor.detectionRecoveryWindow.detectionDelta;
+		const deltas = h.monitor.slicedWindow.slices.detection;
 
-		expect(deltas.mediaSourceTotalProducedFrames).toBe(30);
-		expect(deltas.highestLayerTotalEncodedFrames).toBe(0);
+		expect(deltas.deltaMediaSourceTotalProducedFrames).toBe(90);
+		expect(deltas.deltaHighestLayerTotalEncodedFrames).toBe(0);
 	});
 
 	it('keeps the encoded total moving forward across a simulcast layer switch', () => {
@@ -272,12 +275,11 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		// Each layer carries its own `framesEncoded`, so the track keeps a running total of its own
 		// rather than differencing one layer's counter against another's.
 		h.setLayers(createLayer(900_000, 30));
-		h.tick({ deltaFrames: 30 });
-		h.tick({ deltaFrames: 30 });
+		for (let i = 0; i < 3; ++i) h.tick({ deltaFrames: 30 });
 		h.setLayers(createLayer(300_000, 12));
 		h.tick({ deltaFrames: 30 });
 
-		expect(h.monitor.detectionRecoveryWindow.detectionDelta.highestLayerTotalEncodedFrames).toBe(42);
+		expect(h.monitor.slicedWindow.slices.detection.deltaHighestLayerTotalEncodedFrames).toBe(72);
 	});
 
 	it('timestamps entries on the stats clock, so the window follows stats time', () => {
@@ -286,12 +288,14 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		h.setLayers(createLayer(900_000, 28));
 		h.tick({ elapsedInMs: 2000, deltaFrames: 30 });
 		h.tick({ elapsedInMs: 3000, deltaFrames: 30 });
+		h.tick({ elapsedInMs: 4000, deltaFrames: 30 });
+		h.tick({ elapsedInMs: 5000, deltaFrames: 30 });
 
-		// 2000 and 5000 on the source's own clock.
-		expect(h.monitor.detectionRecoveryWindow.detectionDurationInMs).toBe(3000);
+		// 2000, 5000, 9000 and 14000 on the source's own clock.
+		expect(h.monitor.slicedWindow.slices.detection.durationInMs).toBe(12_000);
 	});
 
-	it('leaks entries out of the detection window into the recovery window', () => {
+	it('fills the recovery slice from the values that fall out of the detection slice', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(900_000, 10));
@@ -300,26 +304,26 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 		// seventh fills it. One frame per collection makes each delta the count of its intervals.
 		for (let i = 0; i < 7; ++i) h.tick({ deltaFrames: 1 });
 
-		const window = h.monitor.detectionRecoveryWindow;
+		const { detection: detectionWindow, recovery: recoveryWindow } = h.monitor.slicedWindow.slices;
 
-		expect(window.detectionDelta.mediaSourceTotalProducedFrames).toBe(3);
-		expect(window.recoveryDelta.mediaSourceTotalProducedFrames).toBe(2);
+		expect(detectionWindow.deltaMediaSourceTotalProducedFrames).toBe(3);
+		expect(recoveryWindow.deltaMediaSourceTotalProducedFrames).toBe(2);
 	});
 
 	/**
 	 * The two halves cover one unbroken stretch, which is what lets a detector compare a recent
 	 * span against the span behind it rather than against a hole.
 	 */
-	it('keeps the recovery half immediately behind the detection half', () => {
+	it('keeps the recovery slice immediately behind the detection slice', () => {
 		const h = createMonitor();
 
 		h.setLayers(createLayer(900_000, 10));
 		for (let i = 0; i < 12; ++i) h.tick({ deltaFrames: 1 });
 
-		const window = h.monitor.detectionRecoveryWindow;
+		const { detection: detectionWindow, recovery: recoveryWindow } = h.monitor.slicedWindow.slices;
 
-		expect(window.detectionDurationInMs).toBe(3000);
-		expect(window.recoveryDurationInMs).toBe(2000);
+		expect(detectionWindow.durationInMs).toBe(3000);
+		expect(recoveryWindow.durationInMs).toBe(2000);
 	});
 
 	it('drops everything and starts again after a gap wider than it allows', () => {
@@ -330,17 +334,35 @@ describe('OutboundTrackMonitor.detectionRecoveryWindow', () => {
 
 		// A blackout: differencing across it would report the blackout as though it were the
 		// interval, so nothing that came before it is kept.
-		h.tick({ elapsedInMs: WINDOW.maxAllowedGapInMs + 1, deltaFrames: 1 });
+		h.tick({ elapsedInMs: OUTBOUND_WINDOW.maxAllowedGapInMs + 1, deltaFrames: 1 });
 
-		const window = h.monitor.detectionRecoveryWindow;
+		const { detection: detectionWindow, recovery: recoveryWindow } = h.monitor.slicedWindow.slices;
 
-		expect(window.detectionDelta.mediaSourceTotalProducedFrames).toBeNull();
-		expect(window.recoveryDelta.mediaSourceTotalProducedFrames).toBeNull();
+		expect(detectionWindow.deltaMediaSourceTotalProducedFrames).toBeNull();
+		expect(recoveryWindow.deltaMediaSourceTotalProducedFrames).toBeNull();
 	});
 
-	it('takes its windows from the client monitor config', () => {
+	it('takes its slice sizes from the client monitor config', () => {
 		const h = createMonitor();
+		const { detection: detectionWindow, recovery: recoveryWindow } = h.monitor.slicedWindow.slices;
 
-		expect(h.monitor.detectionRecoveryWindow.config).toEqual(WINDOW);
+		expect(detectionWindow.numberOfSamples).toBe(OUTBOUND_WINDOW.numberOfSamples.detection);
+		expect(recoveryWindow.numberOfSamples).toBe(OUTBOUND_WINDOW.numberOfSamples.recovery);
+		expect(h.monitor.slicedWindow.config.maxAllowedGapInMs)
+			.toBe(OUTBOUND_WINDOW.maxAllowedGapInMs);
+	});
+
+	/**
+	 * The geometry the config does not get to set: recovery picks up exactly where detection stops,
+	 * so the two never read the same values, and the buffer is only as large as that needs.
+	 */
+	it('places recovery behind detection and sizes the buffer to fit both', () => {
+		const h = createMonitor();
+		const { detection: detectionWindow, recovery: recoveryWindow } = h.monitor.slicedWindow.slices;
+
+		expect(detectionWindow.offset).toBe(0);
+		expect(recoveryWindow.offset).toBe(detectionWindow.numberOfSamples);
+		expect(h.monitor.slicedWindow.capacity)
+			.toBe(recoveryWindow.offset + recoveryWindow.numberOfSamples);
 	});
 });

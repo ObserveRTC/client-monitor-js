@@ -12,7 +12,7 @@ import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 /** Everything else off, so constructing a track monitor registers nothing. */
 const NO_DETECTORS = {
 	dryInboundTrackDetector: null,
-	inboundTrackDetectionRecoveryWindow: { numberOfDetectionSamples: 4, numberOfRecoverySamples: 3, maxAllowedGapInMs: 60_000 },
+	inboundTrackWindow: { numberOfSamples: { detection: 4, recovery: 3, flowDetection: 4, flowRecovery: 3 }, maxAllowedGapInMs: 60_000 },
 	codecChangeDetector: null,
 	avDesyncPlayoutDetector: null,
 	inventedSpeechDetector: null,
