@@ -122,8 +122,8 @@ Ten classes are the exception and emit events only, because what they report is 
 | `transport-loss-sustained` | Mean interval loss (worse direction) stayed at or above `threshold` for `durationInMs` | Loss falls below `recoveryThreshold` | `'transport-loss-sustained'` | `TransportLossIssuePayload` |
 | `cpulimitation` | CPU-tagged outbound RTP / stats-collection slowness / low inbound decoded-to-received frames ratio | Indicators normalize | `'cpulimitation'` | `CpuPerformanceIssuePayload` |
 | `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
-| `dry-outbound-track` | Outbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
-| `video-flow-disrupted` | freezes counted over `observationWindowInMs` reach `frozen` or `choppy` | Frames render again (`frozen`), or `continuousDurationInMs` passes freeze-free (`choppy`) | `'video-flow-disrupted'` | `FrozenVideoTrackIssuePayload` |
+| `dry-outbound-track` | Outbound bytes stay flat across **every layer being sent** for `thresholdInMs` | Any layer sends bytes again, or the last active layer is switched off | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
+| `video-flow-disrupted` | freezes counted across the track's detection window reach `frozen` or `choppy` | Frames render again (`frozen`), or both halves of the window read freeze-free (`choppy`) | `'video-flow-disrupted'` | `FrozenVideoTrackIssuePayload` |
 | `inbound-video-playout-discrepancy` | `(framesReceived - framesRendered) / framesReceived > highSkewRatio` | Ratio drops below `lowSkewRatio` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
 | `ice-disconnected` | An ICE transport stayed `disconnected` past `disconnectedThresholdInMs` | ICE reconnects, or the transport goes away | — | `IceDisconnectedIssuePayload` |
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
@@ -146,7 +146,7 @@ Ten classes are the exception and emit events only, because what they report is 
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
 | `stuck-decoder` | RTP bytes flowing, nothing decoding, PLIs firing, for `thresholdInMs` | Frames decode again | `'stuck-decoder'` | `StuckDecoderIssuePayload` |
 | `frame-assembly-stalled` | Packets kept arriving with `framesReceived` flat for `thresholdInMs`, past `minPacketsReceived` | A frame is assembled, packets stop arriving, or the track pauses | `'frame-assembly-stalled'` | `FrameAssemblyStalledIssuePayload` |
-| `pixelated-video` | `bitPerPixel` stayed at or below `threshold` for `durationInMs` of stats time | It rises above `recoveryThreshold`, or the track pauses | `'pixelated-video'` | `PixelatedVideoIssuePayload` |
+| `pixelated-video` | `normalizedQp` stayed at or above `threshold` for `durationInMs` of stats time | It falls below `recoveryThreshold`, the quantizer stops being reported, or the track pauses | `'pixelated-video'` | `PixelatedVideoIssuePayload` |
 
 Most per-detector payload types are exported from the package root; the five newest are not yet re-exported individually (`TransportDelayIssuePayload`, `TransportLossIssuePayload`, `PixelatedVideoIssuePayload`, `ChoppyVideoIssuePayload`, `FrameAssemblyStalledIssuePayload`), so reach them through the `ClientMonitorIssue` union below, which does narrow to all of them. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
 

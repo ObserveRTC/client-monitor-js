@@ -2,6 +2,7 @@ import { InboundRtpStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
+import { qpScaleOf } from "../utils/quantizer";
 import { positiveDelta } from "../utils/common";
 
 export class InboundRtpMonitor implements InboundRtpStats {
@@ -102,6 +103,24 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	deltaQpSum?: number | undefined;
 	/** Mean quantizer of the frames decoded in this interval; `undefined` when `qpSum` is absent. */
 	avgQpPerFrame?: number | undefined;
+
+	/**
+	 * The mean quantizer of the last interval as a fraction of this codec's own scale, `0..1`, or
+	 * `undefined` when it cannot be read.
+	 *
+	 * `qpSum` is the one direct statement about coding quality the stats API offers, but it is
+	 * reported in the codec's units, so a raw quantizer is not comparable between streams. This
+	 * puts it on one scale: `0` is untouched, `1` is as coarse as that codec gets.
+	 *
+	 * `undefined` when the browser did not report `qpSum`, when no codec is linked to this stream,
+	 * or when the codec's scale is not one `qpScaleOf` knows. It means **no reading**, never
+	 * "fine" — a stream whose browser is silent about `qpSum` is not thereby a stream with a clean
+	 * picture.
+	 *
+	 * Derived once per collection rather than on every read: several detectors and the score
+	 * calculator want it, and resolving the codec for each of them would repeat the same lookup.
+	 */
+	normalizedQp?: number | undefined;
 	deltaFramesReceived?: number;
 	deltaFramesRendered?: number;
 	deltaTime?: number;
@@ -386,6 +405,8 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		} else {
 			this.avgQpPerFrame = undefined;
 		}
+
+		this.normalizedQp = this._deriveNormalizedQp();
 		this.deltaTotalDecodeTime = positiveDelta(stats.totalDecodeTime, this.totalDecodeTime);
 		this.deltaTotalFreezesDuration = positiveDelta(stats.totalFreezesDuration, this.totalFreezesDuration);
 		this.deltaFreezeCount = positiveDelta(stats.freezeCount, this.freezeCount);
@@ -482,6 +503,22 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		if (this.framesPerSecond !== undefined) {
 			this.ewmaFps = this.ewmaFps ? 0.9 * this.ewmaFps + 0.1 * this.framesPerSecond : this.framesPerSecond;
 		}
+	}
+
+	/**
+	 * Resolves the codec and puts `avgQpPerFrame` on its scale. Called once per collection; see
+	 * {@link normalizedQp}, which is where the result is read from.
+	 */
+	private _deriveNormalizedQp(): number | undefined {
+		const avgQpPerFrame = this.avgQpPerFrame;
+
+		if (avgQpPerFrame === undefined) return undefined;
+
+		const qpScale = qpScaleOf(this.getCodec()?.mimeType);
+
+		if (qpScale === undefined || qpScale <= 0) return undefined;
+
+		return Math.min(1, Math.max(0, avgQpPerFrame / qpScale));
 	}
 
 	public getRemoteOutboundRtp(): RemoteOutboundRtpMonitor | undefined {

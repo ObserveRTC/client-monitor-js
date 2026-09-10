@@ -21,11 +21,11 @@ export type FrozenVideoFlow = VideoFlowIssueBase & {
 /** The picture kept coming back and kept being interrupted. */
 export type ChoppyVideoFlow = VideoFlowIssueBase & {
 	state: 'choppy';
-	/** Freezes counted in the window — at least `minFreezeCountForChoppy`. */
+	/** Freezes counted across the detection window — at least `minFreezeCountForChoppy`. */
 	freezeCount: number;
-	/** The window they were counted over, in ms of stats time. */
+	/** The stretch they were counted over, in ms of stats time. */
 	windowInMs: number;
-	/** Share of that window the picture was stopped, `0..1`. */
+	/** Share of that stretch the picture was stopped, `0..1`. */
 	frozenRatio: number;
 }
 
@@ -36,21 +36,8 @@ export type InboundVideoFlowStateDetectorConfig = {
 	/** How long one uninterrupted freeze must last to count as frozen rather than choppy, in ms. */
 	frozenAfterInMs: number;
 
-	/** Freezes inside `observationWindowInMs` that make the picture choppy. Floored at two. */
+	/** Freezes across the detection window that make the picture choppy. Floored at two. */
 	minFreezeCountForChoppy: number;
-
-	/** The recent window freezes are counted over, in ms of stats time. */
-	observationWindowInMs: number;
-
-	/** Freeze-free time before a choppy finding closes, in ms of stats time. A frozen one ignores this. */
-	continuousDurationInMs: number;
-}
-
-type ObservedItem = {
-	at: number,
-	spanInMs: number,
-	freezes: number,
-	frozenInMs: number,
 }
 
 /**
@@ -58,17 +45,37 @@ type ObservedItem = {
  * for long (`frozen`). Use it to answer "is this person watching moving video right now" — the
  * complaint behind most "you're breaking up" reports, and one no single stat answers.
  *
- * Two mutually exclusive states with one configured duration between them, judged over two windows
- * on the stream's own `deltaTime`: `observationWindowInMs` makes the verdict, and a retention
- * window spanning `continuousDurationInMs` decides only when a choppy finding may close. Frozen
- * wins wherever both would fit, and closes the moment frames render again.
+ * **The evidence is `InboundTrackMonitor.detectionRecoveryWindow`**, the same window every other
+ * detector on the track reads, so this one keeps no history of its own. `totalFramesRendered`,
+ * `totalFreezeCount` and `totalFreezesDurationInMs` are differenced across the detection window to
+ * make the verdict, and across the recovery window behind it to decide when a choppy finding may
+ * close. That replaces two private windows and a private clock, and it is what fixed the
+ * sensitivity: an isolated freeze inside a multi-collection window no longer fills it, where
+ * previously every freeze past `frozenAfterInMs` opened a finding that the next rendered frame
+ * closed. On one captured call that produced eleven findings on a track that was moving 95% of the
+ * time.
+ *
+ * The window is the sustain, so how much evidence a verdict rests on is set by
+ * `inboundTrackDetectionRecoveryWindow`, not here — a wider window is a slower, surer detector, and
+ * `windowInMs` on the payload always says which stretch a given finding was measured over.
+ *
+ * `frozen` is **nothing rendered across the whole detection window**, which is a stronger claim
+ * than one empty collection and takes as long to make as the window spans. A freeze that has
+ * already ended is classified by its mean length: a mean at `frozenAfterInMs` proves one freeze
+ * reached it, since a maximum is never below a mean. `choppy` is `minFreezeCountForChoppy` freezes
+ * or more across the window with frames still arriving.
+ *
+ * The two states are mutually exclusive and one becoming the other closes the first: they are
+ * different experiences with different causes, and a viewer whose stutter turned into a stop has a
+ * new problem rather than a continuing one.
  *
  * `frozen` usually means delivery stopped or the decoder wedged; `choppy` usually means frames are
  * arriving late or in bursts. Both are what the viewer actually sees, so they are the right thing to
  * count when asking how a call went.
  *
  * It describes the picture, not the network — pair it with the transport detectors for a cause.
- * Screen shares, paused tracks and a backgrounded tab are not judged at all.
+ * Paused tracks, a backgrounded tab and screen shares are not judged at all; note that a received
+ * track is only known to be a screen share if the application declared it through `setContext`.
  *
  * Track attribute: `InboundTrackMonitor.frameFlowState`, also read by `DefaultScoreCalculator`.
  * Issue raised: `video-flow-disrupted`. Monitor event: `video-flow-disrupted`.
@@ -86,25 +93,18 @@ export class InboundVideoFlowStateDetector implements Detector {
 	public inputsUnavailable = false;
 
 	private readonly _issueKey: string;
-	/**
-	 * Stats time spent *watching*, and the clock every window here is measured on. Not
-	 * `statsClockTime`, which advances through collections where a needed counter was missing.
-	 */
-	private _detectorClockTimeInMs = 0;
 	private _watching = false;
-	/** How long the picture has been stopped right now. Zero whenever frames are arriving. */
-	private _frozenForInMs = 0;
-	/** The last `observationWindowInMs` of collections, with totals kept in step so no verdict walks the list. */
-	private _issueObservationWindow: ObservedItem[] = [];
-	private _observationFreezeCount = 0;
-	private _observationFrozenInMs = 0;
-	private _observationSpanInMs = 0;
-	/** Aged out of the verdict, still recent enough to block a choppy finding from closing. */
-	private _issueRetentionWindow: ObservedItem[] = [];
-	private _retentionFreezeCount = 0;
-	private _retentionFrozenInMs = 0;
-	private _retentionSpanInMs = 0;
-
+	/**
+	 * Collections judged since this detector last stood down.
+	 *
+	 * The window is the track's, not this detector's, and it keeps being fed through a pause, a
+	 * screen share and a backgrounded tab — every other detector on the track needs it to. So a
+	 * window that is *full* is not necessarily full of collections this detector was looking at,
+	 * and reading it on the first collection back would judge the stretch it deliberately skipped:
+	 * a pause renders no frames, and would come back as a freeze. Counting what has been judged is
+	 * what keeps a stand-down from being replayed as a fault.
+	 */
+	private _judgedCollections = 0;
 	private _state?: InboundVideoFlowState;
 	/** Wall clock, and only for the resolved issue's `durationInMs`. */
 	private _raisedAt?: number;
@@ -114,6 +114,7 @@ export class InboundVideoFlowStateDetector implements Detector {
 	) {
 		this._issueKey = `${InboundVideoFlowStateDetector.ISSUE_TYPE}-pc-${this.peerConnection.peerConnectionId}-track-${trackMonitor.track.id}`;
 	}
+
 	private get config() {
 		return this.peerConnection.parent.config.inboundVideoFlowStateDetector!;
 	}
@@ -145,88 +146,86 @@ export class InboundVideoFlowStateDetector implements Detector {
 			return this._standDown('not judging playback right now');
 		}
 
-		const statsDeltaTimeInMs = inboundRtp.deltaTime;
-		const freezes = inboundRtp.deltaFreezeCount;
-		const frozenSec = inboundRtp.deltaTotalFreezesDuration;
-		const renderedFrames = inboundRtp.deltaFramesRendered ?? inboundRtp.deltaFramesDecoded;
+		const window = this.trackMonitor.detectionRecoveryWindow;
+		const renderedFrames = window.detectionDelta.totalFramesRendered
+			?? window.detectionDelta.totalFramesDecoded;
+		const freezes = window.detectionDelta.totalFreezeCount;
+		const frozenInMs = window.detectionDelta.totalFreezesDurationInMs;
+		const windowInMs = window.detectionDurationInMs;
 
-		// All four are load-bearing; missing any of them makes this collection unjudgeable.
-		if (
-			statsDeltaTimeInMs === undefined ||
-			freezes === undefined ||
-			frozenSec === undefined ||
-			renderedFrames === undefined
-		) {
+		// All three are load-bearing; missing any of them makes this stretch unjudgeable.
+		if (renderedFrames === null || freezes === null || frozenInMs === null) {
 			this.inputsUnavailable = true;
 
-			// The clock deliberately does not advance: windows must only count observed time.
 			return;
 		}
 
 		this.inputsUnavailable = false;
+
+		// A window still filling is not a verdict, and a window spanning no stats time measures
+		// nothing however many values it holds.
+		if (!window.detectionWindowIsReady || windowInMs < 1) return;
 
 		// Once, when judging starts, so `undefined` keeps meaning "no answer" rather than "healthy".
 		if (!this._watching) {
 			this.trackMonitor.frameFlowState = 'continuous';
 			this._watching = true;
 		}
-		this._detectorClockTimeInMs += statsDeltaTimeInMs;
 
-		// Nothing rendered: the only route that sees a stop while it is still happening.
+		this._judgedCollections += 1;
+
+		// The window may be full of collections this detector was not looking at; see the field.
+		if (this._judgedCollections < window.config.numberOfDetectionSamples) return;
+
+		// Nothing rendered across the whole window: the picture is stopped, and has been for as
+		// long as the window spans.
 		if (renderedFrames === 0) {
-			this._frozenForInMs += statsDeltaTimeInMs;
-
-			if (this.config.frozenAfterInMs <= this._frozenForInMs) {
-				this._raise({ state: 'frozen', observedFrozenTimeInMs: this._frozenForInMs });
+			if (this.config.frozenAfterInMs <= windowInMs) {
+				this._raise({
+					state: 'frozen',
+					observedFrozenTimeInMs: Math.max(frozenInMs, windowInMs),
+				});
 			}
 
 			return;
 		}
 
-		this._frozenForInMs = 0;
-
-		// A recovery collection is credited the whole stop, so judging it would re-raise
-		// the freeze that just ended or misread it as stutter. Close instead, unjudged.
+		// The picture is moving again, which ends a stop the moment it happens.
 		if (this._state === 'frozen') {
-			this._resetObservations();
-
 			return this._resolve('the picture is moving again');
 		}
 
-		this._updateObservations({
-			at: this._detectorClockTimeInMs,
-			spanInMs: statsDeltaTimeInMs,
-			freezes,
-			frozenInMs: frozenSec * 1000,
-		});
-
-		const observedFreezeCount = this._observationFreezeCount;
-		const observedFrozenInMs = this._observationFrozenInMs;
-		const observedWindowInMs = this._observationSpanInMs;
-
-		// A floor on the longest freeze here: a max is never below its mean, so a mean at
-		// the threshold proves one freeze reached it.
-		const longestFreezeInMs = 0 < observedFreezeCount ? observedFrozenInMs / observedFreezeCount : 0;
+		// A floor on the longest freeze here: a max is never below its mean, so a mean at the
+		// threshold proves one freeze reached it.
+		const longestFreezeInMs = 0 < freezes ? frozenInMs / freezes : 0;
 
 		if (this.config.frozenAfterInMs <= longestFreezeInMs) {
 			return this._raise({ state: 'frozen', observedFrozenTimeInMs: longestFreezeInMs });
 		}
 
-		if (observedFreezeCount < this.minFreezeCount) {
-			// Both windows must be clean: under the floor is not the same as clean.
-			if (this._state === 'choppy' && observedFreezeCount === 0 && this._retentionFreezeCount === 0) {
-				this._resolve('the picture has been continuous since');
-			}
-
-			return;
+		if (this.minFreezeCount <= freezes) {
+			return this._raise({
+				state: 'choppy',
+				freezeCount: freezes,
+				windowInMs,
+				frozenRatio: frozenInMs / windowInMs,
+			});
 		}
 
-		this._raise({
-			state: 'choppy',
-			freezeCount: observedFreezeCount,
-			windowInMs: observedWindowInMs,
-			frozenRatio: 0 < observedWindowInMs ? observedFrozenInMs / observedWindowInMs : 0,
-		});
+		if (this._state !== 'choppy') return;
+
+		// Under the floor is not the same as clean, and the stretch behind this one has to be
+		// clean too before a stutter is called over.
+		if (0 < freezes) return;
+		if (!window.recoveryWindowIsReady) return;
+
+		const recoveryFreezes = window.recoveryDelta.totalFreezeCount;
+
+		// No reading behind this one to corroborate with: the detection half decides alone rather
+		// than holding a finding open on evidence that does not exist.
+		if (recoveryFreezes !== null && 0 < recoveryFreezes) return;
+
+		this._resolve('the picture has been continuous since');
 	}
 
 	private _raise(
@@ -270,9 +269,7 @@ export class InboundVideoFlowStateDetector implements Detector {
 
 		if (this._watching) {
 			this._watching = false;
-			this._detectorClockTimeInMs = 0;
-			this._frozenForInMs = 0;
-			this._resetObservations();
+			this._judgedCollections = 0;
 
 			if (this._state !== undefined) this._resolve(comment);
 		}
@@ -301,58 +298,5 @@ export class InboundVideoFlowStateDetector implements Detector {
 		});
 
 		this._raisedAt = undefined;
-	}
-
-	/** Folds one collection in and ages both windows on, keeping every running total in step. */
-	private _updateObservations(item: ObservedItem) {
-		this._issueObservationWindow.push(item);
-
-		this._observationFreezeCount += item.freezes;
-		this._observationFrozenInMs += item.frozenInMs;
-		this._observationSpanInMs += item.spanInMs;
-
-		// Demoted rather than dropped: out of the verdict, into the stretch that must stay clean.
-		const observeFrom = this._detectorClockTimeInMs - this.config.observationWindowInMs;
-
-		while (0 < this._issueObservationWindow.length) {
-			const oldest = this._issueObservationWindow[0]!;
-
-			if (observeFrom < oldest.at) break;
-
-			this._issueObservationWindow.shift();
-			this._observationFreezeCount -= oldest.freezes;
-			this._observationFrozenInMs -= oldest.frozenInMs;
-			this._observationSpanInMs -= oldest.spanInMs;
-
-			this._issueRetentionWindow.push(oldest);
-			this._retentionFreezeCount += oldest.freezes;
-			this._retentionFrozenInMs += oldest.frozenInMs;
-			this._retentionSpanInMs += oldest.spanInMs;
-		}
-
-		const retainFrom = this._detectorClockTimeInMs - this.config.continuousDurationInMs;
-
-		while (0 < this._issueRetentionWindow.length) {
-			const oldest = this._issueRetentionWindow[0]!;
-
-			if (retainFrom < oldest.at) break;
-
-			this._issueRetentionWindow.shift();
-			this._retentionFreezeCount -= oldest.freezes;
-			this._retentionFrozenInMs -= oldest.frozenInMs;
-			this._retentionSpanInMs -= oldest.spanInMs;
-		}
-	}
-
-	private _resetObservations() {
-		this._issueObservationWindow = [];
-		this._observationFreezeCount = 0;
-		this._observationFrozenInMs = 0;
-		this._observationSpanInMs = 0;
-
-		this._issueRetentionWindow = [];
-		this._retentionFreezeCount = 0;
-		this._retentionFrozenInMs = 0;
-		this._retentionSpanInMs = 0;
 	}
 }

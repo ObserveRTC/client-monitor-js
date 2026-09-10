@@ -296,7 +296,8 @@ export type TransportLossSustainedEventPayload = ClientMonitorBaseEvent & {
 
 export type PixelatedVideoEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
-	bitPerPixel: number,
+	/** The mean quantizer as a fraction of the codec's scale, `0..1`. */
+	normalizedQp: number,
 }
 
 /** Experimental. See `InboundVideoFlowStateDetector`. */

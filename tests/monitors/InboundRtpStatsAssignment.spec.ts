@@ -25,8 +25,18 @@ describe('InboundRtpMonitor stats assignment', () => {
         ...extra,
     }) as any;
 
+    /**
+     * The monitor resolves its codec once per collection to put `qpSum` on that codec's scale, so
+     * even a spec about field assignment needs a peer connection carrying the lookup maps.
+     */
+    const peerConnection = () => ({
+        mappedCodecMonitors: new Map(),
+        mappedMediaPlayoutMonitors: new Map(),
+        mappedInboundTracks: new Map(),
+    }) as any;
+
     const monitorWith = (extra: Record<string, unknown>) =>
-        new InboundRtpMonitor({} as any, report(1000, extra));
+        new InboundRtpMonitor(peerConnection(), report(1000, extra));
 
     it('drops a field the browser stopped reporting', () => {
         const monitor = monitorWith({ framesPerSecond: 30, qpSum: 100, framesDecoded: 30 });

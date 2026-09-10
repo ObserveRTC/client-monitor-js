@@ -323,16 +323,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
             // Perceived Quality — how the picture and the sound come across.
             pixelatedVideoDetector: detectorDefault(monitorConfig.pixelatedVideoDetector, {
-                // Bits per pixel below which blocking artefacts show.
-                threshold: 0.03,
-                recoveryThreshold: 0.05,
+                // Fractions of the codec's own quantizer scale, so one pair covers every codec.
+                // 0.62 is a mean quantizer of 79 on VP8 and 32 on H.264, either of which is
+                // visibly coarse; 0.52 is 66 and 27, which is not. Starting points to calibrate
+                // against a fleet, not findings.
+                threshold: 0.62,
+                recoveryThreshold: 0.52,
                 durationInMs: 8000,
             }),
             inboundVideoFlowStateDetector: detectorDefault(monitorConfig.inboundVideoFlowStateDetector, {
                 frozenAfterInMs: 2000,
                 minFreezeCountForChoppy: 2,
-                observationWindowInMs: 5000,
-                continuousDurationInMs: 30000,
+                // The stretch both verdicts are measured over is the track's shared window, not a
+                // duration here: see `inboundTrackDetectionRecoveryWindow`.
             }),
             inventedSpeechDetector: detectorDefault(monitorConfig.inventedSpeechDetector, {
                 // Share of concealed audio tolerated before it counts against the budget.

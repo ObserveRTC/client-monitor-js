@@ -59,22 +59,6 @@ export class DefaultScoreCalculator {
 	public static PIXELATION_SMALL_MAGNIFICATION = 0.75;
 
 	/**
-	 * The top of each codec's quantizer scale, keyed by the subtype of the codec's `mimeType`.
-	 *
-	 * `qpSum` is reported in the codec's own units and those units are not comparable: a mean
-	 * quantizer of 40 is severe H.264 and unremarkable VP9. Without the codec the number cannot be
-	 * read at all, which is why an unrecognised `mimeType` yields no reading rather than a guess.
-	 */
-	public static readonly QP_SCALE_BY_CODEC: Record<string, number> = {
-		vp8: 127,
-		vp9: 255,
-		av1: 255,
-		h264: 51,
-		h265: 51,
-		hevc: 51,
-	};
-
-	/**
 	 * Where on a codec's scale, as a fraction of its maximum, the picture stops looking clean and
 	 * where it is as coarse as that codec gets. Between the two the reading rises linearly.
 	 *
@@ -552,9 +536,9 @@ export class DefaultScoreCalculator {
 	 * makes it a far better witness than `bitPerPixel`, whose value at constant visual quality
 	 * swings about tenfold with content and motion and again with codec generation.
 	 *
-	 * `qpSum` is optional in the spec and its scale is codec-specific, so this returns `undefined`
-	 * whenever the mean quantizer is missing, no codec is linked, or the codec's scale is not in
-	 * `QP_SCALE_BY_CODEC`. **`undefined` means "no reading", never "fine"** — a caller that cannot
+	 * `qpSum` is optional in the spec and its scale is codec-specific, so `normalizedQp` is
+	 * `undefined` whenever the mean quantizer is missing, no codec is linked, or the codec's scale
+	 * is not one `qpScaleOf` knows, and this returns `undefined` with it. **`undefined` means "no reading", never "fine"** — a caller that cannot
 	 * get a number should leave pixelation out of the score entirely rather than score it as zero,
 	 * because a track whose browser does not report `qpSum` is not thereby a track with a clean
 	 * picture.
@@ -565,30 +549,16 @@ export class DefaultScoreCalculator {
 	 * 63 and 1 at 102; on VP9 and AV1, 0 at 127 and 1 at 204.
 	 */
 	private _inboundQpSeverity(trackMonitor: InboundTrackMonitor): number | undefined {
-		const inboundRtp = trackMonitor.getInboundRtp();
-		const avgQpPerFrame = inboundRtp?.avgQpPerFrame;
+		const normalizedQp = trackMonitor.getInboundRtp()?.normalizedQp;
 
-		if (avgQpPerFrame === undefined) return undefined;
+		if (normalizedQp === undefined) return undefined;
 
-		// `video/VP8`, `video/H264`, ... - the subtype is the codec, normalised so that spellings
-		// like `H.264` and `HEVC` land on the same key as the table uses.
-		const codec = inboundRtp?.getCodec()?.mimeType
-			?.split('/')[1]
-			?.toLowerCase()
-			.replace(/[^a-z0-9]/g, '');
-
-		if (codec === undefined) return undefined;
-
-		const qpScale = DefaultScoreCalculator.QP_SCALE_BY_CODEC[codec];
-
-		if (qpScale === undefined) return undefined;
-
-		const clean = qpScale * DefaultScoreCalculator.QP_CLEAN_RATIO;
-		const coarse = qpScale * DefaultScoreCalculator.QP_COARSE_RATIO;
+		const clean = DefaultScoreCalculator.QP_CLEAN_RATIO;
+		const coarse = DefaultScoreCalculator.QP_COARSE_RATIO;
 
 		if (coarse <= clean) return undefined;
 
-		return clamp((avgQpPerFrame - clean) / (coarse - clean), 0, 1);
+		return clamp((normalizedQp - clean) / (coarse - clean), 0, 1);
 	}
 }
 

@@ -22,6 +22,9 @@ interface EventHandler {
 interface OutboundRtpStats {
     bytesSent?: number;
     deltaBytesSent?: number;
+    /** A simulcast layer the sender has switched off; its counters never move again. */
+    active?: boolean;
+    rid?: string;
     /**
      * The gap between the two stats reports this delta came from, as
      * `OutboundRtpMonitor` derives it. The dry stretch is measured by accumulating
@@ -143,6 +146,11 @@ class MockOutboundTrackMonitor {
     setOutboundRtp(stats: OutboundRtpStats | null) {
         this.outboundRtps = stats ? [stats] : [];
     }
+
+    /** A simulcast track, which is what most real video tracks are. */
+    setOutboundRtps(stats: OutboundRtpStats[]) {
+        this.outboundRtps = stats;
+    }
 }
 
 describe('DryOutboundTrackDetector', () => {
@@ -243,8 +251,95 @@ describe('DryOutboundTrackDetector', () => {
                 type: 'dry-outbound-track',
                 payload: {
                     trackId: 'test-track-id',
-                    duration: 6000
+                    dryForInMs: 6000,
+                    activeLayers: 1
                 }
+            });
+        });
+
+        /**
+         * The regression this detector shipped with. It read `getOutboundRtps()[0]` — one
+         * arbitrary simulcast layer — and called the whole track dry when that layer went quiet.
+         * A captured call reported a 640x360 camera dry for fourteen minutes while the layer
+         * beside it sent a hundred kilobytes every collection: first because congestion made the
+         * encoder drop the top layer, then because the layer was switched off outright.
+         */
+        describe('on a simulcast track', () => {
+            it('is not dry while any layer is still sending', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 50_406 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBe(false);
+            });
+
+            it('is dry only when every layer it is sent over is', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+                expect(mockClientMonitor.getIssues()[0].payload.activeLayers).toBe(2);
+            });
+
+            // A deactivated layer sends nothing by design, and its counters stay where they
+            // stopped for the rest of the call.
+            it('leaves a switched-off layer out of the verdict', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 101_968 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBe(false);
+            });
+
+            /**
+             * The latch. A frozen counter can never differ from itself, so a finding taken from a
+             * switched-off layer could never be closed: one stayed open for 820 seconds, to the
+             * end of the call.
+             */
+            it('closes a finding when the last active layer is switched off', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+                tick(5000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+
+            it('says nothing about a track no layer of which is being sent', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
             });
         });
 

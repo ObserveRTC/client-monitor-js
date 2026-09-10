@@ -503,8 +503,9 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      *
      * `frozenAfterInMs` (2000): how long one uninterrupted freeze lasts before it
      * counts as frozen rather than choppy. `minFreezeCountForChoppy` (2, floored
-     * there): freezes inside `observationWindowInMs` (5000) needed to call it
-     * choppy. `continuousDurationInMs` (30000): how long the picture must run
+     * there): freezes across the track's detection window needed to call it
+     * choppy. The stretch both verdicts are measured over comes from
+     * `inboundTrackDetectionRecoveryWindow`, not from here. (was: how long the picture must run
      * continuous before a choppy finding closes; a frozen one closes on the next
      * rendered frame.
      *

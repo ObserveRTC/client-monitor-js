@@ -190,8 +190,7 @@ const monitor = new ClientMonitor({
         durationInMs: 8000,
     },
     inboundVideoFlowStateDetector: {
-        observationWindowInMs: 10000, // the recent span freezes are counted over
-        continuousDurationInMs: 3000, // freeze-free time before a choppy finding closes
+        // the stretch both verdicts are measured over is inboundTrackDetectionRecoveryWindow
     },
     inventedSpeechDetector: {
         allowedInventedRatio: 0.05,  // RFC 7294 calls a second above 5% concealment severely concealed

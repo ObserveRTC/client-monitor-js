@@ -104,22 +104,46 @@ describe('detectors stand down on a paused track', () => {
 	});
 
 	describe('InboundVideoFlowStateDetector', () => {
+		const WINDOW = {
+			numberOfDetectionSamples: 3,
+			numberOfRecoverySamples: 2,
+			maxAllowedGapInMs: 60_000,
+		};
+
 		function setup() {
-			const trackMonitor = new MockInboundTrackMonitor('video');
+			const trackMonitor = new MockInboundTrackMonitor('video', undefined, WINDOW);
 
 			trackMonitor.peerConnection.parent.config = {
 				inboundVideoFlowStateDetector: {
 					frozenAfterInMs: 2000, minFreezeCountForChoppy: 2,
-					observationWindowInMs: 5000, continuousDurationInMs: 30000,
 				},
 			};
-			trackMonitor.setInboundRtp({
-				kind: 'video',
-				deltaTime: 1000, deltaFreezeCount: 0, deltaTotalFreezesDuration: 0,
-				deltaFramesRendered: 30, trackIdentifier: 'v',
-			});
 
-			return { trackMonitor, detector: new InboundVideoFlowStateDetector(trackMonitor as any) };
+			const detector = new InboundVideoFlowStateDetector(trackMonitor as any);
+
+			/**
+			 * One collection, fed through the track's window — which is where this detector reads
+			 * everything it judges on, so poking the RTP monitor's deltas would drive nothing.
+			 */
+			const collect = (rendered: number, freezes = 0, frozenInMs = 0) => {
+				trackMonitor.setInboundRtp({
+					kind: 'video',
+					deltaTime: 1000,
+					deltaFreezeCount: freezes,
+					deltaTotalFreezesDuration: frozenInMs / 1000,
+					deltaFramesRendered: rendered,
+					deltaFramesDecoded: rendered,
+					trackIdentifier: 'v',
+				});
+				detector.update();
+			};
+
+			/** Enough clean collections for the detector to have a window of its own to read. */
+			const settle = () => {
+				for (let i = 0; i < WINDOW.numberOfDetectionSamples; ++i) collect(30);
+			};
+
+			return { trackMonitor, detector, collect, settle };
 		}
 
 		/**
@@ -127,64 +151,50 @@ describe('detectors stand down on a paused track', () => {
 		 * rather than a media problem — so neither the flag nor a finding may follow.
 		 */
 		it('does not read a pause as a freeze, or replay it on resume', () => {
-			const { trackMonitor, detector } = setup();
-			const inboundRtp = trackMonitor.getInboundRtp();
+			const { trackMonitor, collect, settle } = setup();
 
-			detector.update();
+			settle();
 
 			trackMonitor.paused = true;
 			// a long pause: the renderer runs dry and the counters catch up on resume
-			inboundRtp.deltaFreezeCount = 12;
-			inboundRtp.deltaTotalFreezesDuration = 12;
-			inboundRtp.deltaFramesRendered = 0;
-			for (let i = 0; i < 5; ++i) detector.update();
+			for (let i = 0; i < 5; ++i) collect(0, 12, 12_000);
 
 			expect(trackMonitor.frameFlowState).toBeUndefined();
 
 			// resumed, frames flowing again, no further freezes
 			trackMonitor.paused = false;
-			inboundRtp.deltaFreezeCount = 0;
-			inboundRtp.deltaTotalFreezesDuration = 0;
-			inboundRtp.deltaFramesRendered = 30;
-			detector.update();
+			collect(30);
 
-			// Judged again, and judged fine — the freezes accrued while paused were
-			// swallowed rather than replayed.
+			// Judged again, and judged fine — the pause is still sitting in the track's shared
+			// window, and the detector counts what it has judged rather than what the window holds.
 			expect(trackMonitor.frameFlowState).toBe('continuous');
 			expect(trackMonitor.peerConnection.parent.issueOfType('video-flow-disrupted')).toBeUndefined();
 		});
 
-		it('reports the same freeze on a track that is not paused', () => {
-			const { trackMonitor, detector } = setup();
-			const inboundRtp = trackMonitor.getInboundRtp();
+		it('reports the same stop on a track that is not paused', () => {
+			const { trackMonitor, collect, settle } = setup();
 
-			detector.update();
+			settle();
+			collect(0);
 
-			inboundRtp.deltaFramesRendered = 0;
-			detector.update();
-
-			// The state moves with the finding, not with the collection: one stopped
-			// collection is not yet long enough to be one.
+			// The state moves with the finding, not with the collection: one stopped collection is
+			// not yet a stop that lasted the window.
 			expect(trackMonitor.frameFlowState).toBe('continuous');
 			expect(trackMonitor.peerConnection.parent.issueOfType('video-flow-disrupted')).toBeUndefined();
 
-			detector.update();
+			collect(0);
 
 			expect(trackMonitor.peerConnection.parent.issueOfType('video-flow-disrupted')).toBeDefined();
 			expect(trackMonitor.frameFlowState).toBe('frozen');
 		});
 
 		it('stands down when the remote sender pauses', () => {
-			const { trackMonitor, detector } = setup();
-			const inboundRtp = trackMonitor.getInboundRtp();
+			const { trackMonitor, collect, settle } = setup();
 
-			detector.update();
+			settle();
 
 			trackMonitor.remoteOutboundTrackPaused = true;
-			inboundRtp.deltaFreezeCount = 4;
-			inboundRtp.deltaTotalFreezesDuration = 4;
-			inboundRtp.deltaFramesRendered = 0;
-			detector.update();
+			collect(0, 4, 4_000);
 
 			expect(trackMonitor.frameFlowState).toBeUndefined();
 		});

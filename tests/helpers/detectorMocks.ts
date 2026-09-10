@@ -264,22 +264,27 @@ export class MockInboundTrackMonitor {
 	 * half holds exactly the last one — so a spec that says "this collection carried these frames"
 	 * still means that, whether the detector reads the window or the RTP's own deltas.
 	 */
-	public readonly detectionRecoveryWindow = new DetectionRecoveryWindow<{
+	public readonly detectionRecoveryWindow: DetectionRecoveryWindow<{
 		totalFramesReceived: number | null;
 		totalFramesRendered: number | null;
 		totalFramesDecoded: number | null;
-	}>({ numberOfDetectionSamples: 2, numberOfRecoverySamples: 2, maxAllowedGapInMs: 60_000 });
+		totalFreezeCount: number | null;
+		totalFreezesDurationInMs: number | null;
+	}>;
 
 	private _inboundRtp: any = null;
 	private _statsClockTime = 0;
-	private _totals = { received: 0, rendered: 0, decoded: 0 };
+	private _totals = { received: 0, rendered: 0, decoded: 0, freezes: 0, frozenInMs: 0 };
 
 	public constructor(
 		kind: string,
 		public readonly peerConnection = new MockPeerConnectionMonitor(),
+		/** Widened by a spec whose detector needs more than one collection to judge. */
+		windowConfig = { numberOfDetectionSamples: 2, numberOfRecoverySamples: 2, maxAllowedGapInMs: 60_000 },
 	) {
 		this.track = new MockMediaStreamTrack(kind);
 		this.issues = new IssueRegistry(this.peerConnection.parent.issueUplink);
+		this.detectionRecoveryWindow = new DetectionRecoveryWindow(windowConfig);
 		// One entry to difference the first collection against, as a real track always has.
 		this._addWindowEntry();
 	}
@@ -306,27 +311,38 @@ export class MockInboundTrackMonitor {
 		// A collection reporting no frame counter leaves the totals unreported, which is what the
 		// window sees when the browser stops carrying them.
 		if (received === undefined && rendered === undefined && decoded === undefined) {
-			return this._addWindowEntry({ unreported: true });
+			return this._addWindowEntry({ unreported: true, spanInMs: stats?.deltaTime });
 		}
 
 		this._totals.received += received ?? 0;
 		this._totals.rendered += rendered ?? 0;
 		this._totals.decoded += decoded ?? 0;
-		this._addWindowEntry();
+		this._totals.freezes += stats?.deltaFreezeCount ?? 0;
+		this._totals.frozenInMs += (stats?.deltaTotalFreezesDuration ?? 0) * 1000;
+		this._addWindowEntry({ spanInMs: stats?.deltaTime });
 	}
 
-	private _addWindowEntry(options: { unreported?: boolean } = {}) {
+	private _addWindowEntry(options: { unreported?: boolean, spanInMs?: number } = {}) {
 		this.detectionRecoveryWindow.add({
 			timestamp: this._statsClockTime,
 			value: options.unreported
-				? { totalFramesReceived: null, totalFramesRendered: null, totalFramesDecoded: null }
+				? {
+					totalFramesReceived: null,
+					totalFramesRendered: null,
+					totalFramesDecoded: null,
+					totalFreezeCount: null,
+					totalFreezesDurationInMs: null,
+				}
 				: {
 					totalFramesReceived: this._totals.received,
 					totalFramesRendered: this._totals.rendered,
 					totalFramesDecoded: this._totals.decoded,
+					totalFreezeCount: this._totals.freezes,
+					totalFreezesDurationInMs: this._totals.frozenInMs,
 				},
 		});
-		this._statsClockTime += 1000;
+		// The collection's own span, so a window's duration is the stats time a spec fed it.
+		this._statsClockTime += options.spanInMs ?? 1000;
 	}
 
 	public getLinkedVideoTrack() {

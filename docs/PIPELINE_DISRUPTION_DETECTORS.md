@@ -719,20 +719,42 @@ stopped feeding it, a sender that never really started. **It is the one failure
 the local user cannot see for themselves**, because their own preview keeps
 rendering from the capture stream and looks perfect.
 
-**Signals read.** `deltaBytesSent` and `deltaTime` on the outbound RTP;
-`trackMonitor.paused`, `track.muted`, `track.readyState`.
+**Signals read.** `deltaBytesSent`, `deltaTime` and `active` on **every** outbound
+RTP of the track; `trackMonitor.paused`, `track.muted`, `track.readyState`.
 
-**Algorithm and thresholds with defaults.** Each tick where `deltaBytesSent` is
-exactly `0` adds that outbound RTP's `deltaTime` to a dry clock. Once the clock
-reaches `dryOutboundTrackDetector.thresholdInMs` (default **5000**) the issue is
-raised once per episode, on key `dry-outbound-track-track-<trackId>`, with
-payload `trackId` and `duration` (the stats-time length of the dry stretch at
-raise); `durationInMs` is added at resolution.
+**It judges the track, not one of its layers.** A simulcast track is sent over
+several RTP streams and the sender moves between them constantly: congestion
+makes the encoder drop the top layer, an application or an SFU switches one off.
+Either leaves one stream's counters frozen while the picture keeps going out over
+another. The dry test is therefore the **sum** of `deltaBytesSent` across the
+layers, and layers reporting `active: false` are left out of it rather than
+counted as silence — they are off by design, and a frozen counter can never
+differ from itself, so a finding taken from one could never be closed. A track
+whose layers are all inactive is not being sent at all: that is a stand-down,
+with comment `no layer of this track is being sent`.
 
-**Raise and resolve.** Anything other than exactly zero bytes — including a
-*missing* outbound RTP, since `undefined !== 0` — zeroes the clock and resolves
-with `dry outbound track recovered`. That fail-safe is the right default: absent
-evidence must not accumulate towards an accusation.
+Reading a single stream instead reported a 640x360 camera as dry for fourteen
+minutes of a captured call while the layer beside it sent a hundred kilobytes
+every collection.
+
+**Algorithm and thresholds with defaults.** Each tick where the summed
+`deltaBytesSent` is exactly `0` adds that collection's `deltaTime` to a dry clock.
+Once the clock reaches `dryOutboundTrackDetector.thresholdInMs` (default **5000**)
+the issue is raised once per episode, on key
+`dry-outbound-track-track-<trackId>`, with payload `trackId`, `dryForInMs` (the
+stats-time length of the dry stretch at raise) and `activeLayers`; `durationInMs`
+is added at resolution.
+
+**`dryForInMs` and `durationInMs` are different quantities**, and the first was
+called `duration` until the two proved impossible to tell apart in a sample: one
+is how long the fault had lasted *before* it was reported, the other how long the
+report stayed open.
+
+**Raise and resolve.** Anything other than exactly zero bytes across the active
+layers zeroes the clock and resolves with `dry outbound track recovered`. No layer
+reporting a byte counter at all is blindness rather than silence, and neither
+accumulates nor resolves: absent evidence must not accumulate towards an
+accusation.
 
 **Stand-downs.** A paused sender, a `muted` track, or a track that is not
 `live`, all resolving with `track paused, muted or not live`. In each case the

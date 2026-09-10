@@ -333,7 +333,7 @@ audioPlayoutSynthesisDetector: {
 
 Reports an inbound picture that stopped moving: repeatedly and briefly (`choppy`), or once and for long (`frozen`). Use it to answer "is this person watching moving video right now" — the complaint behind most "you're breaking up" reports, and one no single stat answers.
 
-It replaces the old `InboundVideoFlowStateDetector`, which reported freeze *starts*. Two mutually exclusive states with one configured duration between them, judged over two windows on the stream's own `deltaTime`: `observationWindowInMs` makes the verdict, and a retention window spanning `continuousDurationInMs` decides only when a choppy finding may close. Frozen wins wherever both would fit, and closes the moment frames render again.
+Two mutually exclusive states with one configured duration between them, judged over the track's shared `detectionRecoveryWindow`: the detection half makes the verdict and the recovery half behind it decides only when a choppy finding may close. `frozen` is nothing rendered across the whole detection window, which is a stronger claim than one empty collection and takes as long to make as the window spans. Frozen wins wherever both would fit, and closes the moment frames render again.
 
 `frozen` usually means delivery stopped or the decoder wedged; `choppy` usually means frames are arriving late or in bursts. Both are what the viewer actually sees, so they are the right thing to count when asking how a call went. It describes the picture, not the network — pair it with the transport detectors for a cause.
 
@@ -343,8 +343,7 @@ It replaces the old `InboundVideoFlowStateDetector`, which reported freeze *star
 
 ```javascript
 inboundVideoFlowStateDetector: {
-    observationWindowInMs: 10000,   // the recent span freezes are counted over
-    continuousDurationInMs: 3000,   // freeze-free time before a choppy finding closes
+    // the stretch both verdicts are measured over is inboundTrackDetectionRecoveryWindow
 }
 ```
 
@@ -392,7 +391,7 @@ The stall is accumulated from each tick's `deltaTime` rather than wall-clock ela
 
 Perceived video quality: nothing has stalled, frames arrive and decode and render on time, and the experience is still bad. It thresholds a value the inbound RTP monitor already computes and that nothing previously read.
 
-`pixelated-video` is judged on **`bitPerPixel`** — bitrate divided by width × height × frame rate — the picture being drawn with too few bits for its size, for long enough to be worth complaining about. Bits per pixel was chosen over quantizer parameters for a plain reason: `qpSum` is optional, absent on some codecs, and its scale differs between them, so a QP threshold is really a per-codec table that silently produces nothing where it has no entry. `bitPerPixel` is derived from three fields every browser reports and means the same thing everywhere. It is not a precise perceptual model and does not pretend to be.
+`pixelated-video` is judged on **the quantizer, and only the quantizer**: `InboundRtpMonitor.normalizedQp`, the mean quantizer of the interval as a fraction of the codec's own scale, derived from `qpSum`. A high quantizer is what a blocky picture is made of, so this is the direct measurement rather than a proxy. **Without `qpSum` the detector does not judge** — it sets `inputsUnavailable` and says nothing, which is a statement of what it can do rather than a compatibility gap. It previously read `bitPerPixel`, and that was wrong in the direction that matters: bits per pixel falls with frame area and with how cheap the content is to code, so a large, static, visually perfect screen share read as more pixelated than a small camera picture at a quarter of the quality.
 
 The class holds no window of its own. The arithmetic lives on `InboundRtpMonitor`, and this detector compares two numbers against two thresholds and counts how long the answer stayed bad — a derived value is a fact about the stream that anything may want, while a threshold is an opinion belonging to whoever is judging.
 
@@ -405,7 +404,7 @@ pixelatedVideoDetector: {
 ```
 
 ```typescript
-monitor.on('pixelated-video', ({ trackMonitor, bitPerPixel }) => ui.hintPoorVideo(trackMonitor.track.id, { bitPerPixel }));
+monitor.on('pixelated-video', ({ trackMonitor, normalizedQp }) => ui.hintPoorVideo(trackMonitor.track.id, { normalizedQp }));
 ```
 
 **How much a blocky picture costs depends on how big it is shown.** `DefaultScoreCalculator` weighs this finding by `InboundTrackMonitor.displayMagnification` — blown up, the coded blocks are what the viewer complains about; in a thumbnail nobody can see them. Declare the size with `setInboundTrackContext({ presentedResolution })`; undeclared, the table price applies unchanged.
@@ -550,6 +549,8 @@ monitor.on('inbound-video-playout-discrepancy', ({ trackMonitor }) => {
 ### DryInboundTrackDetector / DryOutboundTrackDetector
 
 Raise `dry-inbound-track` / `dry-outbound-track` when a track that should be flowing carries no bytes at all past a threshold. This is *starvation* — contrast with [`stuck-decoder`](#stuckdecoderdetector), where bytes flow and nothing decodes.
+
+The outbound side judges **the track, which means every layer it is being sent over**. A simulcast track moves between its layers constantly — congestion makes the encoder drop the top one, an application or SFU switches one off — so a verdict taken from a single RTP stream is a verdict about a layer, not about the track. Layers reporting `active: false` are left out rather than counted as silence: they are switched off by design and their counters never move again, which would also make the finding they invent impossible to close. A track whose layers are all inactive is not being sent at all, and stands the detector down.
 
 **Use the result:** inbound dry → verify the producer is not paused, then resubscribe/reconsume; outbound dry → check the local track (`muted`, `enabled`, `readyState`) and the transport before blaming the network.
 

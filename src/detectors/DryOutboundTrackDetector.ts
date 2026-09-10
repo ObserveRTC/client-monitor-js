@@ -3,9 +3,21 @@ import { Detector } from "./Detector";
 
 export type DryOutboundTrackIssuePayload = {
 	trackId: string;
-	/** How long the track had already been dry when the issue was raised, in milliseconds of stats time. */
-	duration: number;
-	/** How long the episode lasted; filled in when the issue is resolved. */
+
+	/**
+	 * Milliseconds of stats time the track had already been dry when the issue was raised — the
+	 * stretch that earned the finding, which is at least `thresholdInMs`.
+	 *
+	 * Not to be confused with `durationInMs` below, which was called `duration` here until the two
+	 * names proved impossible to tell apart in a sample: one is how long the fault had lasted
+	 * *before* it was reported, the other how long the report stayed open.
+	 */
+	dryForInMs: number;
+
+	/** How many of this track's layers were sending nothing, and how many were being driven at all. */
+	activeLayers: number;
+
+	/** How long the issue was open, in wall-clock ms. Filled in when it resolves. */
 	durationInMs?: number;
 }
 export type DryOutboundTrackIssueType = 'dry-outbound-track';
@@ -20,6 +32,20 @@ export type DryOutboundTrackDetectorConfig = {
  * stalled encoder, a capture source that quietly stopped feeding it, or a sender that never really
  * started. Use it for the one failure the local user cannot see for themselves, since their own
  * preview keeps rendering.
+ *
+ * **It judges the track, which means every layer it is being sent over.** A simulcast track sends
+ * across several RTP streams and the sender moves between them constantly: congestion makes the
+ * encoder drop the top layer, and an application or an SFU switches layers off outright. Either
+ * leaves one stream's counters frozen while the picture keeps going out over another, so a verdict
+ * taken from a single stream is a verdict about a layer rather than about the track. Reading one
+ * arbitrary stream reported a 640x360 camera as dry for fourteen minutes while the layer beside it
+ * sent a hundred kilobytes every collection.
+ *
+ * Layers the sender is not driving are left out rather than counted as silence: an `active: false`
+ * stream is switched off by design, and its counters stay where they stopped for the rest of the
+ * call. A track whose layers are *all* inactive is not being sent at all, which is a stand-down and
+ * not a fault — and it is also what keeps this detector able to close a finding it opened, since a
+ * frozen counter can never differ from itself.
  *
  * A paused sender, a muted track or a track no longer `live` explains the silence: any of them
  * discards the timer and resolves an open issue. A stall must last `thresholdInMs` of the sender's
@@ -78,30 +104,60 @@ export class DryOutboundTrackDetector implements Detector {
 			return;
 		}
 
-		const outboundRtp = this.trackMonitor.getOutboundRtps()?.[0];
+		// Only the layers the sender is driving. A deactivated one sends nothing by design and its
+		// counters never move again, so counting it as silence both invents a fault and makes the
+		// finding it invents impossible to close.
+		const activeRtps = this.trackMonitor.getOutboundRtps()
+			.filter((outboundRtp) => outboundRtp.active !== false);
 
-		// No counter at all is blind; a non-zero one is bytes leaving, which is health.
-		if (outboundRtp?.deltaBytesSent === undefined) {
+		if (activeRtps.length === 0) {
 			this.trackMonitor.dry = undefined;
+			this._dryForInMs = 0;
+
+			if (this._startedDryAt !== undefined) {
+				this._resolve('no layer of this track is being sent');
+			}
+
+			return;
 		}
 
-		if (outboundRtp?.deltaBytesSent !== 0) {
-			if (outboundRtp?.deltaBytesSent !== undefined) this.trackMonitor.dry = false;
+		let deltaBytesSent: number | undefined;
+		let deltaTime: number | undefined;
+
+		// Summed across the layers: the track is dry only when every one of them is.
+		for (const outboundRtp of activeRtps) {
+			if (outboundRtp.deltaBytesSent !== undefined) {
+				deltaBytesSent = (deltaBytesSent ?? 0) + outboundRtp.deltaBytesSent;
+			}
+			if (deltaTime === undefined) deltaTime = outboundRtp.deltaTime;
+		}
+
+		// No counter on any layer is blind, which is not the same as silent.
+		if (deltaBytesSent === undefined) {
+			this.trackMonitor.dry = undefined;
+
+			return;
+		}
+
+		if (deltaBytesSent !== 0) {
+			this.trackMonitor.dry = false;
 			this._dryForInMs = 0;
+
 			if (this._startedDryAt !== undefined) {
 				this._resolve('dry outbound track recovered');
 			}
+
 			return;
 		}
 
 		// Zero bytes, but not yet long enough to be a fault: judged, and not yet wrong.
 		this.trackMonitor.dry = false;
 
-		this._dryForInMs += outboundRtp.deltaTime ?? 0;
+		this._dryForInMs += deltaTime ?? 0;
 
-		const duration = this._dryForInMs;
+		const dryForInMs = this._dryForInMs;
 
-		if (duration < this.config.thresholdInMs) return;
+		if (dryForInMs < this.config.thresholdInMs) return;
 
 		if (this._startedDryAt !== undefined) return;
 
@@ -115,7 +171,8 @@ export class DryOutboundTrackDetector implements Detector {
 
 		this._raise({
 			trackId: this.trackMonitor.track.id,
-			duration,
+			dryForInMs,
+			activeLayers: activeRtps.length,
 		});
 	}
 

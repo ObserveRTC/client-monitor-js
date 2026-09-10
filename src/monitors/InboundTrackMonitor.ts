@@ -274,11 +274,6 @@ export class InboundTrackMonitor {
 	) {
 		this.attachments = attachments;
 
-		if (typeof track.getSettings === 'function' &&
-			(track.getSettings() as { displaySurface?: string }).displaySurface !== undefined) {
-			this._context.contentType = 'screenshare';
-		}
-
 		const monitorConfig = this.getPeerConnection().parent.config;
 
 		this.issues = new IssueRegistry<InboundTrackIssues>(
@@ -358,6 +353,16 @@ export class InboundTrackMonitor {
 		return linked?.kind === 'video' ? linked : undefined;
 	}
 
+	/**
+	 * Whether this track carries screen-share content, which several detectors decline to judge.
+	 *
+	 * **`false` until the application says otherwise.** Nothing in the stats of a *received* track
+	 * reveals what it carries: `displaySurface` is a capture constraint and exists only on a
+	 * locally captured track, so there is nothing here to infer from. A deployment that wants
+	 * screen shares exempted has to declare them through `setContext`, and one that does not will
+	 * see camera thresholds applied to screen content — which is the honest failure, and better
+	 * than a heuristic that is wrong in a way nobody can see.
+	 */
 	public get isScreenShare() {
 		return this.contentType === 'screenshare';
 	}

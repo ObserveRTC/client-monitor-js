@@ -107,12 +107,20 @@ describe('InboundTrackMonitor contentType', () => {
         expect(monitor.isScreenShare).toBe(false);
     });
 
-    it('is inferred from getSettings().displaySurface when present', () => {
+    /**
+     * The outbound side infers this from `displaySurface`, and the inbound side deliberately does
+     * not. `displaySurface` is a capture constraint: it exists on a locally captured track and
+     * never on a received one, so the inbound inference could only ever have been dead code that
+     * implied a capability the class does not have. Detectors that exempt screen shares —
+     * `PixelatedVideoDetector`, `InboundVideoFlowStateDetector` — therefore judge inbound screen
+     * content by camera rules until the application declares it.
+     */
+    it('is NOT inferred from getSettings().displaySurface, which a received track never carries', () => {
         const track = createMockTrack({ getSettings: () => ({ displaySurface: 'monitor' }) });
         const monitor = new InboundTrackMonitor(track as any, createMockInboundRtp() as any);
 
-        expect(monitor.contentType).toBe('screenshare');
-        expect(monitor.isScreenShare).toBe(true);
+        expect(monitor.contentType).toBeUndefined();
+        expect(monitor.isScreenShare).toBe(false);
     });
 
     it('is settable explicitly through setContext', () => {
