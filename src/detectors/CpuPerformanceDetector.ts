@@ -1,7 +1,7 @@
 import { ClientMonitor } from "..";
 import type { ClientWindowValues } from "../ClientMonitor";
 import type { WindowSlice } from "../utils/SlicedWindow";
-import { runsOffCpu } from "../utils/runsOffCpu";
+import { runsOffCpu } from "../utils/cpu";
 import { Detector } from "./Detector";
 
 export type CpuPerformanceIssuePayload = {

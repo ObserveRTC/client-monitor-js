@@ -3,7 +3,7 @@ import { IssueRegistry } from "../../src/utils/IssueRegistry";
 import { SliceConfig, SlicedWindow } from "../../src/utils/SlicedWindow";
 import type { ClientWindowValues } from "../../src/ClientMonitor";
 import { CpuPerformanceDetector } from "../../src/detectors/CpuPerformanceDetector";
-import { runsOffCpu } from "../../src/utils/runsOffCpu";
+import { runsOffCpu } from "../../src/utils/cpu";
 
 // ---------------------------------------------------------------------------
 // Test types & mocks

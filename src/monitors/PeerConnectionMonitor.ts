@@ -1,7 +1,6 @@
 import { BlockedStunRequestsDetector, BlockedTransportIssuePayload } from "../detectors/BlockedStunRequestsDetector";
 import { IssueRegistry } from "../utils/IssueRegistry";
 import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
-import { runsOffCpu } from '../utils/runsOffCpu';
 import { transportStability } from "../utils/transportStability";
 import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
@@ -68,6 +67,7 @@ import {
 } from "../schema/ClientSample";
 import { TrackMonitor } from './TrackMonitor';
 import { accumulatedValue } from '../utils/common';
+import { runsOffCpu } from "../utils/cpu";
 
 const MODULE_NAME = 'PeerConnectionMonitor';
 
@@ -952,7 +952,6 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		track.addEventListener('ended', () => {
 			this._pendingMediaStreamTracks.delete(track.id);
-
 			this.mappedInboundTracks.get(track.id)?.issues.resolveAll('the track ended');
 			this.mappedInboundTracks.delete(track.id);
 
@@ -1300,12 +1299,6 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			this.mappedInboundRtpMonitors.delete(id);
 
 			const inboundTrack = this.mappedInboundTracks.get(monitor.trackIdentifier ?? '');
-
-			// Whatever its detectors left open goes with it. They will never run again, so nothing
-			// can retract their findings: on a captured call a `decoder-bottleneck` raised on the
-			// last collection before the track vanished, and stood for the remaining 2400 seconds
-			// — through 2365 of them with the track back and decoding cleanly, because the
-			// replacement monitor's detectors start with no finding of their own to close.
 			inboundTrack?.issues.resolveAll('the track stopped being reported');
 
 			this.mappedInboundTracks.delete(monitor.trackIdentifier ?? '');
@@ -1337,8 +1330,6 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			// pass would never see the track again; its detectors get their last look here.
 			if (outboundTrack?.sourceEnded) outboundTrack.detectors.update();
 
-			// Then anything still open after that last look, for the same reason as the inbound
-			// side: no detector on this track will run again to close it.
 			outboundTrack?.issues.resolveAll('the track stopped being reported');
 
 			this.mappedOutboundTracks.delete(monitor.trackIdentifier ?? '');

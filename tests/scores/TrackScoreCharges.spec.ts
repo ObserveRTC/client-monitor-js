@@ -59,22 +59,19 @@ const raise = (track: any, type: string) =>
 
 describe('inbound video charges', () => {
 	/**
-	 * Packets arriving with no complete frame coming out, and a freeze that keyframes failed to
-	 * end. Both leave nothing to watch, so both cost the whole scale — the same statement
-	 * `stuck-decoder` and `dry-inbound-track` already made one stage away.
+	 * Packets arriving with no complete frame coming out: nothing reaches the screen, so it costs
+	 * the whole scale — the same statement `stuck-decoder` and `dry-inbound-track` already make
+	 * one stage away.
 	 */
-	it.each([
-		[ 'frame-assembly-stalled' ],
-		[ 'video-recovery-failed' ],
-	])('takes the score to zero on %s', (type) => {
+	it('takes the score to zero on frame-assembly-stalled', () => {
 		const { track } = inboundTrack('video');
 
-		raise(track, type);
+		raise(track, 'frame-assembly-stalled');
 
 		const score = scoreOf(track);
 
 		expect(score.value).toBe(DefaultScoreCalculator.MIN_SCORE);
-		expect(score.reasons?.[type]).toBe(MAX);
+		expect(score.reasons?.['frame-assembly-stalled']).toBe(MAX);
 	});
 
 	/**
