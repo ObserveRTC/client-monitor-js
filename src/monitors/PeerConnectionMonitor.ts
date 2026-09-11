@@ -1,6 +1,7 @@
 import { BlockedStunRequestsDetector, BlockedTransportIssuePayload } from "../detectors/BlockedStunRequestsDetector";
 import { IssueRegistry } from "../utils/IssueRegistry";
 import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
+import { transportStability } from "../utils/transportStability";
 import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
@@ -230,6 +231,23 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	/** Mean inter-arrival jitter in milliseconds over inbound streams that received packets. */
 	public avgInboundJitterInMs?: number;
+
+	/**
+	 * How good this path is for conversation, `0..1`, where **`1` is flawless and `0` unusable**.
+	 *
+	 * Higher is better — the one reading on this monitor that is not a subtraction, which the name
+	 * is meant to make obvious. Derived from the round trip, the jitter and the loss together
+	 * through ITU-T G.107's E-model, because those three are not independently meaningful to a
+	 * listener: 3% loss on a LAN and 3% loss across an ocean are different calls, and no
+	 * single-stat threshold says so.
+	 *
+	 * `undefined` where any of the three could not be read. A path with no loss measurement is not
+	 * a path without loss, so this reports nothing rather than assuming zero.
+	 *
+	 * It judges **speech**, not video: the model's currency is turn-taking and intelligibility. A
+	 * path that scores well here can still be carrying a blocky picture.
+	 */
+	public transportStability?: number;
 
 
 	/**
@@ -857,6 +875,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.totalInboundPacketsLost = accumulatedValue(this.totalInboundPacketsLost, this.deltaInboundPacketsLost);
 		this.totalInboundPacketsReceived = accumulatedValue(this.totalInboundPacketsReceived, this.deltaInboundPacketsReceived);
 
+		this._refreshTransportStability();
 		this._feedSlicedWindow();
 
 		this.detectors.update();
@@ -1172,6 +1191,31 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	}
 
 	/** Averages loss and jitter over the streams that carried media; ones that received nothing are excluded, not counted as zero. */
+	/**
+	 * Combines this collection's round trip, jitter and loss into one conversational reading.
+	 *
+	 * Run after the averages and both round-trip sources are settled, so it sees the same numbers
+	 * a detector would. Loss is converted from the fraction the averages carry to the percent the
+	 * E-model's impairment term expects — the two differ by a hundredfold, and passing a fraction
+	 * where percent is meant makes a 5% loss look like 0.05%.
+	 */
+	private _refreshTransportStability(): void {
+		const rttInSec = this.avgRttInSec;
+		const jitterInMs = this.avgInboundJitterInMs;
+		const lossFraction = this.avgInboundFractionLost ?? this.avgOutboundFractionLost;
+
+		this.transportStability = rttInSec === undefined || jitterInMs === undefined || lossFraction === undefined
+			? undefined
+			: transportStability({
+				rttInMs: rttInSec * 1000,
+				jitterInMs,
+				packetLossPercent: Math.max(
+					this.avgInboundFractionLost ?? 0,
+					this.avgOutboundFractionLost ?? 0,
+				) * 100,
+			});
+	}
+
 	private _updateTransportQualityAverages() {
 		let lossSum = 0;
 		let lossCount = 0;

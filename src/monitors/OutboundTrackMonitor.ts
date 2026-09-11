@@ -26,6 +26,16 @@ import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
 /** Narrower than its inbound counterpart: the sender cannot know how a track is watched. */
 export type OutboundTrackContext = {
 	contentType?: TrackContentType;
+	/**
+	 * This sender is paused.
+	 *
+	 * Declared rather than derived, and declarable before the track exists, because a sender can
+	 * be created *already* paused — a mediasoup producer, for one — and the stats only surface it
+	 * a collection or more later. There is no moment between those two at which the monitor could
+	 * be told, so the only way a track can be paused from its first collection is for the
+	 * declaration to have been waiting for it (see `ClientMonitor.setOutboundTrackContext`).
+	 */
+	paused?: boolean;
 }
 
 /**
@@ -120,11 +130,24 @@ export class OutboundTrackMonitor {
 	public sourceEnded = false;
 	public readonly mappedOutboundRtps = new Map<number, OutboundRtpMonitor>();
 
+	private _context: OutboundTrackContext = {};
+	/** From `getSettings().displaySurface`; a declared `contentType` takes precedence. */
+	private _detectedContentType?: TrackContentType;
+
 	/**
 	 * True while the sender behind this track is deliberately paused. A paused track
 	 * legitimately sends nothing, so detectors that read silence as a failure stand down.
+	 *
+	 * Held in the context so it can be declared before the track exists, and writable here so
+	 * `trackMonitor.paused = true` keeps working. Always a boolean: an undeclared pause is not a
+	 * pause, so an absent context field reads `false` rather than `undefined`.
 	 */
-	public paused = false;
+	public get paused(): boolean {
+		return this._context.paused ?? false;
+	}
+	public set paused(value: boolean) {
+		this._context.paused = value;
+	}
 
 	// ---- Pipeline disruption ------------------------------------------------
 	// One flag per detector that judges this track, each owned solely by its detector and
@@ -177,10 +200,15 @@ export class OutboundTrackMonitor {
 
 	/**
 	 * What kind of content this video track carries; screen-share is scored differently from
-	 * camera, and an undefined video track is scored as camera. Auto-detected from
-	 * `getSettings().displaySurface`, otherwise declared by the application via `setContext`.
+	 * camera, and an undefined video track is scored as camera. Declared by the application via
+	 * `setContext`, and otherwise auto-detected from `getSettings().displaySurface`.
+	 *
+	 * A declaration wins over the detection, and clearing it — passing `contentType: undefined` —
+	 * hands the question back to the capture settings rather than blanking the answer.
 	 */
-	public contentType?: TrackContentType;
+	public get contentType(): TrackContentType | undefined {
+		return this._context.contentType ?? this._detectedContentType;
+	}
 
 	public calculatedScore: CalculatedScore = {
 		weight: 1,
@@ -214,7 +242,7 @@ export class OutboundTrackMonitor {
 		this._refreshCaptureSettings();
 
 		if ((this.settings as { displaySurface?: string } | undefined)?.displaySurface !== undefined) {
-			this.contentType = 'screenshare';
+			this._detectedContentType = 'screenshare';
 		}
 
 		const monitorConfig = this.getPeerConnection().parent.config;
@@ -294,9 +322,17 @@ export class OutboundTrackMonitor {
 		return this.contentType === 'screenshare';
 	}
 
-	/** **Merges** — an explicit `undefined` means "not declared here", not a reset. */
+	/**
+	 * Declares what the application knows about this track. **Merges**: a field the call does not
+	 * mention keeps its declared value, and a field passed as an explicit `undefined` is cleared.
+	 * `ClientMonitor.setOutboundTrackContext()` does the same by track id.
+	 */
 	public setContext(context: OutboundTrackContext): void {
-		if (context.contentType !== undefined) this.contentType = context.contentType;
+		// A plain spread, deliberately: a key that is absent keeps whatever was declared before,
+		// and a key present as `undefined` clears it. Those are different statements — "I have
+		// nothing to say about this" and "this is no longer known" — and an application that
+		// builds a context object from its own optional state needs the second to be reachable.
+		this._context = { ...this._context, ...context };
 	}
 
 	public highestLayer?: OutboundRtpMonitor;

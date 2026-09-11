@@ -1,4 +1,5 @@
 import { IssueRegistry } from "../utils/IssueRegistry";
+import { clamp } from "../utils/common";
 import { AVDesyncPlayoutDetector, AVDesyncPlayoutIssuePayload } from "../detectors/AVDesyncPlayoutDetector";
 import { Detectors } from "../detectors/Detectors";
 import { VideoRecoveryFailedDetector, VideoRecoveryFailedIssuePayload } from "../detectors/VideoRecoveryFailedDetector";
@@ -62,6 +63,21 @@ export type InboundTrackContext = {
 	 * The monitor does not own the element's lifetime.
 	 */
 	videoTag?: HTMLVideoElement;
+	/**
+	 * This receiving leg is paused; the producer may still feed everyone else.
+	 *
+	 * Declared rather than derived, and declarable before the track exists, because a receiver can
+	 * be created *already* paused — a mediasoup consumer, for one — and the stats only surface it
+	 * a collection or more later. There is no moment between those two at which the monitor could
+	 * be told, so the only way a track can be paused from its first collection is for the
+	 * declaration to have been waiting for it (see `ClientMonitor.setInboundTrackContext`).
+	 */
+	paused?: boolean;
+	/**
+	 * The remote producer paused: nobody receives this track. Same reasoning as {@link paused} —
+	 * a producer can be paused before this consumer is created.
+	 */
+	remoteOutboundTrackPaused?: boolean;
 }
 
 /**
@@ -163,6 +179,16 @@ export type InboundTrackIssues = {
 }
 
 export class InboundTrackMonitor {
+	/**
+	 * The share of a codec's quantizer scale at which a picture stops being clean, and the share at
+	 * which it is fully coarse — the two ends of {@link quantizationDegradation}.
+	 *
+	 * Fractions rather than absolute quantizers, so one pair covers every codec: the scales differ
+	 * by a factor of four between H.264 and VP9.
+	 */
+	public static CLEAN_QP_RATIO = 0.5;
+	public static COARSE_QP_RATIO = 0.8;
+
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
 	/**
@@ -191,12 +217,29 @@ export class InboundTrackMonitor {
 
 	public dtxMode = false;
 
-	/** This receiving leg is paused; the producer may still feed everyone else. */
-	public paused = false;
-
-	/** The remote producer paused: nobody receives this track. Application-set. */
-	public remoteOutboundTrackPaused = false;
 	private _context: InboundTrackContext = {};
+
+	/**
+	 * This receiving leg is paused; the producer may still feed everyone else.
+	 *
+	 * Held in the context so it can be declared before the track exists, and writable here so
+	 * `trackMonitor.paused = true` keeps working. Always a boolean: an undeclared pause is not a
+	 * pause, so an absent context field reads `false` rather than `undefined`.
+	 */
+	public get paused(): boolean {
+		return this._context.paused ?? false;
+	}
+	public set paused(value: boolean) {
+		this._context.paused = value;
+	}
+
+	/** The remote producer paused: nobody receives this track. Same shape as {@link paused}. */
+	public get remoteOutboundTrackPaused(): boolean {
+		return this._context.remoteOutboundTrackPaused ?? false;
+	}
+	public set remoteOutboundTrackPaused(value: boolean) {
+		this._context.remoteOutboundTrackPaused = value;
+	}
 
 	public get contentType(): TrackContentType | undefined {
 		return this._context.contentType;
@@ -263,6 +306,43 @@ export class InboundTrackMonitor {
 
 	/** The share of the frames that arrived which the decoder did not get through, `0..1`. */
 	public decodingDegradation?: number;
+
+	/**
+	 * How coarsely this video is quantized, `0..1` — the mean quantizer scaled across the band
+	 * between a clean picture and a visibly blocky one.
+	 *
+	 * Named for the mechanism rather than a pipeline stage, deliberately: the quantizer is the
+	 * *sender's* choice, and this receiver merely observes it faithfully decoded. Calling it a
+	 * decoding fault would send anyone debugging it to the wrong machine — and
+	 * {@link decodingDegradation} above is the genuine decoder-side reading, the frames that
+	 * arrived and never came out.
+	 *
+	 * `0` at or below {@link InboundTrackMonitor.CLEAN_QP_RATIO} of the codec's own quantizer
+	 * scale, `1` at or above {@link InboundTrackMonitor.COARSE_QP_RATIO}, rising linearly between.
+	 * On H.264 that is `0` at a mean quantizer of 25.5 or less and `1` at 41 or more; on VP8, `0`
+	 * at 63 and `1` at 102; on VP9 and AV1, `0` at 127 and `1` at 204.
+	 *
+	 * **The polarity is the reverse of QP's own**, and worth stating outright: a *low* quantizer is
+	 * good video, so this is not a reading of QP but of how bad the picture is because of it. That
+	 * makes it a degradation like the two it is named after, composing directly with them — bigger
+	 * number, worse picture. It is not a quality figure and must not be used as a multiplier.
+	 *
+	 * `qpSum` is the one direct statement about coding quality the stats API offers: the sum of the
+	 * quantizer parameters over the frames decoded, so `InboundRtpMonitor.avgQpPerFrame` is the mean
+	 * quantizer of the last interval. A high quantizer is what a blocky picture is *made of*, which
+	 * makes it a far better witness than `bitPerPixel`, whose value at constant visual quality
+	 * swings about tenfold with content and motion and again with codec generation.
+	 *
+	 * `undefined` is **"no reading", never "fine"**: `qpSum` is optional in the spec and its scale
+	 * is codec-specific, so this is undefined whenever the mean quantizer is missing, no codec is
+	 * linked, or the codec's scale is not one the library knows. A track whose browser does not
+	 * report `qpSum` is not thereby a track with a clean picture, so a consumer that cannot get a
+	 * number should leave coding quality out of its judgement rather than treat it as zero.
+	 *
+	 * Derived here rather than by `PixelatedVideoDetector`, so it is published whether or not that
+	 * detector is enabled — disabling a detector must not silently change what the score can see.
+	 */
+	public quantizationDegradation?: number;
 
 	/** The share of playout the browser fabricated rather than played from received packets, `0..1`. */
 	public synthesizedAudioRatio?: number;
@@ -453,17 +533,16 @@ export class InboundTrackMonitor {
 	}
 
 	/**
-	 * Declares what the application knows about this track. **Merges** — an explicit
-	 * `undefined` means "not declared here", not a reset, so nothing can be un-declared.
+	 * Declares what the application knows about this track. **Merges**: a field the call does not
+	 * mention keeps its declared value, and a field passed as an explicit `undefined` is cleared.
 	 * `ClientMonitor.setInboundTrackContext()` does the same by track id.
 	 */
 	public setContext(context: InboundTrackContext): void {
-		// Not a plain spread: that would copy an explicit `undefined` over a declared value.
-		const declared = Object.fromEntries(
-			Object.entries(context).filter(([ , value ]) => value !== undefined),
-		) as InboundTrackContext;
-
-		this._context = { ...this._context, ...declared };
+		// A plain spread, deliberately: a key that is absent keeps whatever was declared before,
+		// and a key present as `undefined` clears it. Those are different statements — "I have
+		// nothing to say about this" and "this is no longer known" — and an application that
+		// builds a context object from its own optional state needs the second to be reachable.
+		this._context = { ...this._context, ...context };
 
 		// Immediately, not on the next tick: an application that declares a presented size and then
 		// reads the magnification in the same breath would otherwise get the previous layout's answer.
@@ -493,6 +572,7 @@ export class InboundTrackMonitor {
 	public update() {
 		this._refreshPresentedResolution();
 		this._refreshDisplayMagnification();
+		this._refreshQuantizationDegradation();
 		this._refreshLinkedVideoPlayoutDiff();
 		this._feedSlicedWindow();
 
@@ -507,6 +587,22 @@ export class InboundTrackMonitor {
 	 * costs nothing. `totalFreezesDuration` is the one conversion, from seconds to the milliseconds
 	 * everything else here is counted in.
 	 */
+	/**
+	 * Scales the mean quantizer across the clean-to-coarse band, once per collection.
+	 *
+	 * Computed here rather than by every consumer: the ratios are one judgement about what "coarse"
+	 * means, and two places deriving it from `normalizedQp` would be two places to keep in step.
+	 */
+	private _refreshQuantizationDegradation(): void {
+		const normalizedQp = this._inboundRtp.normalizedQp;
+		const clean = InboundTrackMonitor.CLEAN_QP_RATIO;
+		const coarse = InboundTrackMonitor.COARSE_QP_RATIO;
+
+		this.quantizationDegradation = normalizedQp === undefined || coarse <= clean
+			? undefined
+			: clamp((normalizedQp - clean) / (coarse - clean), 0, 1);
+	}
+
 	private _feedSlicedWindow() {
 		const inboundRtp = this._inboundRtp;
 		const freezesDuration = inboundRtp.totalFreezesDuration;

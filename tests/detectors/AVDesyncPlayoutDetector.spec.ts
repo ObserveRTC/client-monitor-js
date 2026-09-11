@@ -471,7 +471,7 @@ describe('AVDesyncPlayoutDetector', () => {
 		it('says nothing while the consumer has this receiving leg paused', () => {
 			const { audioTrack, clientMonitor, ticksAt } = setup();
 
-			audioTrack.paused = true;
+			audioTrack.setContext({ paused: true });
 			ticksAt(150, 10);
 
 			expect(clientMonitor.getIssues()).toHaveLength(0);
@@ -480,7 +480,7 @@ describe('AVDesyncPlayoutDetector', () => {
 		it('says nothing while the remote sender has the track paused', () => {
 			const { audioTrack, clientMonitor, ticksAt } = setup();
 
-			audioTrack.remoteOutboundTrackPaused = true;
+			audioTrack.setContext({ remoteOutboundTrackPaused: true });
 			ticksAt(150, 10);
 
 			expect(clientMonitor.getIssues()).toHaveLength(0);
@@ -492,7 +492,7 @@ describe('AVDesyncPlayoutDetector', () => {
 			ticksAt(150, 3);
 			expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(true);
 
-			audioTrack.paused = true;
+			audioTrack.setContext({ paused: true });
 			ticksAt(150, 1);
 
 			expect(clientMonitor.isIssueActive(ISSUE_KEY)).toBe(false);
@@ -504,10 +504,10 @@ describe('AVDesyncPlayoutDetector', () => {
 
 			ticksAt(150, 2);
 
-			audioTrack.paused = true;
+			audioTrack.setContext({ paused: true });
 			ticksAt(150, 5);
 
-			audioTrack.paused = false;
+			audioTrack.setContext({ paused: false });
 			ticksAt(150, 2);
 
 			expect(clientMonitor.getIssues()).toHaveLength(0);

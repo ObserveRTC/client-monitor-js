@@ -101,17 +101,18 @@ export class MediasoupTransportBinding {
 	}
 
 	private _producerAdded(producer: mediasoup.types.Producer) {
-		// Mirror the producer's paused state onto its outbound track monitor, so
-		// detectors that read silence as a failure (dry-outbound-track) know the
-		// silence is deliberate. Synced both on the pause/resume events and on
-		// every stats tick: the track monitor is created lazily when its stats
-		// first appear (and re-created after `replaceTrack`), so an event-only
-		// sync would lose a pause that happened before the monitor existed.
+		// Mirror the producer's paused state onto its outbound track, so detectors that read
+		// silence as a failure (dry-outbound-track) know the silence is deliberate. Declared
+		// through the client monitor rather than written on the track monitor, because the
+		// monitor is created lazily when its stats first appear: a producer created paused, or
+		// paused before its first collection, is held pending here and applied the moment the
+		// track shows up. Still synced on every tick as well, since `replaceTrack` re-creates
+		// the monitor after the pending declaration has already been taken.
 		const syncPausedState = () => {
 			const trackId = producer.track?.id;
 			if (!trackId) return;
-			const trackMonitor = this.monitor.getOutboundTrackMonitor(trackId);
-			if (trackMonitor) trackMonitor.paused = producer.paused;
+
+			this.monitor.parent.setOutboundTrackContext(trackId, { paused: producer.paused });
 		};
 		const pauseListener = () => {
 			syncPausedState();
@@ -189,13 +190,12 @@ export class MediasoupTransportBinding {
 		// the flow deliberately. NOT `remoteOutboundTrackPaused` — that flag
 		// means the remote producer went silent for everyone, which mediasoup
 		// only tells the application over its own signaling; the application
-		// sets that one itself. Synced on pause/resume events and on every
-		// stats tick, because the inbound track monitor is created lazily when
-		// its inbound-rtp stats first appear — an event-only sync would lose a
-		// pause that happened before the monitor existed.
+		// sets that one itself. Declared through the client monitor rather than
+		// written on the track monitor: a consumer can be created *already*
+		// paused, and its inbound-rtp stats only appear a collection or more
+		// later, so the declaration has to be able to wait for the track.
 		const syncPausedState = () => {
-			const trackMonitor = this.monitor.getInboundTrackMonitor(consumer.track.id);
-			if (trackMonitor) trackMonitor.paused = consumer.paused;
+			this.monitor.parent.setInboundTrackContext(consumer.track.id, { paused: consumer.paused });
 		};
 		const pauseListener = () => {
 			syncPausedState();

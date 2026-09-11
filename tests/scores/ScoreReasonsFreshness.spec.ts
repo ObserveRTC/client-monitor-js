@@ -30,6 +30,7 @@ function createPeerConnection() {
 		avgInboundFractionLost: undefined as number | undefined,
 		avgOutboundFractionLost: undefined as number | undefined,
 		avgInboundJitterInMs: undefined as number | undefined,
+		transportStability: undefined as number | undefined,
 	};
 }
 
@@ -43,7 +44,12 @@ function setup() {
 	};
 	const calculator = new DefaultScoreCalculator(client as any);
 
-	return { pcMonitor, calculator, update: () => calculator.update() };
+	// A severity is only charged while its detector's issue is open, so every fixture that wants a
+	// charge has to state both — the reading and the finding it belongs to.
+	const raise = (type: string) => pcMonitor.issues.raise({ key: `${type}-pc-1`, type, payload: {} } as any);
+	const resolve = (type: string) => pcMonitor.issues.resolve({ key: `${type}-pc-1` } as any);
+
+	return { pcMonitor, calculator, raise, resolve, update: () => calculator.update() };
 }
 
 describe('score reasons', () => {
@@ -58,9 +64,10 @@ describe('score reasons', () => {
 	// The exact phantom from the capture: no congestion in the whole call, both keys reported on
 	// every collection because the severity was written whether or not there was any.
 	it('does not list a condition that cost nothing', () => {
-		const { pcMonitor, update } = setup();
+		const { pcMonitor, raise, update } = setup();
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0.6;
+		raise('downlink-congestion');
 		update();
 
 		// Uplink and jitter cost nothing this collection, so neither is listed beside it.
@@ -71,13 +78,15 @@ describe('score reasons', () => {
 
 	// The staleness: reasons written on a bad collection and left attached through the good ones.
 	it('clears the reasons once the connection recovers', () => {
-		const { pcMonitor, update } = setup();
+		const { pcMonitor, raise, resolve, update } = setup();
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0.6;
+		raise('downlink-congestion');
 		update();
 		expect(pcMonitor.calculatedStabilityScore.reasons).toHaveProperty('downlink-congestion');
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0;
+		resolve('downlink-congestion');
 		update();
 
 		expect(pcMonitor.calculatedStabilityScore.reasons).toBeUndefined();
@@ -89,16 +98,19 @@ describe('score reasons', () => {
 	 * key behind alongside the new one.
 	 */
 	it('replaces the previous collection\'s reasons rather than adding to them', () => {
-		const { pcMonitor, update } = setup();
+		const { pcMonitor, raise, resolve, update } = setup();
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0.6;
+		raise('downlink-congestion');
 		update();
 		expect(Object.keys(pcMonitor.calculatedStabilityScore.reasons ?? {})).toEqual([
 			'downlink-congestion',
 		]);
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0;
+		resolve('downlink-congestion');
 		pcMonitor.uplinkVideoCongestionSeverity = 0.6;
+		raise('uplink-congestion');
 		update();
 
 		expect(Object.keys(pcMonitor.calculatedStabilityScore.reasons ?? {})).toEqual([
@@ -109,13 +121,15 @@ describe('score reasons', () => {
 	// The aggregate the client score publishes is rebuilt each tick from the same rule, so a
 	// reason that has gone cannot survive in it either.
 	it('rebuilds the aggregated reasons from scratch on every collection', () => {
-		const { pcMonitor, calculator, update } = setup();
+		const { pcMonitor, calculator, raise, resolve, update } = setup();
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0.6;
+		raise('downlink-congestion');
 		update();
 		expect(Object.keys(calculator.currentReasons)).toEqual([ 'downlink-congestion' ]);
 
 		pcMonitor.downlinkVideoCongestionSeverity = 0;
+		resolve('downlink-congestion');
 		update();
 
 		expect(Object.keys(calculator.currentReasons)).toEqual([]);
@@ -129,7 +143,9 @@ describe('score reasons', () => {
 	it('does not list a continuous charge that cost less than a point', () => {
 		const { pcMonitor, update } = setup();
 
-		pcMonitor.avgInboundFractionLost = 0.16;
+		// A path measurably short of flawless, but not by a point: it comes off the score and
+		// stays out of the reasons.
+		pcMonitor.transportStability = 0.7;
 		update();
 
 		expect(pcMonitor.calculatedStabilityScore.value).toBeLessThan(
@@ -144,17 +160,13 @@ describe('score reasons', () => {
 	 * raised, everything charged this collection is published however small.
 	 */
 	it('lists a sub-point charge anyway once a detector has raised', () => {
-		const { pcMonitor, update } = setup();
+		const { pcMonitor, raise, update } = setup();
 
-		pcMonitor.avgInboundFractionLost = 0.16;
-		pcMonitor.issues.raise({
-			key: 'transport-loss-sustained-pc-1',
-			type: 'transport-loss-sustained',
-			payload: {},
-		} as any);
+		pcMonitor.transportStability = 0.7;
+		raise('transport-delay-degraded');
 		update();
 
 		expect(pcMonitor.calculatedStabilityScore.reasons)
-			.toHaveProperty('transport-loss-sustained');
+			.toHaveProperty('unstable-transport');
 	});
 });

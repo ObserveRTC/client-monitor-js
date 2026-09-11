@@ -88,14 +88,74 @@ describe('InboundTrackMonitor.setContext', () => {
 		expect(monitor.motionType).toBe('highmotion');
 	});
 
-	it('treats an explicit undefined as "not declared here", not as a reset', () => {
+	/**
+	 * The two statements a context call can make about a field, and they are different: saying
+	 * nothing about it leaves what was declared, and passing `undefined` un-declares it. An
+	 * application assembling a context from its own optional state needs the second to be
+	 * reachable — otherwise a field, once set, could never be taken back.
+	 */
+	it('keeps a field the call does not mention', () => {
+		const monitor = createInbound();
+
+		monitor.setContext({ contentType: 'screenshare' });
+		monitor.setContext({ motionType: 'lowmotion' });
+
+		expect(monitor.contentType).toBe('screenshare');
+		expect(monitor.motionType).toBe('lowmotion');
+	});
+
+	it('clears a field passed as an explicit undefined', () => {
 		const monitor = createInbound();
 
 		monitor.setContext({ contentType: 'screenshare' });
 		monitor.setContext({ contentType: undefined, motionType: 'lowmotion' });
 
-		expect(monitor.contentType).toBe('screenshare');
+		expect(monitor.contentType).toBeUndefined();
 		expect(monitor.motionType).toBe('lowmotion');
+	});
+
+	// The reason the pause flags moved into the context: a receiver can be created already
+	// paused, and the declaration has to be able to arrive before the track does.
+	it('carries the pause flags', () => {
+		const monitor = createInbound();
+
+		expect(monitor.paused).toBe(false);
+		expect(monitor.remoteOutboundTrackPaused).toBe(false);
+
+		monitor.setContext({ paused: true, remoteOutboundTrackPaused: true });
+
+		expect(monitor.paused).toBe(true);
+		expect(monitor.remoteOutboundTrackPaused).toBe(true);
+
+		monitor.setContext({ paused: false });
+
+		expect(monitor.paused).toBe(false);
+		expect(monitor.remoteOutboundTrackPaused).toBe(true);
+	});
+
+	/**
+	 * The field stayed writable, so the way this was set before the flags moved into the context
+	 * still works. Both spellings reach the same place, and a write is visible to a later merge
+	 * rather than being shadowed by it.
+	 */
+	it('keeps the pause flags assignable, writing through to the context', () => {
+		const monitor = createInbound();
+
+		monitor.paused = true;
+		monitor.remoteOutboundTrackPaused = true;
+
+		expect(monitor.paused).toBe(true);
+		expect(monitor.remoteOutboundTrackPaused).toBe(true);
+
+		// A merge that says nothing about them leaves the assigned values alone ...
+		monitor.setContext({ motionType: 'lowmotion' });
+
+		expect(monitor.paused).toBe(true);
+
+		// ... and clearing through the context is visible to the getter.
+		monitor.setContext({ paused: undefined });
+
+		expect(monitor.paused).toBe(false);
 	});
 
 	it('carries the presentation fields', () => {

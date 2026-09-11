@@ -58,17 +58,6 @@ export class DefaultScoreCalculator {
 	public static PIXELATION_LARGE_MAGNIFICATION = 1.5;
 	public static PIXELATION_SMALL_MAGNIFICATION = 0.75;
 
-	/**
-	 * Where on a codec's scale, as a fraction of its maximum, the picture stops looking clean and
-	 * where it is as coarse as that codec gets. Between the two the reading rises linearly.
-	 *
-	 * Expressed as fractions rather than per-codec quantizer values so that one pair of numbers
-	 * covers every codec in the table above, and adding a codec means adding its scale and nothing
-	 * else.
-	 */
-	public static QP_CLEAN_RATIO = 0.5;
-	public static QP_COARSE_RATIO = 0.8;
-
 	// ---- continuous penalty ramps: 0 at the activation point, 1 at saturation ----
 	//
 	// These are what keep a healthy call off a flat 5.0. A detector only speaks once its
@@ -159,6 +148,21 @@ export class DefaultScoreCalculator {
 	// cannot live in the table because it depends on this client rather than on the fault — today
 	// that is inbound video, where a blocky picture costs more full-screen than in a thumbnail.
 
+	/**
+	 * Every `_calculate*Score` below is written the same way, and the shape carries the rule:
+	 *
+	 * - **A reason named after an issue type is charged only while that issue is open.** The
+	 *   detector owns the verdict; the score prices it. What the charge is *worth* can still be a
+	 *   continuous reading — `video-capture-bottleneck` costs what the camera actually fell short
+	 *   by — but nothing is charged for a fault nobody raised.
+	 * - **A reason with no issue of that name is a continuous reading, charged on its own.**
+	 *   `volatile-fps`, `dropped-video-frames`, `blocky-video` and `unstable-transport` have no
+	 *   detector behind them, so this is the only place they show up at all.
+	 *
+	 * Two consequences worth keeping: a key is written only when it cost something, because a
+	 * reason sitting at `0` reads as a fault that was found and never resolved; and `hasIssues` is
+	 * set inside the block that raised it, so it cannot drift from the charge it belongs to.
+	 */
 	private _calculateInboundVideoTrackScore(trackMonitor: InboundTrackMonitor): void {
 		const activeIssues = trackMonitor.issues;
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
@@ -219,14 +223,19 @@ export class DefaultScoreCalculator {
 		// Weighted by how large the picture is actually being shown: blown up, the coded blocks are
 		// what the viewer complains about; in a thumbnail nobody can see them. Held to one point
 		// like every other continuous reading, so the weighting shifts the cost without doubling it.
-		const qpScore = this._inboundQpSeverity(trackMonitor);
+		// Derived on the track rather than here, so it is published on every collection and the
+		// score is not the only thing that can see it. `undefined` is "no reading, never fine":
+		// a browser that does not report `qpSum` leaves pixelation out of the score entirely.
+		const quantizationDegradation = trackMonitor.quantizationDegradation;
 
-		if (qpScore) {
-			subtractions['blocky-video'] = clamp(
-				qpScore * this._pixelationWeight(trackMonitor.displayMagnification),
+		if (quantizationDegradation !== undefined) {
+			const penalty = clamp(
+				quantizationDegradation * this._pixelationWeight(trackMonitor.displayMagnification),
 				0,
 				1,
 			);
+
+			if (0 < penalty) subtractions['blocky-video'] = penalty;
 		}
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
@@ -243,18 +252,18 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
-		const inventedSpeechRatio = normalizedClamp(trackMonitor.getInboundRtp()?.inventedSpeechRatio);
-
-		subtractions['invented-speech'] = inventedSpeechRatio;
-		hasIssues ||= activeIssues.hasType('invented-speech');
-
-		const synthesizedAudioRatio = normalizedClamp(trackMonitor.synthesizedAudioRatio);
-
-		subtractions['synthesized-audio'] = synthesizedAudioRatio;
-		hasIssues ||= activeIssues.hasType('synthesized-audio');
-
-		subtractions['audio-jitter-buffer-stress'] = normalizedClamp(trackMonitor.jitterBufferStressSeverity);
-		hasIssues ||= activeIssues.hasType('audio-jitter-buffer-stress');
+		if (activeIssues.hasType('invented-speech')) {
+			subtractions['invented-speech'] = normalizedClamp(trackMonitor.getInboundRtp()?.inventedSpeechRatio);
+			hasIssues = true;
+		}
+		if (activeIssues.hasType('synthesized-audio')) {
+			subtractions['synthesized-audio'] = normalizedClamp(trackMonitor.synthesizedAudioRatio);
+			hasIssues = true;
+		}
+		if (activeIssues.hasType('audio-jitter-buffer-stress')) {
+			subtractions['audio-jitter-buffer-stress'] = normalizedClamp(trackMonitor.jitterBufferStressSeverity);
+			hasIssues = true;
+		}
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
 		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
@@ -262,7 +271,7 @@ export class DefaultScoreCalculator {
 
 	private _calculateOutboundVideoTrackScore(trackMonitor: OutboundTrackMonitor): void {
 		const activeIssues = trackMonitor.issues;
-		const subtractions: Record<string, number> = {};
+		const subtractions: DefaultScoreCalculatorSubtractions = {};
 		let hasIssues = false;
 
 		if (activeIssues.hasType('dry-outbound-track')) {
@@ -270,17 +279,15 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
-		const videoCaptureDegradation = normalizedClamp(trackMonitor.videoCaptureDegradation);
-
 		if (activeIssues.hasType('video-capture-bottleneck')) {
+			subtractions['video-capture-bottleneck'] = normalizedClamp(trackMonitor.videoCaptureDegradation);
 			hasIssues = true;
 		}
-		subtractions['video-capture-bottleneck'] = videoCaptureDegradation;
-
-		const encoderBottleneck = activeIssues.getFirstPayloadByType('encoder-bottleneck');
-
-		if (encoderBottleneck) {
-			subtractions['encoder-bottleneck'] = 2 * Math.max(0, Math.min(1, encoderBottleneck.encodeDegradation));
+		if (activeIssues.hasType('encoder-bottleneck')) {
+			// From the published reading rather than the issue's payload: the payload is what the
+			// encoder was doing when the finding opened, and this is what it is doing now.
+			subtractions['encoder-bottleneck'] = 2 * normalizedClamp(trackMonitor.videoEncodingDegradation);
+			hasIssues = true;
 		}
 
 		const highestLayer = trackMonitor.highestLayer;
@@ -354,35 +361,28 @@ export class DefaultScoreCalculator {
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
 		let hasIssues = false;
 
-		// Congestion distorts significantly but does not make the path useless, so it is worth at
-		// most two of the five points: the severity is a 0..1 reading, doubled to reach that.
-		charge(subtractions, 'uplink-congestion', 2 * normalizedClamp(pcMonitor.uplinkVideoCongestionSeverity));
-		hasIssues ||= pcMonitor.issues.hasType('uplink-congestion');
-
-		charge(subtractions, 'downlink-congestion', 2 * normalizedClamp(pcMonitor.downlinkVideoCongestionSeverity));
-		hasIssues ||= pcMonitor.issues.hasType('downlink-congestion');
-
-		charge(subtractions, 'transport-loss-sustained', normalizedClamp(Math.max(
-			pcMonitor.avgInboundFractionLost ?? 0,
-			pcMonitor.avgOutboundFractionLost ?? 0,
-		)));
-		hasIssues ||= pcMonitor.issues.hasType('transport-loss-sustained');
-
+		if (pcMonitor.issues.hasType('uplink-congestion')) {
+			subtractions['uplink-congestion'] = normalizedClamp(pcMonitor.uplinkVideoCongestionSeverity) * (DefaultScoreCalculator.MAX_SCORE / 2);
+			hasIssues = true;
+		}
+		if (pcMonitor.issues.hasType('downlink-congestion')) {
+			subtractions['downlink-congestion'] = normalizedClamp(pcMonitor.downlinkVideoCongestionSeverity) * (DefaultScoreCalculator.MAX_SCORE / 2);
+			hasIssues = true;
+		}
+		if (pcMonitor.issues.hasType('transport-loss-sustained')) {
+			subtractions['transport-loss-sustained'] = 1;
+			hasIssues = true;
+		}
 		if (pcMonitor.issues.hasType('transport-delay-degraded')) {
-			subtractions['transport-delay-degraded'] = 2;
+			subtractions['transport-delay-degraded'] = 1;
 			hasIssues = true;
 		}
 
-		// Jitter has no detector of its own — it is published and nothing thresholds it — so this
-		// is the only place an uneven path shows up at all. Round trip and loss are deliberately
-		// left to their detectors above rather than charged twice.
-		const jitterPenalty = this._normalizedPenalty(
-			pcMonitor.avgInboundJitterInMs ?? 0,
-			DefaultScoreCalculator.JITTER_ACTIVATION_IN_MS,
-			DefaultScoreCalculator.JITTER_SATURATION_IN_MS,
-		);
+		if (pcMonitor.transportStability !== undefined) {
+			const instability = clamp(1 - pcMonitor.transportStability, 0, 1);
 
-		if (0 < jitterPenalty) subtractions['high-jitter'] = jitterPenalty;
+			if (0 < instability) subtractions['unstable-transport'] = instability;
+		}
 
 		pcMonitor.calculatedStabilityScore.value = reduceScoreReasons(subtractions);
 		pcMonitor.calculatedStabilityScore.reasons = reasonsOf(subtractions, hasIssues);
@@ -524,49 +524,6 @@ export class DefaultScoreCalculator {
 
 		return 1;
 	}
-
-	/**
-	 * How hard this inbound video was being quantised, as a 0..1 reading where **0 is a clean
-	 * picture and 1 is as blocky as the codec gets**, or `undefined` when that cannot be worked
-	 * out.
-	 *
-	 * The polarity is worth stating outright because it is the reverse of QP's own: a *low*
-	 * quantizer is good video, so this is deliberately not a reading of QP but of how bad the
-	 * picture is because of it. That makes it a subtraction like every other continuous value in
-	 * this file - `videoCaptureDegradation`, `jitterBufferStressSeverity`, `decodingDegradation` -
-	 * and it composes with them directly, bigger number taking more off the score. It is not a
-	 * quality figure and must not be used as a multiplier.
-	 *
-	 * `qpSum` is the one direct statement about coding quality the stats API offers: the sum of the
-	 * quantizer parameters over the frames decoded, so `InboundRtpMonitor.avgQpPerFrame` is the mean
-	 * quantizer of the last interval. A high quantizer is what a blocky picture is *made of*, which
-	 * makes it a far better witness than `bitPerPixel`, whose value at constant visual quality
-	 * swings about tenfold with content and motion and again with codec generation.
-	 *
-	 * `qpSum` is optional in the spec and its scale is codec-specific, so `normalizedQp` is
-	 * `undefined` whenever the mean quantizer is missing, no codec is linked, or the codec's scale
-	 * is not one `qpScaleOf` knows, and this returns `undefined` with it. **`undefined` means "no reading", never "fine"** — a caller that cannot
-	 * get a number should leave pixelation out of the score entirely rather than score it as zero,
-	 * because a track whose browser does not report `qpSum` is not thereby a track with a clean
-	 * picture.
-	 *
-	 * The scale, once the codec is known: 0 at or below `QP_CLEAN_RATIO` of that codec's maximum
-	 * quantizer, 1 at or above `QP_COARSE_RATIO` of it, rising linearly between the two. On H.264
-	 * that is 0 at a mean QP of 25.5 or less, 1 at 41 or more, and about 0.48 at 33; on VP8, 0 at
-	 * 63 and 1 at 102; on VP9 and AV1, 0 at 127 and 1 at 204.
-	 */
-	private _inboundQpSeverity(trackMonitor: InboundTrackMonitor): number | undefined {
-		const normalizedQp = trackMonitor.getInboundRtp()?.normalizedQp;
-
-		if (normalizedQp === undefined) return undefined;
-
-		const clean = DefaultScoreCalculator.QP_CLEAN_RATIO;
-		const coarse = DefaultScoreCalculator.QP_COARSE_RATIO;
-
-		if (coarse <= clean) return undefined;
-
-		return clamp((normalizedQp - clean) / (coarse - clean), 0, 1);
-	}
 }
 
 function reduceScoreReasons(
@@ -618,17 +575,6 @@ function reasonsOf(subtractions: DefaultScoreCalculatorSubtractions, hasIssues: 
 	return hasIssues || 1 < totalSubtractions ? subtractions : undefined;
 }
 
-/**
- * Records what a condition cost, and records nothing when it cost nothing.
- *
- * `reasons` is read as the list of what reduced this score, so a key sitting at `0` is not a
- * harmless zero — it reads as a finding. A connection with no congestion at all was reporting
- * `uplink-congestion: 0` and `downlink-congestion: 0` on every collection for the life of the
- * call, which is indistinguishable from congestion that was detected and never went away.
- */
-function charge(target: DefaultScoreCalculatorSubtractions, reason: string, value: number) {
-	if (0 < value) target[reason] = value;
-}
 
 /** Adds one set of subtractions into another, keyed by issue type. */
 function accumulateSubtractions(

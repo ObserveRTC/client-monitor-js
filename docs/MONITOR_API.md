@@ -196,6 +196,32 @@ monitor.setInboundTrackContext(audioTrackId, { linkedVideoTrackId: videoTrackId 
 
 // A moving surface captured as a screen share, which should be judged like camera video.
 monitor.setOutboundTrackContext(trackId, { contentType: 'camera' });
+
+// Whether a track is paused. A receiver can be created *already* paused — a mediasoup consumer,
+// for one — and its stats only appear a collection or more later, so this is declared rather than
+// derived: the declaration waits for the track and is applied the moment it shows up.
+monitor.setInboundTrackContext(trackId, { paused: true });
+monitor.setInboundTrackContext(trackId, { remoteOutboundTrackPaused: true });
+monitor.setOutboundTrackContext(trackId, { paused: true });
+
+// The flags stay assignable on a track monitor that already exists, which is what code written
+// before they moved into the context does. Both spellings reach the same field.
+trackMonitor.paused = true;
+```
+
+`paused` and `remoteOutboundTrackPaused` always read `true` or `false` — an undeclared pause is
+not a pause, so an absent context field reads `false`, never `undefined`.
+
+**Merging, and how to un-declare.** A context call merges into what was declared before, whether
+or not the track monitor exists yet. A field the call does not mention keeps its value; a field
+passed as an explicit `undefined` is cleared. Those are different statements — "I have nothing to
+say about this" and "this is no longer known" — so a context assembled from an application's own
+optional state behaves the way it reads.
+
+```typescript
+monitor.setInboundTrackContext(trackId, { contentType: 'screenshare' });
+monitor.setInboundTrackContext(trackId, { motionType: 'lowmotion' });   // contentType survives
+monitor.setInboundTrackContext(trackId, { contentType: undefined });    // now it is cleared
 ```
 
 ---
