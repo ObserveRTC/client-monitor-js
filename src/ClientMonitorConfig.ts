@@ -48,6 +48,7 @@ import type { VideoResolutionChangeDetectorConfig } from "./detectors/VideoResol
 import type { OutboundTrackWindowConfig } from "./monitors/OutboundTrackMonitor";
 import type { InboundTrackWindowConfig } from "./monitors/InboundTrackMonitor";
 import type { PeerConnectionWindowConfig } from "./monitors/PeerConnectionMonitor";
+import type { ClientWindowConfig } from "./ClientMonitor";
 
 export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> = Record<string, unknown>> = {
     /**
@@ -138,6 +139,13 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Detectors judging the same thing judge the same stretch of time.
      */
     peerConnectionWindow: PeerConnectionWindowConfig;
+
+    /**
+     * Sizes for `ClientMonitor.slicedWindow`, shared by every detector that judges the machine
+     * rather than a connection or a track. Detectors judging the same thing judge the same
+     * stretch of time.
+     */
+    clientWindow: ClientWindowConfig;
 
     // =========================================================================
     // Detector configuration. One block per detector, keyed by the detector's

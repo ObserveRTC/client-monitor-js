@@ -62,8 +62,9 @@ export type CongestionDetectorConfig = {
  *
  * Its issue is raised on the **client** registry rather than the connection's, which is what keeps
  * it out of the score: `uplink-congestion` and `downlink-congestion` already price congestion, and
- * a deprecated duplicate reporting the same condition must not penalise a call twice. It is priced
- * at zero in `ISSUE_SCORING` to say so explicitly rather than by omission.
+ * a deprecated duplicate reporting the same condition must not penalise a call twice. The client
+ * registry is not read by `DefaultScoreCalculator` at all, so raising it there is what makes that
+ * true rather than a rule written down somewhere else.
  *
  * Raises `congestion`. Emits `congestion`. Config: `congestionDetector`.
  * Connection attribute: `PeerConnectionMonitor.congested`.

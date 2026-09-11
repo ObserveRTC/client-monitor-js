@@ -26,14 +26,17 @@ describe('capture source lost: the track monitor outlives the event', () => {
 	/** A stand-in outbound track monitor that records whether its detectors ran. */
 	const trackMonitorFor = (track: any) => {
 		const updated = { count: 0 };
+		const resolveAll = jest.fn();
 
 		return {
 			updated,
+			resolveAll,
 			monitor: {
 				track,
 				sourceEnded: false,
 				detectors: { update: () => { updated.count += 1; } },
 				trackIdentifier: track.id,
+				issues: { resolveAll },
 			} as any,
 		};
 	};
@@ -78,7 +81,7 @@ describe('capture source lost: the track monitor outlives the event', () => {
 	 */
 	it('runs the detectors once more before dropping a monitor whose source was lost', () => {
 		const track = makeTrack('lost');
-		const { monitor: trackMonitor, updated } = trackMonitorFor(track);
+		const { monitor: trackMonitor, updated, resolveAll } = trackMonitorFor(track);
 
 		pc.addMediaStreamTrack(track);
 		pc.mappedOutboundTracks.set(track.id, trackMonitor);
@@ -94,6 +97,8 @@ describe('capture source lost: the track monitor outlives the event', () => {
 
 		expect(updated.count).toBe(1);
 		expect(pc.mappedOutboundTracks.has(track.id)).toBe(false);
+		// The last look happens first, then whatever is still open is closed on the way out.
+		expect(resolveAll).toHaveBeenCalledTimes(1);
 	});
 
 	/**
@@ -123,13 +128,16 @@ describe('capture source lost: the track monitor outlives the event', () => {
 
 	it('still forgets an inbound track and a pending one on the same event', () => {
 		const track = makeTrack('inbound');
+		const resolveAll = jest.fn();
 
 		pc.addMediaStreamTrack(track);
-		pc.mappedInboundTracks.set(track.id, { track } as any);
+		pc.mappedInboundTracks.set(track.id, { track, issues: { resolveAll } } as any);
 
 		track.readyState = 'ended';
 		track.dispatchEvent(new Event('ended'));
 
 		expect(pc.mappedInboundTracks.has(track.id)).toBe(false);
+		// Nothing looks at this track again, so whatever it had open is closed on the way out.
+		expect(resolveAll).toHaveBeenCalledTimes(1);
 	});
 });

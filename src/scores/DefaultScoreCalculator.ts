@@ -19,22 +19,26 @@ type DefaultScoreCalculatorSubtractions = Record<string, number>;
  * what is wrong, so a fault is judged in exactly one place and the score cannot disagree with
  * the issue list an operator is looking at.
  *
- * How a fault counts depends on its kind, which `ISSUE_SCORING` decides per issue type:
+ * How a fault counts depends on its kind:
  *
- * - **Connectivity** — the path is down. The score is zero while the issue is open, and nothing
- *   else is consulted: nothing riding on an unusable path can be good.
- * - **Pipeline disruption** — media stopped moving somewhere in the chain. It *caps* the score
- *   in proportion to its severity, so a lost capture device takes it to zero while a keyframe
- *   storm merely holds it down.
- * - **Perceived quality** — media is flowing and a person can tell it is wrong. It *subtracts*,
- *   so several mild faults accumulate the way a viewer experiences them.
+ * - **Pipeline disruption** — media stopped moving somewhere in the chain. A disruption that
+ *   leaves nothing to watch or hear costs the whole scale; one that leaves degraded media costs
+ *   half of it, or what the shortfall actually measured.
+ * - **Perceived quality** — media is flowing and a person can tell it is wrong. It subtracts in
+ *   proportion to the reading behind it, so several mild faults accumulate the way a viewer
+ *   experiences them.
  * - **Transport quality** — the path carries media badly. It subtracts from the *connection*,
- *   which already multiplies into every track riding on it.
+ *   which is one of the dimensions the call's score is built from.
+ * - **Connectivity** — the path is down. Deliberately **not priced at all**. A path that is not
+ *   carrying anything leaves nothing to score: the tracks riding on it go dry, and
+ *   `dry-inbound-track` and `dry-outbound-track` already take their components to zero. Charging
+ *   the connection for it as well would be the same fault counted twice, in the one situation
+ *   where there is no media to have an opinion about.
  *
- * Capping and subtracting differ on purpose. Two broken pipelines are not twice as bad as one,
- * because there is no media either way — but two quality faults really are worse than one.
- * `scoreReasons` is keyed by issue type throughout, so the reason a score fell is the name of
- * the finding that caused it.
+ * `scoreReasons` is keyed by issue type wherever an issue is behind the charge. A handful of
+ * reasons are continuous readings with no detector of their own — `volatile-fps`,
+ * `dropped-video-frames`, `blocky-video`, `unstable-audio-playout`, `unstable-transport` and the
+ * two outbound quality ramps — and those are named for what they measure.
  *
  * A monitor holding no issues scores 5.0, which is a real statement: its detectors ran and
  * raised nothing. That is not the same as a score of `undefined`, which means too few
@@ -92,6 +96,24 @@ export class DefaultScoreCalculator {
 	 */
 	public static SCREENSHARE_DOWNSCALE_ACTIVATION = 0.5;
 	public static SCREENSHARE_DOWNSCALE_SATURATION = 0.75;
+
+	/**
+	 * Share of the per-frame budget decoding used, `1` being exactly the budget. The activation is
+	 * `decoderPerformanceDetector.decodeTimeBudgetRatio`, so the ramp starts where that detector
+	 * starts counting and is already at its full cost by the time decoding takes longer than the
+	 * frame rate leaves for it.
+	 */
+	public static DECODE_BUDGET_ACTIVATION = 0.8;
+	public static DECODE_BUDGET_SATURATION = 1.0;
+
+	/**
+	 * How full `InventedSpeechDetector`'s bucket is, `1` being its raise point. The ramp exists so
+	 * inbound audio is not a flat 5.0 right up to the collection the detector speaks on: audio that
+	 * keeps filling the bucket and draining it again is audibly worse than audio that never does.
+	 * The activation keeps ordinary concealment out of it.
+	 */
+	public static INVENTED_SPEECH_ACTIVATION = 0.25;
+	public static INVENTED_SPEECH_SATURATION = 1.0;
 
 	/** Inter-arrival jitter, the one path property no detector thresholds. */
 	public static JITTER_ACTIVATION_IN_MS = 30;
@@ -178,6 +200,32 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
+		// Packets are arriving and no complete frame is coming out of reassembly: there is no
+		// picture to judge, the same statement `stuck-decoder` makes one stage further on.
+		if (activeIssues.hasType('frame-assembly-stalled')) {
+			subtractions['frame-assembly-stalled'] = DefaultScoreCalculator.MAX_SCORE;
+			hasIssues = true;
+		}
+
+		// Frames arrive and the decoder does not get through them. Priced from the published
+		// reading rather than the issue's payload, and at the same `* 2` as `encoder-bottleneck`
+		// on the sending side: the two are the same fault at opposite ends of the chain.
+		if (activeIssues.hasType('decoder-bottleneck')) {
+			subtractions['decoder-bottleneck'] = normalizedClamp(trackMonitor.decodingDegradation) * 2;
+			hasIssues = true;
+		}
+
+		if (activeIssues.hasType('video-decoder-overloaded') && trackMonitor.decodeBudgetUtilization !== undefined) {
+			const penalty = this._normalizedPenalty(
+				trackMonitor.decodeBudgetUtilization,
+				DefaultScoreCalculator.DECODE_BUDGET_ACTIVATION,
+				DefaultScoreCalculator.DECODE_BUDGET_SATURATION,
+			);
+
+			if (0 < penalty) subtractions['video-decoder-overloaded'] = penalty;
+			hasIssues = true;
+		}
+
 		if (trackMonitor.frameFlowState === 'frozen') {
 			subtractions['frozen-video'] = DefaultScoreCalculator.MAX_SCORE;
 			hasIssues = true;
@@ -220,22 +268,30 @@ export class DefaultScoreCalculator {
 			if (0 < penalty) subtractions['dropped-video-frames'] = penalty;
 		}
 
-		// Weighted by how large the picture is actually being shown: blown up, the coded blocks are
-		// what the viewer complains about; in a thumbnail nobody can see them. Held to one point
-		// like every other continuous reading, so the weighting shifts the cost without doubling it.
+		if (activeIssues.hasType('inbound-video-playout-discrepancy')) {
+			subtractions['inbound-video-playout-discrepancy'] = normalizedClamp(trackMonitor.videoPlayoutSkew);
+			hasIssues = true;
+		}
+
 		// Derived on the track rather than here, so it is published on every collection and the
 		// score is not the only thing that can see it. `undefined` is "no reading, never fine":
 		// a browser that does not report `qpSum` leaves pixelation out of the score entirely.
 		const quantizationDegradation = trackMonitor.quantizationDegradation;
-
-		if (quantizationDegradation !== undefined) {
-			const penalty = clamp(
+		const blockiness = quantizationDegradation === undefined
+			? undefined
+			: clamp(
 				quantizationDegradation * this._pixelationWeight(trackMonitor.displayMagnification),
 				0,
 				1,
 			);
 
-			if (0 < penalty) subtractions['blocky-video'] = penalty;
+		if (blockiness !== undefined) {
+			if (activeIssues.hasType('pixelated-video')) {
+				subtractions['pixelated-video'] = blockiness * (DefaultScoreCalculator.MAX_SCORE / 2);
+				hasIssues = true;
+			} else if (0 < blockiness) {
+				subtractions['blocky-video'] = blockiness;
+			}
 		}
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
@@ -255,6 +311,14 @@ export class DefaultScoreCalculator {
 		if (activeIssues.hasType('invented-speech')) {
 			subtractions['invented-speech'] = normalizedClamp(trackMonitor.getInboundRtp()?.inventedSpeechRatio);
 			hasIssues = true;
+		} else if (trackMonitor.inventedSpeechSeverity !== undefined) {
+			const penalty = this._normalizedPenalty(
+				trackMonitor.inventedSpeechSeverity,
+				DefaultScoreCalculator.INVENTED_SPEECH_ACTIVATION,
+				DefaultScoreCalculator.INVENTED_SPEECH_SATURATION,
+			);
+
+			if (0 < penalty) subtractions['unstable-audio-playout'] = penalty;
 		}
 		if (activeIssues.hasType('synthesized-audio')) {
 			subtractions['synthesized-audio'] = normalizedClamp(trackMonitor.synthesizedAudioRatio);
@@ -320,7 +384,7 @@ export class DefaultScoreCalculator {
 					1 - (sentArea / sourceArea),
 					DefaultScoreCalculator.SCREENSHARE_DOWNSCALE_ACTIVATION,
 					DefaultScoreCalculator.SCREENSHARE_DOWNSCALE_SATURATION,
-				) * (DefaultScoreCalculator.MAX_SCORE / 2);
+				);
 
 				if (0 < penalty) subtractions['downscaled-screenshare'] = penalty;
 			}
@@ -349,13 +413,6 @@ export class DefaultScoreCalculator {
 		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
-	/**
-	 * The connection's own score: its connectivity and transport-quality issues.
-	 *
-	 * Deliberately not an average of its tracks. `_calculateClientMonitorScore` multiplies this
-	 * into them, so a path in trouble drags down everything riding on it instead of being
-	 * averaged away by tracks that happen to look fine.
-	 */
 	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
 		let hasIssues = false;

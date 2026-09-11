@@ -1,6 +1,7 @@
 import { BlockedStunRequestsDetector, BlockedTransportIssuePayload } from "../detectors/BlockedStunRequestsDetector";
 import { IssueRegistry } from "../utils/IssueRegistry";
 import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
+import { runsOffCpu } from '../utils/runsOffCpu';
 import { transportStability } from "../utils/transportStability";
 import EventEmitter from 'eventemitter3';
 import { ClientMonitor } from "../ClientMonitor";
@@ -303,6 +304,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public totalSentVideoBytes?: number;
 	public totalReceivedAudioBytes?: number;
 	public totalReceivedVideoBytes?: number;
+	public totalVideoEncodeTimeInMs?: number;
+	public totalVideoDecodeTimeInMs?: number;
 	public totalAvailableIncomingBitrate?: number;
 	public totalAvailableOutgoingBitrate?: number;
 	public totalPacketSendDelayInSec?: number;
@@ -322,6 +325,14 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	public deltaPacketSendDelayInSec?: number;
 	/** Video only, to divide `deltaPacketSendDelayInSec` by — the two are accumulated together. */
 	public deltaVideoPacketsSent?: number;
+	/**
+	 * This collection's codec time, over the video streams whose work lands on the CPU. Streams
+	 * naming an off-CPU implementation, or flagged `powerEfficient`, are left out as the sum is
+	 * taken: whether a stream counts is a property of that collection, not of the stretch a
+	 * detector later reads.
+	 */
+	public deltaVideoEncodeTimeInMs?: number;
+	public deltaVideoDecodeTimeInMs?: number;
 
 	/**
 	 * Mean time a video packet waited in the pacer this collection, in milliseconds.
@@ -644,6 +655,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.deltaInboundVideoJitterBufferEmittedCount = undefined;
 		this.avgInboundVideoJitterBufferDelayInMs = undefined;
 		this.deltaVideoPacketsSent = undefined;
+		this.deltaVideoEncodeTimeInMs = undefined;
+		this.deltaVideoDecodeTimeInMs = undefined;
 		this.avgPacketSendDelayInMs = undefined;
 
 		this.sendingAudioBitrate = 0;
@@ -682,6 +695,15 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 								this.deltaVideoBytesReceived = accumulatedValue(this.deltaVideoBytesReceived, monitor?.deltaBytesReceived);
 								this.hasInboundMedia = true;
 								this.hasInboundVideo = true;
+
+								if (monitor && !runsOffCpu(monitor.decoderImplementation, monitor.powerEfficientDecoder)) {
+									this.deltaVideoDecodeTimeInMs = accumulatedValue(
+										this.deltaVideoDecodeTimeInMs,
+										monitor.deltaTotalDecodeTime === undefined
+											? undefined
+											: monitor.deltaTotalDecodeTime * 1000,
+									);
+								}
 
 								// Summed rather than averaged over streams: the quotient of the two
 								// sums is the mean over frames, which is what a threshold can be
@@ -727,6 +749,15 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 							case 'video':
 								this.sendingVideoBitrate += monitor?.bitrate ?? 0;
 								this.deltaVideoBytesSent = accumulatedValue(this.deltaVideoBytesSent, monitor?.deltaBytesSent);
+
+								if (monitor && !runsOffCpu(monitor.encoderImplementation, monitor.powerEfficientEncoder)) {
+									this.deltaVideoEncodeTimeInMs = accumulatedValue(
+										this.deltaVideoEncodeTimeInMs,
+										monitor.deltaEncodeTime === undefined
+											? undefined
+											: monitor.deltaEncodeTime * 1000,
+									);
+								}
 								this.totalPacketSendDelayInSec = accumulatedValue(this.totalPacketSendDelayInSec, monitor?.deltaPacketSendDelay);
 								this.deltaPacketSendDelayInSec = accumulatedValue(this.deltaPacketSendDelayInSec, monitor?.deltaPacketSendDelay);
 								this.deltaVideoPacketsSent = accumulatedValue(this.deltaVideoPacketsSent, monitor?.deltaPacketsSent);
@@ -869,6 +900,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		this.totalSentVideoBytes = accumulatedValue(this.totalSentVideoBytes, this.deltaVideoBytesSent);
 		this.totalReceivedAudioBytes = accumulatedValue(this.totalReceivedAudioBytes, this.deltaAudioBytesReceived);
 		this.totalReceivedVideoBytes = accumulatedValue(this.totalReceivedVideoBytes, this.deltaVideoBytesReceived);
+		this.totalVideoEncodeTimeInMs = accumulatedValue(this.totalVideoEncodeTimeInMs, this.deltaVideoEncodeTimeInMs);
+		this.totalVideoDecodeTimeInMs = accumulatedValue(this.totalVideoDecodeTimeInMs, this.deltaVideoDecodeTimeInMs);
 		this.totalOutboundPacketsSent = accumulatedValue(this.totalOutboundPacketsSent, this.deltaOutboundPacketsSent);
 		this.totalOutboundPacketsReceived = accumulatedValue(this.totalOutboundPacketsReceived, this.deltaOutboundPacketsReceived);
 		this.totalOutboundPacketsLost = accumulatedValue(this.totalOutboundPacketsLost, this.deltaOutboundPacketsLost);
@@ -919,6 +952,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		track.addEventListener('ended', () => {
 			this._pendingMediaStreamTracks.delete(track.id);
+
+			this.mappedInboundTracks.get(track.id)?.issues.resolveAll('the track ended');
 			this.mappedInboundTracks.delete(track.id);
 
 			// An outbound track is flagged rather than dropped: this event is the only place
@@ -1263,6 +1298,16 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		for (const [id, monitor] of this.mappedInboundRtpMonitors) {
 			if (monitor.visited) continue;
 			this.mappedInboundRtpMonitors.delete(id);
+
+			const inboundTrack = this.mappedInboundTracks.get(monitor.trackIdentifier ?? '');
+
+			// Whatever its detectors left open goes with it. They will never run again, so nothing
+			// can retract their findings: on a captured call a `decoder-bottleneck` raised on the
+			// last collection before the track vanished, and stood for the remaining 2400 seconds
+			// — through 2365 of them with the track back and decoding cleanly, because the
+			// replacement monitor's detectors start with no finding of their own to close.
+			inboundTrack?.issues.resolveAll('the track stopped being reported');
+
 			this.mappedInboundTracks.delete(monitor.trackIdentifier ?? '');
 		}
 
@@ -1291,6 +1336,10 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			// A source that went away takes its stats entry with it, so the ordinary update
 			// pass would never see the track again; its detectors get their last look here.
 			if (outboundTrack?.sourceEnded) outboundTrack.detectors.update();
+
+			// Then anything still open after that last look, for the same reason as the inbound
+			// side: no detector on this track will run again to close it.
+			outboundTrack?.issues.resolveAll('the track stopped being reported');
 
 			this.mappedOutboundTracks.delete(monitor.trackIdentifier ?? '');
 		}

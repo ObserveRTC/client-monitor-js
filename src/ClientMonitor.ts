@@ -22,7 +22,7 @@ import { sampledScoreReasons } from './scores/utils';
 import { ClientEventTypes } from './schema/ClientEventTypes';
 import { AppliedClientMonitorConfig, ClientMonitorConfig, ClientMonitorSourceType } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
-import { PartialBy } from './utils/common';
+import { accumulatedValue, PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { StatsGapDetector } from './detectors/StatsGapDetector';
@@ -36,10 +36,29 @@ import { inferSourceType } from './sources/inferSourceType';
 import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider';
 import { IssueRegistry } from './utils/IssueRegistry';
 import { ExtensionStatsMonitor } from './monitors/ExtensionStatsMonitor';
+import { SliceConfig, SlicedWindow } from './utils/SlicedWindow';
 
 const MODULE_NAME = 'ClientMonitor';
 
 export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload, id?: string } | Promise<{ type: string, payload?: ClientPayload, id?: string }>;
+export type ClientWindowValues = {
+	/** Milliseconds spent inside video encoders running on the CPU, summed over the sending streams. */
+	totalVideoEncodeTimeInMs: number | null;
+	/** The same for the video decoders, over the receiving streams. */
+	totalVideoDecodeTimeInMs: number | null;
+}
+
+export type ClientWindowConfig = {
+	/**
+	 * Milliseconds between two collections above which the run is treated as broken and the fill
+	 * starts again. Wider than the collecting period, or every collection is discarded.
+	 */
+	maxAllowedGapInMs: number;
+
+	/** Values per stretch. At least 2 each, since a delta needs two endpoints. */
+	numberOfSamples: Record<'detection' | 'recovery', number>;
+}
+
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
 
@@ -56,6 +75,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      */
     // public readonly activeIssues = new Map<string, RaisedClientIssue>();
     public readonly activeIssues: IssueRegistry;
+
+    /**
+     * Machine-wide running totals with named stretches over them, shared by the detectors that
+     * judge the client rather than a connection or a track. One buffer, so those detectors all
+     * judge the same stretch of time.
+     */
+    public readonly slicedWindow: SlicedWindow<
+        ClientWindowValues,
+        Record<keyof ClientWindowConfig['numberOfSamples'], SliceConfig>
+    >;
 
     public scoreCalculator: ScoreCalculator;
     public readonly logger: Logger;
@@ -151,28 +180,31 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             // blackout worth starting again after.
             outboundTrackWindow: monitorConfig.outboundTrackWindow ?? {
                 numberOfSamples: {
-                    detection: 2,
-                    recovery: 2,
+                    detection: 3,
+                    recovery: 3,
                 },
                 maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
-            // Wider than the outbound pair: this span was `decoderBottleneckDetector.durationInMs`
-            // before the window took it over, and it is kept so that detector judges as it did.
             inboundTrackWindow: monitorConfig.inboundTrackWindow ?? {
                 numberOfSamples: {
-                    detection: 2,
-                    recovery: 2,
+                    detection: 3,
+                    recovery: 3,
                     flowDetection: 4,
                     flowRecovery: 3,
                 },
                 maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
-            // The 6s floor is `transportDelayDetector.durationInMs` from before the window took the
-            // sustain over, kept so that detector judges over the stretch it always did.
             peerConnectionWindow: monitorConfig.peerConnectionWindow ?? {
                 numberOfSamples: {
-                    detection: 2,
-                    recovery: 2,
+                    detection: 3,
+                    recovery: 3,
+                },
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
+            },
+            clientWindow: monitorConfig.clientWindow ?? {
+                numberOfSamples: {
+                    detection: 3,
+                    recovery: 3,
                 },
                 maxAllowedGapInMs: collectingPeriodInMs * 4,
             },
@@ -325,10 +357,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 recoveryFailedMinPliCount: 2,
             }),
             cpuPerformanceDetector: detectorDefault(monitorConfig.cpuPerformanceDetector, {
-                // Both halves of the media pipeline spending 15% of stats time in codec
-                // work. Summed across streams, a healthy capture sat at 32% encoder and
-                // 0.8% decoder utilization at the median, so the decoder side binds first.
-                utilizationThreshold: 0.15,
+                utilizationThreshold: 0.5,
+                recoveryThreshold: 0.4,
             }),
             // Perceived Quality — how the picture and the sound come across.
             pixelatedVideoDetector: detectorDefault(monitorConfig.pixelatedVideoDetector, {
@@ -403,6 +433,23 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
             appData: monitorConfig.appData ?? {} as AppData,
         }
+
+        this.slicedWindow = new SlicedWindow({
+            maxAllowedGapInMs: this.config.clientWindow.maxAllowedGapInMs,
+            totals: {
+                totalVideoEncodeTimeInMs: null,
+                totalVideoDecodeTimeInMs: null,
+            },
+            slices: {
+                detection: {
+                    numberOfSamples: this.config.clientWindow.numberOfSamples.detection,
+                },
+                recovery: {
+                    numberOfSamples: this.config.clientWindow.numberOfSamples.recovery,
+                    offset: this.config.clientWindow.numberOfSamples.detection,
+                },
+            },
+        });
 
         this._sources = new Sources(this, this.logger);
         this.scoreCalculator = new DefaultScoreCalculator(this);
@@ -584,13 +631,21 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             : -1;
         this.durationOfCollectingStatsInMs = Date.now() - this.lastCollectingStatsAt;
 
+        const totalVideoEncodeTimeInMs = this.peerConnections.reduce<number | undefined>((acc, peerConnection) => accumulatedValue(acc, peerConnection.totalVideoEncodeTimeInMs), undefined);
+        const totalVideoDecodeTimeInMs = this.peerConnections.reduce<number | undefined>((acc, peerConnection) => accumulatedValue(acc, peerConnection.totalVideoDecodeTimeInMs), undefined);
+
+        this.slicedWindow.add({
+            timestamp: Date.now(),
+            value: {
+                totalVideoEncodeTimeInMs: totalVideoEncodeTimeInMs ?? null,
+                totalVideoDecodeTimeInMs: totalVideoDecodeTimeInMs ?? null,
+            },
+        });
+
         this.tracks.forEach(track => track.update());
         this.detectors.update();
         this.scoreCalculator.update();
 
-        // One collection of grace: a value reported this collection survives the next sweep, and is
-        // dropped by the one after unless it was reported again. A provider re-reports every
-        // collection and so never expires; a one-off `addExtensionStats` call does.
         for (const [id, monitor] of this.mappedExtensionStatsMonitors) {
             if (monitor.visited) {
                 monitor.visited = false;

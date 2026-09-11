@@ -89,11 +89,13 @@ export class InventedSpeechDetector implements Detector {
 		// Discarded rather than drained, so a pause cannot leak into the next episode.
 		if (this.trackMonitor.paused) {
 			this._bucketInMs = 0;
+			this.trackMonitor.inventedSpeechSeverity = undefined;
 
 			return this._raised ? this._clear('consumer paused') : undefined;
 		}
 		if (this.trackMonitor.remoteOutboundTrackPaused) {
 			this._bucketInMs = 0;
+			this.trackMonitor.inventedSpeechSeverity = undefined;
 
 			return this._raised ? this._clear('remote track paused') : undefined;
 		}
@@ -103,6 +105,7 @@ export class InventedSpeechDetector implements Detector {
 		if (ratio === undefined) {
 			// No concealment counters, or no samples arrived. Blind, not fine.
 			this.inputsUnavailable = true;
+			this.trackMonitor.inventedSpeechSeverity = undefined;
 
 			return;
 		}
@@ -118,6 +121,13 @@ export class InventedSpeechDetector implements Detector {
 			this.config.raiseAfterInventedMs,
 			Math.max(0, this._bucketInMs + inventedInMs - allowedInMs),
 		);
+
+		// Beside the verdict, the measurement it was a verdict on: how full the bucket is, where
+		// `1` is the raise point. Published on every collection that was judged, so the score can
+		// see audio heading towards a fault and not only the moment it becomes one.
+		this.trackMonitor.inventedSpeechSeverity = 0 < this.config.raiseAfterInventedMs
+			? this._bucketInMs / this.config.raiseAfterInventedMs
+			: undefined;
 
 		if (this._raised) {
 			if (this._bucketInMs <= 0) return this._clear('audio recovered');

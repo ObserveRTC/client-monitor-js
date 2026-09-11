@@ -194,6 +194,14 @@ export class IssueRegistry<T extends IssueRegistryAcceptedTypes = IssueRegistryA
 		return resolved;
 	}
 
+	public resolveAll(comment: string): number {
+		const keys = [ ...this.activeIssues.keys() ];
+
+		for (const key of keys) this.resolve({ key, comment });
+
+		return keys.length;
+	}
+
 	public notify<K extends string & keyof T>(input: {
 		type: K,
 		payload?: T[K],
