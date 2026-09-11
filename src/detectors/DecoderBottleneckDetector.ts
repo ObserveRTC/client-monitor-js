@@ -35,6 +35,22 @@ export type DecoderBottleneckIssuePayload = {
 	 */
 	decodeDegradation: number;
 
+	/** Frames the browser threw away before the decoder over the detection window. */
+	droppedFramesForDetection: number;
+
+	/**
+	 * Frames that arrived over the detection window, dropped ones included.
+	 *
+	 * `receivedFramesForDetection` is this minus the dropped ones — what actually reached the
+	 * decoder, and what `decodeDegradation` is measured against. The two are published side by
+	 * side because their difference is the distinction between a decoder that could not keep up
+	 * and a path delivering frames too late to use.
+	 */
+	arrivedFramesForDetection: number;
+
+	/** The average frames per second that arrived, dropped ones included. */
+	arrivedFpsForDetection: number;
+
 	/** The decoded frame size when the issue opened. */
 	frameWidth?: number;
 	frameHeight?: number;
@@ -117,6 +133,15 @@ export class DecoderBottleneckDetector implements Detector {
 	private readonly _issueKey: string;
 	private _raised = false;
 
+	/**
+	 * Frames that arrived in the previous collection, for the stats-gap guard.
+	 *
+	 * `undefined` until the first judged collection, `0` after one that carried nothing — which is
+	 * the shape a frozen stats report leaves behind, and the one collection this must not judge
+	 * across.
+	 */
+	private _previousCollectionArrived?: number;
+
 	public constructor(
 		public readonly trackMonitor: InboundTrackMonitor,
 	) {
@@ -170,20 +195,48 @@ export class DecoderBottleneckDetector implements Detector {
 			detection: detectionWindow,
 			recovery: recoveryWindow,
 		} = this.trackMonitor.slicedWindow.slices;
-		const receivedFramesForDetection = detectionWindow.deltaTotalFramesReceived;
+		const arrivedFramesForDetection = detectionWindow.deltaTotalFramesReceived;
 		const decodedFramesForDetection = detectionWindow.deltaTotalFramesDecoded;
+		const droppedFramesForDetection = detectionWindow.deltaTotalFramesDropped;
 		const detectionWindowInMs = detectionWindow.durationInMs;
 
-		if (receivedFramesForDetection === null) return this._clear({
+		if (arrivedFramesForDetection === null) return this._clear({
 			comment: 'no arriving frame count',
 		});
 		if (decodedFramesForDetection === null) return this._clear({
 			comment: 'no decoded frame count',
 		});
+		if (droppedFramesForDetection === null) return this._clear({
+			comment: 'no dropped frame count',
+		});
 		if (!detectionWindow.isReady || detectionWindowInMs < 1) return;
 
+		// A dropped frame is one the browser threw away before the decoder, and on a captured call
+		// it accounted for the shortfall to within two frames on 98% of the collections where one
+		// existed — arriving late or incomplete under retransmission, not queued behind a decoder
+		// that could not keep up. Charging them here made this a second, differently-named
+		// `dropped-video-frames`, which the score already prices from the same counters. What is
+		// left after subtracting them is the remainder the decoder is actually answerable for.
+		const receivedFramesForDetection = Math.max(0, arrivedFramesForDetection - droppedFramesForDetection);
 		const receivedFpsForDetection = receivedFramesForDetection / (detectionWindowInMs / 1000);
 		const decodedFpsForDetection = decodedFramesForDetection / (detectionWindowInMs / 1000);
+		const arrivedFpsForDetection = arrivedFramesForDetection / (detectionWindowInMs / 1000);
+
+		// A collection whose counters froze, and a next one reporting both intervals' frames on one
+		// interval's clock. The rate reads at twice the stream's own, and the backlog the decoder
+		// discards on the way out reads as a bottleneck: on a captured call this raised at a
+		// computed 76fps for a 30fps stream. `StatsGapDetector` reports the gap itself; this one
+		// must not judge the collection that catches up after it.
+		//
+		// Read from the collection's own delta rather than the window's: the artefact belongs to
+		// one collection boundary, and a window wide enough to dilute it would hide the guard
+		// along with the fault.
+		const arrivedThisCollection = this.trackMonitor.getInboundRtp()?.deltaFramesReceived;
+		const caughtUp = this._previousCollectionArrived === 0 && 0 < (arrivedThisCollection ?? 0);
+
+		this._previousCollectionArrived = arrivedThisCollection;
+
+		if (caughtUp) return;
 
 		// A ratio over a handful of frames is noise, and a stream this thin is not the decoder's
 		// doing. Too thin to judge is not the same as healthy, so the verdict goes blind.
@@ -191,7 +244,9 @@ export class DecoderBottleneckDetector implements Detector {
 			comment: 'stream too thin to judge',
 		});
 
-		const decodeDegradation = 1 - (decodedFpsForDetection / receivedFpsForDetection);
+		const decodeDegradation = 0 < receivedFpsForDetection
+			? 1 - (decodedFpsForDetection / receivedFpsForDetection)
+			: 0;
 
 		// Beside the flag and the issue: the measurement itself, on every judged collection, so the
 		// score calculator has a continuous number below the threshold as well as above it.
@@ -207,6 +262,9 @@ export class DecoderBottleneckDetector implements Detector {
 				receivedFramesForDetection,
 				decodedFpsForDetection,
 				decodedFramesForDetection,
+				droppedFramesForDetection,
+				arrivedFramesForDetection,
+				arrivedFpsForDetection,
 				detectionWindowInMs,
 				frameWidth: inboundRtp?.frameWidth,
 				frameHeight: inboundRtp?.frameHeight,
@@ -229,14 +287,16 @@ export class DecoderBottleneckDetector implements Detector {
 
 		// Below the threshold with a finding open: the recovery window decides whether it ends.
 
-		const receivedFramesForRecovery = recoveryWindow.deltaTotalFramesReceived;
+		const arrivedFramesForRecovery = recoveryWindow.deltaTotalFramesReceived;
 		const decodedFramesForRecovery = recoveryWindow.deltaTotalFramesDecoded;
+		const droppedFramesForRecovery = recoveryWindow.deltaTotalFramesDropped;
 		const recoveryWindowInMs = recoveryWindow.durationInMs;
 
 		if (
 			!recoveryWindow.isReady ||
-			receivedFramesForRecovery === null ||
+			arrivedFramesForRecovery === null ||
 			decodedFramesForRecovery === null ||
+			droppedFramesForRecovery === null ||
 			recoveryWindowInMs < 1
 		) {
 			return void this.trackMonitor.issues.update({
@@ -247,6 +307,10 @@ export class DecoderBottleneckDetector implements Detector {
 			});
 		}
 
+		// The same subtraction the detection half makes, for the same reason: a stretch whose
+		// frames were dropped on the way in is not a stretch the decoder failed on, and a recovery
+		// judged without it could never be demonstrated on a lossy path.
+		const receivedFramesForRecovery = Math.max(0, arrivedFramesForRecovery - droppedFramesForRecovery);
 		const receivedFpsForRecovery = receivedFramesForRecovery / (recoveryWindowInMs / 1000);
 		const decodedFpsForRecovery = decodedFramesForRecovery / (recoveryWindowInMs / 1000);
 
@@ -261,7 +325,9 @@ export class DecoderBottleneckDetector implements Detector {
 			});
 		}
 
-		const recoveryDegradation = 1 - (decodedFpsForRecovery / receivedFpsForRecovery);
+		const recoveryDegradation = 0 < receivedFpsForRecovery
+			? 1 - (decodedFpsForRecovery / receivedFpsForRecovery)
+			: 0;
 
 		if (this.config.decodeDegradationThreshold < recoveryDegradation) {
 			return void this.trackMonitor.issues.update({

@@ -280,13 +280,13 @@ export class DefaultScoreCalculator {
 		}
 
 		if (activeIssues.hasType('video-capture-bottleneck')) {
-			subtractions['video-capture-bottleneck'] = normalizedClamp(trackMonitor.videoCaptureDegradation);
+			subtractions['video-capture-bottleneck'] = normalizedClamp(trackMonitor.videoCaptureDegradation) * 2;
 			hasIssues = true;
 		}
 		if (activeIssues.hasType('encoder-bottleneck')) {
 			// From the published reading rather than the issue's payload: the payload is what the
 			// encoder was doing when the finding opened, and this is what it is doing now.
-			subtractions['encoder-bottleneck'] = 2 * normalizedClamp(trackMonitor.videoEncodingDegradation);
+			subtractions['encoder-bottleneck'] = normalizedClamp(trackMonitor.videoEncodingDegradation) * 2;
 			hasIssues = true;
 		}
 
@@ -320,14 +320,13 @@ export class DefaultScoreCalculator {
 					1 - (sentArea / sourceArea),
 					DefaultScoreCalculator.SCREENSHARE_DOWNSCALE_ACTIVATION,
 					DefaultScoreCalculator.SCREENSHARE_DOWNSCALE_SATURATION,
-				);
+				) * (DefaultScoreCalculator.MAX_SCORE / 2);
 
 				if (0 < penalty) subtractions['downscaled-screenshare'] = penalty;
 			}
 		}
 
 		trackMonitor.calculatedScore.value = reduceScoreReasons(subtractions);
-
 		trackMonitor.calculatedScore.reasons = reasonsOf(subtractions, hasIssues);
 	}
 
@@ -370,16 +369,16 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 		if (pcMonitor.issues.hasType('transport-loss-sustained')) {
-			subtractions['transport-loss-sustained'] = 1;
+			subtractions['transport-loss-sustained'] = DefaultScoreCalculator.MAX_SCORE / 2;
 			hasIssues = true;
 		}
 		if (pcMonitor.issues.hasType('transport-delay-degraded')) {
-			subtractions['transport-delay-degraded'] = 1;
+			subtractions['transport-delay-degraded'] = DefaultScoreCalculator.MAX_SCORE / 2;
 			hasIssues = true;
 		}
 
 		if (pcMonitor.transportStability !== undefined) {
-			const instability = clamp(1 - pcMonitor.transportStability, 0, 1);
+			const instability = 2 * clamp(1 - pcMonitor.transportStability, 0, 1);
 
 			if (0 < instability) subtractions['unstable-transport'] = instability;
 		}

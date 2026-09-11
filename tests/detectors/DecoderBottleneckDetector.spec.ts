@@ -59,9 +59,11 @@ function createHarness(configOverrides: Partial<{
 		totals: {
 				totalFramesReceived: null,
 				totalFramesDecoded: null,
+				totalFramesDropped: null,
 		} as {
 				totalFramesReceived: number | null;
 				totalFramesDecoded: number | null;
+				totalFramesDropped: number | null;
 		},
 		// Counted in values: N values span N-1 ticks, so this is the same stretch as the
 		// millisecond windows these constants used to configure. `recovery` sits at the
@@ -81,7 +83,14 @@ function createHarness(configOverrides: Partial<{
 		remoteOutboundTrackPaused: false,
 		degradedFrameSupply: undefined as boolean | undefined,
 		slicedWindow,
-		getInboundRtp: () => ({ frameWidth: 1280, frameHeight: 720 }),
+		// `deltaFramesReceived` is this collection's own arrival count, which the detector reads
+		// for its stats-gap guard: the window cannot show a frozen collection once it is wide
+		// enough to average one away.
+		getInboundRtp: () => ({
+			frameWidth: 1280,
+			frameHeight: 720,
+			deltaFramesReceived: lastArrivedFrames,
+		}),
 		issues: new IssueRegistry({
 			notify: () => { /* one-shots are not this detector's business */ },
 			raise: (input: any) => {
@@ -102,6 +111,8 @@ function createHarness(configOverrides: Partial<{
 	const detector = new DecoderBottleneckDetector(trackMonitor as any);
 
 	let statsClockTime = 0;
+	let droppedTotal = 0;
+	let lastArrivedFrames: number | undefined;
 	let receivedTotal = 0;
 	let decodedTotal = 0;
 
@@ -109,17 +120,26 @@ function createHarness(configOverrides: Partial<{
 		detector, raised, resolved, warnings, emitted, track, trackMonitor, clientMonitor,
 		slicedWindow,
 		config: clientMonitor.config.decoderBottleneckDetector,
-		/** One collection: `received` frames arrive and the decoder gets through `decoded` of them. */
-		tick(received: number, decoded: number, elapsedMs = TICK_MS) {
+		/**
+		 * One collection: `received` frames arrive, the decoder gets through `decoded` of them, and
+		 * `dropped` were thrown away before reaching it.
+		 *
+		 * `received` is what the browser counts as arriving — dropped frames included — because
+		 * that is what `framesReceived` is. The detector subtracts the dropped ones itself.
+		 */
+		tick(received: number, decoded: number, elapsedMs = TICK_MS, dropped = 0) {
 			statsClockTime += elapsedMs;
+			lastArrivedFrames = received;
 			receivedTotal += received;
 			decodedTotal += decoded;
+			droppedTotal += dropped;
 
 			slicedWindow.add({
 				timestamp: statsClockTime,
 				value: {
 					totalFramesReceived: receivedTotal,
 					totalFramesDecoded: decodedTotal,
+					totalFramesDropped: droppedTotal,
 				},
 			});
 
@@ -201,6 +221,89 @@ describe('DecoderBottleneckDetector', () => {
 			h.tick(ARRIVING, ARRIVING / 2);
 
 			expect(h.emitted.filter(name => name === 'decoder-bottleneck')).toHaveLength(1);
+		});
+	});
+
+	describe('frames dropped before the decoder', () => {
+		/**
+		 * The finding this detector exists for is frames the *decoder* could not get through. A
+		 * frame the browser threw away on the way in never reached it. On a captured call those
+		 * accounted for the whole shortfall to within two frames on 98% of the collections where
+		 * one existed — arriving late or incomplete under retransmission — and charging them here
+		 * made this a second, differently-named `dropped-video-frames`.
+		 */
+		it('does not blame the decoder for frames it was never handed', () => {
+			const h = createHarness();
+			const ticks = Math.ceil((DETECTION_MS + RECOVERY_MS) / TICK_MS) + 1;
+
+			// Half of everything arriving is dropped before the decoder, which gets through the
+			// whole of the rest. A decoder keeping up perfectly, on a path losing half its frames.
+			for (let i = 0; i < ticks; ++i) h.tick(ARRIVING, ARRIVING / 2, TICK_MS, ARRIVING / 2);
+
+			expect(h.issues()).toHaveLength(0);
+			expect(h.trackMonitor.degradedFrameSupply).toBe(false);
+			expect(h.trackMonitor.decodingDegradation).toBeCloseTo(0, 10);
+		});
+
+		it('still raises on frames that reached the decoder and did not come out', () => {
+			const h = createHarness();
+			const ticks = Math.ceil((DETECTION_MS + RECOVERY_MS) / TICK_MS) + 1;
+
+			// A tenth dropped on the way in, and of the ninety that reached the decoder it emits
+			// forty-five — a real halving, with dropping going on beside it.
+			for (let i = 0; i < ticks; ++i) h.tick(100, 45, TICK_MS, 10);
+
+			expect(h.issues()).toHaveLength(1);
+			expect(h.trackMonitor.decodingDegradation).toBeCloseTo(0.5, 10);
+		});
+
+		it('carries what arrived and what was dropped beside what reached the decoder', () => {
+			const h = createHarness();
+			const ticks = Math.ceil((DETECTION_MS + RECOVERY_MS) / TICK_MS) + 1;
+
+			for (let i = 0; i < ticks; ++i) h.tick(100, 45, TICK_MS, 10);
+
+			const payload = h.issues()[0].payload;
+
+			expect(payload.arrivedFramesForDetection).toBeGreaterThan(payload.receivedFramesForDetection);
+			expect(payload.arrivedFramesForDetection - payload.droppedFramesForDetection)
+				.toBe(payload.receivedFramesForDetection);
+		});
+	});
+
+	describe('a collection the stats did not report', () => {
+		/**
+		 * A frozen stats report followed by one carrying both intervals' frames on one interval's
+		 * clock. The rate reads at twice the stream's own and the backlog the decoder discards on
+		 * the way out reads as a bottleneck: on a captured call this raised at a computed 76fps
+		 * for a 30fps stream. `StatsGapDetector` reports the gap itself; this one must not judge
+		 * across it.
+		 */
+		it('does not judge the collection that catches up after one reporting nothing', () => {
+			const h = createHarness();
+
+			h.warmUp();
+			expect(h.issues()).toHaveLength(0);
+
+			// The counters freeze for a collection ...
+			h.tick(0, 0);
+			// ... then catch up, on a clock that advanced only one interval.
+			h.tick(ARRIVING * 2, ARRIVING / 2);
+
+			expect(h.issues()).toHaveLength(0);
+		});
+
+		it('judges again on the collection after the catch-up', () => {
+			const h = createHarness();
+
+			h.warmUp();
+			h.tick(0, 0);
+			h.tick(ARRIVING * 2, ARRIVING / 2);
+
+			// Back to a normal stretch that is genuinely short: the guard was for one collection.
+			for (let i = 0; i < 4; ++i) h.tick(ARRIVING, ARRIVING / 2);
+
+			expect(h.issues()).toHaveLength(1);
 		});
 	});
 
