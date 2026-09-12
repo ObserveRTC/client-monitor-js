@@ -79,7 +79,7 @@ const monitor = new ClientMonitor({
 monitor.addSource(peerConnection);
 
 // Listen for samples
-monitor.on("sample-created", (sample) => {
+monitor.on("sample-created", ({ sample }) => {
     console.log("Sample created:", sample);
     // Send sample to your analytics backend
 });
@@ -241,7 +241,8 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 
 -   **`setCollectingPeriod(periodInMs: number)`**: Updates the stats collection interval
 -   **`setSamplingPeriod(periodInMs: number)`**: Updates the sampling interval
--   **`setScore(score: number, reasons?: Record<string, number>)`**: Manually sets the client score
+-   **`setScore(score: number, ownReasons?: Record<string, number>, aggregatedReasons?: Record<string, number>)`**: Manually sets the client score
+-   **`setInboundTrackContext(trackId, ctx)` / `setOutboundTrackContext(trackId, ctx)`**: Declares what the stats cannot reveal about a track. See [Declared track context](#declared-track-context).
 
 #### Event & Issue Methods
 
@@ -257,19 +258,46 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 #### Utility Methods
 
 -   **`getTrackMonitor(trackId: string)`**: Retrieves a track monitor by ID
+-   **`getExtensionStatsMonitor(id)` / `getExtensionStatsPayload(id)`**: Reaches application-supplied stats folded into the monitor tree
 -   **`watchMediaDevices()`**: Integrates with navigator.mediaDevices
 -   **`fetchUserAgentData()`**: Fetches browser user agent information
 
 ### Properties
 
 -   **`score`**: Current client performance score (0.0-5.0)
--   **`scoreReasons`**: Detailed score calculation reasons
+-   **`scoreReasons`**: This entity's own score subtractions — the aggregate is on the `'score'` event's `currentReasons`
+-   **`createdAt`** / **`uptimeInMs`**: When this monitor started, and how long it has run
+-   **`cpuUtilization`**: The reading behind `cpulimitation`, published whether or not it raised
 -   **`closed`**: Whether the monitor is closed
 -   **`config`**: Current configuration
 -   **`detectors`**: Detector management instance
 -   **`peerConnections`**: Array of monitored peer connections
 -   **`tracks`**: Array of monitored tracks
 -   **`activeIssues`**: `Map<string, RaisedClientIssue>` keyed by issue `key` — currently active stateful issues. Read-only by convention; use `getActiveIssuesByType` / `isIssueActive` instead of touching this directly.
+
+### Declared track context
+
+Some of what decides a score is invisible to `getStats()`: whether an inbound track
+is a screen share, how much motion its content carries, and how large it is actually
+being shown. One call per direction declares it.
+
+```typescript
+monitor.setInboundTrackContext(trackId, {
+    contentType: 'screenshare',   // no frame-rate penalties on static content
+    motionType: 'lowmotion',      // which quantizer band judges blockiness
+    videoTag: videoElement,       // presented size, re-measured every tick
+});
+
+monitor.setOutboundTrackContext(trackId, { contentType: 'screenshare' });
+```
+
+Declarations may be made **before the track exists** — signaling usually announces a
+guest's screen share before a packet arrives — and are applied to whichever peer
+connection first manifests the track. They **merge** rather than replace, so
+attaching the video element later never drops a content type declared earlier, and an
+explicit `undefined` means "not declared here", not "reset". `presentedResolution`
+can be given in device pixels instead of a `videoTag`; outbound `contentType` is
+auto-detected from `track.getSettings().displaySurface` where the browser reports it.
 
 ## Detectors
 
@@ -389,15 +417,23 @@ starts at 5.0 and is reduced by the findings its own detectors raised. Nothing
 re-derives a threshold from raw stats, so a fault is judged in one place and the
 score can never disagree with the issue list an operator is looking at.
 
-How a fault counts follows from its category, which `ISSUE_SCORING` decides per
-issue type:
+A charge named after an issue type is applied only while that issue is open. What
+it is *worth* can still be a continuous reading, so `decoder-bottleneck` costs what
+the decoder actually fell behind by. A few charges have no detector behind them and
+are named for what they measure rather than for an issue — `volatile-fps`,
+`dropped-video-frames`, `blocky-video`, `unstable-audio-playout`,
+`unstable-transport`. A charge worth nothing is never written: a reason sitting at
+`0` would read as a fault that was found and never resolved.
 
-| Category | Effect | Why |
-|---|---|---|
-| Connectivity | Scores the connection **zero** | Nothing riding on an unusable path can be good |
-| Pipeline disruption | **Caps** the score | Two stopped pipelines are not twice as stopped |
-| Perceived quality | **Subtracts** from the track | Two quality faults really are worse than one |
-| Transport quality | **Subtracts** from the connection | It already scales into every track riding on it |
+Connectivity issues are **deliberately not priced**. A path carrying nothing leaves
+nothing to have an opinion about, and `dry-inbound-track` / `dry-outbound-track`
+already take the tracks riding on it to zero.
+
+The call's own score is `5 − RMSE` across five dimensions — the transport, and
+inbound and outbound audio and video. A dimension nothing reported is *absent*, not
+zero: a call that sends no video is not a call whose video is broken. Squaring the
+distances is what makes one collapsed dimension cost more than the same shortfall
+spread evenly.
 
 ```typescript
 monitor.on('score', ({ clientScore, currentReasons }) => {
@@ -406,8 +442,9 @@ monitor.on('score', ({ clientScore, currentReasons }) => {
 });
 ```
 
-`ISSUE_SCORING` is exported and mutable — retuning what a fault costs is an edit to
-a table, and `unscoredIssueTypes()` reports any issue type no rule covers.
+Retuning what a fault costs is an edit to the mutable statics on
+`DefaultScoreCalculator`; replacing the policy outright means assigning your own
+`ScoreCalculator` to `monitor.scoreCalculator`.
 
 > **[docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md)** is the full
 > reference — the weight of every issue type, the five-dimension client score, the
@@ -423,8 +460,13 @@ server to consume.
 ```typescript
 const monitor = new ClientMonitor({ collectingPeriodInMs: 2000, samplingPeriodInMs: 4000 });
 
-monitor.on('sample-created', ({ clientSample }) => transport.send(clientSample));
+monitor.on('sample-created', ({ sample }) => transport.send(sample));
 ```
+
+Samples created before anything listens are dropped, unless
+`bufferClientSamplesUntilSubscriber: true` — then they are held and replayed in
+creation order to the first `'sample-created'` listener, so a monitor started before
+the transport is ready does not lose the opening of the call.
 
 Adapters normalise, monitors derive, detectors threshold. An adapter never invents
 a measurement: where a browser reports nothing, the field stays absent and
@@ -498,7 +540,7 @@ type ClientSample = {
     clientId?: string;
     callId?: string;
     score?: number;
-    scoreReasons?: string;
+    scoreReasons?: Record<string, number>;
     attachments?: Record<string, unknown>;
     peerConnections?: PeerConnectionSample[];
     clientEvents?: ClientEvent[];
@@ -516,7 +558,7 @@ Per-peer-connection statistics:
 type PeerConnectionSample = {
     peerConnectionId: string;
     score?: number;
-    scoreReasons?: string;
+    scoreReasons?: Record<string, number>;
     attachments?: Record<string, unknown>;
     inboundTracks?: InboundTrackSample[];
     outboundTracks?: OutboundTrackSample[];
@@ -527,6 +569,7 @@ type PeerConnectionSample = {
     remoteOutboundRtps?: RemoteOutboundRtpStats[];
     mediaSources?: MediaSourceStats[];
     mediaPlayouts?: MediaPlayoutStats[];
+    peerConnectionTransports?: PeerConnectionTransportStats[];
     dataChannels?: DataChannelStats[];
     iceTransports?: IceTransportStats[];
     iceCandidates?: IceCandidateStats[];
@@ -563,8 +606,9 @@ All stats types include standard WebRTC fields plus:
 #### High Memory Usage
 
 ```javascript
-// Limit stored scores history
-monitor.scoreCalculator.constructor.lastNScoresMaxLength = 5;
+// Collect less often — the monitor tree and every window are sized in
+// collections, so this is the one knob that shrinks all of them at once.
+monitor.setCollectingPeriod(5000);
 
 // Disable unnecessary detectors at runtime — the flag lives on the detector
 // instance, not on its config entry.
@@ -573,9 +617,6 @@ for (const pc of monitor.mappedPeerConnections.values()) {
         track.detectors.disable('av-desync-playout-detector');
     }
 }
-
-// Reduce collection frequency
-monitor.setCollectingPeriod(5000);
 ```
 
 #### Missing Statistics
@@ -589,10 +630,13 @@ monitor.on("stats-collected", ({ collectedStats }) => {
     console.log("Collected stats from PCs:", collectedStats.length);
 });
 
-// Check for adaptation issues
-monitor.statsAdapters.add((stats) => {
-    console.log("Raw stats count:", stats.length);
-    return stats;
+// Check for adaptation issues — an adapter is a named object, not a bare function
+monitor.statsAdapters.add({
+    name: "log-raw-stats",
+    postAdapt: (stats) => {
+        console.log("Raw stats count:", stats.length);
+        return stats;
+    },
 });
 ```
 
@@ -643,13 +687,10 @@ const monitor = new ClientMonitor({
     // flag on the instance.
     cpuPerformanceDetector: null,
     avDesyncPlayoutDetector: null,
-});
 
-// Manual garbage collection
-setInterval(() => {
-    // Clear old data periodically
-    monitor.scoreCalculator.totalReasons = {};
-}, 60000);
+    // Keep reasons off the wire without changing any score
+    sendScoreReasonsToServer: false,
+});
 ```
 
 ## API Reference
@@ -698,18 +739,22 @@ interface Detector {
 ### Events
 
 ```typescript
-interface ClientMonitorEvents {
-    "sample-created": (sample: ClientSample) => void;
-    "stats-collected": (data: {
+// Every payload but `issue` carries the emitting `clientMonitor`.
+type ClientMonitorEvents = {
+    "sample-created": [{ clientMonitor: ClientMonitor; sample: ClientSample }];
+    "stats-collected": [{
+        clientMonitor: ClientMonitor;
+        startedAt: number;
         durationOfCollectingStatsInMs: number;
-        collectedStats: [string, RTCStats[]][];
-    }) => void;
-    score: (data: { clientScore: number; currentReasons: Record<string, number> }) => void;
-    issue: (issue: ClientIssue) => void;
-    congestion: (data: CongestionEventPayload) => void;
-    close: () => void;
-    // ... detector-specific events
-}
+        collectedStats: [string, RtcStats[]][];
+    }];
+    score: [{ clientMonitor: ClientMonitor; clientScore: number; currentReasons: Record<string, number> }];
+    issue: [ClientIssue];
+    "issue-resolved": [ResolvedClientIssue];
+    "uplink-congestion": [UplinkCongestionEventPayload];
+    close: [];
+    // ... one entry per detector event
+};
 ```
 
 ## FAQ
@@ -764,12 +809,22 @@ monitor.addSource(pc2);
 
 ### Q: How do I monitor screen sharing vs camera streams differently?
 
-**A**: Use the `attachments` property to tag tracks:
+**A**: Declare it. Nothing in `getStats()` reveals that an inbound track is a screen
+share, and the library scores one differently — no frame-rate penalties on content
+that legitimately sits still, and a different quantizer band. A declaration may be
+made before the track exists; it is held and applied to whichever peer connection
+first manifests it.
 
 ```javascript
-// When adding a screen share track
-trackMonitor.attachments = { mediaType: "screen-share" };
+monitor.setInboundTrackContext(trackId, { contentType: "screenshare" });
+
+// Outbound screen share is auto-detected from track.getSettings().displaySurface,
+// so declaring it is only needed where the browser does not report one.
+monitor.setOutboundTrackContext(trackId, { contentType: "screenshare" });
 ```
+
+Contexts merge rather than replace, so attaching the video element later keeps the
+content type declared here.
 
 ### Q: What's the performance impact of monitoring?
 

@@ -148,13 +148,6 @@ export type DownlinkCongestionEventPayload = ClientMonitorBaseEvent & {
 export type CongestionDirection = 'uplink' | 'downlink';
 
 /**
- * The direction-agnostic feed: emitted alongside `uplink-congestion` or
- * `downlink-congestion` whenever either fires, for applications that only need
- * to know the connection is capacity-limited somewhere. Carries whichever
- * detector's payload fired, discriminated on `direction`; a connection
- * congested both ways fires it once per direction.
- */
-/**
  * **Deprecated**, and dedicated to `CongestionDetector`: one verdict for the whole connection, with
  * the headroom that preceded the episode. Nothing else emits on this event — the detectors that
  * replaced it report on `uplink-congestion` and `downlink-congestion`, each on its own evidence and

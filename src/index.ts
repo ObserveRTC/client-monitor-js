@@ -118,6 +118,8 @@ export type {
     ClientMonitorResolvedIssue,
     ClientMonitorIssueType,
 } from './ClientMonitorIssues';
+export { AudioPlayoutSynthesisDetector } from './detectors/AudioPlayoutSynthesisDetector';
+export type { AudioPlayoutSynthesisDetectorConfig, AudioPlayoutSynthesisIssuePayload } from './detectors/AudioPlayoutSynthesisDetector';
 export { AVDesyncPlayoutDetector } from './detectors/AVDesyncPlayoutDetector';
 export type { AVDesyncPlayoutDetectorConfig } from './detectors/AVDesyncPlayoutDetector';
 export type { AVDesyncPlayoutIssuePayload, AVDesyncDirection } from './detectors/AVDesyncPlayoutDetector';

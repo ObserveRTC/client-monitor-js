@@ -286,12 +286,6 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     // ---- Transport Quality --------------------------------------------------
 
     /**
-     * Configuration for `UplinkCongestionDetector` — the sending path running
-     * out of capacity.
-     *
-     * Pass `null` to disable the detector entirely.
-     */
-    /**
      * Configuration for the deprecated `CongestionDetector`. Set to `null` to switch it off once
      * nothing depends on the `congestion` event or issue any more.
      *
@@ -299,6 +293,12 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      */
     congestionDetector: CongestionDetectorConfig | null;
 
+    /**
+     * Configuration for `UplinkCongestionDetector` — the sending path running
+     * out of capacity.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
     uplinkCongestionDetector: UplinkCongestionDetectorConfig | null;
 
     /**
