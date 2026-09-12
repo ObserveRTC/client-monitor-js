@@ -76,6 +76,14 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     bufferingEventsForSamples?: boolean,
 
     /**
+     * Whether samples created while there is no `'sample-created'` listener are
+     * buffered and replayed, in creation order, to the first one that subscribes.
+     *
+     * DEFAULT: false
+     */
+    bufferClientSamplesUntilSubscriber?: boolean,
+
+    /**
      * Specifies the interval (in milliseconds) at which the observer calls
      * the added statsCollectors and pulls the stats.
      *

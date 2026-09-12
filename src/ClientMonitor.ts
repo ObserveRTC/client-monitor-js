@@ -132,6 +132,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _clientMetaItems: ClientSampleClientMetaData[] = [];
     private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
+    private _bufferedClientSamples?: ClientSample[];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
     private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
@@ -426,6 +427,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             }),
 
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
+            bufferClientSamplesUntilSubscriber: monitorConfig.bufferClientSamplesUntilSubscriber ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
@@ -464,6 +466,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         }
         if (this.config.watchTabVisibility) {
             this._sources.watchTabVisibility();
+        }
+        if (this.config.bufferClientSamplesUntilSubscriber) {
+            this._bufferedClientSamples = [];
         }
         try {
             this._sources.fetchUserAgentData();
@@ -565,6 +570,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             this.createSample();
         }
 
+        if (this._bufferedClientSamples?.length) {
+            this.logger.warn(`[${MODULE_NAME}]:`,
+                `Closing with ${this._bufferedClientSamples.length} buffered sample(s) never delivered, because no 'sample-created' listener ever subscribed.`
+            );
+        }
+        this._bufferedClientSamples = undefined;
+
         this.closed = true;
         this.emit('close');
     }
@@ -572,11 +584,15 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public on<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
         super.on(event, listener);
 
+        if (event === 'sample-created') this._flushBufferedClientSamples();
+
         return this;
     }
 
     public once<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
         super.once(event, listener);
+
+        if (event === 'sample-created') this._flushBufferedClientSamples();
 
         return this;
     }
@@ -745,11 +761,20 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         if (!clientSample) {
             return;
         }
+        this.lastSampledAt = timestamp;
+
+        if (this._bufferedClientSamples) {
+            if (this.listenerCount('sample-created') === 0) {
+                this._bufferedClientSamples.push(clientSample);
+            } else {
+                this._flushBufferedClientSamples();
+            }
+        }
+
         this.emit('sample-created', {
             clientMonitor: this,
             sample: clientSample
         });
-        this.lastSampledAt = timestamp;
 
         return clientSample;
     }
@@ -1208,7 +1233,28 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         );
     }
 
+    /**
+     * Replays, in creation order, the samples buffered while no
+     * `'sample-created'` listener existed, and ends buffering for good.
+     *
+     * Dropped before emitting, so a listener subscribing from inside its own
+     * handler re-enters here and finds nothing left to replay.
+     */
+    private _flushBufferedClientSamples(): void {
+        const bufferedClientSamples = this._bufferedClientSamples;
 
+        if (!bufferedClientSamples) return;
+        if (this.listenerCount('sample-created') === 0) return;
+
+        this._bufferedClientSamples = undefined;
+
+        for (const sample of bufferedClientSamples) {
+            this.emit('sample-created', {
+                clientMonitor: this,
+                sample,
+            });
+        }
+    }
 
     // the temrinal function for a raise issue chain
     private _raiseIssue(issue: RaisedClientIssue): boolean {
