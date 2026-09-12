@@ -1254,7 +1254,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 sample,
             });
         }
-
+    }
 
     // the temrinal function for a raise issue chain
     private _raiseIssue(issue: RaisedClientIssue): boolean {
