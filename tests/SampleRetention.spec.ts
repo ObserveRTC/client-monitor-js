@@ -3,11 +3,15 @@ import { ClientSample } from "../src/schema/ClientSample";
 import { Logger } from "../src/utils/logger";
 
 /**
- * What retention adds on top of the contract in
+ * What buffering adds on top of the contract in
  * `SampleLossBeforeFirstSubscriber.spec.ts`: the early data arrives as the very
  * samples that were created for it, each still bounding its own time window,
  * rather than merged into one sample stamped when the consumer happened to
- * subscribe. The queue that holds them is bounded, and says so when it overflows.
+ * subscribe.
+ *
+ * `bufferClientSamplesUntilSubscriber` is opt-in, so every monitor here states
+ * it; the cases that leave it off are the ones pinning that the default
+ * discards, exactly as it always did.
  */
 
 const silentLogger: Logger = { trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
@@ -29,6 +33,7 @@ function createRecordingLogger() {
 function createMonitor(config: Record<string, unknown> = {}) {
 	return new ClientMonitor({
 		logger: silentLogger,
+		bufferClientSamplesUntilSubscriber: true,
 		integrateNavigatorMediaDevices: false,
 		addClientJointEventOnCreated: false,
 		addClientLeftEventOnClose: false,
@@ -114,48 +119,86 @@ describe('samples created before the first subscriber', () => {
 	});
 });
 
-describe('the retention queue bound', () => {
-	it('keeps the newest samples and drops the oldest beyond the limit', () => {
-		const monitor = createMonitor({ maxRetainedSamplesBeforeFirstSubscriber: 3 });
+describe('the buffer', () => {
+	/**
+	 * Deliberately unbounded. Buffering is opt-in, so enabling it is the
+	 * application taking on the retained samples and what they cost; a bound
+	 * would silently drop the very samples the option exists to keep.
+	 */
+	it('holds every sample, however many are created before a subscriber', () => {
+		const monitor = createMonitor();
+		const tags = Array.from({ length: 200 }, (_, index) => `sample-${index}`);
 
-		for (const tag of ['first', 'second', 'third', 'fourth', 'fifth']) {
-			createTaggedSample(monitor, tag);
-		}
+		for (const tag of tags) createTaggedSample(monitor, tag);
 
 		const received: ClientSample[] = [];
 
 		monitor.on('sample-created', ({ sample }) => received.push(sample));
 
-		expect(received.map(tagsOf)).toEqual([['third'], ['fourth'], ['fifth']]);
+		expect(received.map(tagsOf)).toEqual(tags.map(tag => [ tag ]));
 
 		monitor.close();
 	});
 
-	it('logs an error naming how many samples were dropped', () => {
+	it('never logs a dropped-sample error, however long nobody subscribes', () => {
 		const { logger, errors } = createRecordingLogger();
-		const monitor = createMonitor({ logger, maxRetainedSamplesBeforeFirstSubscriber: 2 });
-		const dropErrors = () => errors.filter(error => error.includes('Dropped'));
+		const monitor = createMonitor({ logger });
+
+		for (let index = 0; index < 100; ++index) createTaggedSample(monitor, `sample-${index}`);
+
+		// Only sample losses: the constructor logs its own errors in this environment.
+		expect(errors.filter(error => /drop/i.test(error))).toHaveLength(0);
+
+		monitor.close();
+	});
+
+	/** The default: sample events are not expected to be consumed, so nothing waits. */
+	it('discards every unconsumed sample while buffering is off', () => {
+		const monitor = createMonitor({ bufferClientSamplesUntilSubscriber: false });
 
 		createTaggedSample(monitor, 'first');
-		createTaggedSample(monitor, 'second');
 
-		expect(dropErrors()).toHaveLength(0);
+		const received: ClientSample[] = [];
 
-		createTaggedSample(monitor, 'third');
+		monitor.on('sample-created', ({ sample }) => received.push(sample));
 
-		expect(dropErrors()).toHaveLength(1);
-		expect(dropErrors()[0]).toContain('Dropped 1 sample(s)');
-
-		createTaggedSample(monitor, 'fourth');
-
-		// the count is cumulative, so the last message tells the whole story
-		expect(dropErrors()[1]).toContain('Dropped 2 sample(s)');
+		expect(received).toHaveLength(0);
 
 		monitor.close();
 	});
 
-	it('discards every unconsumed sample when the limit is 0', () => {
-		const monitor = createMonitor({ maxRetainedSamplesBeforeFirstSubscriber: 0 });
+	/**
+	 * "Until the first subscriber" is literal: the buffer is dropped once one
+	 * drains it, so a consumer that later detaches leaves the monitor emitting
+	 * to nobody rather than quietly refilling an unbounded array.
+	 */
+	it('does not buffer again once a subscriber has come and gone', () => {
+		const monitor = createMonitor();
+		const first = () => { /* the first subscriber, which ends buffering */ };
+
+		createTaggedSample(monitor, 'before');
+		monitor.on('sample-created', first);
+		monitor.off('sample-created', first);
+
+		createTaggedSample(monitor, 'after');
+
+		const received: ClientSample[] = [];
+
+		monitor.on('sample-created', ({ sample }) => received.push(sample));
+
+		expect(received).toHaveLength(0);
+
+		monitor.close();
+	});
+
+	it('is off unless the application asks for it', () => {
+		const monitor = new ClientMonitor({
+			logger: silentLogger,
+			integrateNavigatorMediaDevices: false,
+			addClientJointEventOnCreated: false,
+			addClientLeftEventOnClose: false,
+			watchTabVisibility: false,
+		});
 
 		createTaggedSample(monitor, 'first');
 
@@ -180,7 +223,13 @@ describe('closing without a subscriber', () => {
 		expect(warnings.some(warning => warning.includes('never delivered'))).toBe(true);
 	});
 
-	it('still hands the retained samples to a consumer that subscribes after close', () => {
+	/**
+	 * The buffer is released at close rather than held for a subscriber that may
+	 * never come: the monitor is done, the warning above has already said what
+	 * was never delivered, and an unbounded buffer should not outlive the thing
+	 * that filled it.
+	 */
+	it('releases the buffered samples rather than holding them past close', () => {
 		const monitor = createMonitor();
 
 		createTaggedSample(monitor, 'first');
@@ -190,7 +239,6 @@ describe('closing without a subscriber', () => {
 
 		monitor.on('sample-created', ({ sample }) => received.push(sample));
 
-		// close() creates a last sample of its own, which is retained too
-		expect(received.map(tagsOf)).toEqual([['first'], []]);
+		expect(received).toHaveLength(0);
 	});
 });

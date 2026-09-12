@@ -37,14 +37,6 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 
 const MODULE_NAME = 'ClientMonitor';
 
-/**
- * Samples retained while nothing listens for `'sample-created'`. At the default
- * 8s sampling period this covers a little over four minutes of monitor lifetime
- * before the oldest sample is dropped, which is far longer than any consumer
- * should need to attach.
- */
-const DEFAULT_MAX_RETAINED_SAMPLES_BEFORE_FIRST_SUBSCRIBER = 32;
-
 export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
@@ -114,8 +106,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _clientMetaItems: ClientSampleClientMetaData[] = [];
     private _clientIssues: ClientSampleClientIssue[] = [];
     private _extensionStats: ExtensionStat[] = [];
-    private _retainedSamples: ClientSample[] = [];
-    private _droppedRetainedSamples = 0;
+    private _bufferedClientSamples?: ClientSample[];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
 
@@ -291,8 +282,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 iceRestartRecommendationCooldownInMs: 15000,
             }),
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
-            maxRetainedSamplesBeforeFirstSubscriber: monitorConfig.maxRetainedSamplesBeforeFirstSubscriber
-                ?? DEFAULT_MAX_RETAINED_SAMPLES_BEFORE_FIRST_SUBSCRIBER,
+            bufferClientSamplesUntilSubscriber: monitorConfig.bufferClientSamplesUntilSubscriber ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
@@ -320,6 +310,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         }
         if (this.config.watchTabVisibility) {
             this._sources.watchTabVisibility();
+        }
+        if (this.config.bufferClientSamplesUntilSubscriber) {
+            this._bufferedClientSamples = [];
         }
         try {
             this._sources.fetchUserAgentData();
@@ -408,14 +401,12 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             this.createSample();
         }
 
-        if (0 < this._retainedSamples.length) {
-            // Kept rather than cleared: clearing would destroy the very samples
-            // retention exists to preserve, and a consumer subscribing after
-            // close still drains them. They are released with the monitor.
+        if (this._bufferedClientSamples?.length) {
             this.logger.warn(`[${MODULE_NAME}]:`,
-                `Closing with ${this._retainedSamples.length} sample(s) never delivered, because no 'sample-created' listener ever subscribed.`
+                `Closing with ${this._bufferedClientSamples.length} buffered sample(s) never delivered, because no 'sample-created' listener ever subscribed.`
             );
         }
+        this._bufferedClientSamples = undefined;
 
         this.closed = true;
         this.emit('close');
@@ -423,14 +414,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public on<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
         super.on(event, listener);
-        this._flushRetainedSamples();
+
+        if (event === 'sample-created') this._flushBufferedClientSamples();
 
         return this;
     }
 
     public once<K extends keyof ClientMonitorEvents>(event: K, listener: (...args: ClientMonitorEvents[K]) => void): this {
         super.once(event, listener);
-        this._flushRetainedSamples();
+
+        if (event === 'sample-created') this._flushBufferedClientSamples();
 
         return this;
     }
@@ -566,70 +559,22 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         if (!clientSample) {
             return;
         }
-        if (this.listenerCount('sample-created') === 0) {
-            this._retainSample(clientSample);
-        } else {
-            // Also flushed from `on`/`once`; repeated here so a subscription
-            // made through a path that bypasses those overrides still replays
-            // the retained samples ahead of this one.
-            this._flushRetainedSamples();
-            this.emit('sample-created', {
-                clientMonitor: this,
-                sample: clientSample
-            });
-        }
         this.lastSampledAt = timestamp;
 
-        return clientSample;
-    }
-
-    /**
-     * Holds a sample nobody could receive yet, dropping the oldest once the
-     * queue is full. The drop is an error rather than a warning: the queue is
-     * sized so that it cannot overflow in a session that ever attaches a
-     * consumer, so reaching it means samples are being permanently lost.
-     */
-    private _retainSample(clientSample: ClientSample): void {
-        const limit = this.config.maxRetainedSamplesBeforeFirstSubscriber
-            ?? DEFAULT_MAX_RETAINED_SAMPLES_BEFORE_FIRST_SUBSCRIBER;
-
-        if (limit < 1) return;
-
-        this._retainedSamples.push(clientSample);
-
-        const overflow = this._retainedSamples.length - limit;
-
-        if (overflow < 1) return;
-
-        this._retainedSamples.splice(0, overflow);
-        this._droppedRetainedSamples += overflow;
-
-        this.logger.error(`[${MODULE_NAME}]:`,
-            `Dropped ${this._droppedRetainedSamples} sample(s) created before any 'sample-created' listener subscribed. ` +
-            `No consumer has subscribed after ${limit} samples — subscribe earlier, or raise maxRetainedSamplesBeforeFirstSubscriber.`
-        );
-    }
-
-    /**
-     * Replays, in creation order, the samples created before the first
-     * `'sample-created'` listener existed.
-     */
-    private _flushRetainedSamples(): void {
-        if (this._retainedSamples.length === 0) return;
-        if (this.listenerCount('sample-created') === 0) return;
-
-        // Drained before emitting so a listener subscribing from inside its own
-        // handler re-enters here and finds nothing left to replay.
-        const retainedSamples = this._retainedSamples;
-
-        this._retainedSamples = [];
-
-        for (const sample of retainedSamples) {
-            this.emit('sample-created', {
-                clientMonitor: this,
-                sample,
-            });
+        if (this._bufferedClientSamples) {
+            if (this.listenerCount('sample-created') === 0) {
+                this._bufferedClientSamples.push(clientSample);
+            } else {
+                this._flushBufferedClientSamples();
+            }
         }
+
+        this.emit('sample-created', {
+            clientMonitor: this,
+            sample: clientSample
+        });
+
+        return clientSample;
     }
 
     public addPeerConnectionMonitor(peerConnectionMonitor: PeerConnectionMonitor): void {
@@ -1134,5 +1079,28 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         this._samplingTick = Math.max(1,
             Math.floor(this.config.samplingPeriodInMs / this.config.collectingPeriodInMs)
         );
+    }
+
+    /**
+     * Replays, in creation order, the samples buffered while no
+     * `'sample-created'` listener existed, and ends buffering for good.
+     *
+     * Dropped before emitting, so a listener subscribing from inside its own
+     * handler re-enters here and finds nothing left to replay.
+     */
+    private _flushBufferedClientSamples(): void {
+        const bufferedClientSamples = this._bufferedClientSamples;
+
+        if (!bufferedClientSamples) return;
+        if (this.listenerCount('sample-created') === 0) return;
+
+        this._bufferedClientSamples = undefined;
+
+        for (const sample of bufferedClientSamples) {
+            this.emit('sample-created', {
+                clientMonitor: this,
+                sample,
+            });
+        }
     }
 }

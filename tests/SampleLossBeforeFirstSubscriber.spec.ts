@@ -21,6 +21,8 @@ const silentLogger: Logger = { trace: () => {}, debug: () => {}, info: () => {},
 function createMonitor(config: Record<string, unknown> = {}) {
 	return new ClientMonitor({
 		logger: silentLogger,
+		// The contract below is what this option buys; it is off by default.
+		bufferClientSamplesUntilSubscriber: true,
 		integrateNavigatorMediaDevices: false,
 		addClientJointEventOnCreated: false,
 		addClientLeftEventOnClose: false,

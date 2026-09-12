@@ -209,7 +209,7 @@ const monitor = new ClientMonitor({
     addClientJointEventOnCreated: true, // Default: true
     addClientLeftEventOnClose: true, // Default: true
     bufferingEventsForSamples: false, // Default: false
-    maxRetainedSamplesBeforeFirstSubscriber: 32, // Default: 32
+    bufferClientSamplesUntilSubscriber: false, // Default: false
 
     // Detector configurations (all optional).
     //
@@ -1653,32 +1653,47 @@ monitor.on("sample-created", (sample) => {
 
 ### Subscribing Late
 
-Sampling starts with the monitor, not with the consumer. A `'sample-created'`
-listener that subscribes some time after construction — after an async import,
-after a signaling handshake — would otherwise miss every sample created before
-it existed, including the one carrying the user agent data the constructor
-collects.
+Creating a sample and emitting it are separate concerns. `createSample()` can be
+called at any time, independently of the monitor's ticking loop — an application
+may collect stats every few seconds and create a sample only when a client issue
+is raised, and want no periodic sample events at all. So by default a sample
+created while nothing is listening is emitted to an empty listener list and gone.
 
-Samples created while nothing is listening are therefore retained and replayed,
-in creation order, to the first listener that subscribes:
+`bufferClientSamplesUntilSubscriber` is how an application says the opposite:
+that a subscriber is expected to process every sample event, and that it may not
+be attached yet when the monitor is created. Sampling starts with the monitor,
+not with the consumer, so a listener that subscribes some time after
+construction — after an async import, after a signaling handshake — would
+otherwise miss every sample created before it existed, including the one
+carrying the user agent data the constructor collects.
+
+Samples created while nothing is listening are therefore buffered and replayed,
+in creation order, to the first listener that subscribes — when the application
+opts in with `bufferClientSamplesUntilSubscriber`:
 
 ```javascript
-const monitor = new ClientMonitor({ samplingPeriodInMs: 4000 });
+const monitor = new ClientMonitor({
+  samplingPeriodInMs: 4000,
+  bufferClientSamplesUntilSubscriber: true,
+});
 
 // ...minutes later, once the analytics transport is ready
 monitor.on("sample-created", ({ sample }) => sendToAnalytics(sample));
 // every sample created before this line arrives here first, oldest first
 ```
 
-Each retained sample keeps its own `timestamp` and still bounds its own time
-window — nothing is merged into an oversized first sample. The queue holds
-`maxRetainedSamplesBeforeFirstSubscriber` samples (default 32, a little over
-four minutes at the default sampling period) and drops the oldest beyond that,
-logging an error naming how many were lost. Set it to `0` to discard
-unconsumed samples instead of retaining them.
+Each buffered sample keeps its own `timestamp` and still bounds its own time
+window — nothing is merged into an oversized first sample.
 
-A consumer that subscribes immediately after construction is unaffected: the
-queue is always empty and each sample is emitted exactly once, as before.
+The buffer is unbounded on purpose. Buffering is opt-in, so enabling it is the
+application taking responsibility for the retained samples and what they cost in
+memory; a bounded queue would silently drop the very samples the option exists to
+keep. Enabling it and never attaching a subscriber is an application lifecycle
+problem — `close()` warns when it happens, and releases the buffer rather than
+holding it for a subscriber that may never come.
+
+A consumer that subscribes immediately after construction is unaffected either
+way: the buffer is always empty and each sample is emitted exactly once.
 
 ### Manual Sampling
 
