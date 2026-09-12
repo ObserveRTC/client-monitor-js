@@ -1,3 +1,151 @@
+## 4.9.0
+
+The detector layer is rebuilt around one rule: **one detector class raises one issue type**, and
+every issue is priced by one table. 26 detector classes became 46, 25 issue types became 37, and
+the score stopped re-deriving thresholds from raw stats.
+
+Three things drove it. A class that owned four findings lost all four to one malformed stats
+report, because `Detectors.update()` wraps each detector in its own try/catch. `disabled` and
+`includeIssueInSample` are per detector, so a config key covering a group could not silence one
+finding without silencing its neighbours. And a class holding several conditions accumulated
+shared state that coupled them.
+
+Full reference: [docs/DETECTOR_TAXONOMY.md](docs/DETECTOR_TAXONOMY.md).
+
+### Breaking: detector classes split and renamed
+
+| 4.8.0 | 4.9.0 | Issue type |
+|---|---|---|
+| `AudioConcealmentDetector` | `InventedSpeechDetector` | `audio-concealment` → `invented-speech` |
+| `AudioDesyncDetector` | `AVDesyncPlayoutDetector` | `audio-desync` → `av-desync` |
+| `BlockedTransportDetector` | `BlockedInboundMediaDetector`, `BlockedOutboundMediaDetector`, `BlockedStunRequestsDetector` | `blocked-transport` → `blocked-inbound-media-transport`, `blocked-outbound-media-transport`, `blocked-stun-requests` |
+| `CaptureFailureDetector` | `CaptureSourceLostDetector`, `CaptureTrackMutedDetector` | `capture-track-ended` → `capture-source-lost` |
+| `EncoderPerformanceDetector` | `EncoderBottleneckDetector` | `encoder-bottleneck`, unchanged |
+| `FreezedVideoTrackDetector` | `InboundVideoFlowStateDetector` | `freezed-video-track` → `video-flow-disrupted` |
+| `IceConnectivityDetector` | `IceDisconnectedDetector`, `IceConnectionFailedDetector`, `IceTransportStalledDetector`, `UnstableIcePathDetector`, `IceRestartDetector`, `IceRestartRecommendationDetector` | `ice-disconnected` plus five new |
+| `IceTupleChangeDetector` | `IceTraversalDetector` | none (telemetry) |
+| `InboundFrameSupplyDetector` | `DecoderBottleneckDetector` | `decoder-bottleneck`, unchanged |
+| `LongPcConnectionEstablishment` | `IcePathEstablishmentDetector` | none |
+| `MediaPipelineDetector` | `RtpSenderStalledDetector`, `TransportDemuxStalledDetector` | `media-pipeline-stalled` → `rtp-sender-stalled`, `transport-demux-stalled` |
+| `NoAvailableIceCandidateDetector` | `IceReachabilityDetector` | `no-available-ice-candidate`, unchanged |
+| `OutboundFrameSupplyDetector` | `VideoCaptureBottleneckDetector` | `capture-bottleneck` → `video-capture-bottleneck` |
+| `SynthesizedSamplesDetector` | `AudioPlayoutSynthesisDetector` | `synthesized-audio` |
+
+A split class has no alias: one that raised four issues cannot be aliased onto one that raises a
+single one without lying about what it does. Import the part you meant.
+
+**Also new**, with no predecessor: `DtlsHandshakeFailedDetector`, `DtlsHandshakeStalledDetector`,
+`IceEstablishmentFailedDetector`, `FrameAssemblyStalledDetector`, `PixelatedVideoDetector`,
+`SilentAudioSourceDetector`, `TransportDelayDetector`, `TransportLossDetector`,
+`UplinkCongestionDetector`, `DownlinkCongestionDetector`, `VideoRecoveryFailedDetector`,
+`CodecChangeDetector`, `SimulcastLayerDetector`, `StatsGapDetector`,
+`VideoResolutionChangeDetector`.
+
+`keyframe-storm` is removed outright, with no replacement.
+
+### Breaking: one config block per detector
+
+Every detector reads a block named after itself — its `name` in camelCase, so
+`frame-assembly-stalled-detector` reads `frameAssemblyStalledDetector`. Keys that used to
+construct a group of classes are gone, because a `null` intended to silence one finding silently
+removed its neighbours: `audioConcealmentDetector`, `audioDesyncDetector`,
+`blockedTransportDetector`, `captureFailureDetector`, `encoderPerformanceDetector`,
+`iceConnectivityDetector`, `inboundFrameSupplyDetector`,
+`longPcConnectionEstablishmentDetector`, `mediaPipelineDetector`,
+`noAvailableIceCandidateDetector`, `outboundFrameSupplyDetector`, `syntheticSamplesDetector`,
+`videoFreezesDetector`, `videoRecoveryDetector`.
+
+63 config keys, one per detector plus the shared blocks below. A retired key fails to type-check.
+
+### Breaking: the score is a reading of the open issues
+
+`DefaultScoreCalculator` no longer re-derives anything from raw stats. Every monitor starts at
+5.0 and is reduced by the findings its own detectors raised, read from that monitor's issue
+registry, so a fault is judged in exactly one place and the score cannot disagree with the issue
+list an operator is looking at.
+
+`ISSUE_SCORING` is the whole policy: one row per issue type, giving a category and a weight, and
+optionally the payload field to read a detector-measured severity from. How a fault counts
+follows from its category — connectivity zeroes the score, pipeline disruption *caps* it,
+perceived and transport quality *subtract*. Capping and subtracting differ on purpose: two broken
+pipelines are not twice as bad as one, but two quality faults really are.
+
+Removed with it: `DefaultScoreCalculatorInboundVideoTrackScoreAppData`,
+`DefaultScoreCalculatorOutboundAudioTrackScoreAppData`,
+`DefaultScoreCalculatorOutboundVideoTrackScoreAppData`,
+`DefaultScoreCalculatorPeerConnectionScoreAppData`, `DefaultScoreCalculatorSubtractions`, and the
+`QP_SCALE_BY_CODEC` / `QP_CLEAN_RATIO` / `QP_COARSE_RATIO` statics — a blocky picture is now
+`PixelatedVideoDetector`'s judgement, not the calculator's.
+
+New: `ISSUE_SCORING`, `issueSeverity` and `unscoredIssueTypes` are exported, so retuning what a
+fault costs is an edit to a table, and an issue type no rule covers is reported rather than
+silently unscored.
+
+### Breaking: retired events
+
+`audio-concealment`, `audio-desync-track`, `capture-track-ended`, `freezed-video-track`,
+`keyframe-storm`, `media-pipeline-stalled` and `too-long-pc-connection-establishment` no longer
+exist. 68 events in total; the additions mirror the detector table above, plus
+`ice-path-establishment-slow` and `capture-source-lost`.
+
+### Deprecated: `CongestionDetector`
+
+Still registered and still raising `congestion`, and still configured by `congestionDetector`.
+It answers for both directions from one signal, which a receiver cannot support — Chrome computes
+no incoming bandwidth estimate, so the old detector's incoming fields read zero there. Set
+`congestionDetector: null` and read `uplink-congestion` and `downlink-congestion` instead. Both
+new detectors also emit `congestion`, discriminated on `direction`, so an application that only
+dims a network badge keeps one listener.
+
+### Capacity: one detector per direction
+
+`UplinkCongestionDetector` scores the sending path from two witnesses — how far the browser's
+bandwidth estimate has fallen below the highest it recently reached, and how far pacer time per
+packet sits above its own running median. `DownlinkCongestionDetector` scores the receiving path
+from the arriving bitrate against its recent maximum, and the per-frame jitter buffer delay
+against its median.
+
+Each pair combines as a geometric mean, so a witness at its healthy level takes the severity to
+zero rather than merely failing to add — which is what separates a path running out of room from
+a sender that was asked for less. The only configured number is `minSeverity`. Neither uses a
+recovery ratio against the old maximum, because nothing knows what a narrowed path can carry now;
+the recent maximum decays instead, and fades faster for 30 seconds after an episode closes, since
+a path rarely gives back all of what one took.
+
+### New: shared facts, shared windows, shared registries
+
+- **`IssueRegistry`** — every monitor owns the issues raised against it, so a detector no longer
+  reaches into a client-wide map and the score can read one monitor's findings directly.
+- **`DetectionRecoveryWindow`** — the sustain-then-recover shape several detectors had each
+  implemented, done once: a detection span that decides whether to raise and an older recovery
+  span that has to agree before a finding closes. Configured per monitor level by
+  `inboundTrackDetectionRecoveryWindow`, `outboundTrackDetectionRecoveryWindow` and
+  `peerConnectionDetectionRecoveryWindow`, which replace the per-detector `durationInMs` keys.
+- **`DecayingMaxEstimator`** — the largest value seen recently, where "recently" is a half-life
+  rather than a window, decaying per second of stats time so applications collecting at different
+  periods forget at the same rate.
+- **`FrugalQuantileEstimator`** — a streaming quantile held in one number, for baselines of spiky
+  signals where an EWMA settles far above the true median.
+
+**`statsClockTime`** — every monitor now accumulates the measured gaps between collections, and
+every window and duration in the library is aged on that clock rather than on `Date.now()`. A
+late or skipped collection widens a window by the time the condition actually held; a backgrounded
+tab cannot age a stall into an issue.
+
+**`inputsUnavailable`** — a detector whose inputs the browser does not report says so, instead of
+reading as a healthy path. This is the behaviour whose absence made a whole browser population
+look like the best behaved on a fleet.
+
+### Fixed
+
+| Fix | What was wrong |
+|---|---|
+| One-way media no longer reads as a fault | `blocked-transport` and `ice-transport-stalled` both assumed a peer connection carries media in both directions; an SFU publish transport does not, and both raised on healthy calls. Each now requires that return media was expected at all — at least one inbound RTP stream attributed to the transport |
+| Data-channel bitrate accumulators reset each collection | they accumulated forever, so a 40 kbps signalling channel read as 9.7 Mbps after twenty minutes |
+| RTCP round trip only counted when the report advances | `getStats()` keeps serving the last `remote-inbound-rtp` after the far end goes quiet, so the average converged on a measurement nobody had made recently |
+| `postAdapt` no longer runs twice | every accumulator in `_acceptAdaptedStats` was applied twice per collection |
+| The issue union matches what detectors raise | it declared `blocked-transport` and `capture-bottleneck`, which nothing raises, and omitted `blocked-stun-requests` and `video-capture-bottleneck`, which are raised — so `video-capture-bottleneck` also carried no score weight |
+
 ## 4.8.0
 
 Transport observability. Three themes: **the RTP → transport → candidate-pair graph is fully traversable and attributed by one rule**, **DTLS handshake failure finally has an owner**, and **samples stop repeating constants** (sample schema **3.7.0**).
@@ -14,7 +162,7 @@ Transport observability. Three themes: **the RTP → transport → candidate-pai
 
 ### New: `DtlsHandshakeDetector`
 
-Separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all presented as a generically slow `connecting`. `dtlsState: 'failed'` raises `dtls-handshake-failed` immediately; ICE proven healthy while DTLS sits in `new`/`connecting` past `stalledThresholdInMs` (default 6000) raises `dtls-handshake-stalled`. ICE health comes from the transport's `iceState` where the browser reports one, and from the selected pair being `succeeded` where it does not (Safari, and the transport reconstructed for Firefox < 153) — the payload's `iceEvidence` names which proof was used. Never judges a transport on its first observed tick (Firefox 153/154 report pre-negotiation values that only 155 makes trustworthy), never treats `closed` as a failure, and restarts its stall timer when the ufrag changes. Config: `dtlsHandshakeDetector`, `null` to disable.
+Separates "the network path failed" (the ICE detectors' territory) from "the secure media transport never negotiated", which nothing owned: a certificate fingerprint mismatch, DTLS version intolerance, or a middlebox that passes STUN but eats DTLS all presented as a generically slow `connecting`. `dtlsState: 'failed'` raises `dtls-handshake-failed` immediately; ICE proven healthy while DTLS sits in `new`/`connecting` past `stalledThresholdInMs` (default 6000) raises `dtls-handshake-stalled`. ICE health comes from the transport's `iceState` where the browser reports one, and from the selected pair being `succeeded` where it does not (Safari, and the transport reconstructed for Firefox < 153) — the payload's `iceEvidence` names which proof was used. Never judges a transport on its first observed tick (Firefox 153/154 report pre-negotiation values that only 155 makes trustworthy), never treats `closed` as a failure, and restarts its stall timer when the ufrag changes. Config: `dtlsHandshakeDetector`, `null` to disable. *(4.10.0 split this class in two and retired that key; the two detectors now read `dtlsHandshakeFailedDetector` and `dtlsHandshakeStalledDetector`.)*
 
 ### One attribution rule for RTP → transport
 

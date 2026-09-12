@@ -42,7 +42,7 @@ export enum ClientEventTypes {
 	CODEC_CHANGED = 'CODEC_CHANGED',
 	VIDEO_RESOLUTION_CHANGED = 'VIDEO_RESOLUTION_CHANGED',
 	SIMULCAST_LAYER_CHANGED = 'SIMULCAST_LAYER_CHANGED',
-	CAPTURE_TRACK_ENDED = 'CAPTURE_TRACK_ENDED',
+	CAPTURE_SOURCE_LOST = 'CAPTURE_SOURCE_LOST',
 	CAPTURE_TRACK_MUTED = 'CAPTURE_TRACK_MUTED',
 	STATS_COLLECTION_GAP = 'STATS_COLLECTION_GAP',
 	TAB_VISIBILITY_CHANGED = 'TAB_VISIBILITY_CHANGED',
@@ -382,7 +382,7 @@ export interface SimulcastLayerChangedEventPayload extends ClientEventPayloadRec
 	layers: string;
 }
 
-export interface CaptureTrackEndedEventPayload extends ClientEventPayloadRecord {
+export interface CaptureSourceLostEventPayload extends ClientEventPayloadRecord {
 	peerConnectionId: string;
 	trackId: string;
 	kind: string;

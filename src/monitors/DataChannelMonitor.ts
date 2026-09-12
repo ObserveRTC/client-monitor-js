@@ -1,4 +1,5 @@
 import { DataChannelStats } from "../schema/ClientSample";
+import { positiveDelta } from "../utils/common";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class DataChannelMonitor implements DataChannelStats {
@@ -18,14 +19,11 @@ export class DataChannelMonitor implements DataChannelStats {
 	deltaBytesSent?: number | undefined;
 	deltaBytesReceived?: number | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	public sendingBitrate?: number | undefined;
+	public receivingBitrate?: number | undefined;
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -37,7 +35,7 @@ export class DataChannelMonitor implements DataChannelStats {
 
 		Object.assign(this, options);
 	}
-	
+
 
 	public getPeerConnection() {
 		return this._peerConnection;
@@ -46,7 +44,7 @@ export class DataChannelMonitor implements DataChannelStats {
 
 	public get visited(): boolean {
 		const result = this._visited;
-		
+
 		this._visited = false;
 
 		return result;
@@ -56,15 +54,21 @@ export class DataChannelMonitor implements DataChannelStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
+		const elapsedInSec = elapsedInMs / 1000;
+
+		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
 
-		if (this.bytesSent !== undefined && stats.bytesSent !== undefined) {
-			this.deltaBytesSent = stats.bytesSent - this.bytesSent;
+		this.deltaBytesReceived = positiveDelta(stats.bytesReceived, this.bytesReceived);
+		this.deltaBytesSent = positiveDelta(stats.bytesSent, this.bytesSent);
+
+		if (this.deltaBytesSent !== undefined) {
+			this.sendingBitrate = Math.max(0, this.deltaBytesSent * 8 / elapsedInSec);
 		}
-		if (this.bytesReceived !== undefined && stats.bytesReceived !== undefined) {
-			this.deltaBytesReceived = stats.bytesReceived - this.bytesReceived;
+
+		if (this.deltaBytesReceived !== undefined) {
+			this.receivingBitrate = Math.max(0, this.deltaBytesReceived * 8 / elapsedInSec);
 		}
 
 		Object.assign(this, stats);

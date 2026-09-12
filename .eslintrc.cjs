@@ -15,7 +15,7 @@ module.exports = {
     "plugins": [
         "@typescript-eslint"
     ],
-    "ignorePatterns": ["*.txt"],
+    "ignorePatterns": ["*.txt", "dist/", "coverage/"],
     "rules": {
         "prefer-for-of": 0,
         "no-inferrable-types": 0,

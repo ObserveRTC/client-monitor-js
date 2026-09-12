@@ -22,7 +22,7 @@ import { sampledScoreReasons } from './scores/utils';
 import { ClientEventTypes } from './schema/ClientEventTypes';
 import { AppliedClientMonitorConfig, ClientMonitorConfig, ClientMonitorSourceType } from './ClientMonitorConfig';
 import { Sources } from './sources/Sources';
-import { PartialBy } from './utils/common';
+import { accumulatedValue, PartialBy } from './utils/common';
 import { Detectors } from './detectors/Detectors';
 import { CpuPerformanceDetector } from './detectors/CpuPerformanceDetector';
 import { StatsGapDetector } from './detectors/StatsGapDetector';
@@ -34,28 +34,57 @@ import { ScoreCalculator } from "./scores/ScoreCalculator";
 import * as mediasoup from 'mediasoup-client';
 import { inferSourceType } from './sources/inferSourceType';
 import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider';
+import { IssueRegistry } from './utils/IssueRegistry';
+import { ExtensionStatsMonitor } from './monitors/ExtensionStatsMonitor';
+import { SliceConfig, SlicedWindow } from './utils/SlicedWindow';
 
 const MODULE_NAME = 'ClientMonitor';
 
-export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload } | Promise<{ type: string, payload?: ClientPayload }>;
+export type ExtensionStatProvider = () => { type: string, payload?: ClientPayload, id?: string } | Promise<{ type: string, payload?: ClientPayload, id?: string }>;
+export type ClientWindowValues = {
+	/** Milliseconds spent inside video encoders running on the CPU, summed over the sending streams. */
+	totalVideoEncodeTimeInMs: number | null;
+	/** The same for the video decoders, over the receiving streams. */
+	totalVideoDecodeTimeInMs: number | null;
+}
+
+export type ClientWindowConfig = {
+	/**
+	 * Milliseconds between two collections above which the run is treated as broken and the fill
+	 * starts again. Wider than the collecting period, or every collection is discarded.
+	 */
+	maxAllowedGapInMs: number;
+
+	/** Values per stretch. At least 2 each, since a delta needs two endpoints. */
+	numberOfSamples: Record<'detection' | 'recovery', number>;
+}
+
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
-
+    public readonly createdAt = Date.now();
     // public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
+    public readonly mappedExtensionStatsMonitors = new Map<string, ExtensionStatsMonitor>();
     public readonly detectors: Detectors;
     public readonly clientEventPayloadProvider = new ClientEventPayloadProvider();
     public readonly extensionStatsProviders = new Set<ExtensionStatProvider>();
     /**
      * Stateful issues currently in-flight, keyed by their `key`. Populated by
-     * `raiseIssue`, cleared by `resolveIssue`. One-shot issues created via
-     * `addIssue` are NOT stored here.
-     *
-     * External read access is encouraged via `getActiveIssues` /
-     * `isIssueActive`; this map is exposed read-only for advanced use cases
-     * but should not be mutated directly.
+     * `raiseIssue`, cleared by `resolveIssue`; one-shot `addIssue` issues are not
+     * stored here. Read it via `getActiveIssues` / `isIssueActive`; do not mutate.
      */
-    public readonly activeIssues = new Map<string, RaisedClientIssue>();
+    // public readonly activeIssues = new Map<string, RaisedClientIssue>();
+    public readonly activeIssues: IssueRegistry;
+
+    /**
+     * Machine-wide running totals with named stretches over them, shared by the detectors that
+     * judge the client rather than a connection or a track. One buffer, so those detectors all
+     * judge the same stretch of time.
+     */
+    public readonly slicedWindow: SlicedWindow<
+        ClientWindowValues,
+        Record<keyof ClientWindowConfig['numberOfSamples'], SliceConfig>
+    >;
 
     public scoreCalculator: ScoreCalculator;
     public readonly logger: Logger;
@@ -66,22 +95,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     public cpuPerformanceAlertOn = false;
 
     /**
-     * Whether the browser tab running this monitor is currently visible.
-     *
-     * Kept up to date by the tab-visibility watcher (`config.watchTabVisibility`,
-     * on by default) from `document.visibilityState`. Defaults to `true`, and
-     * stays `true` when the watcher is disabled or no `document` exists (SSR,
-     * tests, workers) — so `false` always means the tab really is in the
-     * background. Browsers throttle background tabs (timers, rendering,
-     * sometimes decoding), so detectors whose signals the throttling corrupts
-     * (CPU limitation, decoder performance, stuck decoder, playout
-     * discrepancy, video freezes) stand down while this is `false`.
+     * The measurement behind {@link cpuPerformanceAlertOn}: how much of the time available for
+     * encoding and decoding the machine actually spent on it, `1` being fully occupied. Written on
+     * every collection the detector could judge, whether or not it raised. `CpuPerformanceDetector`.
+     */
+    public cpuUtilization?: number;
+
+    /**
+     * Whether the browser tab running this monitor is currently visible, kept up
+     * to date by `config.watchTabVisibility`. Stays `true` when the watcher is
+     * off or no `document` exists, so `false` always means really backgrounded;
+     * detectors that browser throttling would mislead stand down while it is.
      */
     public activeTab = true;
-
-    private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
-    private readonly _pendingOutboundTrackContexts = new Map<string, OutboundTrackContext>();
-
 
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
@@ -109,6 +135,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _bufferedClientSamples?: ClientSample[];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
+    private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
+    private readonly _pendingOutboundTrackContexts = new Map<string, OutboundTrackContext>();
 
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
@@ -129,6 +157,11 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         const detectorDefault = <T>(value: T | null | undefined, fallback: T): T | null =>
             value === undefined ? fallback : value;
 
+        const collectingPeriodInMs = 0 < (monitorConfig.collectingPeriodInMs ?? 0)
+            ? monitorConfig.collectingPeriodInMs as number
+            : 2000;
+
+
         this.config = {
             ...monitorConfig,
             collectingPeriodInMs: monitorConfig.collectingPeriodInMs ?? 2000,
@@ -138,98 +171,244 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             watchTabVisibility: monitorConfig.watchTabVisibility ?? true,
             addClientJointEventOnCreated: monitorConfig.addClientJointEventOnCreated ?? true,
             addClientLeftEventOnClose: monitorConfig.addClientLeftEventOnClose ?? true,
+            // The slices are counted in values, not milliseconds, so that a slice asked for N
+            // values holds N at any collecting period and is readable at any cadence. What varies
+            // is the stretch those values span: N values span N-1 intervals, so at the default
+            // 2000ms period a slice of 2 covers 2s and one of 4 covers 6s. `maxAllowedGapInMs`
+            // tolerates a couple of late or missed collections and treats anything longer as a
+            // blackout worth starting again after.
+            outboundTrackWindow: monitorConfig.outboundTrackWindow ?? {
+                numberOfSamples: {
+                    detection: 3,
+                    recovery: 3,
+                },
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
+            },
+            inboundTrackWindow: monitorConfig.inboundTrackWindow ?? {
+                numberOfSamples: {
+                    detection: 3,
+                    recovery: 3,
+                    flowDetection: 4,
+                    flowRecovery: 3,
+                },
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
+            },
+            peerConnectionWindow: monitorConfig.peerConnectionWindow ?? {
+                numberOfSamples: {
+                    detection: 3,
+                    recovery: 3,
+                },
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
+            },
+            clientWindow: monitorConfig.clientWindow ?? {
+                numberOfSamples: {
+                    detection: 3,
+                    recovery: 3,
+                },
+                maxAllowedGapInMs: collectingPeriodInMs * 4,
+            },
+            // Detector defaults, one entry per detector, grouped as in
+            // `ClientMonitorConfig` so the two files read side by side.
 
-            videoFreezesDetector: detectorDefault(monitorConfig.videoFreezesDetector, {
-                minConsecutiveTicks: 2,
+            // Connectivity — layer 1: reachability.
+            iceReachabilityDetector: detectorDefault(monitorConfig.iceReachabilityDetector, {
+                thresholdInMs: 6000,
             }),
-            dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
+            // Layer 2 — traversal. Telemetry, nothing to tune.
+            iceTraversalDetector: detectorDefault(monitorConfig.iceTraversalDetector, {}),
+            // Layer 3 — path establishment: slow, then demonstrably failed.
+            icePathEstablishmentDetector: detectorDefault(monitorConfig.icePathEstablishmentDetector, {
                 thresholdInMs: 5000,
+                createEvent: true,
+            }),
+            iceEstablishmentFailedDetector: detectorDefault(monitorConfig.iceEstablishmentFailedDetector, {
+                thresholdInMs: 15000,
+            }),
+            // Layer 4 — secure transport. `failed` is terminal, so no threshold.
+            dtlsHandshakeFailedDetector: detectorDefault(monitorConfig.dtlsHandshakeFailedDetector, {}),
+            dtlsHandshakeStalledDetector: detectorDefault(monitorConfig.dtlsHandshakeStalledDetector, {
+                stalledThresholdInMs: 6000,
+            }),
+            // Layer 5 — path continuity: down, finished, delivering nothing,
+            // or never settling.
+            iceDisconnectedDetector: detectorDefault(monitorConfig.iceDisconnectedDetector, {
+                disconnectedThresholdInMs: 5000,
+            }),
+            iceConnectionFailedDetector: detectorDefault(monitorConfig.iceConnectionFailedDetector, {}),
+            iceTransportStalledDetector: detectorDefault(monitorConfig.iceTransportStalledDetector, {
+                transportStallThresholdInMs: 5000,
+            }),
+            unstableIcePathDetector: detectorDefault(monitorConfig.unstableIcePathDetector, {
+                pathSwitchWindowInMs: 30000,
+                pathSwitchThreshold: 3,
+            }),
+            // Connectivity telemetry. Recommendation thresholds sit wider than
+            // the issue thresholds beside them, on purpose.
+            iceRestartDetector: detectorDefault(monitorConfig.iceRestartDetector, {
+                createEvent: true,
+            }),
+            iceRestartRecommendationDetector: detectorDefault(monitorConfig.iceRestartRecommendationDetector, {
+                createEvent: true,
+                iceRestartRecommendationThresholdInMs: 10000,
+                iceRestartRecommendationCooldownInMs: 15000,
+                restartRecommendationThresholdInMs: 10000,
+                restartRecommendationCooldownInMs: 15000,
+            }),
+            // Transport Quality — the properties of a working path. These
+            // thresholds are starting points, meant to be tuned against a fleet.
+            // Deprecated, on by default so integrations built against the `congestion` event keep
+            // working. Set to `null` once nothing depends on it.
+            congestionDetector: detectorDefault(monitorConfig.congestionDetector, {
+                sensitivity: 'medium' as const,
+            }),
+            uplinkCongestionDetector: detectorDefault(monitorConfig.uplinkCongestionDetector, {
+                minSeverity: 0.65,
+                // Four times the connection's own median pacer delay tops the scale.
+                pacerBloatingSaturatesAt: 4,
+            }),
+            downlinkCongestionDetector: detectorDefault(monitorConfig.downlinkCongestionDetector, {
+                minSeverity: 0.65,
+                // Four times the connection's own median jitter buffer delay tops the scale.
+                bufferBloatingSaturatesAt: 4,
+            }),
+            transportDelayDetector: detectorDefault(monitorConfig.transportDelayDetector, {
+                // ~300ms round trip is where turn-taking starts to break down.
+                thresholdInMs: 300,
+                recoveryThresholdInMs: 200,
+                // The sustain lives in `peerConnectionWindow`, not here.
+            }),
+            transportLossDetector: detectorDefault(monitorConfig.transportLossDetector, {
+                threshold: 0.05,
+                recoveryThreshold: 0.01,
+                durationInMs: 6000,
+            }),
+            blockedStunRequestsDetector: detectorDefault(monitorConfig.blockedStunRequestsDetector, {
+                responseReceivedTimeoutInMs: 10000,
+                requestsSentTimeoutInMs: 10000,
+            }),
+            blockedOutboundMediaDetector: detectorDefault(monitorConfig.blockedOutboundMediaDetector, {
+                thresholdInMs: 10000,
+            }),
+            // Defaults to `null`: its premise fails wherever rtcp-mux is in
+            // force, which is every browser. See `ClientMonitorConfig`.
+            blockedInboundMediaDetector: detectorDefault(monitorConfig.blockedInboundMediaDetector, null),
+            // Pipeline Disruption — the send chain, from the capture device to
+            // the wire.
+            captureSourceLostDetector: detectorDefault(monitorConfig.captureSourceLostDetector, {
+                createEvent: true,
+            }),
+            silentAudioSourceDetector: detectorDefault(monitorConfig.silentAudioSourceDetector, {
+                silenceThresholdInMs: 60000,
+                silenceRmsThreshold: 0.0001,
+                recoveryRmsThreshold: 0.0003,
+            }),
+            videoCaptureBottleneckDetector: detectorDefault(monitorConfig.videoCaptureBottleneckDetector, {
+                produceDegradationThreshold: 0.2,
+            }),
+            encoderBottleneckDetector: detectorDefault(monitorConfig.encoderBottleneckDetector, {
+                encodeDegradationThreshold: 0.3,
+            }),
+            rtpSenderStalledDetector: detectorDefault(monitorConfig.rtpSenderStalledDetector, {
+                thresholdInMs: 4000,
             }),
             dryOutboundTrackDetector: detectorDefault(monitorConfig.dryOutboundTrackDetector, {
                 thresholdInMs: 5000,
             }),
-            audioDesyncDetector: detectorDefault(monitorConfig.audioDesyncDetector, {
-                // aligned with the documented defaults; the previous 0.5/0.25
-                // required half of all samples to be corrected before alerting
-                fractionalCorrectionAlertOffThreshold: 0.05,
-                fractionalCorrectionAlertOnThreshold: 0.1,
+            // Pipeline Disruption — the receive chain, from the transport to the
+            // renderer.
+            transportDemuxStalledDetector: detectorDefault(monitorConfig.transportDemuxStalledDetector, {
+                thresholdInMs: 4000,
+                minTransportReceiveBitrateBps: 20000,
             }),
-            syntheticSamplesDetector: detectorDefault(monitorConfig.syntheticSamplesDetector, {
-                minSynthesizedSamplesDuration: 0,
-                createEvent: true,
+            dryInboundTrackDetector: detectorDefault(monitorConfig.dryInboundTrackDetector, {
+                thresholdInMs: 5000,
             }),
-            congestionDetector: detectorDefault(monitorConfig.congestionDetector, {
-                sensitivity: 'medium',
+            frameAssemblyStalledDetector: detectorDefault(monitorConfig.frameAssemblyStalledDetector, {
+                thresholdInMs: 3000,
+                minPacketsReceived: 20,
+            }),
+            decoderBottleneckDetector: detectorDefault(monitorConfig.decoderBottleneckDetector, {
+                // 0.1 is the old decodeFpsRatioThreshold of 0.9, read as a shortfall.
+                decodeDegradationThreshold: 0.1,
+                minReceivedFps: 5,
+            }),
+            decoderPerformanceDetector: detectorDefault(monitorConfig.decoderPerformanceDetector, {
+                decodeTimeBudgetRatio: 0.8,
+                minFramesReceived: 10,
+                quietLossThreshold: 0.02,
+                minConsecutiveTicks: 2,
+            }),
+            stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
+                thresholdInMs: 4000,
+                rttMultiplier: 15,
+                minBitrate: 10000,
+                minPliCount: 2,
+            }),
+            playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
+                lowSkewRatio: 0.1,
+                highSkewRatio: 0.25,
+                minFramesReceived: 10,
+            }),
+            // Pipeline Disruption — the repair loop beside the receive chain, and
+            // the machine behind both chains.
+            videoRecoveryFailedDetector: detectorDefault(monitorConfig.videoRecoveryFailedDetector, {
+                recoveryFailedThresholdInMs: 5000,
+                recoveryFailedMinPliCount: 2,
             }),
             cpuPerformanceDetector: detectorDefault(monitorConfig.cpuPerformanceDetector, {
-                incomingDecodedFramesRatioThresholds: {
-                    alertOn: 0.7,
-                    alertOff: 0.85,
-                    minReceivedFrames: 10,
-                    // ~2.5x the smoothed arrival rate reads as a burst (layer
-                    // switch / keyframe recovery), not as CPU limitation.
-                    frameArrivalBurstFactor: 2.5,
-                },
-                durationOfCollectingStatsThreshold: {
-                    lowWatermark: 5000,
-                    highWatermark: 10000,
-                },
-                encoderCpuLimitationShareThreshold: 0.3,
-                encodeTimeBudgetRatio: 0.8,
+                utilizationThreshold: 0.5,
+                recoveryThreshold: 0.4,
             }),
-            audioConcealmentDetector: detectorDefault(monitorConfig.audioConcealmentDetector, {
-                // Webex-aligned: >3% concealment is a significant change, a
-                // "severely concealed second" is >5%
-                onThreshold: 0.03,
-                offThreshold: 0.01,
-                // must span several collections at the commonly recommended
-                // ~5s collecting period — a 5s window would hold one sample
-                windowInMs: 15000,
-                minSamplesInWindow: 24000, // half a second of 48kHz audio
+            // Perceived Quality — how the picture and the sound come across.
+            pixelatedVideoDetector: detectorDefault(monitorConfig.pixelatedVideoDetector, {
+                // Fractions of the codec's own quantizer scale, so one pair covers every codec.
+                // 0.62 is a mean quantizer of 79 on VP8 and 32 on H.264, either of which is
+                // visibly coarse; 0.52 is 66 and 27, which is not. Starting points to calibrate
+                // against a fleet, not findings.
+                threshold: 0.62,
+                recoveryThreshold: 0.52,
+                durationInMs: 8000,
+            }),
+            inboundVideoFlowStateDetector: detectorDefault(monitorConfig.inboundVideoFlowStateDetector, {
+                frozenAfterInMs: 2000,
+                minFreezeCountForChoppy: 2,
+                // The stretch both verdicts are measured over is the track's shared window, not a
+                // duration here: see `inboundTrackWindow`.
+            }),
+            inventedSpeechDetector: detectorDefault(monitorConfig.inventedSpeechDetector, {
+                // Share of concealed audio tolerated before it counts against the budget.
+                allowedInventedRatio: 0.05,
+                // Invented audio beyond the allowance, in ms, that opens the issue.
+                raiseAfterInventedMs: 400,
+            }),
+            audioPlayoutSynthesisDetector: detectorDefault(monitorConfig.audioPlayoutSynthesisDetector, {
+                // A share of what was played, not a duration per collection. The previous
+                // `minSynthesizedSamplesDuration: 0` reported on every tick that concealed anything
+                // at all, and its unit was seconds while the config documented milliseconds.
+                synthesizedRatioThreshold: 0.05,
+                createEvent: true,
+            }),
+            // Raise at the acceptability limits, resolve back inside the
+            // detectability ones; audio behind video is forgiven further.
+            avDesyncPlayoutDetector: detectorDefault(monitorConfig.avDesyncPlayoutDetector, {
+                audioAheadRaiseInMs: 90,
+                audioAheadResolveInMs: 45,
+                audioBehindRaiseInMs: 185,
+                audioBehindResolveInMs: 125,
+                sustainForInMs: 3000,
             }),
             jitterBufferStressDetector: detectorDefault(monitorConfig.jitterBufferStressDetector, {
                 targetDelayThresholdInMs: 200,
                 timeStretchThreshold: 0.02,
                 minConsecutiveTicks: 2,
+                // Severity scale only, and absolute rather than relative to the thresholds above:
+                // a second of buffering makes conversation impossible, and a seventh of the samples
+                // warped is badly distorted speech. The thresholds land near 0.16 on that scale.
+                unbearableTargetDelayInMs: 1000,
+                unbearableTimeStretchRate: 0.15,
             }),
-            decoderPerformanceDetector: detectorDefault(monitorConfig.decoderPerformanceDetector, {
-                decodeTimeBudgetRatio: 0.8,
-                dropRatioThreshold: 0.1,
-                minFramesReceived: 10,
-                quietLossThreshold: 0.02,
-                minConsecutiveTicks: 2,
-            }),
-            videoRecoveryDetector: detectorDefault(monitorConfig.videoRecoveryDetector, {
-                windowInMs: 30000,
-                // real-world storms run ~0.5-0.7 PLI/s sustained; healthy
-                // streams stay well under 0.1/s outside of joins
-                pliRateAlertOn: 0.5,
-                pliRateAlertOff: 0.15,
-                recoveryFailedThresholdInMs: 5000,
-                recoveryFailedMinPliCount: 2,
-            }),
-            outboundFrameSupplyDetector: detectorDefault(monitorConfig.outboundFrameSupplyDetector, {
-                durationInMs: 15_000,
-                captureFpsRatioThreshold: 0.9,
-            }),
-            encoderPerformanceDetector: detectorDefault(monitorConfig.encoderPerformanceDetector, {
-                encodeFpsRatioThreshold: 0.7,
-                encodeTimeBudgetRatio: 0.8,
-                // null: CpuPerformanceDetector owns the CPU signal — see the detector
-                cpuLimitationShareThreshold: null,
-                minConsecutiveTicks: 2,
-            }),
-            inboundFrameSupplyDetector: detectorDefault(monitorConfig.inboundFrameSupplyDetector, {
-                durationInMs: 15_000,
-                decodeFpsRatioThreshold: 0.9,
-                minReceivedFps: 5,
-            }),
-            simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
-                createEvent: true,
-            }),
-            captureFailureDetector: detectorDefault(monitorConfig.captureFailureDetector, {
-                silenceThresholdInMs: 60000,
-                silenceRmsThreshold: 0.0001,
+            // Telemetry — facts about the session, not faults.
+            captureTrackMutedDetector: detectorDefault(monitorConfig.captureTrackMutedDetector, {
                 createEvent: true,
             }),
             codecChangeDetector: detectorDefault(monitorConfig.codecChangeDetector, {
@@ -238,62 +417,39 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             videoResolutionChangeDetector: detectorDefault(monitorConfig.videoResolutionChangeDetector, {
                 createEvent: true,
             }),
-            stuckDecoderDetector: detectorDefault(monitorConfig.stuckDecoderDetector, {
-                thresholdInMs: 4000,
-                rttMultiplier: 15,
-                minBitrate: 10000,
-                minPliCount: 2,
+            simulcastLayerDetector: detectorDefault(monitorConfig.simulcastLayerDetector, {
+                createEvent: true,
             }),
             statsGapDetector: detectorDefault(monitorConfig.statsGapDetector, {
                 gapRatioThreshold: 2,
                 minGapInMs: 5000,
                 createEvent: true,
             }),
-            playoutDiscrepancyDetector: detectorDefault(monitorConfig.playoutDiscrepancyDetector, {
-                lowSkewRatio: 0.1,
-                highSkewRatio: 0.25,
-                minFramesReceived: 10,
-            }),
-            longPcConnectionEstablishmentDetector: detectorDefault(monitorConfig.longPcConnectionEstablishmentDetector, {
-                thresholdInMs: 5000,
-                createEvent: true,
-            }),
-            blockedTransportDetector: detectorDefault(monitorConfig.blockedTransportDetector, {
-                thresholdInMs: 5000,
-                minMediaBitrateBps: 10000,
-                maxReturnBitrateBps: 2000,
-                maxSendShare: 0.1,
-                stunFreshnessInMs: 10000,
-            }),
-            noAvailableIceCandidateDetector: detectorDefault(monitorConfig.noAvailableIceCandidateDetector, {
-                thresholdInMs: 6000,
-            }),
-            mediaPipelineDetector: detectorDefault(monitorConfig.mediaPipelineDetector, {
-                thresholdInMs: 4000,
-                minTransportReceiveBitrateBps: 20000,
-            }),
-            iceConnectivityDetector: detectorDefault(monitorConfig.iceConnectivityDetector, {
-                disconnectedThresholdInMs: 5000,
-                transportStallThresholdInMs: 5000,
-                createEvent: true,
-                pathSwitchWindowInMs: 30000,
-                pathSwitchThreshold: 3,
-                iceRestartRecommendationThresholdInMs: 10000,
-                iceRestartRecommendationCooldownInMs: 15000,
-            }),
+
             bufferingEventsForSamples: monitorConfig.bufferingEventsForSamples ?? false,
             bufferClientSamplesUntilSubscriber: monitorConfig.bufferClientSamplesUntilSubscriber ?? false,
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
-            dtlsHandshakeDetector: detectorDefault(monitorConfig.dtlsHandshakeDetector, {
-                // sits between the ICE detectors' 5000ms thresholds and
-                // noAvailableIceCandidateDetector's 6000ms, so ICE-level causes
-                // are reported by their own detectors first
-                stalledThresholdInMs: 6000,
-            }),
             appData: monitorConfig.appData ?? {} as AppData,
         }
+
+        this.slicedWindow = new SlicedWindow({
+            maxAllowedGapInMs: this.config.clientWindow.maxAllowedGapInMs,
+            totals: {
+                totalVideoEncodeTimeInMs: null,
+                totalVideoDecodeTimeInMs: null,
+            },
+            slices: {
+                detection: {
+                    numberOfSamples: this.config.clientWindow.numberOfSamples.detection,
+                },
+                recovery: {
+                    numberOfSamples: this.config.clientWindow.numberOfSamples.recovery,
+                    offset: this.config.clientWindow.numberOfSamples.detection,
+                },
+            },
+        });
 
         this._sources = new Sources(this, this.logger);
         this.scoreCalculator = new DefaultScoreCalculator(this);
@@ -319,6 +475,16 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         } catch (err) {
             this.logger.error(`[${MODULE_NAME}]:`, 'Failed to fetch user agent data', err);
         }
+
+        // The terminal registry, built before any detector so a detector's constructor can
+        // reach it. Its uplink is not another registry but the sink that emits the events and
+        // buffers entries into the ClientSample — which is what makes this the end of the chain.
+        this.activeIssues = new IssueRegistry({
+            notify: (issue) => this.addIssue(issue),
+            raise: (input) => this._raiseIssue(input),
+            update: (input) => this._updateIssue(input),
+            resolve: (input) => this._resolveIssue(input),
+        });
 
         this.detectors = new Detectors();
         if (this.config.cpuPerformanceDetector !== null) {
@@ -350,6 +516,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         for (const peerConnection of this.peerConnections) {
             this._sources.addStatsAdapters(peerConnection);
         }
+    }
+
+    public get uptimeInMs() {
+        return Date.now() - this.createdAt;
     }
 
     public set onsamplecreated(listener: (...args: ClientMonitorEvents['sample-created']) => void) {
@@ -384,9 +554,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         clearInterval(this._timer);
         this._timer = undefined;
 
-        // Auto-resolve any stateful issues so consumers see a clean lifecycle
-        // and don't leak entries past monitor close. Done before `closed = true`
-        // so resolveIssue still runs.
+        // Auto-resolve stateful issues before `closed = true`, so resolveIssue
+        // still runs and consumers see a clean lifecycle.
         for (const key of [...this.activeIssues.keys()]) {
             this.resolveIssue(key, {
                 comment: 'monitor closed before issue could be resolved',
@@ -480,9 +649,29 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             : -1;
         this.durationOfCollectingStatsInMs = Date.now() - this.lastCollectingStatsAt;
 
+        const totalVideoEncodeTimeInMs = this.peerConnections.reduce<number | undefined>((acc, peerConnection) => accumulatedValue(acc, peerConnection.totalVideoEncodeTimeInMs), undefined);
+        const totalVideoDecodeTimeInMs = this.peerConnections.reduce<number | undefined>((acc, peerConnection) => accumulatedValue(acc, peerConnection.totalVideoDecodeTimeInMs), undefined);
+
+        this.slicedWindow.add({
+            timestamp: Date.now(),
+            value: {
+                totalVideoEncodeTimeInMs: totalVideoEncodeTimeInMs ?? null,
+                totalVideoDecodeTimeInMs: totalVideoDecodeTimeInMs ?? null,
+            },
+        });
+
         this.tracks.forEach(track => track.update());
         this.detectors.update();
         this.scoreCalculator.update();
+
+        for (const [id, monitor] of this.mappedExtensionStatsMonitors) {
+            if (monitor.visited) {
+                monitor.visited = false;
+
+                continue;
+            }
+            this.mappedExtensionStatsMonitors.delete(id);
+        }
 
         this.emit('stats-collected', {
             clientMonitor: this,
@@ -507,13 +696,28 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     /**
-     * Sets the client score, keeping the two kinds of reason separate.
+     * The most recent payload reported under `id` through {@link addExtensionStats}, or undefined
+     * if that id has never been reported or has since expired.
      *
-     * `ownReasons` are the client's own subtractions and are what
-     * {@link scoreReasons} holds and the sample ships — there are none today.
-     * `aggregatedReasons` are every component's reasons summed by key and are
-     * emitted on the `'score'` event, so applications still react to the whole
-     * picture without that picture being duplicated onto the wire.
+     * `T` is asserted, not checked: the caller names the shape it reported, and nothing here can
+     * verify it. Undefined does not distinguish "never reported" from "expired" — see
+     * {@link addExtensionStats} for how long a value stays readable.
+     */
+    public getExtensionStatsPayload<T extends Record<string, unknown>>(id: string): T | undefined {
+        const monitor = this.mappedExtensionStatsMonitors.get(id);
+
+        return monitor?.payload as T | undefined;
+    }
+
+    /** The monitor holding the latest payload for `id`, with its `type` and when it last arrived. */
+    public getExtensionStatsMonitor(id: string): ExtensionStatsMonitor | undefined {
+        return this.mappedExtensionStatsMonitors.get(id);
+    }
+
+    /**
+     * Sets the client score. `ownReasons` are the client's own subtractions,
+     * held by {@link scoreReasons} and shipped in the sample; `aggregatedReasons`
+     * are every component's reasons summed, emitted on `'score'` only.
      */
     public setScore<T extends Record<string, number>>(
         score: number,
@@ -545,9 +749,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             clientIssues: this._clientIssues,
             extensionStats: this._extensionStats,
             score: this.score,
-            // The client's own reasons only. The aggregate lives on the 'score'
-            // event, never on the wire: every reason already ships on the
-            // component that caused it, and a server re-aggregates them.
+            // The client's own reasons only; the aggregate lives on the 'score' event.
             scoreReasons: sampledScoreReasons(this.scoreReasons, this.config.sendScoreReasonsToServer),
         };
         this._clientEvents = [];
@@ -640,12 +842,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     /**
-     * Fire-and-forget issue. Emits `'issue'` and buffers an entry into the
-     * next ClientSample. Does NOT enter the active store and cannot be
-     * resolved — use this for one-shot, non-stateful issues like
-     * `USER_MEDIA_ERROR` where there is no "ended" condition.
-     *
-     * For stateful issues that should live until resolved, use `raiseIssue`.
+     * Fire-and-forget issue: emits `'issue'` and buffers an entry into the next
+     * ClientSample, but never enters the active store and cannot be resolved.
+     * For issues that live until resolved, use `raiseIssue`.
      */
     public addIssue<T extends ClientIssuePayload = ClientIssuePayload>(input: {
         type: string;
@@ -676,13 +875,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }
 
     /**
-     * Raise (or refresh) a stateful issue. `key` is mandatory and is the
-     * global identity within this monitor — pass the same `key` to
-     * `resolveIssue` to clear the issue. Re-raising with an already-active
-     * `key` updates the existing entry in place (payload refreshed,
-     * `updatedAt` bumped) and emits `'issue-updated'` instead of `'issue'`.
-     *
-     * Returns the resulting `RaisedClientIssue` (new or updated).
+     * Raise (or refresh) a stateful issue. `key` is its identity within this
+     * monitor — pass the same one to `resolveIssue`. Re-raising an active `key`
+     * updates the entry in place and emits `'issue-updated'` instead of `'issue'`.
      */
     public raiseIssue<T extends ClientIssuePayload = ClientIssuePayload>(key: string, input: {
         type: string,
@@ -690,54 +885,22 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         timestamp?: number,
         /**
          * Whether this issue (and its later resolution) is buffered into the
-         * ClientSample. Defaults to true. The built-in detectors pass their
-         * public `includeIssueInSample` field here, so sampling of any
-         * detector's issues can be switched off at runtime without touching
-         * the local issue lifecycle.
+         * ClientSample. Defaults to true; the built-in detectors pass their
+         * `includeIssueInSample` field here.
          */
         includeInSample?: boolean,
     }): RaisedClientIssue<T> | undefined {
         if (this.closed) return undefined;
 
-        const now = input.timestamp ?? Date.now();
-        const existing = this.activeIssues.get(key) as RaisedClientIssue<T> | undefined;
-
-        if (existing) {
-            existing.type = input.type;
-            existing.payload = input.payload;
-            existing.updatedAt = now;
-            existing.includeInSample = input.includeInSample ?? existing.includeInSample;
-
-            this.emit('issue-updated', existing);
-            return existing;
-        }
-
-        const issue: RaisedClientIssue<T> = {
-            type: input.type,
+        const innerPayload = {
             key,
-            payload: input.payload,
-            raisedAt: now,
-            updatedAt: now,
-            includeInSample: input.includeInSample ?? true,
+            ...input,
         };
 
-        this.activeIssues.set(issue.key, issue);
+        if (!this.activeIssues.has(key)) this.activeIssues.raise(innerPayload);
+        else this.activeIssues.update(innerPayload);
 
-        // With lifecycle tracking on, the raise entry carries the issue key so
-        // the server can open its side of the issue under the same identity it
-        // will later close on the `-resolved` entry. With it off, the wire
-        // format is unchanged from previous releases.
-        if (issue.includeInSample !== false) {
-            this._bufferIssueForSample(
-                issue.type,
-                issue.payload,
-                now,
-                this.config.sendResolvedIssuesToServer ? issue.key : undefined,
-            );
-        }
-        this.emit('issue', issue);
-
-        return issue;
+        return this.activeIssues.get(key) as RaisedClientIssue<T>;
     }
 
     /**
@@ -752,52 +915,14 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     }): ResolvedClientIssue | undefined {
         if (this.closed) return undefined;
 
-        const issue = this.activeIssues.get(key);
-        if (!issue) return undefined;
-
-        this.activeIssues.delete(key);
-
-        if (input.payload) {
-            issue.payload = input.payload;
-        }
-
-        const resolution: ResolvedClientIssue = {
-            ...issue,
-            resolvedAt: input.resolvedAt ?? Date.now(),
-            comment: input.comment,
-        };
-        this.emit('issue-resolved', resolution);
-
-        if (this.config.sendResolvedIssuesToServer && issue.includeInSample !== false) {
-            const extraPayload = typeof input.payload === 'object' && input.payload !== null ? input.payload : {};
-            // The schema-level `key` identifies which open issue this entry
-            // closes; `raisedAt` equals the raise entry's timestamp as a
-            // secondary join. Only a payload explicitly passed to this
-            // resolution is included (flattened) — the raise-time payload is
-            // already on the server from the raise entry.
-            this._bufferIssueForSample(
-                `${issue.type}-resolved`,
-                {
-                    raisedAt: issue.raisedAt,
-                    comment: input.comment,
-                    ...extraPayload,
-                },
-                resolution.resolvedAt,
-                issue.key,
-            );
-        }
-
-        return resolution;
+        return this.activeIssues.resolve({ key, ...input });
     }
 
     /** Snapshot of currently active (raised) issues, optionally filtered by type. */
-    public getActiveIssuesByType(type?: string): RaisedClientIssue[] {
-        const result: RaisedClientIssue[] = [];
-
-        for (const issue of this.activeIssues.values()) {
-            if (type === undefined || issue.type === type) result.push(issue);
-        }
-        return result;
+    public getActiveIssuesByType(type: string): RaisedClientIssue[] {
+        return [
+            ...this.activeIssues.getByType(type) ?? []
+        ];
     }
 
     /** True if a raised issue with the given `key` is currently active. */
@@ -805,10 +930,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         return this.activeIssues.has(key);
     }
 
+
     private _bufferIssueForSample(type: string, payload: ClientIssuePayload | undefined, timestamp: number, key?: string): void {
-        // Only buffer when sampling is configured (or explicitly requested),
-        // matching the existing behavior of other addX methods. Event emission
-        // is unconditional. Listeners always see the issue.
+        // Only buffer when sampling is configured; emission is unconditional.
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         this._clientIssues.push({
@@ -838,8 +962,42 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         })
     }
 
-    public addExtensionStats(stats: { type: string, payload?: ClientPayload }): void {
+    /**
+     * Reports one application metric alongside the WebRTC statistics.
+     *
+     * Pass an `id` to make the payload readable back off the monitor with
+     * {@link getExtensionStatsPayload}. Without one the stat is still buffered into the next sample
+     * and emitted, but nothing keeps it: `id` is what turns a reported value into current state.
+     *
+     * An id-keyed payload lives while the id keeps being reported and is dropped one collection
+     * after it stops, on the same `visited` sweep every other monitor uses. A provider registered
+     * in {@link extensionStatsProviders} runs every collection, so its value stays readable for the
+     * life of the call; a one-off call to this method leaves a value readable for one collection.
+     * Re-reporting an id replaces the payload rather than accumulating — this is a current-value
+     * store, not a history.
+     *
+     * Buffering into the sample is separate: that half is skipped when nothing is sampling and
+     * `bufferingEventsForSamples` is off, but the id-keyed value is kept regardless, because
+     * reading your own metrics back has nothing to do with whether samples are being produced.
+     */
+    public addExtensionStats(stats: { type: string, payload?: ClientPayload, id?: string }): void {
         if (this.closed) return;
+
+        if (stats.id) {
+            let monitor = this.mappedExtensionStatsMonitors.get(stats.id);
+
+            if (!monitor) {
+                monitor = new ExtensionStatsMonitor(
+                    stats.id,
+                    stats.type,
+                    this
+                );
+                this.mappedExtensionStatsMonitors.set(stats.id, monitor);
+            }
+
+            monitor.accept(stats.payload);
+        }
+
         if (!this._samplingTick && !this.config.bufferingEventsForSamples) return;
 
         // Schema 3.5.0 carries payloads as records — nothing to serialise.
@@ -989,15 +1147,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     /**
      * Declares what the application knows about an **inbound** track and the
-     * stats never reveal, by track id — whether or not the track's monitor
-     * exists yet. Signaling usually knows a guest's track is a screen share
-     * before a single packet arrives, and at that moment there is nothing to
-     * call `setContext` on.
-     *
-     * A declaration made early is held pending and consumed by whichever peer
-     * connection first manifests the track. **Merges in both states**, so a
-     * content type declared from signaling survives a later call that only
-     * attaches the video element.
+     * stats never reveal, by track id, whether or not its monitor exists yet.
+     * An early declaration is held pending until the track appears, and merges
+     * in both states, so a later partial call does not overwrite it.
      */
     public setInboundTrackContext(trackId: string, context: InboundTrackContext): void {
         const trackMonitor = this.getInboundTrackMonitor(trackId);
@@ -1102,5 +1254,59 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 sample,
             });
         }
+
+
+    // the temrinal function for a raise issue chain
+    private _raiseIssue(issue: RaisedClientIssue): boolean {
+        if (this.closed) return false;
+
+        // With lifecycle tracking on, the raise entry carries the key the
+        // `-resolved` entry will later close on.
+        if (issue.includeInSample !== false) {
+            this._bufferIssueForSample(
+                issue.type,
+                issue.payload,
+                issue.raisedAt,
+                this.config.sendResolvedIssuesToServer ? issue.key : undefined,
+            );
+        }
+        this.emit('issue', issue);
+
+        return true;
+    }
+
+    private _updateIssue(issue: RaisedClientIssue): boolean {
+        if (this.closed) return false;
+
+        this.emit('issue-updated', issue);
+
+        return true;
+    }
+
+    private _resolveIssue(resolvedIssue: ResolvedClientIssue): ResolvedClientIssue | undefined {
+        if (this.closed) return undefined;
+
+
+         // With lifecycle tracking on, the raise entry carries the key the
+        // `-resolved` entry will later close on.
+        if (this.config.sendResolvedIssuesToServer && resolvedIssue.includeInSample !== false) {
+            const extraPayload = typeof resolvedIssue.payload === 'object' && resolvedIssue.payload !== null ? resolvedIssue.payload : {};
+            // `key` says which open issue this closes, `raisedAt` is a secondary
+            // join. Only the resolution's own payload is flattened in.
+            this._bufferIssueForSample(
+                `${resolvedIssue.type}-resolved`,
+                {
+                    raisedAt: resolvedIssue.raisedAt,
+                    comment: resolvedIssue.comment,
+                    ...extraPayload,
+                },
+                resolvedIssue.resolvedAt,
+                resolvedIssue.key,
+            );
+        }
+
+        this.emit('issue-resolved', resolvedIssue);
+
+        return resolvedIssue;
     }
 }

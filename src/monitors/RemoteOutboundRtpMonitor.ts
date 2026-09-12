@@ -1,4 +1,5 @@
 import { RemoteOutboundRtpStats } from "../schema/ClientSample";
+import { positiveDelta } from "../utils/common";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
 export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
@@ -12,6 +13,10 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 	codecId?: string | undefined;
 	packetsSent?: number | undefined;
 	bytesSent?: number | undefined;
+
+	/** What the far end reported sending in this interval; `undefined` when there is no new report. */
+	deltaPacketsSent?: number | undefined;
+	deltaBytesSent?: number | undefined;
 	localId?: string | undefined;
 	remoteTimestamp?: number | undefined;
 	reportsSent?: number | undefined;
@@ -22,15 +27,14 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 	// derived fields
 	bitrate?: number | undefined;
 
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
+	deltaTime?: number | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+
+
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server, 
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 	
 	public constructor(
@@ -52,6 +56,9 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 
 		return result;
 	}
+
+	/** Accumulated stats time. Only differences between two readings mean anything. */
+	public statsClockTime = 0;
 
 	public getPeerConnection() {
 		return this._peerConnection;
@@ -77,9 +84,21 @@ export class RemoteOutboundRtpMonitor implements RemoteOutboundRtpStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
-		if (elapsedInMs <= 0) { 
-			return; // logger?
+
+		if (elapsedInMs <= 0) {
+			// The same sender report came back: a stale claim would read as the far end
+			// still talking long after its RTCP stopped.
+			this.deltaTime = 0;
+			this.deltaPacketsSent = undefined;
+			this.deltaBytesSent = undefined;
+
+			return;
 		}
+
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
+		this.deltaPacketsSent = positiveDelta(stats.packetsSent, this.packetsSent);
+		this.deltaBytesSent = positiveDelta(stats.bytesSent, this.bytesSent);
 
 		Object.assign(this, stats);
 	}

@@ -8,8 +8,11 @@ export type DecoderPerformanceIssuePayload = {
 	decodeTimePerFrameInMs?: number;
 	/** The per-frame budget it was compared against (1000/fps), in milliseconds. */
 	frameBudgetInMs?: number;
-	/** Delta `framesDropped` over delta `framesReceived` in the interval. */
-	dropRatio?: number;
+	/**
+	 * Delta `framesDropped` over delta `framesReceived` in the interval. Context only — frames
+	 * lost after arrival are `DecoderBottleneckDetector`'s finding, never this one's trigger.
+	 */
+	droppedFrameRatio?: number;
 	/** Delta `framesRendered` over delta `framesDecoded` in the interval. */
 	renderRatio?: number;
 	/** Frames that arrived in the interval — the evidence the decoder had something to do. */
@@ -22,29 +25,50 @@ export type DecoderPerformanceIssuePayload = {
 	durationInMs?: number;
 }
 
+export type DecoderPerformanceDetectorConfig = {
+	/** Fraction of the per-frame budget (1000/fps) decoding may consume before counting as overloaded. */
+	decodeTimeBudgetRatio: number;
+
+	/** Frames that must have been received in the interval before judging. */
+	minFramesReceived: number;
+
+	/** Loss fraction above which the network is the better explanation and the detector stays silent. */
+	quietLossThreshold: number;
+
+	/** Consecutive collections the condition must hold before raising. */
+	minConsecutiveTicks: number;
+}
+
 /**
- * Watches inbound video for the client failing to decode what it was sent. It exists to make
- * network-versus-client attribution possible at all: frames missing because they never arrived
- * and frames missing because the machine could not decode them look identical in a frame-rate
- * chart, and the two have opposite fixes.
+ * Reports decoding costing more time than the stream leaves for it — how *expensive* each frame was
+ * to decode, not how many frames came out. One measurement:
  *
- * So the decoder is only accused once the frames demonstrably arrived. Enough of them must have
- * come in during the interval, and the network must have been quiet — loss below
- * `quietLossThreshold` — before either symptom counts: decode time per frame exceeding the
- * budget the stream's own frame rate implies (1000/fps: 33ms at 30fps, 66ms at 15fps), or frames
- * being dropped after they had already arrived. Rising loss alongside PLI is the other story
- * entirely, `FreezedVideoTrackDetector` owns it, and both detectors firing at once is the honest
- * answer when both things are true. A symptom must also persist for `minConsecutiveTicks`, so
- * one slow interval never becomes an issue.
+ * ```
+ * frameBudgetInMs = 1000 / framesPerSecond          // 33ms at 30fps, 66ms at 15fps
  *
- * It stands down, resolving any open issue, whenever it cannot clear the network or the machine:
- * in a backgrounded tab, where throttled decoding says nothing about real capability; with too
- * few frames in the interval to judge, as with a static screen share; and when the loss reading
- * is missing altogether, because an absent measurement cannot exonerate the network and the
- * decoder must not be blamed in its place.
+ * raise when  decodeTimePerFrameInMs  >  frameBudgetInMs × decodeTimeBudgetRatio
+ * ```
+ *
+ * With the default `0.8`, a 30fps stream raises once a frame takes more than 26ms to decode. The
+ * budget comes from the stream's own frame rate, so a 15fps stream is not accused for costs a 30fps
+ * one could not afford, and the condition must hold for `minConsecutiveTicks` collections.
+ *
+ * A finding means this machine is the constraint: too many streams for it, a thermal throttle, or a
+ * software codec on hardware that cannot run it at this resolution. Decoding this close to the
+ * budget is the warning *before* frames start being lost — once they are, the shortfall is
+ * `DecoderBottleneckDetector`'s finding. This detector owns cost, that one owns loss, and neither
+ * reads the other.
+ *
+ * It stands down and resolves whenever it cannot clear the network or the machine: a backgrounded
+ * tab, too few frames to judge, or a missing loss reading.
  *
  * Raises `video-decoder-overloaded`. Emits `video-decoder-overloaded`.
  * Config: `decoderPerformanceDetector`.
+ * Track attribute: `InboundTrackMonitor.overloadedDecoder`.
+ *
+ * Category: Pipeline Disruption
+ * Layer: Receive — frames to decoder
+ *
  */
 export class DecoderPerformanceDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'video-decoder-overloaded';
@@ -72,14 +96,28 @@ export class DecoderPerformanceDetector implements Detector {
 	}
 
 	public update() {
-		if (this.disabled) return;
+		if (this.disabled) {
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
+
+			return;
+		}
 
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
-		if (!inboundRtp || inboundRtp.kind !== 'video') return;
+		if (!inboundRtp || inboundRtp.kind !== 'video') {
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
 
+			return;
+		}
+
+		// Every stand-down below is a reason the decoder could not be judged, so the flag goes
+		// blind rather than false: a backgrounded tab is not a decoder that kept up.
 		if (!this.peerConnection.parent.activeTab) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
 
 			return this._alertOn ? this._clear('tab in background') : undefined;
 		}
@@ -88,6 +126,8 @@ export class DecoderPerformanceDetector implements Detector {
 
 		if (framesReceived < this.config.minFramesReceived) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
 
 			return this._alertOn ? this._clear('not enough frames to evaluate') : undefined;
 		}
@@ -96,31 +136,41 @@ export class DecoderPerformanceDetector implements Detector {
 
 		if (fractionLost === undefined) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
 
 			return this._alertOn ? this._clear('no loss reading; cannot clear the network') : undefined;
 		}
 
-		// loss dominating means the network owns the frame loss, not the decoder (`FreezedVideoTrackDetector` covers that)
+		// Loss dominating means the network owns the frame loss, not the decoder.
 		if (this.config.quietLossThreshold < fractionLost) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
 
 			return this._alertOn ? this._clear('loss dominates; not a decoder problem') : undefined;
 		}
 
-		// per-frame budget from the stream's own frame rate: 33ms at 30fps, 66ms at 15fps
+		// Per-frame budget from the stream's own frame rate: 33ms at 30fps, 66ms at 15fps.
 		const fps = inboundRtp.framesPerSecond ?? inboundRtp.avgFramesPerSec;
 		const frameBudgetInMs = fps && 0 < fps ? 1000 / fps : undefined;
 		const decodeTimePerFrameInMs = inboundRtp.decodeTimePerFrameInMs;
+
+		// Beside the flag: how much of the budget decoding used, on every collection it could be
+		// measured, so a decoder at 0.7 of its budget is distinguishable from one nobody measured.
+		this.trackMonitor.decodeBudgetUtilization = frameBudgetInMs !== undefined
+			&& decodeTimePerFrameInMs !== undefined
+			&& 0 < frameBudgetInMs
+			? decodeTimePerFrameInMs / frameBudgetInMs
+			: undefined;
 
 		const decodeTooSlow = frameBudgetInMs !== undefined &&
 			decodeTimePerFrameInMs !== undefined &&
 			frameBudgetInMs * this.config.decodeTimeBudgetRatio < decodeTimePerFrameInMs;
 
-		const droppingAfterArrival = inboundRtp.dropRatio !== undefined &&
-			this.config.dropRatioThreshold < inboundRtp.dropRatio;
-
-		if (!decodeTooSlow && !droppingAfterArrival) {
+		if (!decodeTooSlow) {
 			this._consecutiveTicks = 0;
+			this.trackMonitor.overloadedDecoder = false;
 
 			if (this._alertOn) {
 				this._clear('decoder keeping up again');
@@ -132,10 +182,18 @@ export class DecoderPerformanceDetector implements Detector {
 		this._consecutiveTicks += 1;
 
 		if (this._alertOn) return;
-		if (this._consecutiveTicks < this.config.minConsecutiveTicks) return;
+
+		// Over the budget, but not yet for long enough to be reportable.
+		if (this._consecutiveTicks < this.config.minConsecutiveTicks) {
+			this.trackMonitor.overloadedDecoder = false;
+
+			return;
+		}
 
 		this._alertOn = true;
 		this._startedAt = Date.now();
+		// Set here, not at the call sites, so the flag and the finding cannot drift.
+		this.trackMonitor.overloadedDecoder = true;
 
 		const clientMonitor = this.peerConnection.parent;
 
@@ -146,7 +204,8 @@ export class DecoderPerformanceDetector implements Detector {
 			frameBudgetInMs,
 		});
 
-		clientMonitor.raiseIssue<DecoderPerformanceIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.raise({
+				key: this.issueKey,
 				includeInSample: this.includeIssueInSample,
 			type: DecoderPerformanceDetector.ISSUE_TYPE,
 			payload: {
@@ -154,7 +213,7 @@ export class DecoderPerformanceDetector implements Detector {
 				trackId: this.trackMonitor.track.id,
 				decodeTimePerFrameInMs,
 				frameBudgetInMs,
-				dropRatio: inboundRtp.dropRatio,
+				droppedFrameRatio: inboundRtp.droppedFrameRatio,
 				renderRatio: inboundRtp.renderRatio,
 				framesReceived,
 				decoderImplementation: inboundRtp.decoderImplementation,
@@ -167,8 +226,7 @@ export class DecoderPerformanceDetector implements Detector {
 	private _clear(comment: string) {
 		this._alertOn = false;
 
-		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
+		const issue = this.trackMonitor.issues.get(this.issueKey);
 		let payload: DecoderPerformanceIssuePayload | undefined;
 
 		if (issue) {
@@ -178,7 +236,8 @@ export class DecoderPerformanceDetector implements Detector {
 			};
 		}
 
-		clientMonitor.resolveIssue<DecoderPerformanceIssuePayload>(this.issueKey, {
+		this.trackMonitor.issues.resolve({
+			key: this.issueKey,
 			comment,
 			payload,
 			resolvedAt: Date.now(),

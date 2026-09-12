@@ -89,7 +89,7 @@ describe('ClientMonitor issue lifecycle in samples', () => {
 
 		monitor.on('issue', (issue) => seen.push(issue));
 		monitor.raiseIssue('local-only', {
-			type: 'freezed-video-track',
+			type: 'video-flow-disrupted',
 			payload: { trackId: 'a' },
 			includeInSample: false,
 		});

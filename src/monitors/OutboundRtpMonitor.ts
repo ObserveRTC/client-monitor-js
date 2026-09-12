@@ -64,18 +64,18 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	deltaFramesEncoded?: number | undefined;
 	deltaKeyFramesEncoded?: number | undefined;
 	deltaHugeFramesSent?: number | undefined;
-	deltaTotalEncodeTime?: number | undefined;
-	deltaTotalPacketSendDelay?: number | undefined;
+	deltaEncodeTime?: number | undefined;
+	deltaPacketSendDelay?: number | undefined;
 	deltaQpSum?: number | undefined;
 	deltaNackCount?: number | undefined;
 	deltaFirCount?: number | undefined;
 	deltaPliCount?: number | undefined;
 
-	/**
-	 * Wall-clock encode time per frame in this interval, in milliseconds —
-	 * the most direct sender-side CPU pressure signal.
-	 */
-	encodeTimePerFrameInMs?: number | undefined;
+	/** Difference in milliseconds since the previous collection stats report, using the reports' own timestamps. */
+	deltaTime?: number | undefined;
+
+	/** The average number of milliseconds the encoder spent since the last collection to encode per frame */
+	avgEncodeTimePerFrameInMs?: number | undefined;
 
 	/** Share of the bytes sent in this interval that were retransmissions. */
 	retransmissionRatio?: number | undefined;
@@ -97,11 +97,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	pliRate?: number | undefined;
 	firRate?: number | undefined;
 
-	/**
-	 * Share of the interval the encoder spent limited by each reason, in
-	 * `0..1` — unlike the monotonic `qualityLimitationDurations` totals, this
-	 * describes the current interval and can be compared to a threshold.
-	 */
+	/** Share of this interval the encoder spent limited by each reason, `0..1`. */
 	qualityLimitationDurationShares?: {
 		none: number;
 		cpu: number;
@@ -109,14 +105,9 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		other: number;
 	} | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -142,6 +133,13 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 	public get trackIdentifier() {
 		return this.getMediaSource()?.trackIdentifier;
 	}
+
+	/**
+	 * Milliseconds of stats time this monitor has observed, accumulated from `deltaTime`.
+	 * Every window and duration in the library is measured on this clock, never on `Date.now()`;
+	 * it is not a timestamp, so only differences between two readings mean anything.
+	 */
+	public statsClockTime = 0;
 
 	public getPeerConnection() {
 		return this._peerConnection;
@@ -180,6 +178,8 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 		const elapsedInSec = elapsedInMs / 1000;
 
 		this.deltaPacketsSent = positiveDelta(stats.packetsSent, this.packetsSent);
@@ -216,26 +216,26 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		this.deltaFramesEncoded = positiveDelta(stats.framesEncoded, this.framesEncoded);
 		this.deltaKeyFramesEncoded = positiveDelta(stats.keyFramesEncoded, this.keyFramesEncoded);
 		this.deltaHugeFramesSent = positiveDelta(stats.hugeFramesSent, this.hugeFramesSent);
-		this.deltaTotalEncodeTime = positiveDelta(stats.totalEncodeTime, this.totalEncodeTime);
-		this.deltaTotalPacketSendDelay = positiveDelta(stats.totalPacketSendDelay, this.totalPacketSendDelay);
+		this.deltaEncodeTime = positiveDelta(stats.totalEncodeTime, this.totalEncodeTime);
+		this.deltaPacketSendDelay = positiveDelta(stats.totalPacketSendDelay, this.totalPacketSendDelay);
 		this.deltaQpSum = positiveDelta(stats.qpSum, this.qpSum);
 		this.deltaNackCount = positiveDelta(stats.nackCount, this.nackCount);
 		this.deltaFirCount = positiveDelta(stats.firCount, this.firCount);
 		this.deltaPliCount = positiveDelta(stats.pliCount, this.pliCount);
 
 		if (this.deltaFramesEncoded !== undefined && this.deltaFramesEncoded > 0) {
-			if (this.deltaTotalEncodeTime !== undefined) {
+			if (this.deltaEncodeTime !== undefined) {
 				// totalEncodeTime is in seconds.
-				this.encodeTimePerFrameInMs = (this.deltaTotalEncodeTime * 1000) / this.deltaFramesEncoded;
+				this.avgEncodeTimePerFrameInMs = (this.deltaEncodeTime * 1000) / this.deltaFramesEncoded;
 			}
 			if (this.deltaQpSum !== undefined) {
 				this.avgQpPerFrame = this.deltaQpSum / this.deltaFramesEncoded;
 			}
 		}
 
-		if (this.deltaTotalPacketSendDelay !== undefined && this.deltaPacketsSent !== undefined && this.deltaPacketsSent > 0) {
+		if (this.deltaPacketSendDelay !== undefined && this.deltaPacketsSent !== undefined && this.deltaPacketsSent > 0) {
 			// totalPacketSendDelay is in seconds.
-			this.avgPacketSendDelayInMs = (this.deltaTotalPacketSendDelay * 1000) / this.deltaPacketsSent;
+			this.avgPacketSendDelayInMs = (this.deltaPacketSendDelay * 1000) / this.deltaPacketsSent;
 		}
 
 		if (this.deltaKeyFramesEncoded !== undefined) {
@@ -263,11 +263,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		}
 	}
 
-	/**
-	 * Shares are computed from the deltas and normalized by the total
-	 * limitation time observed — not by the wall clock, which can drift from
-	 * the encoder's own accounting.
-	 */
+	/** Normalized by the total limitation time observed, not by the wall clock. */
 	private _calculateQualityLimitationShares(
 		previous?: QualityLimitationDurations,
 		current?: QualityLimitationDurations,
@@ -283,7 +279,7 @@ export class OutboundRtpMonitor implements OutboundRtpStats {
 		const total = none + cpu + bandwidth + other;
 
 		if (total <= 0) {
-			// no encoder progress at all (paused sender) — no shares rather than a fabricated 100% "none"
+			// No encoder progress at all — no shares rather than a fabricated 100% "none".
 			return undefined;
 		}
 

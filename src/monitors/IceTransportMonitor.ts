@@ -1,9 +1,34 @@
+import { IssueRegistry } from "../utils/IssueRegistry";
 import { IceTransportStats } from "../schema/ClientSample";
+import { BlockedStunRequestsDetector, BlockedTransportIssuePayload } from "../detectors/BlockedStunRequestsDetector";
+import { Detectors } from "../detectors/Detectors";
 import { positiveDelta } from "../utils/common";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 
+/**
+ * Every issue a ICE transport can carry, keyed by the detector that raises it. This is what
+ * `issues` is typed to, so a detector cannot raise a type this monitor has no business reporting,
+ * and adding a detector without adding it here fails to compile at that detector's `raise`.
+ */
+export type IceTransportIssues = {
+	[BlockedStunRequestsDetector.ISSUE_TYPE]: BlockedTransportIssuePayload,
+}
+
 export class IceTransportMonitor implements IceTransportStats {
 	private _visited = true;
+
+	/**
+	 * Detectors whose findings are about this one transport, run once per collection by
+	 * `PeerConnectionMonitor`. Binding them here ties their state and lifetime to the transport.
+	 */
+	public readonly detectors: Detectors;
+
+	/**
+	 * This ICE transport's own active issues, uplinked into its peer connection's registry. Its
+	 * detectors raise, update and resolve here and nowhere else — writes travel up, so a
+	 * resolution sent straight to a higher layer would leave this copy standing forever.
+	 */
+	public readonly issues: IssueRegistry<IceTransportIssues>;
 
 	timestamp: number;
 	id: string;
@@ -33,22 +58,30 @@ export class IceTransportMonitor implements IceTransportStats {
 	sendingBitrate?: number | undefined;
 	receivingBitrate?: number | undefined;
 	/**
-	 * How many times the browser switched the selected candidate pair since the
-	 * previous tick, from the native `selectedCandidatePairChanges` counter
-	 * (Chrome 80+, Firefox 155+; absent on Safari). `undefined` until the
-	 * transport has had a selection: the spec counter also increments on the
-	 * very first none → some selection, which is not churn.
+	 * How many times the browser switched the selected candidate pair since the previous tick.
+	 * `undefined` until the transport has had a selection, since the first one is not churn.
 	 */
 	deltaSelectedCandidatePairChanges?: number | undefined;
 
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
+	deltaTime?: number | undefined;
+
 	/**
-	 * Additional data attached to this stats, will be shipped to the server
+	 * True once this transport has ever reached `connected` or `completed`, never false again.
+	 * Separates a path that never established from one that established and was then lost.
 	 */
+	everConnected = false;
+
+	/**
+	 * True while STUN requests keep going out on this transport and nothing comes back.
+	 * `PeerConnectionMonitor.blockedTransport` folds this over the live transports, and is
+	 * where callers should read it.
+	 */
+	public blocked = false;
+
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -59,6 +92,15 @@ export class IceTransportMonitor implements IceTransportStats {
 		this.timestamp = options.timestamp;
 
 		Object.assign(this, options);
+
+		this.issues = new IssueRegistry<IceTransportIssues>(
+			this._peerConnection.issues.asSink,
+		);
+		this.detectors = new Detectors();
+
+		if (_peerConnection.parent.config.blockedStunRequestsDetector !== null) {
+			this.detectors.add(new BlockedStunRequestsDetector(this));
+		}
 	}
 
 	public get visited(): boolean {
@@ -69,6 +111,13 @@ export class IceTransportMonitor implements IceTransportStats {
 		return result;
 	}
 
+	/**
+	 * Milliseconds of stats time this monitor has observed, accumulated from `deltaTime`.
+	 * Every window and duration in the library is measured on this clock, never on `Date.now()`;
+	 * it is not a timestamp, so only differences between two readings mean anything.
+	 */
+	public statsClockTime = 0;
+
 	public getPeerConnection() {
 		return this._peerConnection;
 	}
@@ -78,11 +127,19 @@ export class IceTransportMonitor implements IceTransportStats {
 	}
 
 	/**
-	 * The live `SelectedIcePath` of this transport, when one exists. Paths are
-	 * keyed by the candidate pair's `pathKey`, which is the transport id for
-	 * every native flow, so this resolves for anything but the pathless
-	 * legacy fallbacks.
+	 * The outbound RTP streams carried by this transport. A plain `transportId` lookup:
+	 * restoring the id where a browser omits it is the stats adapters' job, not this one's.
 	 */
+	public getOutboundRtps() {
+		return this._peerConnection.outboundRtps.filter((rtp) => rtp.transportId === this.id);
+	}
+
+	/** The inbound RTP streams carried by this transport. See `getOutboundRtps()`. */
+	public getInboundRtps() {
+		return this._peerConnection.inboundRtps.filter((rtp) => rtp.transportId === this.id);
+	}
+
+	/** The live `SelectedIcePath` of this transport, when one exists. */
 	public getSelectedIcePath() {
 		return this._peerConnection.mappedSelectedIcePaths.get(this.id);
 	}
@@ -95,6 +152,13 @@ export class IceTransportMonitor implements IceTransportStats {
 
 		if (elapsedInMs <= 0) {
 			return; // logger?
+		}
+
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
+
+		if (stats.iceState === 'connected' || stats.iceState === 'completed') {
+			this.everConnected = true;
 		}
 
 		if (this.packetsSent !== undefined && stats.packetsSent !== undefined && this.packetsSent <= stats.packetsSent) {
@@ -122,10 +186,8 @@ export class IceTransportMonitor implements IceTransportStats {
 			this.receivingBitrate = undefined;
 		}
 
-		// Only counted once the transport already had a selection: the spec counter
-		// also increments going from no selected pair to having one (its very first
-		// selection), and treating that as a switch would read every connection
-		// setup as churn. A backwards counter (reset) yields `undefined`, never 0.
+		// Only counted once the transport already had a selection: the counter also increments
+		// on the first one, and treating that as a switch would read every setup as churn.
 		this.deltaSelectedCandidatePairChanges = this.selectedCandidatePairId !== undefined
 			? positiveDelta(stats.selectedCandidatePairChanges, this.selectedCandidatePairChanges)
 			: undefined;
@@ -134,11 +196,8 @@ export class IceTransportMonitor implements IceTransportStats {
 	}
 
 	public createSample(): IceTransportStats {
-		// Constant after the handshake, so re-sending them every sample carries no
-		// information: they are emitted in the first sample and again only when one
-		// of them changes (the ufrag changes exactly at an ICE restart — a change
-		// worth seeing). `sendIceTransportMetadataOnChangeOnly: false` restores the
-		// legacy every-sample emission.
+		// Constant after the handshake, so emitted in the first sample and again only on change
+		// (the ufrag changes exactly at an ICE restart).
 		const staticMetadata: Pick<IceTransportStats,
 			'iceRole' | 'iceLocalUsernameFragment' | 'localCertificateId' | 'remoteCertificateId'
 			| 'tlsVersion' | 'dtlsCipher' | 'dtlsRole' | 'srtpCipher'> = {

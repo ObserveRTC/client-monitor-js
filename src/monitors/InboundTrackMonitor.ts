@@ -1,105 +1,397 @@
-import { AudioDesyncDetector } from "../detectors/AudioDesyncDetector";
+import { IssueRegistry } from "../utils/IssueRegistry";
+import { clamp } from "../utils/common";
+import { AVDesyncPlayoutDetector, AVDesyncPlayoutIssuePayload } from "../detectors/AVDesyncPlayoutDetector";
 import { Detectors } from "../detectors/Detectors";
-import { FreezedVideoTrackDetector } from "../detectors/FreezedVideoTrackDetector";
-import { DryInboundTrackDetector } from "../detectors/DryInboundTrackDetector";
+import { VideoRecoveryFailedDetector, VideoRecoveryFailedIssuePayload } from "../detectors/VideoRecoveryFailedDetector";
+import { DryInboundTrackDetector, DryInboundTrackIssuePayload } from "../detectors/DryInboundTrackDetector";
 import { CalculatedScore, VideoMotionType } from "../scores/CalculatedScore";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { InboundTrackSample } from "../schema/ClientSample";
 import { sampledScoreReasons } from "../scores/utils";
-import { PlayoutDiscrepancyDetector } from "../detectors/PlayoutDiscrepancyDetector";
-import { AudioConcealmentDetector } from "../detectors/AudioConcealmentDetector";
-import { JitterBufferStressDetector } from "../detectors/JitterBufferStressDetector";
-import { DecoderPerformanceDetector } from "../detectors/DecoderPerformanceDetector";
-import { InboundFrameSupplyDetector } from "../detectors/InboundFrameSupplyDetector";
-import { StuckDecoderDetector } from "../detectors/StuckDecoderDetector";
+import { PlayoutDiscrepancyDetector, PlayoutDiscrepancyIssuePayload } from "../detectors/PlayoutDiscrepancyDetector";
+import { InventedSpeechDetector, InventedSpeechIssuePayload } from "../detectors/InventedSpeechDetector";
+import { JitterBufferStressDetector, JitterBufferStressIssuePayload } from "../detectors/JitterBufferStressDetector";
+import { DecoderPerformanceDetector, DecoderPerformanceIssuePayload } from "../detectors/DecoderPerformanceDetector";
+import { DecoderBottleneckDetector, DecoderBottleneckIssuePayload } from "../detectors/DecoderBottleneckDetector";
+import { StuckDecoderDetector, StuckDecoderIssuePayload } from "../detectors/StuckDecoderDetector";
+import { FrameAssemblyStalledDetector, FrameAssemblyStalledIssuePayload } from "../detectors/FrameAssemblyStalledDetector";
+import { PixelatedVideoDetector, PixelatedVideoIssuePayload } from "../detectors/PixelatedVideoDetector";
+import { InboundVideoFlowStateDetector, VideoFlowIssuePayload } from "../detectors/InboundVideoFlowStateDetector";
 import { VideoResolutionChangeDetector } from "../detectors/VideoResolutionChangeDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
+import { AudioPlayoutSynthesisDetector, AudioPlayoutSynthesisIssuePayload } from "../detectors/AudioPlayoutSynthesisDetector";
 import type { TrackContentType } from "./TrackMonitor";
+import { SliceConfig, SlicedWindow } from "../utils/SlicedWindow";
 
 /**
- * What the application knows about an inbound track and the stats never reveal.
- *
- * Every field is optional and independently declarable: the pieces usually
- * become known at different moments — the content type from signaling before a
- * packet arrives, the video element only once it is mounted — and
- * `setContext()` merges rather than replaces, so a later partial call never
- * erases an earlier one. `ClientMonitor.setInboundTrackContext()` accepts the
- * same object by track id and works before the monitor exists at all.
+ * How the picture on an inbound video track is arriving: `frozen` is not moving at all,
+ * `choppy` is moving but repeatedly interrupted, `continuous` is fine.
+ */
+export type InboundVideoFlowState = 'continuous' | 'choppy' | 'frozen';
+
+/**
+ * What the application knows about an inbound track and the stats never reveal. Every field
+ * is independently declarable, and `setContext()` merges, so the pieces can be declared as
+ * they become known.
  */
 export type InboundTrackContext = {
+	/**
+	 * What kind of content this video track carries; screen shares are scored differently.
+	 * A received track exposes no `displaySurface`, so the application declares it.
+	 */
 	contentType?: TrackContentType;
+	/**
+	 * The inbound video track this audio track belongs with. Lip sync cannot be measured
+	 * without knowing which two streams to compare, and nothing in the stats says so.
+	 */
+	linkedVideoTrackId?: string;
+	/**
+	 * How much motion this track's content carries, which decides which `pixelated-video`
+	 * band applies. Undeclared, screen share is judged as `lowmotion` and everything else
+	 * as `standard`.
+	 */
 	motionType?: VideoMotionType;
+	/**
+	 * How big the picture is on the viewer's screen, in device pixels — the stats report
+	 * only the decoded resolution. Setting {@link videoTag} re-derives this every tick and
+	 * overwrites any declared value.
+	 */
 	presentedResolution?: { width: number, height: number };
+	/**
+	 * The `<video>` element this track is rendered into, held as a live reference so
+	 * {@link presentedResolution} stays current without the application re-declaring it.
+	 * The monitor does not own the element's lifetime.
+	 */
 	videoTag?: HTMLVideoElement;
+	/**
+	 * This receiving leg is paused; the producer may still feed everyone else.
+	 *
+	 * Declared rather than derived, and declarable before the track exists, because a receiver can
+	 * be created *already* paused — a mediasoup consumer, for one — and the stats only surface it
+	 * a collection or more later. There is no moment between those two at which the monitor could
+	 * be told, so the only way a track can be paused from its first collection is for the
+	 * declaration to have been waiting for it (see `ClientMonitor.setInboundTrackContext`).
+	 */
+	paused?: boolean;
+	/**
+	 * The remote producer paused: nobody receives this track. Same reasoning as {@link paused} —
+	 * a producer can be paused before this consumer is created.
+	 */
+	remoteOutboundTrackPaused?: boolean;
+}
+
+/**
+ * The running totals every detector on an inbound track differences, and so the type of every
+ * delta the window hands back.
+ *
+ * Read by name in the detectors, so the set of them is settled here rather than configured: adding
+ * one is a code change on both sides at once.
+ */
+export type InboundTrackWindowValues = {
+	totalFramesReceived: number | null;
+	totalFramesDecoded: number | null;
+	totalFramesDropped: number | null;
+	totalFramesRendered: number | null;
+	totalKeyFramesDecoded: number | null;
+	totalPacketsReceived: number | null;
+	totalBytesReceived: number | null;
+	totalPliCount: number | null;
+	totalFreezeCount: number | null;
+	totalFreezesDurationInMs: number | null;
+
+	// From the playout device this track's inbound RTP feeds, which several tracks may share.
+	// Carried on the track so a per-track detector judges them over the same stretch as the rest.
+	totalPlayoutSynthesizedDurationInMs: number | null;
+	totalPlayoutSamplesDurationInMs: number | null;
+	totalPlayoutSynthesisEvents: number | null;
+	totalPlayoutDelayInMs: number | null;
+	totalPlayoutSamplesCount: number | null;
+}
+
+/** Placeholders. Only the keys matter; `null` is what a delta reads before the window fills. */
+const INBOUND_TRACK_WINDOW_VALUES: InboundTrackWindowValues = {
+	totalFramesReceived: null,
+	totalFramesDecoded: null,
+	totalFramesDropped: null,
+	totalFramesRendered: null,
+	totalKeyFramesDecoded: null,
+	totalPacketsReceived: null,
+	totalBytesReceived: null,
+	totalPliCount: null,
+	totalFreezeCount: null,
+	totalFreezesDurationInMs: null,
+	totalPlayoutSynthesizedDurationInMs: null,
+	totalPlayoutSamplesDurationInMs: null,
+	totalPlayoutSynthesisEvents: null,
+	totalPlayoutDelayInMs: null,
+	totalPlayoutSamplesCount: null,
+};
+
+/**
+ * How many values each stretch covers, and when a gap breaks the run.
+ *
+ * The names are the library's and the sizes are the integrator's — this is the whole of what an
+ * application configures about the window. It does not set `offset` or `capacity`: those are the
+ * geometry that makes `recovery` sit behind `detection` rather than overlap it, and a window whose
+ * halves overlapped would resolve a fault on the same values that raised it.
+ */
+export type InboundTrackWindowConfig = {
+	/**
+	 * Milliseconds between two collections above which the run is treated as broken and the fill
+	 * starts again — a backgrounded tab, a stalled collector, a renegotiation. Wider than the
+	 * collecting period, or every collection is discarded as a blackout.
+	 */
+	maxAllowedGapInMs: number;
+
+	/**
+	 * Values per stretch. At least 2 each, since a delta needs two endpoints.
+	 *
+	 * `detection` and `recovery` are the pair most detectors on the track read. `flowDetection`
+	 * and `flowRecovery` are a second, wider pair for `InboundVideoFlowStateDetector`, which asks
+	 * a question the others do not: whether *nothing at all* rendered across the whole stretch.
+	 * That claim is only worth making over several collections — at the narrow pair it comes to a
+	 * single interval, and one empty interval is a stutter, not a frozen picture.
+	 */
+	numberOfSamples: Record<'detection' | 'recovery' | 'flowDetection' | 'flowRecovery', number>;
+}
+
+/**
+ * Every issue an inbound track can carry, keyed by the detector that raises it. This is what
+ * `issues` is typed to, so a detector cannot raise a type this monitor has no business reporting,
+ * and adding a detector without adding it here fails to compile at that detector's `raise`.
+ *
+ * Only detectors that raise a *stateful* issue appear. `VideoResolutionChangeDetector` and `CodecChangeDetector` emit events and raise nothing, so they have no entry.
+ */
+export type InboundTrackIssues = {
+	[AudioPlayoutSynthesisDetector.ISSUE_TYPE]: AudioPlayoutSynthesisIssuePayload,
+	[AVDesyncPlayoutDetector.ISSUE_TYPE]: AVDesyncPlayoutIssuePayload,
+	[DecoderBottleneckDetector.ISSUE_TYPE]: DecoderBottleneckIssuePayload,
+	[DecoderPerformanceDetector.ISSUE_TYPE]: DecoderPerformanceIssuePayload,
+	[DryInboundTrackDetector.ISSUE_TYPE]: DryInboundTrackIssuePayload,
+	[FrameAssemblyStalledDetector.ISSUE_TYPE]: FrameAssemblyStalledIssuePayload,
+	[InboundVideoFlowStateDetector.ISSUE_TYPE]: VideoFlowIssuePayload,
+	[InventedSpeechDetector.ISSUE_TYPE]: InventedSpeechIssuePayload,
+	[JitterBufferStressDetector.ISSUE_TYPE]: JitterBufferStressIssuePayload,
+	[PixelatedVideoDetector.ISSUE_TYPE]: PixelatedVideoIssuePayload,
+	[PlayoutDiscrepancyDetector.ISSUE_TYPE]: PlayoutDiscrepancyIssuePayload,
+	[StuckDecoderDetector.ISSUE_TYPE]: StuckDecoderIssuePayload,
+	[VideoRecoveryFailedDetector.ISSUE_TYPE]: VideoRecoveryFailedIssuePayload,
 }
 
 export class InboundTrackMonitor {
+	/**
+	 * The share of a codec's quantizer scale at which a picture stops being clean, and the share at
+	 * which it is fully coarse — the two ends of {@link quantizationDegradation}.
+	 *
+	 * Fractions rather than absolute quantizers, so one pair covers every codec: the scales differ
+	 * by a factor of four between H.264 and VP9.
+	 */
+	public static CLEAN_QP_RATIO = 0.5;
+	public static COARSE_QP_RATIO = 0.8;
+
 	public readonly direction = 'inbound';
 	public readonly detectors: Detectors;
+	/**
+	 * This track's own active issues, uplinked into the client monitor's registry. Its
+	 * detectors raise, update and resolve here and nowhere else — writes travel up, so a
+	 * resolution sent straight to the client would leave this copy standing forever.
+	 */
+	public readonly issues: IssueRegistry<InboundTrackIssues>;
+
+	/**
+	 * The inbound RTP's running totals over a detection window and the recovery window behind it,
+	 * shared by every detector on this track so they judge the same stretch of time.
+	 *
+	 * One window per track rather than one per detector: the receive side carries a single inbound
+	 * RTP, so there is one set of counters to difference and no reason for each detector to keep its
+	 * own copy. What a detector reads is `detectionDelta` to raise on and `recoveryDelta` to resolve
+	 * on; it holds no history of its own.
+	 */
+	public readonly slicedWindow: SlicedWindow<
+		InboundTrackWindowValues,
+		// A slice for every stretch the config sizes, so the names are declared once. Only the
+		// names matter here: how many samples each covers, and where it sits, are runtime.
+		Record<keyof InboundTrackWindowConfig['numberOfSamples'], SliceConfig>
+	>;
+
+
 	public dtxMode = false;
 
-	/** This receiving leg is paused; the producer may still feed everyone else. */
-	public paused = false;
-
-	/** The remote producer paused: nobody receives this track. Application-set. */
-	public remoteOutboundTrackPaused = false;
+	private _context: InboundTrackContext = {};
 
 	/**
-	 * What kind of content this track carries. Only meaningful for video tracks
-	 * — audio leaves it `undefined`, and an undefined video track is scored as
-	 * camera content. Screen shares are scored differently, with no frame-rate
-	 * expectations, since mostly-static content legitimately runs at very low
-	 * and bursty rates.
+	 * This receiving leg is paused; the producer may still feed everyone else.
 	 *
-	 * Unlike the outbound side there is nothing to auto-detect from: a received
-	 * track exposes no `displaySurface`, so the application declares it.
+	 * Held in the context so it can be declared before the track exists, and writable here so
+	 * `trackMonitor.paused = true` keeps working. Always a boolean: an undeclared pause is not a
+	 * pause, so an absent context field reads `false` rather than `undefined`.
 	 */
-	public contentType?: TrackContentType;
+	public get paused(): boolean {
+		return this._context.paused ?? false;
+	}
+	public set paused(value: boolean) {
+		this._context.paused = value;
+	}
+
+	/** The remote producer paused: nobody receives this track. Same shape as {@link paused}. */
+	public get remoteOutboundTrackPaused(): boolean {
+		return this._context.remoteOutboundTrackPaused ?? false;
+	}
+	public set remoteOutboundTrackPaused(value: boolean) {
+		this._context.remoteOutboundTrackPaused = value;
+	}
+
+	public get contentType(): TrackContentType | undefined {
+		return this._context.contentType;
+	}
+	public get linkedVideoTrackId(): string | undefined {
+		return this._context.linkedVideoTrackId;
+	}
+	public get motionType(): VideoMotionType | undefined {
+		return this._context.motionType;
+	}
+	public get presentedResolution(): { width: number, height: number } | undefined {
+		return this._context.presentedResolution;
+	}
+	public get videoTag(): HTMLVideoElement | undefined {
+		return this._context.videoTag;
+	}
 
 	/**
-	 * How much motion this track's content carries, which decides how visible a
-	 * given quantizer is and therefore which `pixelated-video` band applies.
-	 * Movement masks compression artifacts, so high-motion content tolerates a
-	 * coarser quantizer; a slide or a still face shows every blocked edge and is
-	 * judged more strictly.
-	 *
-	 * Nothing in the stats reveals it. Left undeclared, screen share is judged
-	 * as `lowmotion` — unreadable text is a hard failure — and everything else
-	 * as `standard`.
+	 * Lip-sync skew in milliseconds: this audio track's playout ahead of (positive) or behind
+	 * (negative) the track named by `linkedVideoTrackId`. `undefined` whenever the comparison
+	 * could not be made — common, since `estimatedPlayoutTimestamp` is thinly implemented, and
+	 * never to be read as zero skew.
 	 */
-	public motionType?: VideoMotionType;
+	public linkedVideoPlayoutDiffInMs?: number;
 
 	/**
-	 * How big the picture actually is on the viewer's screen, in **device
-	 * pixels**. The stats only report the *decoded* resolution, which says
-	 * nothing about how large the picture is presented — a 1080p stream in a
-	 * grid thumbnail is not the experience the same stream is full-bleed.
-	 *
-	 * Read by the inbound video score: the ratio to the decoded resolution
-	 * selects how much a coarse quantizer costs, since blockiness is an artifact
-	 * of a given angular size. Set {@link videoTag} instead of declaring this
-	 * directly and it is re-derived from the element every tick, overwriting
-	 * any declared value.
+	 * The linear factor the decoded picture is scaled by to reach the viewer,
+	 * `sqrt(presented area / decoded area)`; undefined when either size is unknown.
 	 */
-	public presentedResolution?: { width: number, height: number };
+	public displayMagnification?: number;
+
 
 	/**
-	 * The `<video>` element this track is rendered into, when the application
-	 * has one to offer. Held as a live reference rather than a snapshot, so
-	 * `videoWidth`/`videoHeight` and the element's layout size can be read at
-	 * judgement time.
+	 * How the picture is arriving, derived by `InboundVideoFlowStateDetector`. It moves with
+	 * that detector's open findings rather than with each collection, so it does not flicker
+	 * within one episode.
 	 *
-	 * Handing one over is how {@link presentedResolution} keeps itself current
-	 * without the application re-declaring it on every resize. Note the monitor
-	 * does not own the element's lifetime — clear it (`setContext` cannot;
-	 * assign `videoTag = undefined`) if the element is torn down while the
-	 * track lives on.
+	 * `undefined` means nobody looked, which is not `continuous`: an audio track, a screen
+	 * share, a paused track, or a disabled detector.
 	 */
-	public videoTag?: HTMLVideoElement;
+	public frameFlowState?: InboundVideoFlowState;
 
+	// ---- Pipeline disruption ------------------------------------------------
+	// One flag per detector that judges this track, each owned solely by its detector and
+	// named after the fault it reports. Tri-state on purpose:
+	//
+	//   true      that detector's finding is open right now
+	//   false     it looked this collection and found nothing wrong
+	//   undefined it could not judge — disabled, no config, paused, backgrounded, or missing the counters it reads
+	//
+	// `undefined` is never "healthy": counting healthy tracks means testing for `false`
+	// explicitly, so a stretch nobody examined is not silently counted as fine.
+
+	/**
+	 * Frames reaching this track and failing to come out of the decoder — supply, not cost.
+	 * Decoding that is merely expensive is `overloadedDecoder`. Set by `DecoderBottleneckDetector`.
+	 */
+	public degradedFrameSupply?: boolean;
+
+	// Beside each flag, the measurement it was a verdict on. The flag says whether a threshold was
+	// crossed; the number says by how much, on every collection that was judged rather than only
+	// the ones that crossed. Same tri-state: undefined is "not judged", and a measured value stands
+	// whether or not it was found to be a fault.
+
+	/** The share of the frames that arrived which the decoder did not get through, `0..1`. */
+	public decodingDegradation?: number;
+
+	/**
+	 * How coarsely this video is quantized, `0..1` — the mean quantizer scaled across the band
+	 * between a clean picture and a visibly blocky one.
+	 *
+	 * Named for the mechanism rather than a pipeline stage, deliberately: the quantizer is the
+	 * *sender's* choice, and this receiver merely observes it faithfully decoded. Calling it a
+	 * decoding fault would send anyone debugging it to the wrong machine — and
+	 * {@link decodingDegradation} above is the genuine decoder-side reading, the frames that
+	 * arrived and never came out.
+	 *
+	 * `0` at or below {@link InboundTrackMonitor.CLEAN_QP_RATIO} of the codec's own quantizer
+	 * scale, `1` at or above {@link InboundTrackMonitor.COARSE_QP_RATIO}, rising linearly between.
+	 * On H.264 that is `0` at a mean quantizer of 25.5 or less and `1` at 41 or more; on VP8, `0`
+	 * at 63 and `1` at 102; on VP9 and AV1, `0` at 127 and `1` at 204.
+	 *
+	 * **The polarity is the reverse of QP's own**, and worth stating outright: a *low* quantizer is
+	 * good video, so this is not a reading of QP but of how bad the picture is because of it. That
+	 * makes it a degradation like the two it is named after, composing directly with them — bigger
+	 * number, worse picture. It is not a quality figure and must not be used as a multiplier.
+	 *
+	 * `qpSum` is the one direct statement about coding quality the stats API offers: the sum of the
+	 * quantizer parameters over the frames decoded, so `InboundRtpMonitor.avgQpPerFrame` is the mean
+	 * quantizer of the last interval. A high quantizer is what a blocky picture is *made of*, which
+	 * makes it a far better witness than `bitPerPixel`, whose value at constant visual quality
+	 * swings about tenfold with content and motion and again with codec generation.
+	 *
+	 * `undefined` is **"no reading", never "fine"**: `qpSum` is optional in the spec and its scale
+	 * is codec-specific, so this is undefined whenever the mean quantizer is missing, no codec is
+	 * linked, or the codec's scale is not one the library knows. A track whose browser does not
+	 * report `qpSum` is not thereby a track with a clean picture, so a consumer that cannot get a
+	 * number should leave coding quality out of its judgement rather than treat it as zero.
+	 *
+	 * Derived here rather than by `PixelatedVideoDetector`, so it is published whether or not that
+	 * detector is enabled — disabling a detector must not silently change what the score can see.
+	 */
+	public quantizationDegradation?: number;
+
+	/** The share of playout the browser fabricated rather than played from received packets, `0..1`. */
+	public synthesizedAudioRatio?: number;
+
+	/** How hard the audio jitter buffer is working, `0..1`. `JitterBufferStressDetector`. */
+	public jitterBufferStressSeverity?: number;
+
+	/**
+	 * The share of frames that reached this video track but were never painted,
+	 * `(framesReceived - framesRendered) / framesReceived` over the collection.
+	 *
+	 * A count of dropped frames divided by what arrived, so it means the same at any frame rate and
+	 * any collecting period: `0` is every frame painted, `0.5` is half of them thrown away after
+	 * the network and the decoder had already done their work. Not a time offset — the audio/video
+	 * lip-sync skew is `linkedVideoPlayoutDiffInMs`, which is a signed number of milliseconds and a
+	 * different question entirely.
+	 *
+	 * Goes slightly negative when the renderer paints more frames than arrived in the same
+	 * collection, which the two counters advancing a moment apart can produce; that is noise around
+	 * zero, not a track rendering frames it never received. `PlayoutDiscrepancyDetector`.
+	 */
+	public videoPlayoutSkew?: number;
+
+	/** How much of the per-frame budget decoding used, `1` being exactly the budget. `DecoderPerformanceDetector`. */
+	public decodeBudgetUtilization?: number;
+
+	/** How full the invented-speech bucket is, `0..1`, where `1` is the raise point. `InventedSpeechDetector`. */
+	public inventedSpeechSeverity?: number;
+
+	/** Decoding costing more time per frame than the stream's frame rate leaves for it. `DecoderPerformanceDetector`. */
+	public overloadedDecoder?: boolean;
+
+	/** Nothing at all arriving on this track for long enough to be a fault. `DryInboundTrackDetector`. */
+	public dry?: boolean;
+
+	/** Packets arriving but no complete frame coming out of reassembly. `FrameAssemblyStalledDetector`. */
+	public stalledFrameAssembly?: boolean;
+
+	/** Frames decoded but never painted. `PlayoutDiscrepancyDetector`. */
+	public playoutDiscrepancy?: boolean;
+
+	/** RTP still arriving while nothing decodes any more. `StuckDecoderDetector`. */
+	public stuckedDecoder?: boolean;
+
+	/** A freeze that repeated keyframe requests failed to end. `VideoRecoveryFailedDetector`. */
+	public failedVideoRecovery?: boolean;
 
 	public calculatedScore: CalculatedScore = {
-		weight: 0,
+		weight: 1,
 		value: undefined,
 	};
 
@@ -111,14 +403,9 @@ export class InboundTrackMonitor {
 		return this.calculatedScore.reasons;
 	}
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -128,15 +415,44 @@ export class InboundTrackMonitor {
 	) {
 		this.attachments = attachments;
 
-		if (typeof track.getSettings === 'function' &&
-			(track.getSettings() as { displaySurface?: string }).displaySurface !== undefined) {
-			this.contentType = 'screenshare';
-		}
-
 		const monitorConfig = this.getPeerConnection().parent.config;
+
+		this.issues = new IssueRegistry<InboundTrackIssues>(
+			this.getPeerConnection().parent.activeIssues.asSink,
+		);
+		const windowConfig = monitorConfig.inboundTrackWindow;
+
+		// `capacity` is left out on purpose: it defaults to the furthest reach of the slices, so
+		// the buffer and the stretches read off it cannot disagree.
+		this.slicedWindow = new SlicedWindow({
+			maxAllowedGapInMs: windowConfig.maxAllowedGapInMs,
+			totals: INBOUND_TRACK_WINDOW_VALUES,
+			// Each recovery slice sits at its own detection slice's size, so it covers the stretch
+			// that ends where that detection stretch begins. The two pairs are independent: a
+			// detector reads one pair or the other, never one half of each.
+			slices: {
+				detection: {
+					numberOfSamples: windowConfig.numberOfSamples.detection,
+				},
+				recovery: {
+					numberOfSamples: windowConfig.numberOfSamples.recovery,
+					offset: windowConfig.numberOfSamples.detection,
+				},
+				flowDetection: {
+					numberOfSamples: windowConfig.numberOfSamples.flowDetection,
+				},
+				flowRecovery: {
+					numberOfSamples: windowConfig.numberOfSamples.flowRecovery,
+					offset: windowConfig.numberOfSamples.flowDetection,
+				},
+			},
+		});
 		this.detectors = new Detectors();
 		if (monitorConfig.dryInboundTrackDetector !== null) {
 			this.detectors.add(new DryInboundTrackDetector(this));
+		}
+		if (monitorConfig.audioPlayoutSynthesisDetector !== null) {
+			this.detectors.add(new AudioPlayoutSynthesisDetector(this));
 		}
 
 		if (monitorConfig.codecChangeDetector !== null) {
@@ -144,25 +460,24 @@ export class InboundTrackMonitor {
 		}
 
 		if (this.kind === 'audio') {
-			if (monitorConfig.audioDesyncDetector !== null) {
-				this.detectors.add(new AudioDesyncDetector(this));
+			if (monitorConfig.avDesyncPlayoutDetector !== null) {
+				this.detectors.add(new AVDesyncPlayoutDetector(this));
 			}
-			if (monitorConfig.audioConcealmentDetector !== null) {
-				this.detectors.add(new AudioConcealmentDetector(this));
+			if (monitorConfig.inventedSpeechDetector !== null) {
+				this.detectors.add(new InventedSpeechDetector(this));
 			}
 			if (monitorConfig.jitterBufferStressDetector !== null) {
 				this.detectors.add(new JitterBufferStressDetector(this));
 			}
-			this.calculatedScore.weight = 1;
 		} else if (this.kind === 'video') {
-			if (monitorConfig.videoFreezesDetector !== null || monitorConfig.videoRecoveryDetector !== null) {
-				this.detectors.add(new FreezedVideoTrackDetector(this));
+			if (monitorConfig.videoRecoveryFailedDetector !== null) {
+				this.detectors.add(new VideoRecoveryFailedDetector(this));
 			}
 			if (monitorConfig.playoutDiscrepancyDetector !== null) {
 				this.detectors.add(new PlayoutDiscrepancyDetector(this));
 			}
-			if (monitorConfig.inboundFrameSupplyDetector !== null) {
-				this.detectors.add(new InboundFrameSupplyDetector(this));
+			if (monitorConfig.decoderBottleneckDetector !== null) {
+				this.detectors.add(new DecoderBottleneckDetector(this));
 			}
 			if (monitorConfig.decoderPerformanceDetector !== null) {
 				this.detectors.add(new DecoderPerformanceDetector(this));
@@ -173,7 +488,15 @@ export class InboundTrackMonitor {
 			if (monitorConfig.videoResolutionChangeDetector !== null) {
 				this.detectors.add(new VideoResolutionChangeDetector(this));
 			}
-			this.calculatedScore.weight = 2;
+			if (monitorConfig.frameAssemblyStalledDetector !== null) {
+				this.detectors.add(new FrameAssemblyStalledDetector(this));
+			}
+			if (monitorConfig.pixelatedVideoDetector !== null) {
+				this.detectors.add(new PixelatedVideoDetector(this));
+			}
+			if (monitorConfig.inboundVideoFlowStateDetector !== null) {
+				this.detectors.add(new InboundVideoFlowStateDetector(this));
+			}
 		}
 
 		// for mediasoup probator we don't need to run detectors
@@ -186,35 +509,44 @@ export class InboundTrackMonitor {
 		return this._inboundRtp;
 	}
 
+	/** The video track declared by `linkedVideoTrackId`, when it is present and really video. */
+	public getLinkedVideoTrack(): InboundTrackMonitor | undefined {
+		if (this.linkedVideoTrackId === undefined) return;
+
+		const linked = this.getPeerConnection().mappedInboundTracks.get(this.linkedVideoTrackId);
+
+		return linked?.kind === 'video' ? linked : undefined;
+	}
+
+	/**
+	 * Whether this track carries screen-share content, which several detectors decline to judge.
+	 *
+	 * **`false` until the application says otherwise.** Nothing in the stats of a *received* track
+	 * reveals what it carries: `displaySurface` is a capture constraint and exists only on a
+	 * locally captured track, so there is nothing here to infer from. A deployment that wants
+	 * screen shares exempted has to declare them through `setContext`, and one that does not will
+	 * see camera thresholds applied to screen content — which is the honest failure, and better
+	 * than a heuristic that is wrong in a way nobody can see.
+	 */
 	public get isScreenShare() {
 		return this.contentType === 'screenshare';
 	}
 
 	/**
-	 * Declares what the application knows about this track and the stats do
-	 * not reveal — content type, motion class, how it is presented.
-	 *
-	 * **Merges.** Only the fields present in `context` are written; anything
-	 * omitted keeps its current value, so the pieces can be declared as they
-	 * become known without a later call erasing an earlier one. An explicit
-	 * `undefined` is treated as "not declared here", not as a reset — assign
-	 * the field directly to clear it.
-	 *
-	 * ```ts
-	 * // signaling said it is a screen share:
-	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ contentType: 'screenshare' });
-	 * // later, once the element is mounted — content type survives:
-	 * monitor.getInboundTrackMonitor(track.id)?.setContext({ videoTag });
-	 * ```
-	 *
-	 * `ClientMonitor.setInboundTrackContext()` does the same by track id and
-	 * works before this monitor exists.
+	 * Declares what the application knows about this track. **Merges**: a field the call does not
+	 * mention keeps its declared value, and a field passed as an explicit `undefined` is cleared.
+	 * `ClientMonitor.setInboundTrackContext()` does the same by track id.
 	 */
 	public setContext(context: InboundTrackContext): void {
-		if (context.contentType !== undefined) this.contentType = context.contentType;
-		if (context.motionType !== undefined) this.motionType = context.motionType;
-		if (context.presentedResolution !== undefined) this.presentedResolution = context.presentedResolution;
-		if (context.videoTag !== undefined) this.videoTag = context.videoTag;
+		// A plain spread, deliberately: a key that is absent keeps whatever was declared before,
+		// and a key present as `undefined` clears it. Those are different statements — "I have
+		// nothing to say about this" and "this is no longer known" — and an application that
+		// builds a context object from its own optional state needs the second to be reachable.
+		this._context = { ...this._context, ...context };
+
+		// Immediately, not on the next tick: an application that declares a presented size and then
+		// reads the magnification in the same breath would otherwise get the previous layout's answer.
+		this._refreshDisplayMagnification();
 	}
 
 	public getPeerConnection() {
@@ -239,17 +571,101 @@ export class InboundTrackMonitor {
 
 	public update() {
 		this._refreshPresentedResolution();
+		this._refreshDisplayMagnification();
+		this._refreshQuantizationDegradation();
+		this._refreshLinkedVideoPlayoutDiff();
+		this._feedSlicedWindow();
 
 		this.detectors.update();
 	}
 
 	/**
-	 * Measures the element's layout box, never `videoWidth`/`videoHeight` —
-	 * those are the *intrinsic* decoded size the stats already report, so
-	 * measuring with them would make every magnification exactly 1. The
-	 * intrinsic aspect ratio is fitted into the box as `object-fit: contain`
-	 * does; an application using `cover`, which crops, should declare
-	 * `presentedResolution` itself.
+	 * Hands this collection's counters to the shared window, before the detectors read it.
+	 *
+	 * The raw W3C totals go in, not their per-collection deltas: the window differences its own
+	 * endpoints, so a total spans exactly the stretch its duration measures and a missed collection
+	 * costs nothing. `totalFreezesDuration` is the one conversion, from seconds to the milliseconds
+	 * everything else here is counted in.
+	 */
+	/**
+	 * Scales the mean quantizer across the clean-to-coarse band, once per collection.
+	 *
+	 * Computed here rather than by every consumer: the ratios are one judgement about what "coarse"
+	 * means, and two places deriving it from `normalizedQp` would be two places to keep in step.
+	 */
+	private _refreshQuantizationDegradation(): void {
+		const normalizedQp = this._inboundRtp.normalizedQp;
+		const clean = InboundTrackMonitor.CLEAN_QP_RATIO;
+		const coarse = InboundTrackMonitor.COARSE_QP_RATIO;
+
+		this.quantizationDegradation = normalizedQp === undefined || coarse <= clean
+			? undefined
+			: clamp((normalizedQp - clean) / (coarse - clean), 0, 1);
+	}
+
+	private _feedSlicedWindow() {
+		const inboundRtp = this._inboundRtp;
+		const freezesDuration = inboundRtp.totalFreezesDuration;
+		// Absent on Firefox and WebKit, which produce no `media-playout` reports at all.
+		const playout = inboundRtp.getMediaPlayout();
+		const inMs = (seconds?: number) => seconds === undefined ? null : seconds * 1000;
+
+		this.slicedWindow.add({
+			timestamp: inboundRtp.statsClockTime,
+			value: {
+				totalFramesReceived: inboundRtp.framesReceived ?? null,
+				totalFramesDecoded: inboundRtp.framesDecoded ?? null,
+				totalFramesDropped: inboundRtp.framesDropped ?? null,
+				totalFramesRendered: inboundRtp.framesRendered ?? null,
+				totalKeyFramesDecoded: inboundRtp.keyFramesDecoded ?? null,
+				totalPacketsReceived: inboundRtp.packetsReceived ?? null,
+				totalBytesReceived: inboundRtp.bytesReceived ?? null,
+				totalPliCount: inboundRtp.pliCount ?? null,
+				totalFreezeCount: inboundRtp.freezeCount ?? null,
+				totalFreezesDurationInMs: inMs(freezesDuration),
+				totalPlayoutSynthesizedDurationInMs: inMs(playout?.synthesizedSamplesDuration),
+				totalPlayoutSamplesDurationInMs: inMs(playout?.totalSamplesDuration),
+				totalPlayoutSynthesisEvents: playout?.synthesizedSamplesEvents ?? null,
+				totalPlayoutDelayInMs: inMs(playout?.totalPlayoutDelay),
+				totalPlayoutSamplesCount: playout?.totalSamplesCount ?? null,
+			},
+		});
+	}
+
+	/**
+	 * Derived from the presented size against the decoded one, immediately after the former is
+	 * re-measured, so both describe the same tick.
+	 */
+	private _refreshDisplayMagnification(): void {
+		const presented = this.presentedResolution;
+		const decodedWidth = this._inboundRtp?.frameWidth;
+		const decodedHeight = this._inboundRtp?.frameHeight;
+
+		this.displayMagnification = presented
+			&& 0 < presented.width && 0 < presented.height
+			&& decodedWidth && decodedHeight
+			? Math.sqrt((presented.width * presented.height) / (decodedWidth * decodedHeight))
+			: undefined;
+	}
+
+	/** Derived before the detectors run, so a detector only has to compare against a threshold. */
+	private _refreshLinkedVideoPlayoutDiff(): void {
+		this.linkedVideoPlayoutDiffInMs = undefined;
+
+		if (this.kind !== 'audio') return;
+
+		const audioPlayout = this._inboundRtp?.estimatedPlayoutTimestamp;
+		const videoPlayout = this.getLinkedVideoTrack()?.getInboundRtp()?.estimatedPlayoutTimestamp;
+
+		if (audioPlayout === undefined || videoPlayout === undefined) return;
+
+		// Positive means audio is ahead of the lips.
+		this.linkedVideoPlayoutDiffInMs = audioPlayout - videoPlayout;
+	}
+
+	/**
+	 * Measures the element's layout box, not its intrinsic size, fitting the aspect ratio in
+	 * as `object-fit: contain` does. An application using `cover` should declare the value itself.
 	 */
 	private _refreshPresentedResolution(): void {
 		const videoTag = this.videoTag;
@@ -285,7 +701,7 @@ export class InboundTrackMonitor {
 			if (width <= 0 || height <= 0) return;
 			if (this.presentedResolution?.width === width && this.presentedResolution?.height === height) return;
 
-			this.presentedResolution = { width, height };
+			this._context.presentedResolution = { width, height };
 		} catch (err) {
 			this.getPeerConnection().parent.logger.warn(`Failed to read the presented resolution of track ${this.track.id}`, err);
 		}
