@@ -40,6 +40,35 @@ function outboundTrack(kind: 'audio' | 'video', fields: Record<string, unknown> 
 	};
 }
 
+/** Scores one connection in isolation: no tracks, no client score, just the charge. */
+function scoreOfConnection(pcMonitor: unknown) {
+	const calculator = new DefaultScoreCalculator({
+		config: {
+			uplinkCongestionDetector: { minSeverity: 0.65 },
+			downlinkCongestionDetector: { minSeverity: 0.65 },
+		},
+		peerConnections: [ pcMonitor ],
+		mappedPeerConnections: new Map([ [ 'pc-1', pcMonitor ] ]),
+		tracks: [],
+		setScore() { /* not what this file is about */ },
+	} as any);
+
+	calculator.update();
+
+	return (pcMonitor as any).calculatedStabilityScore as { value?: number, reasons?: Record<string, number> };
+}
+
+function peerConnection(fields: Record<string, unknown> = {}) {
+	return {
+		issues: new IssueRegistry(stubClientIssues().asSink),
+		calculatedStabilityScore: { weight: 1 } as any,
+		uplinkVideoCongestionSeverity: undefined as number | undefined,
+		downlinkVideoCongestionSeverity: undefined as number | undefined,
+		transportStability: undefined as number | undefined,
+		...fields,
+	};
+}
+
 /** Scores one track in isolation: no peer connection, no client score, just the charge. */
 function scoreOf(track: unknown) {
 	const calculator = new DefaultScoreCalculator({
@@ -239,5 +268,47 @@ describe('outbound video quality ramps', () => {
 		// Both ramps saturated: a fifth under target, and nine tenths of the area gone.
 		expect(scoreOf(camera).value).toBeCloseTo(MAX - 1, 6);
 		expect(scoreOf(screenShare).value).toBeCloseTo(MAX - 1, 6);
+	});
+});
+
+/**
+ * A congestion episode opens at `minSeverity` and closes on the browser's bandwidth verdict, never
+ * on severity — so the published reading spends most of an open episode under the bar that opened
+ * it. It is right to sag; the charge is not, because the verdict has not changed.
+ */
+describe('congestion charges', () => {
+	const HALF = MAX / 2;
+
+	it('scales with severity up to half the scale', () => {
+		const pc = peerConnection({ uplinkVideoCongestionSeverity: 1 });
+
+		pc.issues.raise({ key: 'uplink-congestion-pc-1', type: 'uplink-congestion', payload: {} } as any);
+
+		expect(scoreOfConnection(pc).reasons?.['uplink-congestion']).toBeCloseTo(HALF, 6);
+	});
+
+	it('never charges an open episode less than the severity that opened it', () => {
+		const sagged = peerConnection({ uplinkVideoCongestionSeverity: 0.2 });
+
+		sagged.issues.raise({ key: 'uplink-congestion-pc-1', type: 'uplink-congestion', payload: {} } as any);
+
+		expect(scoreOfConnection(sagged).reasons?.['uplink-congestion']).toBeCloseTo(0.65 * HALF, 6);
+	});
+
+	it('floors the downlink side the same way', () => {
+		const pc = peerConnection({ downlinkVideoCongestionSeverity: 0 });
+
+		pc.issues.raise({ key: 'downlink-congestion-pc-1', type: 'downlink-congestion', payload: {} } as any);
+
+		expect(scoreOfConnection(pc).reasons?.['downlink-congestion']).toBeCloseTo(0.65 * HALF, 6);
+	});
+
+	it('charges nothing at all while no episode is open', () => {
+		const pc = peerConnection({ uplinkVideoCongestionSeverity: 0.9 });
+
+		const score = scoreOfConnection(pc);
+
+		expect(score.value).toBe(MAX);
+		expect(score.reasons).toBeUndefined();
 	});
 });

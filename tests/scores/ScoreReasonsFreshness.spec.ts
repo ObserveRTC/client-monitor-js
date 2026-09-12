@@ -37,6 +37,10 @@ function createPeerConnection() {
 function setup() {
 	const pcMonitor = createPeerConnection();
 	const client = {
+		config: {
+			uplinkCongestionDetector: { minSeverity: 0.65 },
+			downlinkCongestionDetector: { minSeverity: 0.65 },
+		},
 		peerConnections: [ pcMonitor ],
 		mappedPeerConnections: new Map([ [ 'pc-1', pcMonitor ] ]),
 		tracks: [],

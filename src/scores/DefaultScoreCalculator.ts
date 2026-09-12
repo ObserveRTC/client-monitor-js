@@ -416,13 +416,18 @@ export class DefaultScoreCalculator {
 	private _calculatePeerConnectionStabilityScore(pcMonitor: PeerConnectionMonitor) {
 		const subtractions: DefaultScoreCalculatorSubtractions = {};
 		let hasIssues = false;
-
 		if (pcMonitor.issues.hasType('uplink-congestion')) {
-			subtractions['uplink-congestion'] = normalizedClamp(pcMonitor.uplinkVideoCongestionSeverity) * (DefaultScoreCalculator.MAX_SCORE / 2);
+			subtractions['uplink-congestion'] = Math.max(
+				pcMonitor.uplinkVideoCongestionSeverity ?? 0,
+				this.clientMonitor.config.uplinkCongestionDetector?.minSeverity ?? 0,
+			) * (DefaultScoreCalculator.MAX_SCORE / 2);
 			hasIssues = true;
 		}
 		if (pcMonitor.issues.hasType('downlink-congestion')) {
-			subtractions['downlink-congestion'] = normalizedClamp(pcMonitor.downlinkVideoCongestionSeverity) * (DefaultScoreCalculator.MAX_SCORE / 2);
+			subtractions['downlink-congestion'] = Math.max(
+				pcMonitor.downlinkVideoCongestionSeverity ?? 0,
+				this.clientMonitor.config.downlinkCongestionDetector?.minSeverity ?? 0,
+			) * (DefaultScoreCalculator.MAX_SCORE / 2);
 			hasIssues = true;
 		}
 		if (pcMonitor.issues.hasType('transport-loss-sustained')) {
