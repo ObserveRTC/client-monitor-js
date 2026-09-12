@@ -61,7 +61,7 @@ export type ClientWindowConfig = {
 
 export class ClientMonitor<AppData extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter<ClientMonitorEvents> {
     public static readonly samplingSchemaVersion = schemaVersion;
-
+    public readonly createdAt = Date.now();
     // public readonly statsAdapters = new StatsAdapters();
     public readonly mappedPeerConnections = new Map<string, PeerConnectionMonitor>();
     public readonly mappedExtensionStatsMonitors = new Map<string, ExtensionStatsMonitor>();
@@ -109,10 +109,6 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
      */
     public activeTab = true;
 
-    private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
-    private readonly _pendingOutboundTrackContexts = new Map<string, OutboundTrackContext>();
-
-
     public sendingAudioBitrate = -1;
     public sendingVideoBitrate = -1;
     public receivingAudioBitrate = -1;
@@ -138,6 +134,8 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
     private _extensionStats: ExtensionStat[] = [];
     public durationOfCollectingStatsInMs = 0;
     public readonly config: AppliedClientMonitorConfig<AppData>;
+    private readonly _pendingInboundTrackContexts = new Map<string, InboundTrackContext>();
+    private readonly _pendingOutboundTrackContexts = new Map<string, OutboundTrackContext>();
 
     /**
      * Additional data attached to this stats, will be shipped to the server if sample is created
@@ -513,6 +511,10 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
         for (const peerConnection of this.peerConnections) {
             this._sources.addStatsAdapters(peerConnection);
         }
+    }
+
+    public get uptimeInMs() {
+        return Date.now() - this.createdAt;
     }
 
     public set onsamplecreated(listener: (...args: ClientMonitorEvents['sample-created']) => void) {
