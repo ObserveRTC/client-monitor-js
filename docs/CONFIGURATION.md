@@ -11,8 +11,8 @@ const monitor = new ClientMonitor({
     // Basic configuration (all optional)
     clientId: "unique-client-id",
     callId: "unique-call-id",
-    collectingPeriodInMs: 2000, // Default: 2000ms
-    samplingPeriodInMs: 4000, // Default: 8000ms
+    collectingPeriodInMs: 5000, // Default: 5000ms
+    samplingPeriodInMs: 5000, // Default: 5000ms; keep it a multiple of the above
 
     // Integration settings (optional with defaults)
     integrateNavigatorMediaDevices: true, // Default: true

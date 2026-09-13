@@ -191,11 +191,11 @@ Enable automatic sampling by setting `samplingPeriodInMs`:
 
 ```javascript
 const monitor = new ClientMonitor({
-    collectingPeriodInMs: 2000,
-    samplingPeriodInMs: 4000, // Create sample every 4 seconds
+    collectingPeriodInMs: 5000,
+    samplingPeriodInMs: 10000, // Create sample every second collection
 });
 
-monitor.on("sample-created", (sample) => {
+monitor.on("sample-created", ({ sample }) => {
     console.log("Sample created:", sample);
     // Send to analytics backend
     sendToAnalytics(sample);
@@ -208,7 +208,7 @@ Create samples on demand:
 
 ```javascript
 const monitor = new ClientMonitor({
-    collectingPeriodInMs: 2000,
+    collectingPeriodInMs: 5000,
     bufferingEventsForSamples: true, // Required for manual sampling
 });
 

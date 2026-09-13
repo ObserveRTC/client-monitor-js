@@ -13,7 +13,6 @@
 - [Quick Start](#quick-start)
 - [Integrations](#integrations)
 - [Configuration](#configuration)
-- [ClientMonitor](#clientmonitor)
 - [Detectors](#detectors)
 - [Score Calculation](#score-calculation)
 - [Stats, Sampling and Adapters](#stats-sampling-and-adapters)
@@ -23,11 +22,11 @@
 - [Examples](#examples)
 - [Troubleshooting](#troubleshooting)
 - [API Reference](#api-reference)
-- [FAQ](#faq)
-- [Reference documents](#reference-documents)
+- [Release candidates](#release-candidates)
 - [NPM Package](#npm-package)
-- [Schemas](#schemas)
 - [Getting Involved](#getting-involved)
+- [Reference documents](#reference-documents)
+- [FAQ](#faq)
 - [License](#license)
 
 ## Installation
@@ -42,26 +41,6 @@ or
 yarn add @observertc/client-monitor-js
 ```
 
-### Release candidates
-
-Every push to `develop` publishes a release candidate as `X.Y.Z-rc.<N>`, where `N` increases with every build. Depend on the **`next` dist-tag** to track them:
-
-```jsonc
-// package.json
-"dependencies": {
-    "@observertc/client-monitor-js": "next"
-}
-```
-
-`next` always points at the newest RC across all version lines, so this dependency never has to be edited when the line bumps from `4.7.x` to `4.8.x`. Per-line tags (`develop-470-rc`, `develop-460-rc`, ...) are still maintained if you want to stay on one line.
-
-**Do not use a caret range to track RCs** — it cannot work, for two separate reasons rooted in how semver ranges treat prereleases:
-
-- `"^4.6.0"` resolves to the stable `4.6.0` and silently excludes every RC. A range with no prerelease in it never matches prerelease versions.
-- `"^4.7.1-rc.5"` does match RCs, but only of `4.7.1` — it will never see `4.8.1-rc.N`, so it stops updating the moment the line bumps.
-
-Historically RCs were published as `X.Y.Z-<git-sha>.0`. Semver compares prerelease identifiers as ASCII strings and git SHAs have no chronological order, so the "highest" RC of that scheme was effectively random — a caret range on one of them resolved to an arbitrary older build and never moved. Those versions are still published and untouched, but they are superseded: any `rc.N` sorts above all of them.
-
 ## Quick Start
 
 ```javascript
@@ -71,8 +50,8 @@ import { ClientMonitor } from "@observertc/client-monitor-js";
 const monitor = new ClientMonitor({
     clientId: "my-client-id",
     callId: "my-call-id",
-    collectingPeriodInMs: 2000,
-    samplingPeriodInMs: 4000,
+    collectingPeriodInMs: 5000,
+    samplingPeriodInMs: 5000,
 });
 
 // Add a peer connection to monitor
@@ -198,8 +177,8 @@ const monitor = new ClientMonitor({
 const monitor = new ClientMonitor({
     clientId: 'unique-client-id',
     callId: 'unique-call-id',
-    collectingPeriodInMs: 2000,
-    samplingPeriodInMs: 4000,
+    collectingPeriodInMs: 5000,
+    samplingPeriodInMs: 5000,
 });
 ```
 
@@ -215,11 +194,11 @@ one off never silences a neighbour.
 > **[docs/CONFIGURATION.md](./docs/CONFIGURATION.md)** is the full reference —
 > every key, every field, and every default, grouped as in `ClientMonitorConfig`.
 
-## ClientMonitor
+### ClientMonitor
 
 The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, statistics collection, and anomaly detection.
 
-### Core Features
+#### Core Features
 
 -   **Multi-source monitoring**: Supports RTCPeerConnection, mediasoup devices and transports
 -   **Automatic stats collection**: Periodically collects WebRTC statistics
@@ -228,7 +207,7 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 -   **Event generation**: Emits events for WebRTC state changes and issues
 -   **Sampling**: Creates periodic snapshots of the client state
 
-### Public Methods
+#### Public Methods
 
 #### Core Methods
 
@@ -262,7 +241,7 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 -   **`watchMediaDevices()`**: Integrates with navigator.mediaDevices
 -   **`fetchUserAgentData()`**: Fetches browser user agent information
 
-### Properties
+#### Properties
 
 -   **`score`**: Current client performance score (0.0-5.0)
 -   **`scoreReasons`**: This entity's own score subtractions — the aggregate is on the `'score'` event's `currentReasons`
@@ -275,7 +254,7 @@ The `ClientMonitor` is the main class that orchestrates WebRTC monitoring, stati
 -   **`tracks`**: Array of monitored tracks
 -   **`activeIssues`**: `Map<string, RaisedClientIssue>` keyed by issue `key` — currently active stateful issues. Read-only by convention; use `getActiveIssuesByType` / `isIssueActive` instead of touching this directly.
 
-### Declared track context
+#### Declared track context
 
 Some of what decides a score is invisible to `getStats()`: whether an inbound track
 is a screen share, how much motion its content carries, and how large it is actually
@@ -458,7 +437,7 @@ spec by a per-browser adapter, and folded into the monitor tree. Every
 server to consume.
 
 ```typescript
-const monitor = new ClientMonitor({ collectingPeriodInMs: 2000, samplingPeriodInMs: 4000 });
+const monitor = new ClientMonitor({ collectingPeriodInMs: 5000, samplingPeriodInMs: 5000 });
 
 monitor.on('sample-created', ({ sample }) => transport.send(sample));
 ```
@@ -594,6 +573,11 @@ All stats types include standard WebRTC fields plus:
 -   `CodecStats`: Codec configuration
 -   `MediaSourceStats`: Local media source stats
 
+### Schema definitions
+
+The canonical schemas, versioned independently of this library, live at
+https://github.com/observertc/schemas. This release ships `ClientSample` **3.7.0**.
+
 ## Examples
 
 > **[docs/EXAMPLES.md](./docs/EXAMPLES.md)** — end-to-end integrations, reacting to
@@ -606,9 +590,9 @@ All stats types include standard WebRTC fields plus:
 #### High Memory Usage
 
 ```javascript
-// Collect less often — the monitor tree and every window are sized in
-// collections, so this is the one knob that shrinks all of them at once.
-monitor.setCollectingPeriod(5000);
+// Collect less often than the 5s default — the monitor tree and every window are
+// sized in collections, so this is the one knob that shrinks all of them at once.
+monitor.setCollectingPeriod(10000);
 
 // Disable unnecessary detectors at runtime — the flag lives on the detector
 // instance, not on its config entry.
@@ -679,8 +663,8 @@ const monitor = new ClientMonitor({
 ```javascript
 // Optimize for large numbers of tracks
 const monitor = new ClientMonitor({
-    collectingPeriodInMs: 3000, // Reduce frequency
-    samplingPeriodInMs: 10000, // Less frequent sampling
+    collectingPeriodInMs: 10000, // Collect half as often as the 5s default
+    samplingPeriodInMs: 10000, // One sample per collection
 
     // Never construct these detectors at all: `null`, not `{ disabled: true }`.
     // The config entry decides whether the class exists; `disabled` is a runtime
@@ -757,27 +741,92 @@ type ClientMonitorEvents = {
 };
 ```
 
+## Release candidates
+
+Stable releases come from npm as above. If you want to track what is landing on
+`develop` ahead of a release, read this section; otherwise skip it.
+
+Every push to `develop` publishes a release candidate as `X.Y.Z-rc.<N>`, where `N` increases with every build. Depend on the **`next` dist-tag** to track them:
+
+```jsonc
+// package.json
+"dependencies": {
+    "@observertc/client-monitor-js": "next"
+}
+```
+
+`next` always points at the newest RC across all version lines, so this dependency never has to be edited when the line bumps from `4.7.x` to `4.8.x`. Per-line tags (`develop-470-rc`, `develop-460-rc`, ...) are still maintained if you want to stay on one line.
+
+**Do not use a caret range to track RCs** — it cannot work, for two separate reasons rooted in how semver ranges treat prereleases:
+
+- `"^4.6.0"` resolves to the stable `4.6.0` and silently excludes every RC. A range with no prerelease in it never matches prerelease versions.
+- `"^4.7.1-rc.5"` does match RCs, but only of `4.7.1` — it will never see `4.8.1-rc.N`, so it stops updating the moment the line bumps.
+
+Historically RCs were published as `X.Y.Z-<git-sha>.0`. Semver compares prerelease identifiers as ASCII strings and git SHAs have no chronological order, so the "highest" RC of that scheme was effectively random — a caret range on one of them resolved to an arbitrary older build and never moved. Those versions are still published and untouched, but they are superseded: any `rc.N` sorts above all of them.
+
+## NPM Package
+
+https://www.npmjs.com/package/@observertc/client-monitor-js
+
+## Getting Involved
+
+Client-monitor is made with the intention to provide an open-source monitoring solution for WebRTC developers. If you are interested in getting involved, please read our [contribution guidelines](CONTRIBUTING.md).
+
+## Reference documents
+
+This README is the guide. The reference documents under `docs/` carry the depth,
+and each one is written to be read on its own.
+
+**By subject** — what you reach for from a symptom:
+
+| Document | What it covers |
+|---|---|
+| [MONITOR_API.md](./docs/MONITOR_API.md) | The application-facing API: reaching a monitor, walking the stats graph, extension stats, custom issues, declared context |
+| [DETECTORS.md](./docs/DETECTORS.md) | Every detector on tracks and media: audio, video, track activity, the send side, plus custom detectors and session replay |
+| [CONNECTION_DETECTORS.md](./docs/CONNECTION_DETECTORS.md) | Every detector on a peer connection, its ICE transports and the client as a whole |
+| [CONFIGURATION.md](./docs/CONFIGURATION.md) | Every config key and field, with defaults |
+| [EVENTS_AND_ISSUES.md](./docs/EVENTS_AND_ISSUES.md) | Every event and issue type, with raise and resolve conditions and payload types |
+| [DERIVED_METRICS.md](./docs/DERIVED_METRICS.md) | Every derived value on every monitor, and what it is computed from |
+| [STATS_PIPELINE.md](./docs/STATS_PIPELINE.md) | The collection loop, the monitor tree, the per-browser adapters and the sampling format |
+| [SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md) | Every score weight, the five-dimension client score, smoothing and tuning |
+| [EXAMPLES.md](./docs/EXAMPLES.md) | End-to-end integrations and worked patterns |
+
+**By detection shape** — how the library decides what belongs where:
+
+| Document | What it covers |
+|---|---|
+| [DETECTOR_TAXONOMY.md](./docs/DETECTOR_TAXONOMY.md) | The five categories, the rules that sort a detector into one, and a complete index of all 46 classes |
+| [CONNECTIVITY_DETECTORS.md](./docs/CONNECTIVITY_DETECTORS.md) | The layers a connection climbs, and the restart telemetry beside them |
+| [TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md) | Capacity, delay and delivery on a path that already works |
+| [PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md) | The send and receive media chains, and the boundary each detector watches |
+| [PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md) | What the participant actually sees and hears, and the proxies used to judge it |
+| [TELEMETRY_DETECTORS.md](./docs/TELEMETRY_DETECTORS.md) | The facts describing a session, and why none of them raises an issue |
+
 ## FAQ
 
 ### Q: How often should I collect statistics?
 
-**A**: The default 2-second interval (2000ms) works well for most applications. For real-time applications or debugging, you might use 1 second. For low-bandwidth situations, 5 seconds is acceptable.
+**A**: The default 5-second interval works well for most applications. Drop it to
+1 second when you are debugging and want a detector to reach its verdict quickly —
+every window and tick count in the library is measured in collections, so a shorter
+period makes the whole library faster to judge at the cost of more `getStats()` calls.
 
 ### Q: What's the difference between collectingPeriod and samplingPeriod?
 
 **A**:
 
--   `collectingPeriod`: How often to collect WebRTC stats from browser APIs
--   `samplingPeriod`: How often to create complete client samples (includes events, issues, metadata)
+-   `collectingPeriod`: How often to collect WebRTC stats from browser APIs. Both default to 5000ms.
+-   `samplingPeriod`: How often to create complete client samples (includes events, issues, metadata). Keep it a multiple of `collectingPeriod` — a sample can only be created on a collection, so anything else makes the interval between samples drift, and the monitor warns about it.
 
 ### Q: How do I reduce bandwidth usage?
 
-**A**:
-
-1. Increase sampling period
-2. Use a delta codec (@observertc/samples-protobuf-codec or @observertc/samples-json-codec)
-3. Filter samples before sending
-4. Disable unnecessary detectors
+**A**: Encode the samples. `@observertc/samples-protobuf-codec` and
+`@observertc/samples-json-codec` both delta-encode against the previous sample, which
+is where nearly all of the saving is — a `ClientSample` mostly repeats itself from one
+interval to the next. Beyond that, `sendScoreReasonsToServer: false` and
+`sendResolvedIssuesToServer: false` drop the two optional parts of a sample without
+changing any score, and a detector's `includeIssueInSample = false` keeps its findings
+local.
 
 ### Q: Can I use this with React Native?
 
@@ -829,49 +878,6 @@ content type declared here.
 ### Q: What's the performance impact of monitoring?
 
 **A**: The library is designed to be lightweight. Typical overhead is <1% CPU usage. The main cost is the periodic `getStats()` calls, which is why the collection period is configurable.
-
-## Reference documents
-
-This README is the guide. The reference documents under `docs/` carry the depth,
-and each one is written to be read on its own.
-
-**By subject** — what you reach for from a symptom:
-
-| Document | What it covers |
-|---|---|
-| [MONITOR_API.md](./docs/MONITOR_API.md) | The application-facing API: reaching a monitor, walking the stats graph, extension stats, custom issues, declared context |
-| [DETECTORS.md](./docs/DETECTORS.md) | Every detector on tracks and media: audio, video, track activity, the send side, plus custom detectors and session replay |
-| [CONNECTION_DETECTORS.md](./docs/CONNECTION_DETECTORS.md) | Every detector on a peer connection, its ICE transports and the client as a whole |
-| [CONFIGURATION.md](./docs/CONFIGURATION.md) | Every config key and field, with defaults |
-| [EVENTS_AND_ISSUES.md](./docs/EVENTS_AND_ISSUES.md) | Every event and issue type, with raise and resolve conditions and payload types |
-| [DERIVED_METRICS.md](./docs/DERIVED_METRICS.md) | Every derived value on every monitor, and what it is computed from |
-| [STATS_PIPELINE.md](./docs/STATS_PIPELINE.md) | The collection loop, the monitor tree, the per-browser adapters and the sampling format |
-| [SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md) | Every score weight, the five-dimension client score, smoothing and tuning |
-| [EXAMPLES.md](./docs/EXAMPLES.md) | End-to-end integrations and worked patterns |
-
-**By detection shape** — how the library decides what belongs where:
-
-| Document | What it covers |
-|---|---|
-| [DETECTOR_TAXONOMY.md](./docs/DETECTOR_TAXONOMY.md) | The five categories, the rules that sort a detector into one, and a complete index of all 46 classes |
-| [CONNECTIVITY_DETECTORS.md](./docs/CONNECTIVITY_DETECTORS.md) | The layers a connection climbs, and the restart telemetry beside them |
-| [TRANSPORT_QUALITY_DETECTORS.md](./docs/TRANSPORT_QUALITY_DETECTORS.md) | Capacity, delay and delivery on a path that already works |
-| [PIPELINE_DISRUPTION_DETECTORS.md](./docs/PIPELINE_DISRUPTION_DETECTORS.md) | The send and receive media chains, and the boundary each detector watches |
-| [PERCEIVED_QUALITY_DETECTORS.md](./docs/PERCEIVED_QUALITY_DETECTORS.md) | What the participant actually sees and hears, and the proxies used to judge it |
-| [TELEMETRY_DETECTORS.md](./docs/TELEMETRY_DETECTORS.md) | The facts describing a session, and why none of them raises an issue |
-| [DETECTOR_SANITY_CHECK.md](./docs/DETECTOR_SANITY_CHECK.md) | The working method behind the detector pass — how a detector is proposed, checked and tested |
-
-## NPM Package
-
-https://www.npmjs.com/package/@observertc/client-monitor-js
-
-## Schemas
-
-Schema definitions are available at https://github.com/observertc/schemas
-
-## Getting Involved
-
-Client-monitor is made with the intention to provide an open-source monitoring solution for WebRTC developers. If you are interested in getting involved, please read our [contribution guidelines](CONTRIBUTING.md).
 
 ## License
 

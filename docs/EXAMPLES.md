@@ -10,7 +10,7 @@ import { ClientMonitor } from "@observertc/client-monitor-js";
 const monitor = new ClientMonitor({
     clientId: "client-123",
     callId: "call-456",
-    collectingPeriodInMs: 2000,
+    collectingPeriodInMs: 5000,
     samplingPeriodInMs: 5000,
 });
 

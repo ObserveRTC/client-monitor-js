@@ -283,7 +283,7 @@ Two detectors count **collections** instead of milliseconds:
 rather than a persistence bar — "one noisy stats read cannot open an issue" —
 and it is deliberately not the same statement as "this lasted N milliseconds".
 It does mean both scale with `collectingPeriodInMs`: two ticks is four seconds
-at the default 2000 ms cadence and ten at a 5000 ms one.
+at a 2000 ms cadence and ten at the default 5000 ms one.
 
 ## The grid
 

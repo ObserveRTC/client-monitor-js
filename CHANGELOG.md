@@ -56,6 +56,20 @@ removed its neighbours: `audioConcealmentDetector`, `audioDesyncDetector`,
 65 config keys: 46 detector blocks, one per class, plus the shared windows below and the basics. A
 retired key fails to type-check.
 
+### Breaking: `collectingPeriodInMs` defaults to 5000, `samplingPeriodInMs` to 5000
+
+Was 2000 and 8000. `getStats()` is not free and the previous default paid for it two and a half
+times over on every call; 5 seconds is where the cost stops being noticeable on a busy client. The
+two now match, so a sample is created on every collection and the interval between samples cannot
+drift — the sampling period should always be a multiple of the collecting period, and the monitor
+warns when it is not.
+
+**Tick-counting detectors are slower to fire at this default, deliberately unchanged.** A
+threshold spelled as a number of consecutive collections now spans 2.5× the wall-clock time it
+did — `minConsecutiveTicks: 2` covers 10 seconds rather than 4 — which buys confidence at the cost
+of latency. Windows sized in values behave the same way: the default detection slice of 3 covers
+10 seconds. Pass `collectingPeriodInMs: 2000` to restore the old timing throughout.
+
 ### Breaking: the score is a reading of the open issues
 
 `DefaultScoreCalculator` no longer re-derives anything from raw stats. Every monitor starts at

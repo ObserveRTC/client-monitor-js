@@ -159,13 +159,13 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
         const collectingPeriodInMs = 0 < (monitorConfig.collectingPeriodInMs ?? 0)
             ? monitorConfig.collectingPeriodInMs as number
-            : 2000;
+            : 5000;
 
 
         this.config = {
             ...monitorConfig,
-            collectingPeriodInMs: monitorConfig.collectingPeriodInMs ?? 2000,
-            samplingPeriodInMs: monitorConfig.samplingPeriodInMs ?? 8000,
+            collectingPeriodInMs: monitorConfig.collectingPeriodInMs ?? 5000,
+            samplingPeriodInMs: monitorConfig.samplingPeriodInMs ?? 5000,
 
             integrateNavigatorMediaDevices: monitorConfig.integrateNavigatorMediaDevices ?? true,
             watchTabVisibility: monitorConfig.watchTabVisibility ?? true,
@@ -174,7 +174,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             // The slices are counted in values, not milliseconds, so that a slice asked for N
             // values holds N at any collecting period and is readable at any cadence. What varies
             // is the stretch those values span: N values span N-1 intervals, so at the default
-            // 2000ms period a slice of 2 covers 2s and one of 4 covers 6s. `maxAllowedGapInMs`
+            // 5000ms period a slice of 2 covers 5s and one of 4 covers 15s. `maxAllowedGapInMs`
             // tolerates a couple of late or missed collections and treats anything longer as a
             // blackout worth starting again after.
             outboundTrackWindow: monitorConfig.outboundTrackWindow ?? {

@@ -87,15 +87,22 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Specifies the interval (in milliseconds) at which the observer calls
      * the added statsCollectors and pulls the stats.
      *
-     * DEFAULT: 2000 (2 seconds)
+     * Every window and duration in the library is aged on this clock, and the
+     * tick-counting detectors count these collections, so lowering it makes the
+     * whole library quicker to judge and raises the cost of `getStats()`.
+     *
+     * DEFAULT: 5000 (5 seconds)
      */
     collectingPeriodInMs: number;
 
     /**
      * Specifies the sampling interval (in milliseconds) for processing stats.
-     * If not provided, the default value will be used.
+     * Should be a multiple of {@link collectingPeriodInMs}; the monitor warns
+     * when it is not, because sampling can then only land on a collection
+     * boundary and the interval between samples drifts.
      *
      * OPTIONAL
+     * DEFAULT: 5000 (5 seconds)
      */
     samplingPeriodInMs?: number;
 
