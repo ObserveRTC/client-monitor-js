@@ -629,7 +629,7 @@ three now has a key of its own. The split is still worth understanding:
 | Class | Category | Raises | Because |
 |---|---|---|---|
 | `CaptureTrackMutedDetector` | Telemetry | *(event only)* | `track.muted` covers the deliberate system mute and the accidental device grab with one flag, and the library cannot separate them. Most mutes are correct. |
-| `CaptureTrackEndedDetector` | Pipeline Disruption | `capture-track-ended` | `readyState: 'ended'` is terminal and never intentional mid-call: the device is gone and the track will never produce another frame |
+| `CaptureSourceLostDetector` | Pipeline Disruption | `capture-source-lost` | `readyState: 'ended'` is terminal and never intentional mid-call: the device is gone and the track will never produce another frame |
 | `SilentAudioSourceDetector` | Pipeline Disruption | `silent-audio-source` | A live, unmuted, enabled microphone producing digital silence for a sustained span is a broken capture chain, not a user choice |
 
 Three findings, three classes, three config keys. What separates them is not where

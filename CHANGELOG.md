@@ -70,7 +70,13 @@ did — `minConsecutiveTicks: 2` covers 10 seconds rather than 4 — which buys 
 of latency. Windows sized in values behave the same way: the default detection slice of 3 covers
 10 seconds. Pass `collectingPeriodInMs: 2000` to restore the old timing throughout.
 
-### Breaking: the score is a reading of the open issues
+### Breaking: the default score calculator is a reading of the open issues
+
+Scoring is pluggable and always was: the library defines `ScoreCalculator` (one
+`update()`), `ClientMonitor.scoreCalculator` holds the implementation in use, and
+`DefaultScoreCalculator` is the reference implementation assigned at construction. What
+follows is that reference implementation changing its mind — its numbers are internal, so
+an application that supplies its own calculator is unaffected.
 
 `DefaultScoreCalculator` no longer re-derives anything from raw stats. Every monitor starts at
 5.0 and is reduced by the findings its own detectors raised, read from that monitor's own
@@ -102,10 +108,12 @@ Removed with it: `DefaultScoreCalculatorInboundVideoTrackScoreAppData`,
 `DefaultScoreCalculatorPeerConnectionScoreAppData`, `DefaultScoreCalculatorSubtractions`,
 `DefaultScoreCalculatorSubtractionReason`, and the `VIDEO_QP_THRESHOLDS` / `VIDEO_QP_MAX` /
 `VideoQpThresholds` exports — a blocky picture is now `PixelatedVideoDetector`'s verdict over
-`InboundTrackMonitor.quantizationDegradation`, not the calculator's own model. What a fault costs
-is still tunable through the mutable statics on `DefaultScoreCalculator` (`PIXELATION_WEIGHT_*`
-and the activation/saturation pairs); replacing the policy wholesale means assigning your own
-`ScoreCalculator` to `ClientMonitor.scoreCalculator`.
+`InboundTrackMonitor.quantizationDegradation`, not the calculator's own model.
+
+Those were the last score internals reachable from outside the package. Nothing replaces them:
+there is no table of issue weights to import, and no config key that retunes a charge. Scoring
+policy is changed by assigning your own `ScoreCalculator` to `ClientMonitor.scoreCalculator`,
+which reads each monitor's `issues` registry and writes `calculatedScore` / `setScore()`.
 
 ### Breaking: retired events
 

@@ -1,29 +1,34 @@
 # Score Calculations — `DefaultScoreCalculator`
 
-This document is the full reference for how the library's built-in score
-calculator turns the **open issues** each monitor holds into the `0.0 – 5.0`
-quality scores exposed on the client, the peer connections and the tracks — and
-for what every issue type costs, and why.
+This document describes **the score calculator that ships with the library**, which
+is a reference implementation and not a contract. It is here so that the numbers a
+default monitor publishes can be understood and so that anyone writing their own
+calculator has a worked example to start from.
 
-For the surrounding API (the `ScoreCalculator` interface, replacing the
-calculator, reading scores and reasons) see the *Score Calculation* section of
-the [README](../README.md#score-calculation).
+Nothing in this document is public API. There is **no table of issue weights to
+import**, no config key that retunes a charge, and nothing else in the library reads
+the scores produced here. The library's own commitment is small:
+
+```typescript
+interface ScoreCalculator {
+    update(): void;
+}
+```
+
+`ClientMonitor.scoreCalculator` holds the implementation in use, `update()` is called
+once per collection after the detectors have run, and `DefaultScoreCalculator` is
+assigned at construction so a monitor scores something out of the box. To change the
+policy, assign your own — see [Writing your own](#writing-your-own).
 
 - [The score scale](#the-score-scale)
 - [The score is a reading of the issues](#the-score-is-a-reading-of-the-issues)
-- [The four categories](#the-four-categories)
-- [What each score is responsible for](#what-each-score-is-responsible-for)
 - [Score hierarchy](#score-hierarchy)
-- [How a fault is priced](#how-a-fault-is-priced)
-  - [Weights](#weights)
-  - [Detector-reported severity](#detector-reported-severity)
-  - [Capping versus subtracting](#capping-versus-subtracting)
-  - [Smoothing](#smoothing)
-- [Per-track and per-connection scores](#per-track-and-per-connection-scores)
+- [What each score is responsible for](#what-each-score-is-responsible-for)
+- [What the calculator charges](#what-the-calculator-charges)
+- [What it does not charge](#what-it-does-not-charge)
 - [Pixelation and the presented size](#pixelation-and-the-presented-size)
-- [Reason reference](#reason-reference)
 - [Where the reasons surface](#where-the-reasons-surface)
-- [Tuning](#tuning)
+- [Writing your own](#writing-your-own)
 
 ## The score scale
 
@@ -37,103 +42,56 @@ Every score ranges from `0.0` (worst) to `5.0` (best), interpreted as:
 | `1.0 – 2.0` | bad |
 | `0.0 – 1.0` | very bad |
 
-Scores are recalculated on every stats collection tick.
+Scores are recalculated on every stats collection, with no smoothing window: the
+published value is this collection's verdict, not a mean of recent ones.
 
 ## The score is a reading of the issues
 
-**As of 4.9.0 the score is the open issues, and nothing else.** Every monitor
-starts at `5.0` and is reduced by the findings its own detectors raised, read
-from that monitor's issue registry. The calculator re-derives no threshold from
-raw stats: the detectors already decided what is wrong, so a fault is judged in
-exactly one place and the score can never disagree with the issue list an
-operator is looking at.
+**As of 4.9.0 the charges are the open issues and the monitors' own published
+readings, and nothing else.** Every monitor starts at `5.0`, the charges below are
+subtracted, and the result is clamped at `0.0`. The calculator re-derives no
+threshold from raw stats: where a detector owns a verdict, the calculator prices it
+and does not form a second opinion, so a fault is judged in one place and the score
+cannot disagree with the issue list an operator is looking at.
 
-This replaces the 4.7-era model, in which the calculator carried its own
-thresholds — jitter ramps, FPS volatility bands, per-codec quantizer tables — and
-could therefore penalize a track no detector had flagged, or stay silent on one
-every detector had. Those parallel thresholds are gone. If you tuned
-`DefaultScoreCalculator.*_ACTIVATION` / `*_SATURATION` constants or
-`VIDEO_QP_THRESHOLDS`, that tuning now lives in the detector configs and in
-[`ISSUE_SCORING`](#tuning).
+This replaced the 4.7-era model, in which the calculator carried its own thresholds —
+jitter ramps, per-codec quantizer tables — and could penalize a track no detector had
+flagged. Those parallel thresholds are gone, along with the `VIDEO_QP_THRESHOLDS`
+export; a blocky picture is now `PixelatedVideoDetector`'s verdict.
 
-A monitor holding no issues scores `5.0`, which is a real statement: its
-detectors ran and raised nothing. That is not the same as a score of
-`undefined`, which means too few collections to judge yet, and which is left out
-of every aggregate above it.
+Two shapes of charge, and the difference matters when reading a score:
 
-## The four categories
+- **Gated on an open issue.** The charge applies only while the issue is open. What
+  it is *worth* can still be a continuous reading, so `decoder-bottleneck` costs what
+  the decoder actually fell behind by.
+- **A continuous reading with no detector behind it.** `volatile-fps`,
+  `dropped-video-frames`, `blocky-video`, `frozen-video`, `choppy-video`,
+  `unstable-audio-playout`, `unstable-transport`, `downscaled-screenshare` and
+  `high-deviation-from-target-bitrate` exist only in the calculator, and are named for
+  what they measure rather than for an issue. They are what keep a merely mediocre
+  call off a flat `5.0`, since a detector says nothing until its threshold is crossed.
 
-`ISSUE_SCORING` assigns every issue type exactly one category, mirroring the four
-detector categories. The category decides *how* the fault counts; the weight
-decides *how much*.
-
-| Category | What it means | What it does to the score |
-| --- | --- | --- |
-| **connectivity** | The path is down, failing or unusable. | **Zero** while the issue is open. Nothing else is consulted — nothing riding on an unusable path can be good. |
-| **pipeline-disruption** | Media stopped moving somewhere between the capture device and the renderer. | **Caps** the score in proportion to its weight. A weight of `1` means zero; a lighter weight leaves a ceiling. |
-| **perceived-quality** | Media is flowing and a person can tell it is wrong. | **Subtracts**, so several mild faults accumulate the way a viewer experiences them. |
-| **transport-quality** | The path carries media, badly. | **Subtracts from the connection**, which already scales everything riding on it. |
-
-## What each score is responsible for
-
-The single rule that decides where a penalty belongs:
-
-> **A peer connection is scored for the state of the path. A track is scored for
-> what the user perceived. Nothing is scored for both.**
-
-Loss, jitter and RTT are properties of the *transport* — every stream riding it
-shares them, and no single track owns them. The detectors that measure them raise
-their issues on the peer connection, so they are subtracted **once**, there.
-
-Freezes, low or volatile frame rates, dropped frames, pixelation, invented
-speech, jitter-buffer stress: these are *measurements of damage the user
-experienced*. Their detectors raise on the **track**, and only there.
-
-The distinction is cause versus effect, and it matters because the two are not
-interchangeable:
-
-- **The same loss does different damage to different tracks.** 2% loss is
-  inaudible on an Opus stream with FEC and PLC, and very visible on video
-  without it. The loss figure cannot tell you which happened; the share of
-  audio NetEQ had to invent and the freeze count can.
-- **Damage happens without loss.** In a captured session, 754 of 772 intervals
-  measured **zero** packet loss, and 31 of them still had audible invention
-  above 0.5% — jitter-buffer underruns and late arrivals, not packets that never
-  came. A path-only view calls that session clean, because by its own metric it
-  was.
-- **A clean path can carry a broken track, and a bad path can carry a fine one.**
-  A camera that has stopped producing frames scores badly on a perfect network;
-  a talking head on a lossy path can still look and sound fine.
-
-So a degradation is attributed by *joining* the two, which a server can always
-do because they arrive in the same sample: the track says what broke, the peer
-connection says whether the network explains it.
-
-Because the score now reads the issue registry, this rule is kept by where each
-detector raises rather than by the calculator remembering to skip a metric.
+A monitor holding no issues scores `5.0`, which is a real statement: its detectors ran
+and raised nothing. That is not the same as `undefined`, which means too few
+collections to judge yet, and which is left out of every aggregate above it.
 
 ## Score hierarchy
 
 Three levels, and the top one is **not an average**.
 
-1. **Every track** scores its own pipeline-disruption and perceived-quality
-   issues.
-2. **Every peer connection** scores its own connectivity and transport-quality
-   issues into a *stability score*. Deliberately not an average of its tracks —
-   it is a dimension in its own right.
-3. **The client score** collapses five dimensions — the transport, and inbound
-   and outbound audio and video — into one number.
+1. **Every track** scores its own issues and readings into `calculatedScore`.
+2. **Every peer connection** scores the state of its path into
+   `calculatedStabilityScore`. Deliberately not an average of its tracks — it is a
+   dimension in its own right.
+3. **The client score** collapses five dimensions — the transport, and inbound and
+   outbound audio and video — into one number.
 
-Each dimension is the weighted mean of the monitors that make it up:
+Each dimension is the weighted mean of the monitors that make it up, using each
+monitor's `calculatedScore.weight`, which is `1` for tracks and peer connections
+alike unless an application changes it.
 
-| contributor | weight |
-|---|---|
-| peer connection | 1 |
-| audio track | 1 |
-| video track | 2 |
-
-The five then combine as **`5 − RMSE`**, the root-mean-square distance from a
-perfect call, rather than as a mean:
+The five then combine as **`5 − RMSE`**, the root-mean-square distance from a perfect
+call, rather than as a mean:
 
 ```
                        ┌──────────────────────────
@@ -142,144 +100,187 @@ Client Score  =  5  −  │  ────────────────�
                       \│      count(Dimensions)
 ```
 
-Squaring the distances is what makes one collapsed dimension cost more than the
-same shortfall spread evenly, which is how a call is actually experienced: nobody
-whose video has died calls it two-thirds fine because the audio and the path are
-still good. `[5, 5, 0]` scores `2.11` where an average would say `3.33`.
+Squaring the distances is what makes one collapsed dimension cost more than the same
+shortfall spread evenly, which is how a call is actually experienced: nobody whose
+video has died calls it two-thirds fine because the audio and the path are still good.
+`[5, 5, 0]` scores `2.11` where an average would say `3.33`.
 
-**A dimension nothing reported is absent, not zero.** A call that sends no video
-is not a call whose video is broken, and counting it as zero would be the same
-statement. `undefined` and `null` are dropped before the mean; with none left
-there is no distance to measure and the client score is `undefined`, which is a
-different statement from `0`.
+**A dimension nothing reported is absent, not zero.** A call that sends no video is not
+a call whose video is broken. `undefined` and `null` are dropped before the mean; with
+none left the client score is `undefined`, a different statement from `0`.
 
-**The transport is one of the five, not a multiplier.** A dead path therefore
-drags the call score hard without silently zeroing tracks that raised nothing of
-their own — a track with no issues still reads 5.0, and the call reads 1.46. Both
-statements are true and they are kept separate on purpose: the track-level number
-answers "was anything wrong with this stream", the call-level number answers "how
-was the call".
+**The transport is one of the five, not a multiplier.** This replaced 4.8.0's model, in
+which a peer connection scaled its tracks by `pcScore / 5`. A dead path now drags the
+call score hard without silently zeroing tracks that raised nothing of their own — a
+track with no issues still reads `5.0` while the call reads `1.46`. Both statements are
+true and kept separate on purpose: the track number answers "was anything wrong with
+this stream", the call number answers "how was the call".
 
-## How a fault is priced
+## What each score is responsible for
 
-### Weights
+> **A peer connection is scored for the state of the path. A track is scored for what
+> the user perceived. Nothing is scored for both.**
 
-A rule's `weight` is a `0..1` share of the full score: `1` is all five points,
-`0.4` is two of them. Weights are **starting points, not measurements** — they
-say how much of a score a fault is worth at full severity, and are meant to be
-retuned against your own corpus.
+Loss, delay and congestion are properties of the *transport* — every stream riding it
+shares them, and no single track owns them. Their detectors raise on the peer
+connection, so they are charged **once**, there.
 
-An issue type with no rule in `ISSUE_SCORING` costs nothing. That is deliberate:
-a new detector never gets a price guessed for it. `unscoredIssueTypes()` is what
-turns that silence into a visible hole, and a test in this repository fails when
-any detector's `ISSUE_TYPE` is missing from the table.
+Freezes, volatile frame rates, dropped frames, pixelation, invented speech,
+jitter-buffer stress: these measure *damage the user experienced*. Their detectors
+raise on the **track**, and only there.
 
-### Detector-reported severity
+The distinction is cause versus effect, and the two are not interchangeable:
 
-Most detectors only ever say yes or no, and for those the weight is the whole
-story. The few that measure how deep their finding is declare a `severityField` —
-a `0..1` field on the payload:
+- **The same loss does different damage to different tracks.** 2% loss is inaudible on
+  an Opus stream with FEC and PLC, and very visible on video without it. The loss
+  figure cannot tell you which happened; the share of audio NetEQ had to invent and
+  the freeze count can.
+- **Damage happens without loss.** In a captured session, 754 of 772 intervals measured
+  **zero** packet loss, and 31 of them still had audible invention above 0.5% —
+  jitter-buffer underruns and late arrivals, not packets that never came.
+- **A clean path can carry a broken track, and a bad path a fine one.** A camera that
+  has stopped producing frames scores badly on a perfect network.
 
-| Issue type | Field | Meaning |
+So a degradation is attributed by *joining* the two, which a server can always do
+because they arrive in the same sample: the track says what broke, the peer connection
+says whether the network explains it. Because the calculator reads the issue registry,
+this rule is kept by where each detector raises rather than by the calculator
+remembering to skip a metric.
+
+## What the calculator charges
+
+Costs are points out of `5.0`. "Issue" means the charge applies only while that issue
+is open; "reading" means it is continuous and has no detector behind it.
+
+### Inbound video track
+
+| Charge | Gate | Cost |
 | --- | --- | --- |
-| `cpulimitation` | `minUtilization` | How occupied the codecs are, `min(encoder, decoder)` |
-| `uplink-congestion` | `severity` | How deep the congestion is |
-| `downlink-congestion` | `severity` | How deep the congestion is |
+| `dry-inbound-track` | issue | 5.0 |
+| `stuck-decoder` | issue | 5.0 |
+| `frame-assembly-stalled` | issue | 5.0 |
+| `frozen-video` | reading — `frameFlowState === 'frozen'` | 5.0 |
+| `choppy-video` | reading — `frameFlowState === 'choppy'` | 2.5 |
+| `pixelated-video` | issue | `quantizationDegradation` × size weight × 2.5 |
+| `decoder-bottleneck` | issue | `decodingDegradation` × 2 |
+| `inbound-video-playout-discrepancy` | issue | `videoPlayoutSkew`, 0–1 |
+| `video-decoder-overloaded` | issue | `decodeBudgetUtilization` ramped 0.8 → 1.0, 0–1 |
+| `blocky-video` | reading — no `pixelated-video` open | `quantizationDegradation` × size weight, 0–1 |
+| `volatile-fps` | reading — `interFrameDelayVariation` ramped 0.2 → 0.4 | 0–1 |
+| `dropped-video-frames` | reading — `droppedFrameRatio` ramped 0.1 → 0.2 | 0–1 |
 
-The reported severity **scales** the weight rather than replacing it, so a
-detector's own severity says *how much of its worst case* this is and the table
-still decides what that worst case costs. A missing field, a non-finite value, or
-one outside `0..1` falls back to the weight rather than scoring nothing.
+`volatile-fps` is skipped on screen share, which legitimately runs at a low and bursty
+frame rate.
 
-### Capping versus subtracting
+### Inbound audio track
 
-The order is not the order the issues happen to arrive in:
+| Charge | Gate | Cost |
+| --- | --- | --- |
+| `dry-inbound-track` | issue | 5.0 |
+| `invented-speech` | issue | `inventedSpeechRatio`, 0–1 |
+| `synthesized-audio` | issue | `synthesizedAudioRatio`, 0–1 |
+| `audio-jitter-buffer-stress` | issue | `jitterBufferStressSeverity`, 0–1 |
+| `unstable-audio-playout` | reading — no `invented-speech` open | `inventedSpeechSeverity` ramped 0.25 → 1.0, 0–1 |
 
-1. A **connectivity** issue short-circuits the whole monitor to `0.0`.
-2. The **pipeline-disruption** caps are taken as a *minimum* — the deepest one
-   wins, and two of them do not stack.
-3. The **subtractions** come off whatever ceiling survived.
+`invented-speech` and `unstable-audio-playout` are the same measurement either side of
+the detector's threshold, so they are mutually exclusive rather than additive.
 
-Two broken pipelines are not twice as bad as one, because there is no media
-either way — but two quality faults really are worse than one. Running all of
-them into a single total would let a mild quality fault push an already-capped
-score below its cap, which would read as the pipeline being *more* broken because
-the picture was also blocky.
+### Outbound video track
 
-The result is clamped to `0.0` at the bottom, so no pile-up of issues produces a
-negative score.
+| Charge | Gate | Cost |
+| --- | --- | --- |
+| `dry-outbound-track` | issue | 5.0 |
+| `video-capture-bottleneck` | issue | `videoCaptureDegradation` × 2 |
+| `encoder-bottleneck` | issue | `videoEncodingDegradation` × 2 |
+| `high-deviation-from-target-bitrate` | reading — camera only, shortfall against `targetBitrate` ramped 0.05 → 0.15 | 0–1 |
+| `downscaled-screenshare` | reading — screen share only, encoded area below the captured surface ramped 0.5 → 0.75 | 0–1 |
 
-### Smoothing
+The two readings are exclusive by content type: a screen share is judged on sharpness,
+because downscaled text is unreadable, and a camera on whether the encoder reached the
+bitrate it was told to.
 
-Each monitor keeps the last `lastNScoresMaxLength` (10) per-tick values and
-publishes their mean, so one collection cannot swing a call's score. Below
-`lastNScoresMinLength` (5) ticks the published score is `undefined` rather than a
-guess from one or two collections, and an `undefined` score is left out of every
-aggregate above it.
+### Outbound audio track
 
-One consequence worth knowing: a track that goes dry mid-call does not read `0.0`
-on the next tick — it slides there over the following ticks as the window fills
-with zeros.
+| Charge | Gate | Cost |
+| --- | --- | --- |
+| `dry-outbound-track` | issue | 5.0 |
+| `silent-audio-source` | issue | 5.0 |
 
-## Per-track and per-connection scores
+### Peer connection
 
-One code path, not one per kind. `_scoreFromIssues` walks a monitor's
-`IssueRegistry`, looks each open issue up in `ISSUE_SCORING`, and applies the
-category rules below. A track and a peer connection differ only in which issues
-they are holding.
+| Charge | Gate | Cost |
+| --- | --- | --- |
+| `uplink-congestion` | issue | `max(uplinkVideoCongestionSeverity, minSeverity)` × 2.5 |
+| `downlink-congestion` | issue | `max(downlinkVideoCongestionSeverity, minSeverity)` × 2.5 |
+| `transport-loss-sustained` | issue | 2.5 |
+| `transport-delay-degraded` | issue | 2.5 |
+| `unstable-transport` | reading — `2 × (1 − transportStability)` | 0–2 |
 
-There is exactly one seam, for the rule that cannot live in the table because it
-depends on *this client* rather than on the fault: inbound video passes an
-adjuster that reweighs `pixelated-video` by how large the picture is being shown.
+Congestion is floored at the detector's own `minSeverity` so that a finding at the
+threshold still costs what the threshold says it is worth.
 
-An issue type the table does not price is skipped, so a detector added without a
-rule is silent here rather than arbitrary.
+### When a charge is published as a reason
+
+A charge of `0` is dropped rather than written, because a reason sitting at zero reads
+as a fault that was found and never resolved. Beyond that, `reasons` is assigned on
+every collection — never only the bad ones — so a connection back at a clean `5.0`
+stops shipping last tick's keys.
+
+Continuous readings alone have to come to more than one point before they are
+published: `reasons` is read as what to act on, and a charge that did not move the
+score by a point is not that. The score still carries it. Where a detector has raised,
+its reason is always published, even if the continuous part came to nothing, so a
+verdict is never contradicted by an empty reason list.
+
+## What it does not charge
+
+**19 of the 37 issue types carry no charge in this calculator.** An unpriced issue is
+still raised, still emitted and still shipped in the sample — it just does not move a
+score.
+
+| Not charged | Why |
+| --- | --- |
+| `ice-connection-failed`, `ice-disconnected`, `ice-establishment-failed`, `ice-transport-stalled`, `no-available-ice-candidate`, `unstable-ice-path`, `dtls-handshake-failed`, `dtls-handshake-stalled` | Deliberate. A path carrying nothing leaves nothing to have an opinion about, and the tracks riding on it go dry — `dry-inbound-track` and `dry-outbound-track` already take their dimensions to zero. Charging the connection too would be the same fault counted twice, in the one situation where there is no media to judge. |
+| `congestion` | Deliberate. The deprecated `CongestionDetector` raises it for the same episode `uplink-congestion` / `downlink-congestion` cover, so pricing it would charge one episode twice. |
+| `capture-source-lost`, `rtp-sender-stalled`, `transport-demux-stalled`, `video-recovery-failed`, `av-desync`, `cpulimitation`, `blocked-inbound-media-transport`, `blocked-outbound-media-transport`, `blocked-stun-requests` | Not deliberate as far as the code says — these are findings a reference implementation would be expected to price, and do not appear in any charge above. Treat their absence as a gap in this implementation rather than a statement that they do not matter. |
+
+This is one of the reasons the calculator is documented as a reference implementation:
+a deployment that cares about any of the second group should price it in its own
+calculator rather than wait for this one to.
 
 ## Pixelation and the presented size
 
-`pixelated-video` is raised by `PixelatedVideoDetector` from bits per pixel: the
-detector decides **whether** the picture is blocky, which is a fact about the
-stream and the same everywhere. How much that *matters* is a fact about this
-client — the same stream is a thumbnail in one layout and full-screen in the
-next, and what the eye resolves is the coded block's size on screen.
-
-Three parties, split along the line that runs through the rest of the library.
-
-**The detector** says whether the picture is blocky, from `bitPerPixel`.
+`pixelated-video` is raised by `PixelatedVideoDetector` from the **quantizer** — the
+mean QP of the interval as a fraction of the codec's own scale, derived from `qpSum`.
+The detector decides *whether* the picture is blocky, which is a fact about the stream
+and the same everywhere. How much that *matters* is a fact about this client: the same
+stream is a thumbnail in one layout and full-screen in the next, and what the eye
+resolves is the coded block's size on screen.
 
 **`InboundTrackMonitor.displayMagnification`** says how magnified it is: the linear
-factor `sqrt(presented area / decoded area)`, reported raw. It is derived beside
-the presented size it depends on — every tick, and again on any `setContext()`
-that changes that size, so an application declaring a size and reading the
-magnification in the same breath does not get the previous layout's answer. Taken
-from the *areas*, so a 16:9 frame letterboxed into a square tile is not read as
-magnification on width alone. `undefined` — not `1` — when nothing declared a
-presented size or a `videoTag`, or the stats carry no decoded frame size yet:
-"nobody measured" and "painted at its decoded size" are different facts.
+factor `sqrt(presented area / decoded area)`, reported raw. Taken from the *areas*, so
+a 16:9 frame letterboxed into a square tile is not read as magnification on width
+alone. `undefined` — not `1` — when nothing declared a presented size or a `videoTag`,
+or the stats carry no decoded frame size yet: "nobody measured" and "painted at its
+decoded size" are different facts. There is no ceiling on it; a 320×180 stream on a 4K
+screen really is magnified twelvefold.
 
-There is no ceiling or floor on it. A 320x180 stream on a 4K screen really is
-magnified twelvefold, and whether that is meaningfully worse than fourfold is a
-judgement for whoever reads the number — which is the table below, and which
-could be something else entirely in a custom `ScoreCalculator`.
+That is a fact, so it lives on the monitor. What a magnification is *worth* is an
+opinion about scoring, so it lives here:
 
-Both of those are facts, so they live on the objects that own them. **What a
-magnification is *worth* is an opinion about scoring**, so it lives here with
-every other such opinion:
-
-| `displayMagnification` | Multiplier on the table price | Constant |
+| `displayMagnification` | Multiplier | Constant |
 | --- | --- | --- |
 | ≥ 1.5 | **×1.5** | `PIXELATION_WEIGHT_LARGE` |
 | 0.75 – 1.5 | ×1.0 | — |
 | < 0.75 | **×0.25** | `PIXELATION_WEIGHT_SMALL` |
 | `undefined` | ×1.0 | — |
 
-Deliberately asymmetric: blown up, the blocks are the thing the viewer complains
-about; in a thumbnail nobody can see them. An unmeasurable magnification means
-"no adjustment" rather than "no opinion", so a missing measurement never silences
-the finding.
-
-The size only ever *weighs* a finding, and never becomes one — a track with no
-open `pixelated-video` issue is charged nothing however large it is shown.
+Deliberately asymmetric: blown up, the blocks are what the viewer complains about; in a
+thumbnail nobody can see them. An unmeasurable magnification means "no adjustment"
+rather than "no opinion", so a missing measurement never silences the finding. The size
+only ever *weighs* a finding and never becomes one — a track with no open
+`pixelated-video` issue is charged `blocky-video` from the same reading, and nothing at
+all when the reading is absent.
 
 ### Declaring the presented size
 
@@ -291,153 +292,64 @@ monitor.setInboundTrackContext(trackId, { videoTag });   // re-measured every ti
 ```
 
 Two things about the `videoTag` route. It measures the element's **layout box**
-(`clientWidth`/`clientHeight` × `devicePixelRatio`), never
-`videoWidth`/`videoHeight` — those are the *intrinsic* decoded size, the same
-number the stats already report, so measuring with them would make every
-magnification exactly 1. And it fits the frame's aspect ratio into that box as
-`object-fit: contain` does; an application using `object-fit: cover`, which crops
-instead, should declare `presentedResolution` itself.
-
-## Reason reference
-
-`scoreReasons` is keyed by **issue type** throughout, so the reason a score fell
-is the name of the finding that caused it — the same string the issue carries,
-and the same string in the sample. The value is the points that issue took off.
-
-"Full cost" below is the points at full severity, out of `5.0`.
-
-### Connectivity — scores the connection zero while open
-
-| Issue type | Weight | Full cost | Severity from |
-| --- | --- | --- | --- |
-| `ice-connection-failed` | 1 | 5.00 | — |
-| `ice-establishment-failed` | 1 | 5.00 | — |
-| `ice-disconnected` | 1 | 5.00 | — |
-| `ice-transport-stalled` | 1 | 5.00 | — |
-| `no-available-ice-candidate` | 1 | 5.00 | — |
-| `dtls-handshake-failed` | 1 | 5.00 | — |
-| `dtls-handshake-stalled` | 1 | 5.00 | — |
-| `unstable-ice-path` | 0.6 | 3.00 | — |
-
-`unstable-ice-path` is the one that is not an outage: the path works between
-reselections, and the churn is what costs.
-
-### Pipeline disruption — caps the score
-
-| Issue type | Weight | Full cost | Severity from |
-| --- | --- | --- | --- |
-| `dry-inbound-track` | 1 | 5.00 | — |
-| `dry-outbound-track` | 1 | 5.00 | — |
-| `capture-source-lost` | 1 | 5.00 | — |
-| `silent-audio-source` | 1 | 5.00 | — |
-| `stuck-decoder` | 1 | 5.00 | — |
-| `rtp-sender-stalled` | 1 | 5.00 | — |
-| `transport-demux-stalled` | 1 | 5.00 | — |
-| `frame-assembly-stalled` | 1 | 5.00 | — |
-| `video-recovery-failed` | 0.9 | 4.50 | — |
-| `decoder-bottleneck` | 0.7 | 3.50 | — |
-| `video-capture-bottleneck` | 0.7 | 3.50 | — |
-| `encoder-bottleneck` | 0.7 | 3.50 | — |
-| `inbound-video-playout-discrepancy` | 0.7 | 3.50 | — |
-| `cpulimitation` | 0.6 | 3.00 | `minUtilization` |
-| `video-decoder-overloaded` | 0.5 | 2.50 | — |
-
-The full-weight eight are cases where there is no media at all. Below them,
-`video-recovery-failed` is a freeze the repair loop could not end; the three
-bottlenecks and the playout discrepancy are frames arriving and being lost, so
-the picture stutters rather than stops; `video-decoder-overloaded` is the earlier
-warning that decoding is expensive but still keeping up; it is a
-repair loop eating the path while the picture may still be moving.
-
-`cpulimitation` is the machine, not one stream — it is the only pipeline issue
-that reports its own severity.
-
-### Perceived quality — subtracts from the track
-
-| Issue type | Weight | Full cost | Severity from |
-| --- | --- | --- | --- |
-| `video-flow-disrupted` | 0.8 | 4.00 | — |
-| `invented-speech` | 0.6 | 3.00 | — |
-| `pixelated-video` | 0.5 | 2.50 | — |
-| `av-desync` | 0.4 | 2.00 | — |
-| `synthesized-audio` | 0.4 | 2.00 | — |
-| `audio-jitter-buffer-stress` | 0.3 | 1.50 | — |
-
-`invented-speech` and `synthesized-audio` are the same fault seen from two
-places — the stream that concealed and the playout device that invented — and
-are priced so the pair is not double-weighted. `video-flow-disrupted` covers both
-`frozen` and `choppy` — the complaint behind
-most "you're breaking up" reports. `pixelated-video` is additionally weighted by
-[the presented size](#pixelation-and-the-presented-size).
-
-### Transport quality — subtracts from the connection
-
-| Issue type | Weight | Full cost | Severity from |
-| --- | --- | --- | --- |
-| `blocked-inbound-media-transport` | 1 | 5.00 | — |
-| `blocked-outbound-media-transport` | 1 | 5.00 | — |
-| `blocked-stun-requests` | 1 | 5.00 | — |
-| `uplink-congestion` | 0.8 | 4.00 | `severity` |
-| `downlink-congestion` | 0.8 | 4.00 | `severity` |
-| `transport-loss-sustained` | 0.7 | 3.50 | — |
-| `transport-delay-degraded` | 0.5 | 2.50 | — |
-| `congestion` | 0 | 0.00 | — |
-
-`congestion` is priced at zero on purpose. The deprecated `CongestionDetector`
-still raises it, and both directional detectors emit the event of that name too,
-so pricing it would charge the same episode twice. Read `uplink-congestion` and
-`downlink-congestion` instead.
-
-The three `blocked-*` issues are media being dropped outright while signalling
-survives. Both congestion detectors measure how deep the trouble is, so both are
-read rather than assumed.
+(`clientWidth`/`clientHeight` × `devicePixelRatio`), never `videoWidth`/`videoHeight` —
+those are the *intrinsic* decoded size, the same number the stats already report, so
+measuring with them would make every magnification exactly 1. And it fits the frame's
+aspect ratio into that box as `object-fit: contain` does; an application using
+`object-fit: cover`, which crops instead, should declare `presentedResolution` itself.
 
 ## Where the reasons surface
 
-- **The realtime `'score'` event** carries the client-level aggregate of the
-  current tick's reasons (`currentReasons`) with their magnitudes.
-- **Each monitor** (`pcMonitor.scoreReasons`, `trackMonitor.scoreReasons`)
-  holds only its *own* reasons — a low track score is explained on the track,
-  not on the peer connection.
-- **The samples** carry `scoreReasons` as a record of issue type → subtracted
-  points (`Record<string, number>`) per entity, magnitudes included. Set
-  `sendScoreReasonsToServer: false` to drop the reasons from the wire.
-- **`calculator.totalReasons`** accumulates the same keys across the whole call,
-  which is what to read for "what dominated this session".
+`scoreReasons` is keyed by issue type wherever an issue is behind the charge, and by
+the name of the reading otherwise. The value is the points that charge took off.
 
-See the README's [Score Reasons](../README.md#score-reasons) section for
-examples.
+- **The `'score'` event** carries the client-level aggregate of this collection's
+  reasons as `currentReasons`, with magnitudes.
+- **Each monitor** (`pcMonitor.scoreReasons`, `trackMonitor.scoreReasons`) holds only
+  its *own* reasons — a low track score is explained on the track, not on the peer
+  connection.
+- **The samples** carry `scoreReasons` per entity as `Record<string, number>`. Set
+  `sendScoreReasonsToServer: false` to drop them from the wire without changing any
+  score.
 
-## Tuning
+## Writing your own
 
-**Retuning what a fault costs is an edit to one table.** `ISSUE_SCORING` is
-exported and mutable:
-
-```typescript
-import { ISSUE_SCORING } from '@observertc/client-monitor-js';
-
-// this deployment cares more about blocky video than about lip-sync
-ISSUE_SCORING['pixelated-video'].weight = 0.8;
-ISSUE_SCORING['av-desync'].weight = 0.2;
-```
-
-**Retuning when a fault is raised at all** is an edit to that detector's config,
-which is where every threshold now lives. The two are independent: the detector
-config decides whether the issue exists, and the table decides what it costs.
-
-**Checking for holes:**
+Assign it, and the monitor calls your `update()` from the next collection on. Nothing
+else has to change: the monitors publish the same facts either way, and the sample
+reads whatever the scores end up as.
 
 ```typescript
-import { unscoredIssueTypes } from '@observertc/client-monitor-js';
+monitor.scoreCalculator = {
+    update() {
+        for (const pc of monitor.mappedPeerConnections.values()) {
+            const lossy = pc.issues.hasType('transport-loss-sustained');
 
-console.warn(unscoredIssueTypes(myIssueTypes));   // [] in a healthy build
+            pc.calculatedStabilityScore.value = lossy ? 2.5 : 5.0;
+            pc.calculatedStabilityScore.reasons = lossy ? { lossy_path: 2.5 } : undefined;
+        }
+
+        for (const track of monitor.tracks) {
+            track.calculatedScore.value = track.issues.size === 0 ? 5.0 : 3.0;
+        }
+
+        monitor.setScore(myClientScore);
+    },
+};
 ```
 
-The pixelation size tiers are `public static` fields on `DefaultScoreCalculator`
-(`PIXELATION_WEIGHT_LARGE`, `PIXELATION_WEIGHT_SMALL`,
-`PIXELATION_LARGE_MAGNIFICATION`, `PIXELATION_SMALL_MAGNIFICATION`), as are the
-smoothing lengths (`lastNScoresMaxLength`, `lastNScoresMinLength`).
+**What you read.** Each monitor's `issues` registry — `hasType(type)`,
+`getByType(type)`, `getFirstPayloadByType(type)`, `size` — plus any derived field the
+monitor publishes, all of which are documented in
+[DERIVED_METRICS.md](./DERIVED_METRICS.md). Detector payloads reached through the
+registry carry the measurements behind a finding.
 
-For entirely different scoring logic, replace the calculator: see the
-README's [Custom Score Calculator](../README.md#custom-score-calculator)
-section.
+**What you write.** `calculatedScore.value` and `.reasons` on the track monitors,
+`calculatedStabilityScore` on the peer connections, and `ClientMonitor.setScore(score,
+ownReasons?, aggregatedReasons?)` for the call. Leave `value` as `undefined` to mean
+"not judged yet" — it is then left out of any aggregate. Reason keys are yours to
+name; they ship verbatim in the sample.
+
+**Retuning when a fault is raised at all** is a different job, and is an edit to that
+detector's config rather than to any calculator: see
+[CONFIGURATION.md](./CONFIGURATION.md). The two are independent — the detector config
+decides whether the issue exists, the calculator decides what it costs.

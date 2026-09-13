@@ -365,7 +365,7 @@ Monitors outgoing media tracks:
 -   `getHighestLayer()`: Gets highest bitrate layer
 -   `getOutboundRtps()`: Gets all outbound RTP monitors
 
-**Detectors:** `DryOutboundTrackDetector`, `CaptureSourceLostDetector`, `CaptureTrackMutedDetector`, `SilentAudioSourceDetector`, `CodecChangeDetector`, and on video tracks `VideoCaptureBottleneckDetector`, `EncoderPerformanceDetector`, `SimulcastLayerDetector`, `VideoResolutionChangeDetector`.
+**Detectors:** `DryOutboundTrackDetector`, `CaptureSourceLostDetector`, `CaptureTrackMutedDetector`, `SilentAudioSourceDetector`, `CodecChangeDetector`, and on video tracks `VideoCaptureBottleneckDetector`, `EncoderBottleneckDetector`, `SimulcastLayerDetector`, `VideoResolutionChangeDetector`.
 
 ## RTP Monitors
 
@@ -390,7 +390,6 @@ Extended outbound RTP statistics:
 -   `bitrate`: Calculated sending bitrate
 -   `payloadBitrate`: Payload-only bitrate
 -   `packetRate`: Packet sending rate
--   `retransmissionRate`: Retransmission rate
 
 **Navigation:**
 

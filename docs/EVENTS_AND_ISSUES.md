@@ -123,7 +123,7 @@ Ten classes are the exception and emit events only, because what they report is 
 | `cpulimitation` | CPU-tagged outbound RTP / stats-collection slowness / low inbound decoded-to-received frames ratio | Indicators normalize | `'cpulimitation'` | `CpuPerformanceIssuePayload` |
 | `dry-inbound-track` | Inbound bytes stay flat for `thresholdInMs` | Bytes start flowing again | `'dry-inbound-track'` | `DryInboundTrackIssuePayload` |
 | `dry-outbound-track` | Outbound bytes stay flat across **every layer being sent** for `thresholdInMs`, with no `bandwidth` or `cpu` limitation to explain it | Any layer sends bytes again, the encoder turns out to be limited, or the last active layer is switched off | `'dry-outbound-track'` | `DryOutboundTrackIssuePayload` |
-| `video-flow-disrupted` | freezes counted across the track's detection window reach `frozen` or `choppy` | Frames render again (`frozen`), or both halves of the window read freeze-free (`choppy`) | `'video-flow-disrupted'` | `FrozenVideoTrackIssuePayload` |
+| `video-flow-disrupted` | freezes counted across the track's detection window reach `frozen` or `choppy` | Frames render again (`frozen`), or both halves of the window read freeze-free (`choppy`) | `'video-flow-disrupted'` | `VideoFlowIssuePayload` |
 | `inbound-video-playout-discrepancy` | `(framesReceived - framesRendered) / framesReceived > highSkewRatio` | Ratio drops below `lowSkewRatio` | `'inbound-video-playout-discrepancy'` | `PlayoutDiscrepancyIssuePayload` |
 | `ice-disconnected` | An ICE transport stayed `disconnected` past `disconnectedThresholdInMs` | ICE reconnects, or the transport goes away | — | `IceDisconnectedIssuePayload` |
 | `ice-connection-failed` | An ICE transport reached `failed` | ICE reconnects (typically after a restart) | — | `IceConnectionFailedIssuePayload` |
@@ -140,7 +140,7 @@ Ten classes are the exception and emit events only, because what they report is 
 | `audio-jitter-buffer-stress` | Target delay grown **and** NetEQ time-stretching, for `minConsecutiveTicks` | Either condition clears | `'audio-jitter-buffer-stress'` | `JitterBufferStressIssuePayload` |
 | `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
 | `video-recovery-failed` | PLIs sent, picture frozen, `keyFramesDecoded` not advancing for `recoveryFailedThresholdInMs` | A keyframe arrives or the freeze ends | `'video-recovery-failed'` | `VideoRecoveryFailedIssuePayload` |
-| `video-capture-bottleneck` | the capture device fell more than `produceDegradationThreshold` short of the configured frame rate across the detection window | a later average comes back at or above `captureFpsRatioRecoveryThreshold` | `'video-capture-bottleneck'` | `CaptureBottleneckIssuePayload` |
+| `video-capture-bottleneck` | the capture device fell more than `produceDegradationThreshold` short of the configured frame rate across the detection window | the recovery window — the stretch *before* the detection window — comes back under the same threshold | `'video-capture-bottleneck'` | `VideoCaptureBottleneckIssuePayload` |
 | `decoder-bottleneck` | the decoder left more than `decodeDegradationThreshold` of the frames that arrived over `durationInMs` | the next average comes back at or above it | `'decoder-bottleneck'` | `DecoderBottleneckIssuePayload` |
 | `encoder-bottleneck` | A delivering source outran the encoder for `durationInMs` continuously | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
@@ -148,7 +148,7 @@ Ten classes are the exception and emit events only, because what they report is 
 | `frame-assembly-stalled` | Packets kept arriving with `framesReceived` flat for `thresholdInMs`, past `minPacketsReceived` | A frame is assembled, packets stop arriving, or the track pauses | `'frame-assembly-stalled'` | `FrameAssemblyStalledIssuePayload` |
 | `pixelated-video` | `normalizedQp` stayed at or above `threshold` for `durationInMs` of stats time | It falls below `recoveryThreshold`, the quantizer stops being reported, or the track pauses | `'pixelated-video'` | `PixelatedVideoIssuePayload` |
 
-Most per-detector payload types are exported from the package root; the five newest are not yet re-exported individually (`TransportDelayIssuePayload`, `TransportLossIssuePayload`, `PixelatedVideoIssuePayload`, `ChoppyVideoIssuePayload`, `FrameAssemblyStalledIssuePayload`), so reach them through the `ClientMonitorIssue` union below, which does narrow to all of them. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
+Every per-detector payload type is exported from the package root, and the `ClientMonitorIssue` union below narrows to all of them, so either route works. The resolved-side payload is always the raise-time payload plus `durationInMs` (and, for some, refreshed metrics).
 
 ## Type-safe handling: the `ClientMonitorIssue` discriminated union
 
@@ -482,7 +482,7 @@ Every detector reads a config block named after it — its `name` in camelCase, 
 
 | Retired config key | What to use instead |
 |---|---|
-| `captureFailureDetector` | `captureTrackEndedDetector`, `silentAudioSourceDetector`, `captureTrackMutedDetector` |
+| `captureFailureDetector` | `captureSourceLostDetector`, `silentAudioSourceDetector`, `captureTrackMutedDetector` |
 | `dtlsHandshakeDetector` | `dtlsHandshakeStalledDetector`, `dtlsHandshakeFailedDetector` |
 | `icePathStabilityDetector` | `iceDisconnectedDetector`, `iceConnectionFailedDetector`, `iceTransportStalledDetector`, `unstableIcePathDetector`, `iceRestartDetector`, `iceRestartRecommendationDetector` |
 | `mediaPipelineDetector` | `rtpSenderStalledDetector`, `transportDemuxStalledDetector` |
@@ -554,12 +554,20 @@ monitor.on('capture-source-lost',                 (e) => { /* the device is gone
 monitor.on('capture-track-muted',                 (e) => { /* the OS or another app took it — event only */ });
 monitor.on('silent-audio-source',                 (e) => { /* live mic producing digital silence */ });
 monitor.on('frame-assembly-stalled',              (e) => { /* packets arriving, no frame ever assembled */ });
-monitor.on('pixelated-video',                     (e) => { /* too few bits per pixel, sustained */ });
+monitor.on('pixelated-video',                     (e) => { /* quantizer sustained above the codec's band */ });
+monitor.on('synthesized-audio',                   (e) => { /* the playout device invented samples */ });
 
 // Transport quality — properties of a path that is up and holding.
 monitor.on('transport-delay-degraded',    (e) => { /* round trip long enough to break turn-taking */ });
 monitor.on('transport-loss-sustained',    (e) => { /* packets vanishing — `direction` says which way */ });
-monitor.on('blocked-transport',           (e) => { /* STUN passes, media does not — the firewall signature */ });
+monitor.on('uplink-congestion',           (e) => { /* the sending path is out of room — graded `severity` */ });
+monitor.on('downlink-congestion',         (e) => { /* the receiving path is — same shape, own evidence */ });
+monitor.on('blocked-inbound-media-transport',  (e) => { /* the far end sent; nothing arrived */ });
+monitor.on('blocked-outbound-media-transport', (e) => { /* we sent; nothing got through */ });
+monitor.on('blocked-transport',           (e) => { /* STUN unanswered — the firewall signature. Emitted by
+                                                     BlockedStunRequestsDetector; the issue of this name
+                                                     is gone, the event is not. */ });
+// The deprecated CongestionDetector is the only thing that emits 'congestion'.
 
 // Pipeline stage boundaries nothing else covers.
 monitor.on('rtp-sender-stalled',      (e) => { /* frames encode, no packet leaves */ });

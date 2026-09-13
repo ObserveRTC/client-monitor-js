@@ -180,7 +180,9 @@ something.
 | Capacity | `DownlinkCongestionDetector` | `downlink-congestion` | `downlinkCongestionDetector` | Needs inbound video `jitterBufferDelay` / `jitterBufferEmittedCount` **and** `outbound-rtp.qualityLimitationReason` — so it is blind on a receive-only connection |
 | Delay | `TransportDelayDetector` | `transport-delay-degraded` | `transportDelayDetector` | RTCP or ICE round trip — available everywhere |
 | Delivery reliability | `TransportLossDetector` | `transport-loss-sustained` | `transportLossDetector` | Inbound everywhere; outbound needs `remote-inbound-rtp.packetsReceived` |
-| Delivery reliability | `BlockedTransportDetector` | `blocked-transport` | `blockedTransportDetector` | Needs the pair's `responsesReceived`, plus transport or candidate-pair byte counters |
+| Delivery reliability | `BlockedStunRequestsDetector` | `blocked-stun-requests` | `blockedStunRequestsDetector` | Needs the pair's `deltaResponsesReceived` |
+| Delivery reliability | `BlockedOutboundMediaDetector` | `blocked-outbound-media-transport` | `blockedOutboundMediaDetector` | Needs our own `deltaPacketsSent` |
+| Delivery reliability | `BlockedInboundMediaDetector` | `blocked-inbound-media-transport` | `blockedInboundMediaDetector` | Needs the remote-outbound report; **`null` by default** |
 
 Every class here binds to `PeerConnectionMonitor`. Nothing in this category lives
 at a track monitor, which follows from the subject: a path is a property of a
@@ -422,9 +424,8 @@ The convenience stops at the event. Neither detector raises a combined *issue*,
 because an issue is a condition with a start and an end and the two directions
 start and end independently — one key would have to pick a lifetime, and it would
 be wrong for whichever direction was still congested. A `congestion` issue type
-does still exist, raised by the deprecated `CongestionDetector` alone; it is
-priced at zero in `ISSUE_SCORING` so that the same episode is not charged twice.
-A
+does still exist, raised by the deprecated `CongestionDetector` alone; the shipped
+score calculator ignores it, so the same episode is not charged twice. A
 connection congested both ways emits `congestion` twice, as the two findings open;
 that is two independent verdicts rather than one restated, since neither detector
 reads the other to decide.
@@ -507,7 +508,7 @@ two detectors decide independently.
 all?
 
 Two classes, and the pairing is the point: `transport-loss-sustained` is a path
-dropping a *share* of what crosses it, and `blocked-transport` is a path dropping
+dropping a *share* of what crosses it, and the `blocked-*` issues are a path dropping
 *all* of it for a reason that is policy rather than capacity. They are the two
 ends of the same axis.
 
@@ -600,9 +601,8 @@ directions.
 Connectivity's test is *the failure is a stage that never completed or stopped
 holding*. Run it against this detector's own preconditions and it fails
 immediately, because the detector **requires** every stage to have completed:
-ICE must read `connected` or `completed`, the selected pair must be `succeeded`,
-and STUN consent responses must have arrived within `stunFreshnessInMs` or the
-detector stands down and hands the session to the ICE detectors. Nothing in the
+ICE must read `connected` or `completed`, and the selected pair must have reached
+`succeeded` — a path that never came up is handed to the ICE detectors instead. Nothing in the
 ladder failed. Nothing in the ladder is even allowed to have failed.
 
 Transport Quality's test is *every stage completed, and the path is still the
@@ -627,51 +627,46 @@ because the encoder is doing its job perfectly well. The gap between "STUN says
 the path is alive" and "no media traverses it" is visible only to something
 comparing those two facts.
 
-**The algorithm.** Each tick, on the transport's selected pair:
+**The algorithm, per class.** Each reads interval deltas off the transport's selected
+pair or its attributed RTP streams, and each times with the ICE transport's own
+`deltaTime`.
+
+`BlockedStunRequestsDetector` — the path stopped answering while this endpoint was still
+asking:
 
 | Gate | Config | Default | Why |
 |---|---|---|---|
-| ICE brought the path up | — | — | `IceTransportMonitor.everConnected` and the pair reading `succeeded`. Liveness is the consent counter's job below; what ICE is needed for is the one thing consent cannot say — that the path came up at all |
-| STUN is alive | `stunFreshnessInMs` | `10000` | `responsesReceived` advanced recently; otherwise this is ordinary connectivity loss and the ICE detectors own it. Consent runs roughly every 5 s, so the window comfortably exceeds one interval |
-| Something is being sent | — | — | At least one outbound RTP stream attributed to this transport. No bitrate bar: see below |
-| Media is not traversing | `maxSendShare` | `0.1` | The transport's send counter moving at under a tenth of what those senders produce |
+| The pair reached `succeeded` first | — | — | A path that never answered is ordinary establishment failure and belongs to `IceEstablishmentFailedDetector` |
+| We are still asking | `requestsSentTimeoutInMs` | `10000` | Consent counts as well as connectivity checks, since after nomination consent is the only STUN still leaving |
+| Nothing is answering | `responseReceivedTimeoutInMs` | `10000` | Consent runs roughly every 5 s, so the window comfortably exceeds one interval |
 
-The discrepancy holding for `thresholdInMs` (default `5000`) raises the issue; any gate
-breaking resolves it. The outbound streams come from
-`IceTransportMonitor.getOutboundRtps()`, a plain `transportId` lookup — restoring that
-reference where a browser omits it is the stats adapters' job, not a monitor's.
+The payload carries `silentForMs`, `requestsSent`, `currentRoundTripTime` and `pathKind`.
+While the finding is open the transport is marked `blocked`.
+
+`BlockedOutboundMediaDetector` — we sent and nothing got through. It requires at least
+one outbound RTP stream reporting `deltaPacketsSent`, and raises once packets have been
+handed over with none leaving for `thresholdInMs` (default `10000`). Where our own send
+counters are missing it sets `inputsUnavailable`, because there silence is not a finding.
+The payload carries `packetsSent`, `blockedForMs` and `pathKind`.
+
+`BlockedInboundMediaDetector` — the far end sent and nothing arrived. It rests on the
+remote-outbound report's `deltaPacketsSent` to establish that anything was sent at all,
+and sets `inputsUnavailable` where inbound streams carry no remote report. `thresholdInMs`
+governs it; the payload carries `remotePacketsSent`, `blockedForMs` and `pathKind`.
 
 **Nothing is gated on media having flowed successfully first.** A blocked transport is
 normally blocked from its first packet: the user is behind a corporate firewall, nothing
 gets out, and reloading puts them behind the same wall. Any bar of the form "it was
 carrying media and then stopped" would switch the detector off in exactly the case it
-exists to explain. The send side needs no such bar anyway — the encoder produces whether
-or not anything escapes, so "we are being asked to send" is self-evident from the
-outbound streams existing.
+exists to explain.
 
-**Only the send side is judged, and that is a deliberate limit.** There the client holds
-both halves of the proof: it produced the bytes and it reads what the transport put on
-the wire. On the receive side it holds one half — what *should* have arrived is a fact
-about the far end that no client stat reports, so a middlebox eating media, an SFU that
-stopped forwarding, a producer the far end paused and a speaker who muted are the same
-reading in `getStats()`. A dry return path is
-[`dry-inbound-track`](./PIPELINE_DISRUPTION_DETECTORS.md)'s finding, not this one's, and a
-block in the receive direction surfaces on the remote peer's own sending side.
-
-The two `evidence` values split the send-side fault by where it happened:
-
-| `evidence` | What was observed | Where the fault is |
-|---|---|---|
-| `media-discarded-on-send` | The selected pair's `packetsDiscardedOnSend` is advancing: the operating system refused the packets | On this machine — a socket error, a host firewall rejecting at the socket, a full send buffer |
-| `media-not-leaving-transport` | No discard counter advancing, either because the browser reports none or because it reports zero | Beyond this machine: the packets left as far as this endpoint can tell |
-
-They have entirely different remedies, and reporting them as one thing sent people to
-read packet captures for a problem in their own send buffer. `packetsDiscardedOnSend` is
-the specification's purpose-built counter for exactly that question, so where a browser
-reports it the answer is not a guess. Where it reports nothing the detector does **not**
-read the silence as proof of a local fault — an unreported counter and a zero one fall on
-the same side, or the verdict would depend on which browser was looking ([design rule
-5](./DETECTOR_TAXONOMY.md#5-a-detector-never-infers-the-raw-stats-it-needs)).
+**The send side is the stronger proof, and that asymmetry is why the receive side is off
+by default.** Sending, the client holds both halves: it produced the bytes and it reads
+what the transport put on the wire. Receiving, it holds one half — what *should* have
+arrived is a fact about the far end, which is why `BlockedInboundMediaDetector` has to
+borrow the remote report, and why it is the one class in the library not registered
+unless its key is supplied. A dry return path with no remote report to lean on is
+[`dry-inbound-track`](./PIPELINE_DISRUPTION_DETECTORS.md)'s finding, not this one's.
 
 **Every clock accumulates the ICE transport's own `deltaTime`** — how long the
 discrepancy has held, how long since STUN last answered, and the interval under the
@@ -686,7 +681,7 @@ the track monitors and the media playout monitor. That is why the class holds no
 state is plain fields, a replaced transport gets a detector whose clocks start at zero,
 and a transport that goes away takes its detector with it, leaving the issue open as
 every monitor-bound detector does. Reaching it means
-`iceTransport.detectors.getByName('blocked-transport-detector')`, not the peer
+`iceTransport.detectors.getByName('blocked-stun-requests-detector')`, not the peer
 connection's registry; the `blockedStunRequestsDetector` config key gates construction on
 every transport at once.
 
@@ -770,16 +765,20 @@ already price by severity.
 
 | Sub-layer | Issue type | Detector | Payload discriminator |
 |---|---|---|---|
-| Capacity | `uplink-congestion` | `UplinkCongestionDetector` | — |
-| Capacity | `downlink-congestion` | `DownlinkCongestionDetector` | — |
+| Capacity | `uplink-congestion` | `UplinkCongestionDetector` | `severity` |
+| Capacity | `downlink-congestion` | `DownlinkCongestionDetector` | `severity` |
+| Capacity | `congestion` *(deprecated)* | `CongestionDetector` | — |
 | Delay | `transport-delay-degraded` | `TransportDelayDetector` | — |
 | Delivery reliability | `transport-loss-sustained` | `TransportLossDetector` | `direction`: `inbound` \| `outbound` |
-| Delivery reliability | `blocked-transport` | `BlockedTransportDetector` | `evidence`: `media-discarded-on-send` \| `media-not-leaving-transport` |
+| Delivery reliability | `blocked-stun-requests` | `BlockedStunRequestsDetector` | `silentForMs`, `requestsSent`, `pathKind` |
+| Delivery reliability | `blocked-outbound-media-transport` | `BlockedOutboundMediaDetector` | `packetsSent`, `blockedForMs`, `pathKind` |
+| Delivery reliability | `blocked-inbound-media-transport` | `BlockedInboundMediaDetector` | `remotePacketsSent`, `blockedForMs`, `pathKind` |
 
-Every issue here is raised on `PeerConnectionMonitor`, and every one emits a
-monitor event of the same name alongside the issue. All but one key their issue
-per peer connection; `blocked-transport` keys per transport, because a peer
-connection without BUNDLE has several and they can be blocked independently.
+Every issue here is raised on `PeerConnectionMonitor`, and each emits a monitor event
+alongside the issue — of the same name, except `blocked-stun-requests`, whose event
+kept the older name `blocked-transport`. Most key their issue per peer connection; the
+`blocked-*` issues key per transport, because a peer connection without BUNDLE has
+several and they can be blocked independently.
 
 The two discriminators are payload fields rather than separate issue types by the
 test [design rule 1](./DETECTOR_TAXONOMY.md#the-five-design-rules) applies to
@@ -794,7 +793,7 @@ two detectors and not one issue with a `kind` field.
 **Below: Connectivity.** Everything in this document presupposes that the path
 exists. Every detector here is silent, or meaningless, on a connection that never
 established — there is no round trip to average, no stream carrying packets, and
-`BlockedTransportDetector` explicitly refuses to judge a transport whose ICE is
+`BlockedStunRequestsDetector` explicitly refuses to judge a transport whose ICE is
 not verified. When a session raises both a connectivity issue and a transport
 quality one, read the connectivity issue first: the lowest category that fired is
 the diagnosis.
@@ -813,7 +812,7 @@ is informative *precisely because* they decided independently: cause and symptom
 confirmed by two separate measurements is evidence, whereas a symptom detector
 that only fires when a cause detector already fired adds nothing to what the
 cause detector said. The same holds for `downlink-congestion` alongside
-`pixelated-video` or `video-choppy`. Correlating them is the server's job, where
+`pixelated-video` or `video-flow-disrupted`. Correlating them is the server's job, where
 the whole session is visible — see
 [Detectors are independent](./DETECTOR_TAXONOMY.md#detectors-are-independent).
 
@@ -824,12 +823,12 @@ what removed the delivery-stability detector described above. The test is not
 "do these classes share code" but "could one of these be true while the other is
 false, for a reason an engineer would act on?" 
 
-The one place the library still violates this is documented under
+Until 4.9.0 the library violated this in one place, recorded under
 [Known deviations](./DETECTOR_TAXONOMY.md#known-deviations): `DefaultScoreCalculator`
-re-derives `high-rtt`, `high-jitter` and `high-packetloss` from raw stats with its
-own thresholds, in parallel with the three detectors that now own those
-conditions. Two sets of thresholds for one condition, with no guarantee they
-agree.
+re-derived `high-rtt`, `high-jitter` and `high-packetloss` from raw stats with its own
+thresholds, in parallel with the detectors that own those conditions — two sets of
+thresholds for one condition, with no guarantee they agreed. The calculator now reads
+the open issues instead, and those three reason keys are gone.
 
 ## What this model deliberately does not do
 
@@ -899,7 +898,7 @@ what browsers report, not against what networks do.
 
 **Silence needs to be readable, and here it now is.** Every detector in the
 category exposes a public `inputsUnavailable` field — `TransportDelayDetector`
-and `TransportLossDetector` when their measurement is absent, `BlockedTransportDetector` when neither transport nor candidate-pair
+and `TransportLossDetector` when their measurement is absent, the `Blocked*` classes when neither our own send counters nor the candidate-pair
 bitrates were reported for a transport it could otherwise have judged, and the
 two capacity detectors when the bandwidth estimate or the jitter buffer counters
 they judge are not reported. See

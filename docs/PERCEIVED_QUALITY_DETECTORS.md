@@ -125,14 +125,14 @@ no detector here reads another's issue, and the co-firing is independent
 evidence rather than an echo. `VideoRecoveryFailedDetector` — a Pipeline
 Disruption class watching the repair loop around a freeze — deliberately
 re-derives "the picture is stuck" from `deltaFramesRendered` and
-`deltaKeyFramesDecoded` rather than reading `inboundRtp.isFreezed`, which is
-this category's conclusion and disappears entirely when
+`deltaKeyFramesDecoded` rather than reading `InboundTrackMonitor.frameFlowState`, which
+is this category's conclusion and disappears entirely when
 `inboundVideoFlowStateDetector` is set to `null`.
 
 ## What promoting a score reason to a detector changed
 
 Until 4.9.0, three of the conditions in this document existed **only** as score
-penalties. `pixelated-video`, `low-fps` and `volatile-fps` were score-reason
+penalties. `pixelated-video`, `low-fps` and `volatile-fps` were 4.7-era score-reason
 keys computed inside `DefaultScoreCalculator`, and that placement decided what could be done with
 them: a score reason is a number attached to the current tick's score. It cannot
 be raised, cannot be resolved, has no duration, never reaches `activeIssues`,
@@ -140,7 +140,7 @@ and is invisible to anything asking "what is wrong with this session right now".
 A call that was blocky and juddery for four minutes produced a low score and an
 empty issue list.
 
-`PixelatedVideoDetector` and `ChoppyVideoDetector` are those conditions promoted
+`PixelatedVideoDetector` and `InboundVideoFlowStateDetector` are those conditions promoted
 to first-class findings. What the promotion bought is the whole issue lifecycle:
 a `raisedAt`, a `durationInMs` at resolution, a payload carrying the evidence as
 it stood when the episode opened, a monitor event an application can act on
@@ -158,10 +158,10 @@ penalty, or the reverse, and both were working as written.
 
 That duplication is gone. The score is now a reading of the open issues and
 nothing else, so a condition is judged in exactly one place — here — and the
-calculator's own thresholds, ramps and QP tables have been removed with it. What
-the calculator still decides is what a finding *costs*, which is a separate
-question and lives in one table
-(see [Score Calculations](./SCORE_CALCULATIONS.md#tuning)).
+calculator's own thresholds, ramps and QP tables have been removed with it. What the
+calculator still decides is what a finding *costs*, which is a separate question and
+belongs to whichever `ScoreCalculator` is in use (see
+[Score Calculations](./SCORE_CALCULATIONS.md#what-the-calculator-charges)).
 
 The removed QP path is also the concrete illustration of why the detector does
 not use QP; see [Visual — clarity](#visual--clarity).
@@ -177,8 +177,8 @@ derives.
 | Value | How it is derived | Read by |
 |---|---|---|
 | `bitPerPixel` | `bitrate / (frameWidth * frameHeight * framesPerSecond)` | `PixelatedVideoDetector` |
-| `ewmaFps` | `0.9 * previous + 0.1 * framesPerSecond`, seeded with the first reading | `ChoppyVideoDetector` |
-| `fpsVolatility` | mean absolute deviation of `lastNFramesPerSec` (≤10 readings) ÷ their mean | `ChoppyVideoDetector` |
+| `ewmaFps` | `0.9 * previous + 0.1 * framesPerSecond`, seeded with the first reading | `PlayoutDiscrepancyDetector` |
+| `fpsVolatility` | mean absolute deviation of `lastNFramesPerSec` (≤10 readings) ÷ their mean | no detector — published for consumers |
 | `avgFramesPerSec` | mean of the same ≤10 readings | *(nothing in this category — see below)* |
 | `inventedSpeechRatio` | (Δ concealed − Δ silent concealed) ÷ Δ `totalSamplesReceived`, **this interval** | `InventedSpeechDetector` |
 | `timeStretchRate` | (Δ inserted + Δ removed) ÷ Δ `totalSamplesReceived` | `JitterBufferStressDetector` |
@@ -186,7 +186,7 @@ derives.
 | `avgJitterBufferDelayInMs` | Δ `jitterBufferDelay` ÷ Δ `jitterBufferEmittedCount`, ×1000 | `JitterBufferStressDetector` (payload only) |
 | `deltaTime` | the two stats reports' `timestamp`s differenced | every duration in this document |
 | `linkedVideoPlayoutDiffInMs` | this audio track's `estimatedPlayoutTimestamp` minus its linked video track's — *on `InboundTrackMonitor`, not `InboundRtpMonitor`* | `AVDesyncPlayoutDetector` |
-| `captureSettings` / `captureSettingsChanged` | `track.getSettings()` snapshotted per tick, and whether `frameRate`/`width`/`height` moved — *on `OutboundTrackMonitor`* | `VideoCaptureBottleneckDetector`, `EncoderBottleneckDetector` |
+| `settings` / `videoCaptureSettingsChanged` | `track.getSettings()` snapshotted per tick, and whether `frameRate`/`width`/`height` moved — *on `OutboundTrackMonitor`* | `VideoCaptureBottleneckDetector`, `EncoderBottleneckDetector` |
 | `displayMagnification` | `sqrt(presented area / decoded area)`, unbounded — *on `InboundTrackMonitor`* | `DefaultScoreCalculator` |
 
 The boundary is drawn there on purpose, and
@@ -196,15 +196,17 @@ an opinion belonging to whoever is judging.** `bitPerPixel` is true of the
 stream whether or not anybody thinks 0.012 is too low. Putting the division on
 the monitor means a scoring implementation, a dashboard or an application can
 read the same number without a detector in the way, and it is why
-`PixelatedVideoDetector` and `ChoppyVideoDetector` are each under a hundred
+`PixelatedVideoDetector` and `InboundVideoFlowStateDetector` are each under a hundred
 lines: they hold no window, no ring buffer and no statistics.
 
 Two entries break the pattern, and each does so for a stated reason rather than
 by drift.
 
-`isFreezed` runs the other way — `InboundVideoFlowStateDetector` derives the freeze
-state and writes it back onto the monitor, because nothing else computes it and
-the score needs it. The cost is stated in the detector's own source: disable
+`frameFlowState` runs the other way — `InboundVideoFlowStateDetector` derives the flow
+state and writes it back onto `InboundTrackMonitor`, because nothing else computes it
+and the score needs it. (Its predecessor wrote a boolean `isFreezed` onto the inbound
+RTP monitor; the field is gone, and the state it replaced it with distinguishes
+`continuous`, `choppy` and `frozen`.) The cost is stated in the detector's own source: disable
 `inboundVideoFlowStateDetector` and the field stays `undefined`, so the score quietly
 stops penalising freezes.
 
@@ -242,7 +244,7 @@ is derived from, and that duplication went with the class.
 
 `avgFramesPerSec` is derived and read by nothing in this category
 (`DecoderPerformanceDetector`, in Pipeline Disruption, uses it as a fallback);
-`ChoppyVideoDetector` uses the EWMA instead. Two smoothings of one signal, one
+`InboundVideoFlowStateDetector` counts freezes instead. Two readings of one signal, one
 of them unused here, is worth knowing about before adding a third.
 
 ### Duration is stats time
@@ -260,7 +262,7 @@ What it buys, in both directions:
 - A tab hidden for a minute has not watched a minute of blocky video. Measured
   against the wall clock, every duration threshold in the category would cross
   at once on the tick the tab comes back, on evidence nobody observed. The specs
-  pin this: `PixelatedVideoDetector` and `ChoppyVideoDetector` each have a test
+  pin this: `PixelatedVideoDetector` and `InboundVideoFlowStateDetector` each have a test
   that advances `Date.now()` by ten minutes with `deltaTime: 0` and asserts that
   nothing is raised.
 - A collection that ran late means the condition held *longer* than one nominal
@@ -290,7 +292,7 @@ at a 2000 ms cadence and ten at the default 5000 ms one.
 | Sub-layer | Class | Issue | Config key | Coverage |
 |---|---|---|---|---|
 | Visual — clarity | `PixelatedVideoDetector` | `pixelated-video` | `pixelatedVideoDetector` | inbound video |
-| Visual — smoothness | `ChoppyVideoDetector` | `video-choppy` | `choppyVideoDetector` | inbound video |
+| Visual — smoothness | `InboundVideoFlowStateDetector` | `video-flow-disrupted` (`state: 'choppy'`) | `inboundVideoFlowStateDetector` | inbound video |
 | Visual — continuity | `InboundVideoFlowStateDetector` | `video-flow-disrupted` | `inboundVideoFlowStateDetector` | inbound video |
 | Audio — clarity | *(none)* | *(none — by design)* | — | **empty, deliberately** |
 | Audio — continuity | `InventedSpeechDetector` | `invented-speech` | `inventedSpeechDetector` | inbound audio |
@@ -337,7 +339,7 @@ anyway the detector runs on its defaults.
 
 The detector `name` strings, which are what `detectors.disable()` /
 `enable()` / `getByName()` take, are `pixelated-video-detector`,
-`choppy-video-detector`, `inbound-video-flow-state-detector`,
+`inbound-video-flow-state-detector`,
 `invented-speech-detector`, `audio-playout-synthesis-detector`,
 `av-desync-playout-detector` and `jitter-buffer-stress-detector`. Two of them are new in
 4.9.0: `audio-concealment-detector` became `invented-speech-detector` and
@@ -442,7 +444,7 @@ exposes no such setting, so in practice an undeclared screen share is judged as
 camera video and will raise. That is the category's most likely false positive.
 
 **Backgrounded tabs are not a stand-down here**, unlike its two video
-neighbours. That is a real asymmetry: `ChoppyVideoDetector` and
+neighbours. That is a real asymmetry: `InboundVideoFlowStateDetector` and
 `InboundVideoFlowStateDetector` both check `activeTab` and this class does not. The
 defensible reading is that bits per pixel is a property of what arrived and was
 decoded rather than of what was painted, so throttled rendering does not
@@ -483,7 +485,7 @@ The merge was the right cut. Both halves — a steady 8fps that is smooth-but-sl
 and 25fps swinging between 5 and 40 that is fast-but-lurching — are the same
 complaint from the viewer ("it's juddery"), and they sit on a continuum with a
 full freeze rather than beside it. Two issue types on one episode was noise: an
-operator reading a failed session had to know that `video-choppy` and
+operator reading a failed session had to know that a choppy verdict and
 `video-flow-disrupted` were the same subject at two depths. One type with a `state`
 of `frozen` or `choppy` says it once.
 
@@ -501,7 +503,7 @@ the freeze the person watching actually sees, with no claim about why.
 
 **Signals.** `inboundRtp.freezeCount` (cumulative freeze *starts*),
 `deltaFramesRendered`, `deltaTotalFreezesDuration` and `deltaTime`. It publishes
-its own conclusion back as `inboundRtp.isFreezed`.
+its own conclusion back as `InboundTrackMonitor.frameFlowState`.
 
 **Algorithm.** A freeze starts when `freezeCount` advances, and persists while
 nothing renders:
@@ -539,28 +541,27 @@ field and shows what handling it looks like: it states in its own source that a
 missing `deltaFramesRendered` counts as *rendering*, so the absence makes it
 quieter rather than differently wrong.
 
-**Raise.** Two consecutive frozen ticks, at which point the payload carries
-`trackId` (the browser's `trackIdentifier`, `undefined` included rather than
-substituted), `frozenTicks`, `observedSpanInMs` and `freezeTimeInMs`.
+**Raise.** The payload is discriminated on `state`, because a freeze is one event with
+a length and choppiness is several over a window — one shape could not describe both
+without half its fields being meaningless on each verdict.
 
-The last two are the part a local threshold cannot supply, and they are why the
-payload is worth reading rather than counting. `observedSpanInMs` is the stats
-time the frozen ticks actually spanned — `deltaTime` accumulated, not the
-nominal collecting period — and `freezeTimeInMs` is the freeze time accrued over
-that span, from `totalFreezesDuration` in seconds converted to milliseconds. A
-server can then judge severity as a *frozen share of a measured window* even
-when a collection ran late: the spec's worked case is a 2 s tick and a 7 s tick
-reporting `observedSpanInMs: 9000` and `freezeTimeInMs: 8300`. `freezeTimeInMs`
-is `undefined` where the browser reports no `totalFreezesDuration`, which is the
-only honest answer — without it there is no way to know how much of the span was
-frozen rather than merely that a freeze happened in it.
+| `state` | Payload |
+|---|---|
+| `frozen` | `observedFrozenTimeInMs` — how long the picture had been stopped when the finding was raised, a floor and never above the truth |
+| `choppy` | `freezeCount` (at least `minFreezeCountForChoppy`), `windowInMs` — the stretch they were counted over, in stats time — and `frozenRatio`, the share of it the picture was stopped |
+
+Both carry `peerConnectionId` and `trackId`, and gain `durationInMs` at resolution. The
+`choppy` triple is the part a local threshold cannot supply, and it is why the payload is
+worth reading rather than counting: `windowInMs` is stats time actually spanned —
+`deltaTime` accumulated, not the nominal collecting period — so a server can judge
+severity as a *frozen share of a measured window* even when a collection ran late.
 
 **Resolve.** Frames render again (`video freeze ended`), or a stand-down.
 
 **Stand-downs.** Tab in the background (`tab in background`), consumer paused
 (`consumer paused`), remote producer paused (`remote track paused`). All three
 route through `_standDown()`, which does something the other classes do not:
-it **swallows the monotonic counter** — `_lastFreezeCount` is set to whatever
+it **swallows the monotonic counter** — its last-seen freeze count is set to whatever
 the counter now reads — rather than skipping the tick. Without that, a tab
 hidden for a minute would come back with `freezeCount` twenty higher and the
 detector would replay a minute of browser throttling as a burst of freezes. A
@@ -969,8 +970,10 @@ Nothing of that measurement survives, and no tuning carries over: the old
 thresholds were dimensionless fractions of samples, the new ones are
 milliseconds of skew. The signal itself is not lost — `JitterBufferStressDetector`
 reads it as `timeStretchRate`, under a name that says what it is, as one of the
-two conditions it requires. The `audio-time-stretch` score penalty moved with it;
-see [SCORE_CALCULATIONS.md](./SCORE_CALCULATIONS.md).
+two conditions it requires. The old `audio-time-stretch` score penalty is gone
+rather than renamed: what the score now charges is
+`audio-jitter-buffer-stress`, on that detector's verdict — see
+[SCORE_CALCULATIONS.md](./SCORE_CALCULATIONS.md).
 
 ## Responsiveness
 
@@ -1072,7 +1075,7 @@ with no network involvement at all.
 | Sub-layer | Issue type | Detector | Monitor event |
 |---|---|---|---|
 | Visual — clarity | `pixelated-video` | `PixelatedVideoDetector` | `pixelated-video` |
-| Visual — smoothness | `video-choppy` | `ChoppyVideoDetector` | `video-choppy` |
+| Visual — smoothness | `video-flow-disrupted` (`state: 'choppy'`) | `InboundVideoFlowStateDetector` | `video-flow-disrupted` |
 | Visual — continuity | `video-flow-disrupted` | `InboundVideoFlowStateDetector` | `video-flow-disrupted` |
 | Audio — clarity | *(none — by design)* | — | — |
 | Audio — continuity | `invented-speech` | `InventedSpeechDetector` | `invented-speech` |
@@ -1092,8 +1095,8 @@ Every issue in the table answers the test each detector must pass: *what can an
 engineer do differently after seeing this?* A frozen picture, a coarse picture
 and a juddery picture send you to three different places — the repair loop, the
 bitrate allocation, the arrival pattern — which is why they are three types and
-not one `video-degraded` with a discriminator. Conversely `low-framerate` and
-`unstable-framerate` send you to the same place, which is why they are one type
+not one `video-degraded` with a discriminator. Conversely a low frame rate and an
+unstable one send you to the same place, which is why they are one type
 with a discriminator.
 
 ## How this category relates to its neighbours
@@ -1140,9 +1143,9 @@ The same pattern holds across every boundary this category has:
   points at the buffer rather than the wire.
 - **Against Pipeline Disruption.** `video-flow-disrupted` with `stuck-decoder`
   names the component; `video-flow-disrupted` alone means the freeze is real and
-  the break is upstream of anything this endpoint can see. `video-choppy` with
+  the break is upstream of anything this endpoint can see. A `choppy` verdict with
   `decoder-bottleneck` or `video-decoder-overloaded` says the local machine is
-  why; `video-choppy` alone leaves the sender and the network as candidates.
+  why; a `choppy` verdict alone leaves the sender and the network as candidates.
 - **Against Telemetry.** `video-resolution-changed` beside `pixelated-video` is
   usually the whole story — the SFU dropped a layer — and neither of them says
   so alone. `stats-collection-gap` beside anything in this category is a warning
@@ -1246,7 +1249,7 @@ distinguish from a measurement.
 exists so that "nothing is wrong" and "I could not see whether anything is wrong"
 are distinguishable from outside — see
 [When inputs are missing](./DETECTOR_TAXONOMY.md#when-inputs-are-missing). In
-this category `PixelatedVideoDetector`, `ChoppyVideoDetector`,
+this category `PixelatedVideoDetector`, `InboundVideoFlowStateDetector`,
 `InventedSpeechDetector` and `AVDesyncPlayoutDetector` set it — the last two gained it
 in 4.9.0. `InventedSpeechDetector` was the case the flag was written for: a
 browser omitting `silentConcealedSamples` used to silence the detector

@@ -187,7 +187,7 @@ them to. `S1` outside this document would mean nothing to anybody.
 |---|---|---|---|---|
 | Send — the source | `CaptureSourceLostDetector` | `capture-source-lost` | `captureSourceLostDetector` | Audio + video, outbound track; reads the track object, not stats |
 | Send — the source | `SilentAudioSourceDetector` | `silent-audio-source` | `silentAudioSourceDetector` | Audio only, outbound track |
-| Send — capture to frame supply (S1) | `VideoCaptureBottleneckDetector` | `capture-bottleneck` | `videoCaptureBottleneckDetector` | Video only; screen shares refused; needs `getSettings().frameRate` |
+| Send — capture to frame supply (S1) | `VideoCaptureBottleneckDetector` | `video-capture-bottleneck` | `videoCaptureBottleneckDetector` | Video only; screen shares refused; needs `getSettings().frameRate` |
 | **Send — processing to encoder input (S2)** | *(none — no browser stat exists)* | — | — | **Unwatched by design of the stats, not by choice** |
 | Send — frames to encoder (S3) | `EncoderBottleneckDetector` | `encoder-bottleneck` | `encoderBottleneckDetector` | Video only; highest active layer only |
 | Send — encoder to RTP sender (S4) | `RtpSenderStalledDetector` | `rtp-sender-stalled` | `rtpSenderStalledDetector` | Video in practice — per ssrc, peer connection level; audio has no frame counter |
@@ -398,7 +398,7 @@ configured to capture? **Boundary S1.** Between what the device was asked for
 (`track.getSettings().frameRate`) and what it produced
 (`mediaSource.sourceFps`).
 
-### `VideoCaptureBottleneckDetector` — `capture-bottleneck`
+### `VideoCaptureBottleneckDetector` — `video-capture-bottleneck`
 
 **What it detects.** A camera degrading in place: a driver struggling, another
 application contending for the device, thermal throttling. The track reports
@@ -415,10 +415,11 @@ re-acquired device restarts it, and a restart is not a measurement of zero fps.
 **Algorithm and thresholds with defaults.** Two running totals, no history.
 Frames delivered and the measured time they had to arrive in accumulate until
 `durationInMs` (default **15000**) of stats time has accrued; then the average
-is compared against the configured `frameRate` using **a threshold and a recovery
-threshold**: below `captureFpsRatioThreshold` (default **0.9**) of it raises, and
-only a later window at or above `captureFpsRatioRecoveryThreshold` (default
-**0.95**) resolves. Either way the totals start over and a fresh window opens.
+is compared against the configured `frameRate` using **one threshold measured over
+two windows**: a `produceDegradation` above `produceDegradationThreshold` across the
+detection window raises, and the issue resolves only once the *recovery* window — the
+stretch immediately before the detection window — comes back under the same line.
+Either way the totals start over and a fresh window opens.
 
 **Why a pair and not one line.** A camera hovering at the threshold alternates
 either side of it, and a single line turns one continuous fault into a stream of
@@ -439,7 +440,7 @@ rate and raises with the camera still delivering. Averaging also weights how far
 the source fell short, not merely how often.
 
 **Raise and resolve.** Raised once per episode on key
-`capture-bottleneck-track-<trackId>`, with `VideoCaptureBottleneckIssuePayload` —
+`video-capture-bottleneck-track-<trackId>`, with `VideoCaptureBottleneckIssuePayload` —
 fitted to this detector rather than shared with `DecoderBottleneckDetector`, so
 everything not marked optional is guaranteed present:
 
@@ -447,16 +448,17 @@ everything not marked optional is guaranteed present:
 |---|---|
 | `sourceFps` | the window average the camera actually delivered |
 | `expectedFps` | the configured rate, from `getSettings().frameRate`; always above zero |
-| `captureDegradation` | `0..1`, how far the camera fell short — `0` at the threshold, `1` at no frames |
-| `averagedOverInMs` | the **measured** window, at least `durationInMs` and usually a little more |
-| `capturedFrames` / `expectedFrames` | the counts the two rates were taken from |
-| `sourceWidth` / `sourceHeight` | the delivered frame size, when the media source reports one |
+| `produceDegradation` | `0..1`, how far the camera fell short — `0` at the threshold, `1` at no frames |
+| `detectionWindowInMs` | the **measured** window, at least `durationInMs` and usually a little more |
+| `producedFpsForDetection` / `producedFramesForDetection` | the rate and the count it was taken from |
+| `trackSettingsWidth` / `trackSettingsHeight` | the delivered frame size, when `getSettings()` reports one |
+| `recoveryWindowInMs`, `producedFpsForRecovery`, `producedFramesForRecovery` | the recovery window that closed the finding; absent while it is open |
 | `durationInMs` | filled in at resolution |
 
-`captureDegradation` is the *depth* of the finding, where the issue's existence is
+`produceDegradation` is the *depth* of the finding, where the issue's existence is
 only its *presence* — it is what separates a camera stuttering from one that has
-effectively stopped, since both raise `capture-bottleneck` and nothing else tells
-them apart. It is measured from `captureFpsRatioThreshold` — the raise line, which is
+effectively stopped, since both raise `video-capture-bottleneck` and nothing else tells
+them apart. It is measured from `produceDegradationThreshold` — the raise line, which is
 what defines the finding — rather than from the
 configured rate, so it asks the same question at any threshold: a deployment that
 raises the threshold is saying it cares about smaller shortfalls, and an absolute
@@ -476,11 +478,11 @@ screen share's frame rate is content-driven, a still document legitimately
 delivers almost nothing, and an application capturing a genuinely moving surface
 can opt in with `monitor.setOutboundTrackContext(trackId, { contentType:
 'camera' })`. A restarted frame counter, a collection gap
-(`maxTickGapInMs`, `max(3 × collectingPeriodInMs, 15000)`) or a change in the
+(the window's own `maxAllowedGapInMs`, `4 × collectingPeriodInMs` by default) or a change in the
 capture format all restart the totals rather than counting against the device.
 The format change is not detected here: `OutboundTrackMonitor` reads
-`getSettings()` once per tick into `captureSettings` and sets
-`captureSettingsChanged` when `frameRate`, `width` or `height` moved, and this
+`getSettings()` once per tick into `settings` and sets
+`videoCaptureSettingsChanged` when `frameRate`, `width` or `height` moved, and this
 detector only acts on the answer — one read and one comparison for every detector
 on the track, rather than one each.
 
@@ -492,7 +494,7 @@ for time nobody was watching.
 
 **False positives.** A track whose `getSettings().frameRate` states an
 aspiration the device was never going to meet — a `frameRate: 60` constraint on
-a 30 fps webcam — produces a permanent `capture-bottleneck`. The detector has no
+a 30 fps webcam — produces a permanent `video-capture-bottleneck`. The detector has no
 way to tell an unmet constraint from a degrading device, and does not try.
 
 **What it does not claim.** Anything about the encoder behind the device, which
@@ -545,34 +547,41 @@ a persistence bar; a tick count is a confidence floor.** Every signal here is a
 per-interval ratio that a single stats read can fabricate, so what is wanted is
 two independent reads agreeing, whatever the collecting period happens to be.
 
-**Signals read.** `mediaSource.sourceFps`; on the highest active layer,
-`framesPerSecond`, `encodeTimePerFrameInMs`,
-`qualityLimitationDurationShares.cpu`, `qualityLimitationReason`,
-`encoderImplementation` and `powerEfficientEncoder`.
+**Signals read.** Two frame counters off `OutboundTrackMonitor.slicedWindow` — the
+frames the media source produced and the frames the highest active layer encoded,
+measured across the same stretch — plus `qualityLimitationReason`,
+`encoderImplementation` and `powerEfficientEncoder`, carried for diagnosis rather than
+used in the verdict.
 
-**Algorithm and thresholds with defaults.** Any one of three signals qualifies a
-tick:
+**Algorithm and thresholds with defaults.** One threshold read over two windows, the
+same shape as `VideoCaptureBottleneckDetector`:
 
-| Signal | Condition | Default |
-|---|---|---|
-| Behind | `encodedFps < sourceFps × encodeFpsRatioThreshold` | `0.7` |
-| Too slow | `(1000 / sourceFps) × encodeTimeBudgetRatio < encodeTimePerFrameInMs` | `0.8` |
-| CPU-limited | `cpuLimitationShareThreshold < qualityLimitationDurationShares.cpu` | **`null` — off** |
+| | |
+|---|---|
+| Raise | more than `encodeDegradationThreshold` (default **0.3**) of the frames handed over left unencoded across the detection window |
+| Update | every later collection still short of it updates the open issue rather than opening another |
+| Resolve | the recovery window — the stretch *before* the detection window — is back within the threshold |
 
-Qualifying ticks are counted, and the issue is raised once
-`minConsecutiveTicks` (default **2**) of them have run consecutively. Any
-non-qualifying tick clears the count and resolves an open issue with
-`encoder keeping up again`.
+An encoder hovering at the line therefore cannot flap one long fault into a stream of
+short ones, and neither window is read before it says it is ready.
 
-**The CPU signal is off by default and that is the interesting default.**
-`CpuPerformanceDetector` already raises `cpulimitation` from the same
-`qualityLimitationDurationShares.cpu` reading. Folding it in here as well would
-make `encoder-bottleneck` and `cpulimitation` correlate *tautologically* — two
-issues that always appear together because they are one measurement reported
-twice, which is exactly the thing
+**The comparison is always against what the source actually delivered**, never the
+configured frame rate, so a starving camera cannot make the encoder look guilty: handed
+nothing, it has nothing to answer for and the detector stands down. That is also why
+screen shares are judged like any other track — their frame rate follows the content,
+and the encoder is still expected to keep up with whatever it is given.
+
+**Stand-downs**, reporting `undefined` rather than a verdict: a backgrounded tab, a
+paused sender, a track that is not live, unmuted and enabled, a capture format that just
+changed, a track with no active layer, and a window in which the source handed over
+nothing.
+
+**There is deliberately no CPU signal here.** `CpuPerformanceDetector` already raises
+`cpulimitation` from codec utilization. Folding a CPU reading in here as well would make
+`encoder-bottleneck` and `cpulimitation` correlate *tautologically* — two issues that
+always appear together because they are one measurement reported twice, which is exactly
+the thing
 [co-firing as independent evidence](#the-neighbours-what-is-below-and-what-is-above)
-is supposed not to be. Setting `cpuLimitationShareThreshold` to a number turns
-that correlation on knowingly.
 
 **Everything is judged against what the source actually delivered, never the
 configured capture rate.** An encoder handed 3 fps and emitting 3 fps is doing
@@ -597,18 +606,18 @@ That last stand-down is skipped for screen shares, for the opposite reason to
 follows the content, so a shortfall against the stated rate is the *normal*
 state of a static surface and treating it as a capture problem would excuse the
 encoder for the rest of the call. The asymmetry is deliberate — screen shares
-never raise `capture-bottleneck` and always remain judgeable for
+never raise `video-capture-bottleneck` and always remain judgeable for
 `encoder-bottleneck`.
 
 **Independence, worked once.** The shortfall test is made here, from the two raw
 readings, and deliberately **not** by consulting `VideoCaptureBottleneckDetector`'s
-`capture-bottleneck` issue, which is what this class used to do. Reading another
+`video-capture-bottleneck` issue, which is what this class used to do. Reading another
 detector's conclusion made the verdict depend on things that have nothing to do
 with the encoder in two distinct ways:
 
 - **Disable or reconfigure the capture detector and this one silently stops
   standing down.** `videoCaptureBottleneckDetector: null` leaves
-  `VideoCaptureBottleneckDetector` unregistered, no `capture-bottleneck` is ever
+  `VideoCaptureBottleneckDetector` unregistered, no `video-capture-bottleneck` is ever
   active, and this detector starts blaming the encoder for a starving camera —
   with no error, no warning, and nothing in the issue to indicate it.
 - **The answer depended on registration order.** The two only agreed within a
@@ -627,7 +636,7 @@ answers *no*: nothing was promised, so nothing was fallen short of, and an encod
 is not excused by an expectation never expressed.
 
 The threshold is deliberately **not** `VideoCaptureBottleneckDetector`'s
-`captureFpsRatioThreshold`, whose predecessor it used to reach across and read. The
+`videoCaptureBottleneckDetector.produceDegradationThreshold`, whose predecessor it used to reach across and read. The
 two defaults are equal and the two fields are independently tunable, which is
 correct:
 the two detectors are asking different questions of the same measurement — *is the
@@ -782,7 +791,7 @@ for a track that is being received perfectly. Its neighbour
 This is inconsistent, and it is recorded here rather than smoothed over.
 
 **What it does not claim.** Why nothing is leaving. That is what the boundaries
-below it are for: read `capture-source-lost`, `capture-bottleneck`,
+below it are for: read `capture-source-lost`, `video-capture-bottleneck`,
 `encoder-bottleneck` and `rtp-sender-stalled` first — the lowest boundary that
 fired is the diagnosis, and `dry-outbound-track` on its own means none of them
 could name it.
@@ -1040,7 +1049,7 @@ the *shape* of the failure each can see, and each shape has a different fix:
 
 ### `DecoderBottleneckDetector` — `decoder-bottleneck`
 
-**What it detects.** The receive-side counterpart of `capture-bottleneck`:
+**What it detects.** The receive-side counterpart of `video-capture-bottleneck`:
 frames arrived and the decoder did not turn enough of them into pictures. The
 user sees video that judders or runs behind the audio while the network is
 delivering perfectly well.
@@ -1063,7 +1072,7 @@ ticks. The average also weights how far short it fell, not merely how often.
 
 **The bar is the measured arrival rate, never the sender's intent.** Frames that
 never arrived are the network's story, told by
-[`frozen-video-track`](./PERCEIVED_QUALITY_DETECTORS.md) and the peer
+[`video-flow-disrupted`](./PERCEIVED_QUALITY_DETECTORS.md) and the peer
 connection's loss reasons — so a stream throttled to 5 fps that decodes cleanly
 is silent here.
 
@@ -1117,12 +1126,14 @@ frames demonstrably arrived, which takes three gates before any symptom counts:
 The middle gate is the subtle one and it is right: **an absent measurement
 cannot exonerate the network**, so a missing `deltaFractionLost` stands the
 detector down rather than letting it proceed on an assumption. Past the gates,
-either of two symptoms qualifies a tick — decode time per frame above
+one symptom qualifies a tick: decode time per frame above
 `decodeTimeBudgetRatio` (default **0.8**) of the budget the stream's own frame
-rate implies (`1000 / fps`: 33 ms at 30 fps, 66 ms at 15 fps), or `droppedFrameRatio`
-above `droppedFrameRatioThreshold` (default **0.1**), frames being thrown away *after*
-they had already arrived. `minConsecutiveTicks` (default **2**) qualifying ticks
-in a row raise; any non-qualifying tick clears the count and resolves.
+rate implies (`1000 / fps`: 33 ms at 30 fps, 66 ms at 15 fps). The ratio is published
+either way as `InboundTrackMonitor.decodeBudgetUtilization`, so a decoder at 0.7 of its
+budget is distinguishable from one nobody measured. `droppedFrameRatio` is carried in
+the payload as corroborating evidence rather than being a second raise condition.
+`minConsecutiveTicks` (default **2**) qualifying ticks in a row raise; any
+non-qualifying tick clears the count and resolves.
 
 **Stand-downs.** A backgrounded tab, where throttled decoding says nothing about
 real capability, plus the three gates above. It has no explicit pause check: a
@@ -1150,8 +1161,8 @@ over a window, versus decode timing and drops per tick — so their agreement is
 second measurement rather than an echo. Neither reads the other; neither is
 gated on the other; their config keys are separate.
 
-**What it does not claim.** That the picture is bad. `frozen-video-track` and
-`video-choppy` say that, and both are
+**What it does not claim.** That the picture is bad. `video-flow-disrupted` says
+that, in either of its two states, and it is
 [Perceived Quality](./PERCEIVED_QUALITY_DETECTORS.md).
 
 ### `StuckDecoderDetector` — `stuck-decoder`
@@ -1278,7 +1289,7 @@ Two classes sit beside R3–R5 rather than on any one of them, because what they
 watch is not a stage but a **mechanism**: the client sends a picture loss
 indication, and a keyframe is supposed to come back. It is Pipeline Disruption
 rather than Perceived Quality, and the reason is precise — **it does not say the
-picture is bad.** `frozen-video-track` says that. This says the mechanism that
+picture is bad.** `video-flow-disrupted` says that. This says the mechanism that
 exists to *fix* a bad picture has stopped working (`video-recovery-failed`),
 which is a locatable break with a different owner: an SFU operator rather than a
 user-facing indicator.
@@ -1301,19 +1312,19 @@ for.
 
 **Independence, worked twice.** The stall condition is derived here from raw
 counters — `deltaFramesRendered === 0 && deltaKeyFramesDecoded === 0` — and
-deliberately **not** from `inboundRtp.isFreezed`, which is
-`FrozenVideoTrackDetector`'s conclusion. The reasoning is the same as
+deliberately **not** from `InboundTrackMonitor.frameFlowState`, which is
+`InboundVideoFlowStateDetector`'s conclusion. The reasoning is the same as
 `EncoderBottleneckDetector`'s, arrived at independently on the other side of
 the library:
 
 - **A verdict resting on another detector's output dies silently when that
-  detector is disabled.** `frozenVideoTrackDetector: null` removes
-  `FrozenVideoTrackDetector` entirely, `isFreezed` stops being maintained, and
+  detector is disabled.** `inboundVideoFlowStateDetector: null` removes
+  `InboundVideoFlowStateDetector` entirely, `frameFlowState` stays `undefined`, and
   this detector would simply never fire again — with nothing anywhere to say
   why.
-- **It also inherits that detector's judgement calls.** `isFreezed` is derived
+- **It also inherits that detector's judgement calls.** `frameFlowState` is derived
   from `freezeCount` — a browser statistic, not a raw counter — cleared whenever
-  the freeze detector itself stands down for a pause or a backgrounded tab, and
+  the flow detector itself stands down for a pause or a backgrounded tab, and
   shaped by how that class chooses to keep a persistent freeze alive across
   ticks. None of those choices was made for this question.
 
@@ -1321,7 +1332,7 @@ And what this detector actually needs is **narrower than "frozen"** anyway:
 frames not rendering *and* no keyframe landing is the precise statement that the
 repair did not arrive, whereas "frozen" is a broader perceptual claim. The two
 detectors are related in subject and independent in mechanism, which is what
-lets `frozen-video-track` and `video-recovery-failed` co-firing mean something.
+lets `video-flow-disrupted` and `video-recovery-failed` co-firing mean something.
 
 A missing `deltaFramesRendered` counts as **rendering**, not as stalled: a claim
 that frames are not arriving needs the counter that says so, not its absence.
@@ -1396,54 +1407,54 @@ and not of any one connection. It walks `clientMonitor.outboundRtps` and
 lives on `clientMonitor.cpuPerformanceAlertOn`. The issue key is the bare string
 `cpulimitation`, with no track or connection suffix.
 
-**Signals read, and their thresholds with defaults.** Five readings — the two
-encoder-pressure rows are one signal measured two ways — any of which turns the
-alert on:
+**The measurement is utilization, over a window.** Codec time per unit of stats time,
+summed across the video streams, where `0.25` means a quarter of the stretch was spent
+inside a codec. Summed rather than averaged, so three simulcast layers busy half the
+time each read `1.5`; nothing clamps it at `1`. `encoderUtilization` and
+`decoderUtilization` combine with `min()` into `minUtilization`, so codec work on one
+side alone is a busy *stream* and work on both at once is a busy *machine*; a client
+missing one direction is judged on the other.
 
-| Signal | Condition | Default |
-|---|---|---|
-| Stats loop late | `durationOfCollectingStatsInMs` above the watermark | `highWatermark: 10000` to raise, `lowWatermark: 5000` to stay |
-| Browser verdict | `outboundRtp.qualityLimitationReason === 'cpu'` | — (no threshold) |
-| Encoder CPU share | `encoderCpuLimitationShareThreshold < qualityLimitationDurationShares.cpu` | `0.3` |
-| Encode cost | `(1000 / fps) × encodeTimeBudgetRatio < encodeTimePerFrameInMs` | `0.8` |
-| Decode ratio | `min(decoded / received, 1)` at or below `alertOn`, staying below `alertOff` | `alertOn: 0.7`, `alertOff: 0.85` |
+| | |
+|---|---|
+| Raise | `utilizationThreshold` (default **0.5**) reached across `ClientMonitor.slicedWindow`'s detection slice |
+| Resolve | the recovery slice — the stretch behind the detection slice — also below `recoveryThreshold` (default **0.4**) |
+| Published every judgeable collection | `ClientMonitor.cpuUtilization`, whether or not it raised |
 
-The watermark pair and the ratio pair are both **hysteresis, not two
-conditions**: which one applies depends on whether the alert is already on, so a
-machine sitting on the line cannot flap the issue.
+**Read over a window, not off one collection.** Utilization swings with whatever the
+encoder happens to be doing between collections, and a machine actually out of
+headroom stays busy across the stretch. Judging one collection at a time made a busy
+moment indistinguishable from a busy machine and the finding flickered with it. The
+sustain *is* the detection slice, which is why this detector counts no duration of its
+own — its length lives in `clientWindow`.
 
-**Why decoded-over-received rather than frame-rate volatility.** The volatility
-signal it replaced false-triggered on screen share, whose fps legitimately
-swings 15 → 1 when the content goes static. Received and decoded frames fall
-*together* there, so the ratio stays near 1.0 and nothing fires.
+**The totals come off `PeerConnectionMonitor`**, accumulated one collection's delta at
+a time and summed across connections, rather than read from the streams' own cumulative
+counters. That is what makes a stream appearing or disappearing mid-call a change in
+*what is being measured* rather than a step in the total: a layer that joins brings
+only what it encodes from then on.
 
-**The burst guard.** The ratio's own failure mode is a bursty *arrival*: a
-simulcast layer switch, a keyframe recovery or a post-stall queue flush dumps
-frames into one interval and the decoder trails the spike for a single tick on
-an otherwise idle machine. So a smoothed per-ssrc arrival baseline is kept —
-EWMA with `alpha = 0.3`, meaning roughly the last five ticks dominate, which
-follows a legitimate rate change within a few intervals while a single-tick
-spike barely moves it — and any interval whose received count exceeds
-`frameArrivalBurstFactor` (default **2.5**) times that baseline is **skipped
-rather than judged**. Sustained decoder starvation still alerts, because its low
-ratio persists across ticks with ordinary arrival rates. A track with no
-baseline yet is skipped too: a fresh consumer routinely starts with a keyframe
-burst. The baseline map is rebuilt every tick, **including on ticks another
-signal already flagged**, so the guard never compares against a stale average.
+**It is not CPU time.** `totalEncodeTime` is elapsed time inside the codec call, so a
+hardware codec waiting on the GPU would count in full. Streams naming an off-CPU
+implementation, or flagged `powerEfficient`, are left out as each collection's delta is
+taken — whether a stream counts is a property of that collection, not of the stretch
+read back later.
 
-**Stand-downs.** A backgrounded tab refuses judgement entirely and resolves any
-open alert with `tab in background` — throttled timers and halted rendering
-would read as CPU limitation on a wholly idle CPU. Inbound tracks with fewer
-than `minReceivedFrames` (default **10**) frames in the interval are skipped
-rather than counted either way, which is the screen-share guard in its simplest
-form.
+**Deliberately not gated on `qualityLimitationReason === 'cpu'`.** Chrome's precedence
+is `bandwidth > cpu > none`, so a machine that is both would report `bandwidth` and the
+gate would close exactly where both problems are real.
 
-**A weakness worth naming.** The payload is `{}` — empty, gaining only
-`durationInMs` at resolution. An issue that names a cause and carries none of
-the four signals that produced it gives a reader the conclusion without the
-evidence, and there is no way from the issue alone to tell an encoder-pressure
-`cpulimitation` from a stats-loop-late one. Every other class in this category
-ships the comparison it made.
+**Stand-downs.** A backgrounded tab refuses judgement entirely and resolves any open
+alert with `tab in background` — throttled timers stretch the interval and read as an
+idle machine, and the hole that leaves trips the window's own gap guard. A wholly
+hardware pipeline, or no video at all, sets `inputsUnavailable` rather than reading as
+healthy: a cumulative total holding its last value could not tell you the difference.
+
+**The payload carries its evidence.** `encoderUtilization`, `decoderUtilization`,
+`minUtilization`, `hardwareAcceleratedEncoders`, `hardwareAcceleratedDecoders` and
+`sustainedForInMs` at raise; `recoveredMinUtilization` and `durationInMs` at
+resolution. Earlier versions shipped `{}`, which gave a reader the conclusion without
+the comparison behind it.
 
 **What it does not claim.** Which process is using the CPU, or that the CPU is
 the *only* problem. It is one endpoint's reading of its own machine.
@@ -1454,7 +1465,7 @@ the *only* problem. It is one endpoint's reading of its own machine.
 |---|---|---|---|---|
 | Send | the source | `capture-source-lost` | `CaptureSourceLostDetector` | Outbound track |
 | Send | the source | `silent-audio-source` | `SilentAudioSourceDetector` | Outbound track |
-| Send | S1 capture → frames | `capture-bottleneck` | `VideoCaptureBottleneckDetector` | Outbound track |
+| Send | S1 capture → frames | `video-capture-bottleneck` | `VideoCaptureBottleneckDetector` | Outbound track |
 | Send | S2 processing | *(unwatched — no stat exists)* | — | — |
 | Send | S3 frames → encoder | `encoder-bottleneck` | `EncoderBottleneckDetector` | Outbound track |
 | Send | S4 encoder → sender | `rtp-sender-stalled` | `RtpSenderStalledDetector` | Peer connection, per ssrc |
@@ -1500,9 +1511,9 @@ this endpoint's receiver does not know what to do with them.
 
 **Above: Perceived Quality.** Nothing in this document says the call looks or
 sounds bad. This category names a place; Perceived Quality names an experience.
-`stuck-decoder` says no frame decodes; `frozen-video-track` says the viewer is
+`stuck-decoder` says no frame decodes; `video-flow-disrupted` says the viewer is
 looking at a still picture. `decoder-bottleneck` says frames are going missing
-between arrival and decode; `video-choppy` says the frame rate stutters badly
+between arrival and decode; its `choppy` state says the frame rate stutters badly
 enough to notice.
 
 **Co-firing is independent evidence, never a chain.** The four issue-raising
@@ -1521,16 +1532,16 @@ The pairings worth reading, and what each split means:
 
 | Together | Reading | Split |
 |---|---|---|
-| `frozen-video-track` + `stuck-decoder` | The freeze is a local wedge; recreate the consumer | `frozen-video-track` alone: the freeze is real and the break is upstream of anything this endpoint can see |
-| `video-choppy` + `decoder-bottleneck` or `video-decoder-overloaded` | The local machine is why the picture stutters | `video-choppy` alone: the sender and the network are still candidates |
+| `video-flow-disrupted` (`frozen`) + `stuck-decoder` | The freeze is a local wedge; recreate the consumer | the flow issue alone: the freeze is real and the break is upstream of anything this endpoint can see |
+| `video-flow-disrupted` (`choppy`) + `decoder-bottleneck` or `video-decoder-overloaded` | The local machine is why the picture stutters | the flow issue alone: the sender and the network are still candidates |
 | `frame-assembly-stalled` + `transport-loss-sustained` | Loss inside every frame is why nothing assembles | `frame-assembly-stalled` alone: a codec or depacketizer mismatch is the better reading |
 | `encoder-bottleneck` + `cpulimitation` | The machine is why the encoder cannot keep up | `encoder-bottleneck` alone: the encoder or the processing above it, on a machine that is otherwise fine |
-| `capture-bottleneck` + `dry-outbound-track` | The device degraded and then stopped | `dry-outbound-track` alone: nothing below it could name the cause |
+| `video-capture-bottleneck` + `dry-outbound-track` | The device degraded and then stopped | `dry-outbound-track` alone: nothing below it could name the cause |
 
 The `encoder-bottleneck` + `cpulimitation` row is the one that depends on a
 configuration default staying as it is. Both can read
 `qualityLimitationDurationShares.cpu`, and if
-`encoderBottleneckDetector.cpuLimitationShareThreshold` is set to a number, the
+`encoderBottleneckDetector.encodeDegradationThreshold` is crossed, the
 two stop being independent measurements and start being one measurement reported
 twice. It is `null` by default for exactly that reason.
 
@@ -1556,7 +1567,7 @@ encoder is 30% overloaded" is not a finding this category can produce, and every
 threshold here exists to answer *did it stop* rather than *how bad is it*. The
 graded questions belong to Perceived Quality, whose members are windowed or
 hysteretic by construction because users do not perceive ticks. Several
-detectors here do compute a ratio — `capture-bottleneck` and
+detectors here do compute a ratio — `video-capture-bottleneck` and
 `decoder-bottleneck` against a supply rate,
 `inbound-video-playout-discrepancy` against frames received,
 `video-decoder-overloaded` against frames dropped — and every one of them uses

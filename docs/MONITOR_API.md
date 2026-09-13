@@ -173,9 +173,11 @@ monitor.activeIssues;                                       // everything open r
 ```
 
 Custom issues ride the same `'issue'` / `'issue-resolved'` events as built-in ones
-and are buffered into the sample the same way. They are **not** priced by
-`ISSUE_SCORING` unless you add a rule for them — `unscoredIssueTypes()` will list
-any type that has none.
+and are buffered into the sample the same way. They do **not** affect any score: the
+calculator that ships with the library prices only the issue types it knows about, and
+there is no table to register a new one in. A custom issue that should cost score
+belongs to a custom `ScoreCalculator`, which reads the same `issues` registry — see
+[Score Calculations](./SCORE_CALCULATIONS.md#writing-your-own).
 
 ---
 

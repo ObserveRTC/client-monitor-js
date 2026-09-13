@@ -172,7 +172,7 @@ cpuPerformanceDetector: {
 }
 ```
 
-The payload carries `minUtilization`, which `ISSUE_SCORING` reads as this issue's severity — so a machine barely over the line costs less score than one pinned.
+The payload carries `minUtilization`, so a consumer can tell a machine barely over the line from one pinned. Note that the score calculator shipped with the library does not charge for `cpulimitation` at all — the finding is reported and sampled, but a custom calculator is what would price it.
 
 ```typescript
 monitor.on('cpulimitation', () => effects.disableBackgroundBlur());

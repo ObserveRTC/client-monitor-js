@@ -1,7 +1,5 @@
 # Configuration reference
 
-# Configuration
-
 The `ClientMonitor` accepts a comprehensive configuration object. All configuration options are optional except when specifically noted:
 
 ```javascript
@@ -16,9 +14,25 @@ const monitor = new ClientMonitor({
 
     // Integration settings (optional with defaults)
     integrateNavigatorMediaDevices: true, // Default: true
+    watchTabVisibility: true, // Default: true — off, `activeTab` stays `true`
     addClientJointEventOnCreated: true, // Default: true
     addClientLeftEventOnClose: true, // Default: true
     bufferingEventsForSamples: false, // Default: false
+    bufferClientSamplesUntilSubscriber: false, // Default: false — replay samples to the first listener
+    logger: undefined, // Default: warn/error to console, trace/debug/info no-op
+
+    // What leaves for the server. None of these change a score or an event.
+    sendScoreReasonsToServer: true, // Default: true — `false` drops scoreReasons from samples
+    sendResolvedIssuesToServer: true, // Default: true — `false` ships raises only, with no `key`
+    sendIceTransportMetadataOnChangeOnly: true, // Default: true — static ICE transport members on change only
+
+    // Window sizes, shared by every detector bound to that level, so detectors
+    // judging the same thing judge the same stretch of time. Counted in values,
+    // not milliseconds: N values span N-1 collecting intervals.
+    clientWindow: { numberOfSamples: { detection: 3, recovery: 3 }, maxAllowedGapInMs: 20000 },
+    inboundTrackWindow: { numberOfSamples: { detection: 3, recovery: 3, flowDetection: 4, flowRecovery: 3 }, maxAllowedGapInMs: 20000 },
+    outboundTrackWindow: { numberOfSamples: { detection: 3, recovery: 3 }, maxAllowedGapInMs: 20000 },
+    peerConnectionWindow: { numberOfSamples: { detection: 3, recovery: 3 }, maxAllowedGapInMs: 20000 },
 
     // Detector configurations (all optional).
     //
@@ -246,7 +260,7 @@ const monitor = new ClientMonitor({
 // Minimal configuration
 const monitor = new ClientMonitor({
     clientId: "my-client",
-    collectingPeriodInMs: 1000,
+    collectingPeriodInMs: 1000,   // faster than the 5000ms default, for debugging
 });
 
 // No configuration (uses all defaults)

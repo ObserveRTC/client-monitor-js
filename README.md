@@ -389,30 +389,38 @@ why](./docs/DETECTOR_TAXONOMY.md) the two do not line up one-to-one.
 
 ## Score Calculation
 
-Every monitor is scored 0.0–5.0, where 4.0 and above is good and 1.0 is bad.
+Scoring is **pluggable, and the library only defines the contract**. A calculator is
+anything with an `update()`, which the monitor calls once per collection after the
+detectors have run:
 
-**The score is a reading of the open issues, and nothing else.** Each monitor
-starts at 5.0 and is reduced by the findings its own detectors raised. Nothing
-re-derives a threshold from raw stats, so a fault is judged in one place and the
-score can never disagree with the issue list an operator is looking at.
+```typescript
+interface ScoreCalculator {
+    update(): void;
+}
+```
 
-A charge named after an issue type is applied only while that issue is open. What
-it is *worth* can still be a continuous reading, so `decoder-bottleneck` costs what
-the decoder actually fell behind by. A few charges have no detector behind them and
-are named for what they measure rather than for an issue — `volatile-fps`,
-`dropped-video-frames`, `blocky-video`, `unstable-audio-playout`,
-`unstable-transport`. A charge worth nothing is never written: a reason sitting at
-`0` would read as a fault that was found and never resolved.
+`ClientMonitor.scoreCalculator` holds the one in use. `DefaultScoreCalculator` is
+assigned at construction so that a monitor scores something out of the box, but it is
+a **reference implementation** — one reasonable opinion, written to show what a
+calculator does, not a policy the library commits to. Its thresholds and weights are
+internal: no config key tunes them, nothing imports them, and nothing else in the
+library depends on the numbers it produces. If its judgement does not suit your
+application, replace it rather than work around it.
 
-Connectivity issues are **deliberately not priced**. A path carrying nothing leaves
-nothing to have an opinion about, and `dry-inbound-track` / `dry-outbound-track`
-already take the tracks riding on it to zero.
+### What the reference implementation does
 
-The call's own score is `5 − RMSE` across five dimensions — the transport, and
-inbound and outbound audio and video. A dimension nothing reported is *absent*, not
-zero: a call that sends no video is not a call whose video is broken. Squaring the
-distances is what makes one collapsed dimension cost more than the same shortfall
-spread evenly.
+Every monitor starts at 5.0 and is reduced by the findings its own detectors raised,
+read from that monitor's issue registry. It never re-derives a threshold from raw
+stats, so a fault is judged in one place and the score cannot disagree with the issue
+list an operator is looking at. Connectivity issues are not priced at all — a path
+carrying nothing leaves nothing to have an opinion about, and `dry-inbound-track` /
+`dry-outbound-track` already take the tracks riding on it to zero. The call's own
+score is `5 − RMSE` across five dimensions — the transport, and inbound and outbound
+audio and video — where a dimension nothing reported is *absent* rather than zero: a
+call that sends no video is not a call whose video is broken.
+
+Whatever calculates them, scores are published the same way — on `monitor.score`, on
+each monitor's own `calculatedScore`, in the sample, and on the `'score'` event:
 
 ```typescript
 monitor.on('score', ({ clientScore, currentReasons }) => {
@@ -421,13 +429,35 @@ monitor.on('score', ({ clientScore, currentReasons }) => {
 });
 ```
 
-Retuning what a fault costs is an edit to the mutable statics on
-`DefaultScoreCalculator`; replacing the policy outright means assigning your own
-`ScoreCalculator` to `monitor.scoreCalculator`.
+### Writing your own
+
+Assign it, and the monitor calls your `update()` from the next collection on.
+
+```typescript
+monitor.scoreCalculator = {
+    update() {
+        for (const pc of monitor.mappedPeerConnections.values()) {
+            const lossy = pc.issues.hasType('transport-loss-sustained');
+
+            pc.calculatedStabilityScore.value = lossy ? 2.5 : 5.0;
+            pc.calculatedStabilityScore.reasons = lossy ? { lossy_path: 2.5 } : undefined;
+        }
+        monitor.setScore(myClientScore);
+    },
+};
+```
+
+You read the monitor tree: each monitor's `issues` registry (`hasType`, `getByType`,
+`getFirstPayloadByType`) and any derived field it publishes. You write
+`calculatedScore.value` / `.reasons` on the tracks, `calculatedStabilityScore` on the
+peer connections, and `ClientMonitor.setScore()` for the call. Reason keys are yours
+to name — they are shipped verbatim in the sample unless `sendScoreReasonsToServer`
+is `false`.
 
 > **[docs/SCORE_CALCULATIONS.md](./docs/SCORE_CALCULATIONS.md)** is the full
-> reference — the weight of every issue type, the five-dimension client score, the
-> smoothing window, and how a blocky picture is priced by the size it is shown at.
+> reference — what the shipped calculator charges for each issue type, how the
+> five-dimension client score is built, and how a blocky picture is priced by the
+> size it is shown at.
 
 ## Stats, Sampling and Adapters
 
