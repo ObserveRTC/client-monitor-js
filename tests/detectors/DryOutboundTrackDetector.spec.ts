@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { IssueRegistry, IssueRegistrySink } from "../../src/utils/IssueRegistry";
 import { DryOutboundTrackDetector } from "../../src/detectors/DryOutboundTrackDetector";
 
 // Types for test mocks
@@ -20,6 +22,18 @@ interface EventHandler {
 interface OutboundRtpStats {
     bytesSent?: number;
     deltaBytesSent?: number;
+    /** A simulcast layer the sender has switched off; its counters never move again. */
+    active?: boolean;
+    rid?: string;
+    /** What the browser says is holding the encoder back, if anything. */
+    qualityLimitationReason?: string;
+    /**
+     * The gap between the two stats reports this delta came from, as
+     * `OutboundRtpMonitor` derives it. The dry stretch is measured by accumulating
+     * this rather than by reading the wall clock, so the specs below drive it
+     * instead of advancing timers.
+     */
+    deltaTime?: number;
 }
 
 // Mock dependencies
@@ -80,6 +94,18 @@ class MockClientMonitor {
         return resolved;
     }
 
+    /**
+     * What a per-monitor registry forwards into. Routing it back through `raiseIssue` /
+     * `resolveIssue` keeps every assertion below reading the same `activeIssues` map — the
+     * registry sits above them rather than replacing them.
+     */
+    public readonly issueUplink: IssueRegistrySink = {
+        notify: (issue: any) => { this.addIssue(issue); },
+        raise: (input: any) => { this.raiseIssue(input.key, input); return true; },
+        update: (input: any) => { this.raiseIssue(input.key, input); return true; },
+        resolve: (input: any) => this.resolveIssue(input.key, input) as any,
+    };
+
     // Compatibility helpers used by the assertions below.
     getIssues() {
         return [...this.activeIssues.values()];
@@ -96,6 +122,8 @@ class MockPeerConnectionMonitor {
 }
 
 class MockOutboundTrackMonitor {
+    /** This track's own active issues, uplinked into the client monitor. */
+    public issues!: IssueRegistry;
     public track = {
         id: 'test-track-id',
         muted: false,
@@ -104,6 +132,10 @@ class MockOutboundTrackMonitor {
     public paused = false;
     private peerConnection = new MockPeerConnectionMonitor();
     private outboundRtps: OutboundRtpStats[] = [];
+
+    public constructor() {
+        this.issues = new IssueRegistry(this.peerConnection.parent.issueUplink);
+    }
 
     getPeerConnection() {
         return this.peerConnection;
@@ -115,6 +147,11 @@ class MockOutboundTrackMonitor {
 
     setOutboundRtp(stats: OutboundRtpStats | null) {
         this.outboundRtps = stats ? [stats] : [];
+    }
+
+    /** A simulcast track, which is what most real video tracks are. */
+    setOutboundRtps(stats: OutboundRtpStats[]) {
+        this.outboundRtps = stats;
     }
 }
 
@@ -128,12 +165,20 @@ describe('DryOutboundTrackDetector', () => {
         mockClientMonitor = mockTrackMonitor.getPeerConnection().parent as MockClientMonitor;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         detector = new DryOutboundTrackDetector(mockTrackMonitor as any);
-        jest.useFakeTimers();
     });
 
-    afterEach(() => {
-        jest.useRealTimers();
-    });
+    /**
+     * One collection, describing `deltaTime` milliseconds of the sender's own time. Set on every
+     * layer, as a real collection does: the detector takes the interval from the layers it is
+     * actually judging, which are not necessarily the first in the list.
+     */
+    const tick = (deltaTime = 0) => {
+        for (const outboundRtp of mockTrackMonitor.getOutboundRtps()) {
+            outboundRtp.deltaTime = deltaTime;
+        }
+
+        detector.update();
+    };
 
     describe('Constructor', () => {
         it('should create detector with correct name', () => {
@@ -150,8 +195,7 @@ describe('DryOutboundTrackDetector', () => {
             detector.disabled = true;
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick(6000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -159,7 +203,7 @@ describe('DryOutboundTrackDetector', () => {
         it('should return early if track is sending data', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 1000, deltaBytesSent: 100 });
 
-            detector.update();
+            tick();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
 
@@ -167,9 +211,8 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
             mockTrackMonitor.paused = true;
 
-            detector.update();
-            jest.advanceTimersByTime(60000);
-            detector.update();
+            tick();
+            tick(60000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -178,9 +221,8 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
             mockTrackMonitor.track.muted = true;
 
-            detector.update();
-            jest.advanceTimersByTime(60000);
-            detector.update();
+            tick();
+            tick(60000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -189,9 +231,8 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
             mockTrackMonitor.track.readyState = 'ended';
 
-            detector.update();
-            jest.advanceTimersByTime(60000);
-            detector.update();
+            tick();
+            tick(60000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -204,9 +245,8 @@ describe('DryOutboundTrackDetector', () => {
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
 
             expect(eventSpy).toHaveBeenCalledWith({
                 trackMonitor: mockTrackMonitor,
@@ -217,30 +257,215 @@ describe('DryOutboundTrackDetector', () => {
                 type: 'dry-outbound-track',
                 payload: {
                     trackId: 'test-track-id',
-                    duration: 6000
+                    dryForInMs: 6000,
+                    activeLayers: 1
                 }
             });
         });
 
-        it('should reset the timer when the track gets paused mid-count', () => {
+        /**
+         * The regression this detector shipped with. It read `getOutboundRtps()[0]` — one
+         * arbitrary simulcast layer — and called the whole track dry when that layer went quiet.
+         * A captured call reported a 640x360 camera dry for fourteen minutes while the layer
+         * beside it sent a hundred kilobytes every collection: first because congestion made the
+         * encoder drop the top layer, then because the layer was switched off outright.
+         */
+        describe('on a simulcast track', () => {
+            it('is not dry while any layer is still sending', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 50_406 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBe(false);
+            });
+
+            it('is dry only when every layer it is sent over is', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+                expect(mockClientMonitor.getIssues()[0].payload.activeLayers).toBe(2);
+            });
+
+            // A deactivated layer sends nothing by design, and its counters stay where they
+            // stopped for the rest of the call.
+            it('leaves a switched-off layer out of the verdict', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 101_968 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBe(false);
+            });
+
+            /**
+             * The latch. A frozen counter can never differ from itself, so a finding taken from a
+             * switched-off layer could never be closed: one stayed open for 820 seconds, to the
+             * end of the call.
+             */
+            it('closes a finding when the last active layer is switched off', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+                tick(5000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+
+            it('says nothing about a track no layer of which is being sent', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: false, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+        });
+
+        /**
+         * Silence the browser has already explained is not this detector's fault to report. A
+         * sender held back by bandwidth or CPU is doing what it is supposed to under pressure, and
+         * `uplink-congestion` and `cpulimitation` are already reporting the pressure itself — so
+         * calling it a broken pipeline on top prices the same condition twice and sends an
+         * operator to the capture chain when the answer is the uplink.
+         */
+        describe('when the browser says why the encoder is held back', () => {
+            it.each([ 'bandwidth', 'cpu' ])('stands down while the encoder is limited by %s', (reason) => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: reason, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+
+            it('closes an open finding once the limitation appears', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: 'none', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: 'bandwidth', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+                tick(5000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+                expect(mockTrackMonitor.dry).toBeUndefined();
+            });
+
+            // `other` is the browser declining to say why, which is not an explanation.
+            it.each([ 'none', 'other' ])('still reports a track held back by nothing it names (%s)', (reason) => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r0', active: true, qualityLimitationReason: reason, bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            });
+
+            // The limitation is read from the track's own layers, and one naming it is enough.
+            it('stands down when any layer of the track names a limitation', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: true, qualityLimitationReason: 'bandwidth', bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, qualityLimitationReason: 'none', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            });
+
+            // A switched-off layer keeps reporting whatever limited it when it stopped.
+            it('ignores a limitation reported by a layer that is no longer being sent', () => {
+                mockTrackMonitor.setOutboundRtps([
+                    { rid: 'r1', active: false, qualityLimitationReason: 'bandwidth', bytesSent: 0, deltaBytesSent: 0 },
+                    { rid: 'r0', active: true, qualityLimitationReason: 'none', bytesSent: 0, deltaBytesSent: 0 },
+                ]);
+
+                tick();
+                tick(6000);
+
+                expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            });
+        });
+
+        it('should reset the accumulator when the track gets paused mid-count', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(3000);
+            // 3s of dry time on the books
+            tick();
+            tick(3000);
 
-            // Producer paused - resets the timer
+            // Producer paused - discards the accumulated dry time
             mockTrackMonitor.paused = true;
-            detector.update();
+            tick(3000);
 
-            // Producer resumed
+            // Producer resumed, and the new stretch starts from zero
             mockTrackMonitor.paused = false;
-            detector.update();
+            tick();
 
-            // Total elapsed would be over the threshold, but the timer restarted
-            jest.advanceTimersByTime(4000);
-            detector.update();
+            // The dry stretches total 7s, but only 4s of them are the current one
+            tick(4000);
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
+        });
+
+        // A stalled encoder and a main thread too busy to collect on schedule tend to
+        // arrive together; on wall-clock elapsed the second was counted as evidence
+        // for the first.
+        it('should not count wall-clock time the collector spent away', () => {
+            jest.useFakeTimers();
+            jest.setSystemTime(0);
+
+            mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
+
+            tick();
+
+            // A minute passes with the collector blocked; the reports it reads when it
+            // comes back are only a second apart.
+            jest.setSystemTime(60_000);
+            tick(1000);
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            jest.useRealTimers();
         });
 
         it('should emit the detector event only once per dry episode', () => {
@@ -249,15 +474,13 @@ describe('DryOutboundTrackDetector', () => {
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
 
             expect(eventSpy).toHaveBeenCalledTimes(1);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
-            jest.advanceTimersByTime(5000);
-            detector.update();
+            tick(5000);
 
             expect(eventSpy).toHaveBeenCalledTimes(1);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
@@ -266,13 +489,12 @@ describe('DryOutboundTrackDetector', () => {
         it('should resolve the issue when the track starts sending again', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 1000, deltaBytesSent: 100 });
-            detector.update();
+            tick();
 
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
         });
@@ -281,24 +503,22 @@ describe('DryOutboundTrackDetector', () => {
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
             // Raise the dry issue
-            detector.update();
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick();
+            tick(6000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
 
             // The producer gets paused - the silence is now explained, so the
             // active issue must be resolved instead of staying open.
             mockTrackMonitor.paused = true;
-            detector.update();
+            tick();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
             // After resume, a new dry episode needs the full threshold again
             mockTrackMonitor.paused = false;
-            detector.update();
+            tick();
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
-            jest.advanceTimersByTime(6000);
-            detector.update();
+            tick(6000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
 
@@ -307,13 +527,11 @@ describe('DryOutboundTrackDetector', () => {
 
             mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
 
-            detector.update();
-            jest.advanceTimersByTime(8000);
-            detector.update();
+            tick();
+            tick(8000);
             expect(mockClientMonitor.getIssues()).toHaveLength(0);
 
-            jest.advanceTimersByTime(4000);
-            detector.update();
+            tick(4000);
             expect(mockClientMonitor.getIssues()).toHaveLength(1);
         });
     });

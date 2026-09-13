@@ -33,25 +33,21 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 	deltaFractionLost?: number;
 
 	/**
-	 * The RTT the far end measured for the stream we send, averaged over this
-	 * interval from `totalRoundTripTime` / `roundTripTimeMeasurements` —
-	 * `roundTripTime` alone is a single noisy measurement. `undefined` when no
-	 * new measurement arrived.
+	 * RTT the far end measured for the stream we send, averaged over this interval rather than
+	 * the single noisy `roundTripTime`. `undefined` when no new measurement arrived.
 	 */
 	avgRoundTripTimeInSec?: number;
 
 	deltaTotalRoundTripTime?: number;
 	deltaRoundTripTimeMeasurements?: number;
 
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
+	deltaTime?: number | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -74,6 +70,9 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 
 		return result;
 	}
+
+	/** Accumulated stats time. Only differences between two readings mean anything. */
+	public statsClockTime = 0;
 
 	public getPeerConnection() {
 		return this._peerConnection;
@@ -99,9 +98,24 @@ export class RemoteInboundRtpMonitor implements RemoteInboundRtpStats {
 		this._visited = true;
 
 		const elapsedInMs = stats.timestamp - this.timestamp;
+
 		if (elapsedInMs <= 0) {
-			return; // logger?
+			// The same receiver report came back, so there is no measurement. Carrying the
+			// previous one forward would make a path whose RTCP stopped keep reading as healthy.
+			this.deltaTime = 0;
+			this.deltaPacketsReceived = undefined;
+			this.deltaPacketsLost = undefined;
+			this.deltaFractionLost = undefined;
+			this.deltaTotalRoundTripTime = undefined;
+			this.deltaRoundTripTimeMeasurements = undefined;
+			this.avgRoundTripTimeInSec = undefined;
+			this.packetRate = undefined;
+
+			return;
 		}
+
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 		const elapsedInSeconds = elapsedInMs / 1000;
 
 		this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);

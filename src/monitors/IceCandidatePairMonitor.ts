@@ -4,19 +4,12 @@ import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
 import { positiveDelta } from "../utils/common";
 
 /**
- * Coarse classification of the path this candidate pair represents.
- *
- * `turn-unknown` means the local candidate is a relay candidate (so TURN is
- * definitely in use) but the browser did not expose `relayProtocol`, so we
- * cannot say how the endpoint reaches the TURN server.
+ * Coarse classification of the path this candidate pair represents. `turn-unknown` is a
+ * relay path whose `relayProtocol` the browser did not expose.
  */
 export type IcePathKind = 'direct' | 'turn-udp' | 'turn-tcp' | 'turn-tls' | 'turn-unknown';
 
-/**
- * Key used when neither the pair nor its local candidate reports a transport
- * id. Every such pair of one peer connection collapses onto this single key,
- * which keeps the selected path continuous — see `pathKey`.
- */
+/** Fallback `pathKey` when no transport id is reported; keeps the selected path continuous. */
 const UNKNOWN_TRANSPORT_KEY = 'unknown-ice-transport';
 
 export class IceCandidatePairMonitor implements IceCandidatePairStats{
@@ -52,25 +45,33 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	public deltaBytesSent?: number | undefined;
 	public deltaBytesReceived?: number | undefined;
 	public deltaTotalRoundTripTime?: number | undefined;
+	public deltaRequestsSent?: number | undefined;
+	/**
+	 * Consent requests sent in the interval, counted separately from `deltaRequestsSent`:
+	 * after nomination the STUN still leaving on the selected pair is consent, not checks.
+	 */
+	public deltaConsentRequestsSent?: number | undefined;
 	public deltaResponsesReceived?: number | undefined;
+	/**
+	 * Packets the OS refused to send on this pair in the interval — a socket error, not a
+	 * network one. `undefined` where the counter is not reported, which is not zero.
+	 */
+	public deltaPacketsDiscardedOnSend?: number | undefined;
+	/** Bytes behind `deltaPacketsDiscardedOnSend`. */
+	public deltaBytesDiscardedOnSend?: number | undefined;
+
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
+	deltaTime?: number | undefined;
 
 	/**
-	 * STUN round trip averaged over the checks that completed in this interval,
-	 * from `totalRoundTripTime` / `responsesReceived`. `currentRoundTripTime`
-	 * is only the *latest* check and consent checks run every ~5s, so it is
-	 * often stale at typical collecting periods. `undefined` when no check
-	 * completed in the interval.
+	 * STUN round trip averaged over the checks that completed in this interval, rather than
+	 * the often-stale `currentRoundTripTime`. `undefined` when no check completed.
 	 */
 	public avgRoundTripTimeInSec?: number | undefined;
 
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -98,10 +99,10 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 
-		// `undefined`, not `0`, when the report carries no counter — the two are
-		// the opposite claim, and the stall checks read a zero as proof.
-		// `IceTransportMonitor` has always done it this way.
+		// `undefined`, not `0`, when the report carries no counter: the stall checks read a zero as proof.
 		this.deltaPacketsSent = positiveDelta(stats.packetsSent, this.packetsSent);
 		this.deltaPacketsReceived = positiveDelta(stats.packetsReceived, this.packetsReceived);
 		this.deltaBytesSent = positiveDelta(stats.bytesSent, this.bytesSent);
@@ -109,6 +110,10 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 
 		this.deltaTotalRoundTripTime = positiveDelta(stats.totalRoundTripTime, this.totalRoundTripTime);
 		this.deltaResponsesReceived = positiveDelta(stats.responsesReceived, this.responsesReceived);
+		this.deltaRequestsSent = positiveDelta(stats.requestsSent, this.requestsSent);
+		this.deltaConsentRequestsSent = positiveDelta(stats.consentRequestsSent, this.consentRequestsSent);
+		this.deltaPacketsDiscardedOnSend = positiveDelta(stats.packetsDiscardedOnSend, this.packetsDiscardedOnSend);
+		this.deltaBytesDiscardedOnSend = positiveDelta(stats.bytesDiscardedOnSend, this.bytesDiscardedOnSend);
 		this.avgRoundTripTimeInSec = this.deltaTotalRoundTripTime !== undefined &&
 			this.deltaResponsesReceived !== undefined &&
 			this.deltaResponsesReceived > 0
@@ -116,7 +121,19 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 			: undefined;
 
 		Object.assign(this, stats);
+
+		// Assigned past `Object.assign`, which leaves absent fields at their last value: for
+		// these two, absence is the fact — a pair no longer in use reports no estimate.
+		this.availableOutgoingBitrate = stats.availableOutgoingBitrate;
+		this.availableIncomingBitrate = stats.availableIncomingBitrate;
 	}
+
+	/**
+	 * Milliseconds of stats time this monitor has observed, accumulated from `deltaTime`.
+	 * Every window and duration in the library is measured on this clock, never on `Date.now()`;
+	 * it is not a timestamp, so only differences between two readings mean anything.
+	 */
+	public statsClockTime = 0;
 
 	public getPeerConnection() {
 		return this._peerConnection;
@@ -135,37 +152,22 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 	}
 
 	/**
-	 * Stable key for the path this pair belongs to. Detectors and
-	 * `SelectedIcePath` key their per-path state on it, because a peer
-	 * connection without BUNDLE has more than one ICE transport and a single
-	 * shared "previous path" would produce phantom transitions on every tick.
-	 *
-	 * The key must stay stable **across pair switches** — a new selected pair on
-	 * the same transport is the very event a path is meant to observe. So it is
-	 * the transport id, falling back to the local candidate's transport id, and
-	 * finally to one constant per peer connection. It is deliberately never the
-	 * pair id: keying on that would mint a brand-new path on every switch,
-	 * resetting the accumulated usage facts and reporting each switch as an
-	 * initial selection instead of a transition.
+	 * Stable key for the path this pair belongs to, per ICE transport. Never the pair id:
+	 * that would mint a new path on every switch, when a switch is the event a path exists
+	 * to observe.
 	 */
 	public get pathKey(): string {
 		return this.transportId ?? this.getLocalCandidate()?.transportId ?? UNKNOWN_TRANSPORT_KEY;
 	}
 
-	/**
-	 * True when this pair goes through TURN. Read from the *local* candidate, so
-	 * the verdict and the protocol details below always describe the same
-	 * candidate of the same pair.
-	 */
+	/** True when this pair goes through TURN. Read from the local candidate, as everything below is. */
 	public get usingTurn(): boolean {
 		return this.getLocalCandidate()?.isRelay === true;
 	}
 
 	/**
-	 * True when the local candidate's ICE transport protocol is TCP. Note this
-	 * is about the candidate itself; a relay candidate reached over TURN/TCP or
-	 * TURN/TLS commonly still reports `protocol: 'udp'`. Read `relayProtocol`
-	 * for the TURN leg.
+	 * True when the local candidate's own transport is TCP. A relay candidate reached over
+	 * TURN/TCP commonly still reports `udp` here; read `relayProtocol` for the TURN leg.
 	 */
 	public get usingTcp(): boolean {
 		return this.getLocalCandidate()?.protocol === 'tcp';
@@ -201,10 +203,7 @@ export class IceCandidatePairMonitor implements IceCandidatePairStats{
 		}
 	}
 
-	/**
-	 * `localAddress:localPort:remoteAddress:remotePort:protocol` — the network
-	 * tuple identity of this pair.
-	 */
+	/** The network tuple identity: `localAddress:localPort:remoteAddress:remotePort:protocol`. */
 	public get tuple(): string {
 		const local = this.getLocalCandidate();
 		const remote = this.getRemoteCandidate();

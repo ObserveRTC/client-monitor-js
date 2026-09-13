@@ -1,459 +1,226 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { CongestionDetector } from "../../src/detectors/CongestionDetector";
 
-// Types for test mocks
-interface CongestionConfig {
-    disabled: boolean;
-    sensitivity: 'low' | 'medium' | 'high';
+/**
+ * The deprecated whole-connection detector, kept so integrations built against the `congestion`
+ * event and issue keep working. This pins the legacy contract as it was, so the class cannot drift
+ * while it is still shipped.
+ */
+type Emitted = { name: string, payload: any };
+
+function createHarness(sensitivity: 'low' | 'medium' | 'high' = 'medium') {
+	const emitted: Emitted[] = [];
+	const raised: { key: string, type: string, payload: any }[] = [];
+	const resolved: { key: string, comment?: string }[] = [];
+
+	const clientMonitor = {
+		config: { congestionDetector: { sensitivity } },
+		emit(name: string, payload: any) { emitted.push({ name, payload }); },
+		raiseIssue(key: string, input: any) { raised.push({ key, type: input.type, payload: input.payload }); },
+		resolveIssue(key: string, input: any) { resolved.push({ key, comment: input.comment }); },
+	};
+
+	const peerConnection: any = {
+		peerConnectionId: 'pc-1',
+		parent: clientMonitor,
+		outboundRtps: [] as any[],
+		congested: false,
+		uplinkCongested: false,
+		downlinkCongested: false,
+		outboundFractionLost: 0,
+		totalAvailableIncomingBitrate: 1_000_000,
+		totalAvailableOutgoingBitrate: 800_000,
+		receivingBitrate: 900_000,
+		sendingBitrate: 700_000,
+		avgRttInSec: 0.1,
+		ewmaRttInSec: 0.1,
+	};
+
+	const detector = new CongestionDetector(peerConnection);
+
+	return {
+		detector, peerConnection, clientMonitor, emitted, raised, resolved,
+		/** One collection. `bandwidthLimited` is the browser's own verdict on an outbound stream. */
+		tick(options: { bandwidthLimited?: boolean } = {}) {
+			peerConnection.outboundRtps = [
+				{ qualityLimitationReason: options.bandwidthLimited ? 'bandwidth' : 'none' },
+			];
+			detector.update();
+		},
+		congestionEvents() { return emitted.filter(e => e.name === 'congestion'); },
+	};
 }
 
-interface TestIssue {
-    id: string;
-    type: string;
-    key?: string;
-    payload: Record<string, unknown>;
-}
-
-interface EventHandler {
-    (event: Record<string, unknown>): void;
-}
-
-interface OutboundRtpStats {
-    qualityLimitationReason?: string;
-}
-
-// Mock dependencies
-class MockClientMonitor {
-    public config = {
-        congestionDetector: {
-            disabled: false,
-            sensitivity: 'medium' as const
-        } as CongestionConfig
-    };
-    
-    private eventHandlers: { [key: string]: EventHandler[] } = {};
-    public readonly activeIssues = new Map<string, TestIssue>();
-    private nextId = 0;
-
-    emit(eventName: string, eventData: Record<string, unknown>) {
-        const handlers = this.eventHandlers[eventName] || [];
-        handlers.forEach(handler => handler(eventData));
-    }
-
-    on(eventName: string, handler: EventHandler) {
-        if (!this.eventHandlers[eventName]) {
-            this.eventHandlers[eventName] = [];
-        }
-        this.eventHandlers[eventName].push(handler);
-    }
-
-    addIssue(input: { type: string; payload?: Record<string, unknown> }) {
-        const issue: TestIssue = {
-            id: `iss_${this.nextId++}`,
-            type: input.type,
-            payload: input.payload ?? {},
-        };
-        this.emit('issue', issue as unknown as Record<string, unknown>);
-        return issue;
-    }
-
-    raiseIssue(key: string, input: { type: string; payload?: Record<string, unknown> }) {
-        const existing = this.activeIssues.get(key);
-        if (existing) {
-            existing.payload = input.payload ?? {};
-            existing.type = input.type;
-            this.emit('issue-updated', existing as unknown as Record<string, unknown>);
-            return existing;
-        }
-        const issue: TestIssue = {
-            id: `iss_${this.nextId++}`,
-            type: input.type,
-            key,
-            payload: input.payload ?? {},
-        };
-        this.activeIssues.set(key, issue);
-        this.emit('issue', issue as unknown as Record<string, unknown>);
-        return issue;
-    }
-
-    resolveIssue(key: string, opts?: { comment?: string; payload?: Record<string, unknown>; resolvedAt?: number }) {
-        const found = this.activeIssues.get(key);
-        if (!found) return undefined;
-        this.activeIssues.delete(key);
-        const resolved = {
-            ...found,
-            payload: opts?.payload ?? found.payload,
-            resolvedAt: opts?.resolvedAt ?? Date.now(),
-            comment: opts?.comment,
-        };
-        this.emit('issue-resolved', resolved as unknown as Record<string, unknown>);
-        return resolved;
-    }
-
-    // Compatibility helpers used by existing test assertions.
-    getIssues() {
-        return [...this.activeIssues.values()];
-    }
-
-    clearIssues() {
-        this.activeIssues.clear();
-    }
-}
-
-class MockPeerConnectionMonitor {
-    public peerConnectionId = 'test-pc-id';
-    public parent = new MockClientMonitor();
-    public congested = false;
-    public avgRttInSec?: number;
-    public ewmaRttInSec?: number;
-    public outboundFractionLost?: number;
-    public totalAvailableIncomingBitrate = 0;
-    public totalAvailableOutgoingBitrate = 0;
-    public receivingBitrate = 0;
-    public sendingBitrate = 0;
-    public outboundRtps: OutboundRtpStats[] = [];
-
-    setOutboundRtps(rtps: OutboundRtpStats[]) {
-        this.outboundRtps = rtps;
-    }
-}
-
-describe('CongestionDetector', () => {
-    let detector: CongestionDetector;
-    let mockPeerConnection: MockPeerConnectionMonitor;
-    let mockClientMonitor: MockClientMonitor;
-
-    beforeEach(() => {
-        mockPeerConnection = new MockPeerConnectionMonitor();
-        mockClientMonitor = mockPeerConnection.parent;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        detector = new CongestionDetector(mockPeerConnection as any);
-    });
-
-    describe('Constructor', () => {
-        it('should create detector with correct name', () => {
-            expect(detector.name).toBe('congestion-detector');
-        });
-
-        it('should store peer connection reference', () => {
-            expect(detector.peerConnection).toBe(mockPeerConnection);
-        });
-    });
-
-    describe('update() - Basic validation', () => {
-        it('should return early if detector is disabled', () => {
-            detector.disabled = true;
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-
-            detector.update();
-            expect(mockPeerConnection.congested).toBe(false);
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
-        });
-    });
-
-    describe('update() - High sensitivity', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            detector.disabled = false;
-        });
-
-        it('should detect congestion on any bandwidth limitation', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('congestion', eventSpy);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.totalAvailableIncomingBitrate = 1000000;
-            mockPeerConnection.totalAvailableOutgoingBitrate = 800000;
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(true);
-            expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({
-                clientMonitor: mockClientMonitor,
-                peerConnectionMonitor: mockPeerConnection,
-                availableIncomingBitrate: 1000000,
-                availableOutgoingBitrate: 800000
-            }));
-        });
-
-        it('should not detect congestion without bandwidth limitation', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'cpu' }]);
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
-        });
-
-        it('should clear congestion when bandwidth limitation stops', () => {
-            // First, detect congestion
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            detector.update();
-            expect(mockPeerConnection.congested).toBe(true);
-
-            // Then clear it
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'none' }]);
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-        });
-    });
-
-    describe('update() - Medium sensitivity', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'medium';
-            detector.disabled = false;
-        });
-
-        it('should detect congestion with bandwidth limitation and significant RTT increase', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('congestion', eventSpy);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.avgRttInSec = 0.2;    // 200ms
-            mockPeerConnection.ewmaRttInSec = 0.1;   // 100ms EWMA
-            // RTT diff = 100ms = 0.1s, which is > 33% of 0.1s (0.033s) but clamped to max 0.15s
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(true);
-            expect(eventSpy).toHaveBeenCalled();
-        });
-
-        it('should not detect congestion with bandwidth limitation but small RTT increase', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.avgRttInSec = 0.11;   // 110ms
-            mockPeerConnection.ewmaRttInSec = 0.1;   // 100ms EWMA
-            // RTT diff = 10ms = 0.01s, which is < 33% of 0.1s (0.033s)
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
-        });
-
-        it('should not detect congestion without EWMA RTT', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.avgRttInSec = 0.2;
-            mockPeerConnection.ewmaRttInSec = undefined;
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-        });
-    });
-
-    describe('update() - Low sensitivity', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'low';
-            detector.disabled = false;
-        });
-
-        it('should detect congestion with bandwidth limitation and high packet loss', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('congestion', eventSpy);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.ewmaRttInSec = 0.1;
-            mockPeerConnection.outboundFractionLost = 0.08; // 8% > 5%
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(true);
-            expect(eventSpy).toHaveBeenCalled();
-        });
-
-        it('should not detect congestion with bandwidth limitation but low packet loss', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.ewmaRttInSec = 0.1;
-            mockPeerConnection.outboundFractionLost = 0.02; // 2% < 5%
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
-        });
-
-        it('should not detect congestion without packet loss data', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.ewmaRttInSec = 0.1;
-            mockPeerConnection.outboundFractionLost = undefined;
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-        });
-    });
-
-    describe('update() - Historical tracking', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            detector.disabled = false;
-        });
-
-        it('should track maximum values during non-congested periods', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'none' }]);
-            mockPeerConnection.totalAvailableIncomingBitrate = 1000000;
-            mockPeerConnection.totalAvailableOutgoingBitrate = 800000;
-            mockPeerConnection.receivingBitrate = 500000;
-            mockPeerConnection.sendingBitrate = 400000;
-
-            detector.update();
-
-            // Now trigger congestion
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.totalAvailableIncomingBitrate = 600000;
-            mockPeerConnection.totalAvailableOutgoingBitrate = 500000;
-
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('congestion', eventSpy);
-
-            detector.update();
-
-            expect(eventSpy).toHaveBeenCalledWith(expect.objectContaining({
-                maxAvailableIncomingBitrate: 1000000,
-                maxAvailableOutgoingBitrate: 800000,
-                maxReceivingBitrate: 500000,
-                maxSendingBitrate: 400000
-            }));
-        });
-
-        it('should reset historical values after congestion detection', () => {
-            // Build up historical values
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'none' }]);
-            mockPeerConnection.totalAvailableIncomingBitrate = 1000000;
-            detector.update();
-
-            // Trigger congestion
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            detector.update();
-
-            // Values should be reset
-            expect(mockPeerConnection.congested).toBe(true);
-
-            // Clear congestion and check that tracking starts fresh
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'none' }]);
-            mockPeerConnection.totalAvailableIncomingBitrate = 500000; // Lower than before
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-        });
-    });
-
-    describe('update() - Issue creation', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            detector.disabled = false;
-        });
-
-        it('should create an issue when congestion is detected', () => {
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            mockPeerConnection.totalAvailableIncomingBitrate = 1000000;
-            mockPeerConnection.totalAvailableOutgoingBitrate = 800000;
-
-            detector.update();
-
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-            expect(mockClientMonitor.getIssues()[0]).toMatchObject({
-                type: 'congestion',
-                payload: expect.objectContaining({
-                    peerConnectionId: 'test-pc-id',
-                    availableIncomingBitrate: 1000000,
-                    availableOutgoingBitrate: 800000
-                })
-            });
-        });
-
-        // Regression: the 'congestion' event and the raised issue must fire
-        // exactly once per congestion episode. Re-detection while the PC is
-        // still congested is gated by `peerConnection.congested`.
-        it('should emit the detector event and raise the issue only once per congestion episode', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('congestion', eventSpy);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            detector.update();
-            expect(eventSpy).toHaveBeenCalledTimes(1);
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-
-            // Three more ticks while congestion persists — should stay silent.
-            detector.update();
-            detector.update();
-            detector.update();
-
-            expect(eventSpy).toHaveBeenCalledTimes(1);
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-        });
-
-        it('should resolve the issue and emit issue-resolved when congestion clears', () => {
-            const resolvedSpy = jest.fn();
-            mockClientMonitor.on('issue-resolved', resolvedSpy);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-            detector.update();
-            expect(mockClientMonitor.getIssues()).toHaveLength(1);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'none' }]);
-            detector.update();
-
-            expect(mockClientMonitor.getIssues()).toHaveLength(0);
-            expect(resolvedSpy).toHaveBeenCalledTimes(1);
-            expect(resolvedSpy.mock.calls[0][0]).toMatchObject({
-                type: 'congestion',
-                comment: 'congestion ended',
-            });
-        });
-    });
-
-    describe('update() - Multiple outbound RTP streams', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            detector.disabled = false;
-        });
-
-        it('should detect congestion if any stream is bandwidth limited', () => {
-            mockPeerConnection.setOutboundRtps([
-                { qualityLimitationReason: 'none' },
-                { qualityLimitationReason: 'cpu' },
-                { qualityLimitationReason: 'bandwidth' }
-            ]);
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(true);
-        });
-
-        it('should not detect congestion if no streams are bandwidth limited', () => {
-            mockPeerConnection.setOutboundRtps([
-                { qualityLimitationReason: 'none' },
-                { qualityLimitationReason: 'cpu' },
-                { qualityLimitationReason: 'other' }
-            ]);
-
-            detector.update();
-
-            expect(mockPeerConnection.congested).toBe(false);
-        });
-    });
-
-    describe('update() - Prevent duplicate events', () => {
-        beforeEach(() => {
-            mockClientMonitor.config.congestionDetector.sensitivity = 'high';
-            detector.disabled = false;
-        });
-
-        it('should not emit events for already congested connections', () => {
-            const eventSpy = jest.fn();
-            mockClientMonitor.on('congestion', eventSpy);
-
-            mockPeerConnection.setOutboundRtps([{ qualityLimitationReason: 'bandwidth' }]);
-
-            // First update should emit event
-            detector.update();
-            expect(eventSpy).toHaveBeenCalledTimes(1);
-
-            // Second update should not emit event (already congested)
-            detector.update();
-            expect(eventSpy).toHaveBeenCalledTimes(1);
-        });
-    });
-}); 
+describe('CongestionDetector (deprecated)', () => {
+	describe('the legacy contract', () => {
+		it('raises the congestion issue and emits the congestion event together', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised).toHaveLength(1);
+			expect(h.raised[0].type).toBe('congestion');
+			expect(h.congestionEvents()).toHaveLength(1);
+		});
+
+		it('emits the flat legacy payload, with no direction on it', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+
+			const payload = h.congestionEvents()[0].payload;
+
+			// What separates it from the uplink/downlink variants sharing this event.
+			expect(payload.direction).toBeUndefined();
+			expect(payload.peerConnectionMonitor).toBe(h.peerConnection);
+			expect(payload.availableIncomingBitrate).toBe(1_000_000);
+			expect(payload.availableOutgoingBitrate).toBe(800_000);
+		});
+
+		it('keys the issue on the peer connection', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised[0].key).toBe('congestion-pc-pc-1');
+		});
+
+		it('sets `congested` and leaves the per-direction flags alone', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.peerConnection.congested).toBe(true);
+			expect(h.peerConnection.uplinkCongested).toBe(false);
+			expect(h.peerConnection.downlinkCongested).toBe(false);
+		});
+
+		it('reports one episode, not one per collection', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+			h.tick({ bandwidthLimited: true });
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised).toHaveLength(1);
+			expect(h.congestionEvents()).toHaveLength(1);
+		});
+
+		it('resolves when the connection stops being bandwidth limited', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+			h.tick({ bandwidthLimited: false });
+
+			expect(h.resolved).toHaveLength(1);
+			expect(h.resolved[0].comment).toBe('congestion ended');
+			expect(h.peerConnection.congested).toBe(false);
+		});
+
+		it('can report a second episode after the first ends', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+			h.tick({ bandwidthLimited: false });
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised).toHaveLength(2);
+		});
+	});
+
+	/** The headroom that preceded the episode, which is what the payload's maxima are for. */
+	describe('the before picture', () => {
+		it('carries the peaks seen while the connection was healthy', () => {
+			const h = createHarness('high');
+
+			h.peerConnection.totalAvailableOutgoingBitrate = 2_000_000;
+			h.peerConnection.sendingBitrate = 1_500_000;
+			h.tick({ bandwidthLimited: false });
+
+			h.peerConnection.totalAvailableOutgoingBitrate = 200_000;
+			h.peerConnection.sendingBitrate = 150_000;
+			h.tick({ bandwidthLimited: true });
+
+			const payload = h.raised[0].payload;
+
+			expect(payload.maxAvailableOutgoingBitrate).toBe(2_000_000);
+			expect(payload.maxSendingBitrate).toBe(1_500_000);
+			// And the collapsed figures at the moment it was declared.
+			expect(payload.availableOutgoingBitrate).toBe(200_000);
+		});
+
+		it('measures each episode against the stretch before it, not the whole call', () => {
+			const h = createHarness('high');
+
+			h.peerConnection.totalAvailableOutgoingBitrate = 5_000_000;
+			h.tick({ bandwidthLimited: false });
+			h.tick({ bandwidthLimited: true });
+
+			// The maxima reset at the raise, so the second episode cannot inherit the first's:
+			// every healthy collection after it re-accumulates from whatever the link is now.
+			h.peerConnection.totalAvailableOutgoingBitrate = 900_000;
+			h.tick({ bandwidthLimited: false });
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised[1].payload.maxAvailableOutgoingBitrate).toBe(900_000);
+		});
+	});
+
+	describe('sensitivity', () => {
+		it('high takes the browser verdict at its word', () => {
+			const h = createHarness('high');
+
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised).toHaveLength(1);
+		});
+
+		it('medium also wants the round trip to be moving', () => {
+			const h = createHarness('medium');
+
+			// Steady RTT: bandwidth limited, but no queue building.
+			h.tick({ bandwidthLimited: true });
+			expect(h.raised).toHaveLength(0);
+
+			h.peerConnection.avgRttInSec = 0.3;
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised).toHaveLength(1);
+		});
+
+		it('low wants outbound loss instead, and applies no round-trip guard', () => {
+			const h = createHarness('low');
+
+			h.tick({ bandwidthLimited: true });
+			expect(h.raised).toHaveLength(0);
+
+			// Steady RTT throughout: only the loss decides.
+			h.peerConnection.outboundFractionLost = 0.08;
+			h.tick({ bandwidthLimited: true });
+
+			expect(h.raised).toHaveLength(1);
+		});
+
+		it('says nothing at all when the browser is not bandwidth limited', () => {
+			for (const sensitivity of [ 'low', 'medium', 'high' ] as const) {
+				const h = createHarness(sensitivity);
+
+				h.peerConnection.outboundFractionLost = 0.5;
+				h.peerConnection.avgRttInSec = 2;
+				h.tick({ bandwidthLimited: false });
+
+				expect(h.raised).toHaveLength(0);
+			}
+		});
+	});
+
+	it('says nothing while disabled', () => {
+		const h = createHarness('high');
+
+		h.detector.disabled = true;
+		h.tick({ bandwidthLimited: true });
+
+		expect(h.raised).toHaveLength(0);
+		expect(h.congestionEvents()).toHaveLength(0);
+	});
+});

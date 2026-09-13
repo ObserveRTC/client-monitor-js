@@ -3,20 +3,25 @@ import { InboundTrackMonitor } from "../monitors/InboundTrackMonitor";
 import { OutboundTrackMonitor } from "../monitors/OutboundTrackMonitor";
 import { ClientEventTypes } from "../schema/ClientEventTypes";
 
+export type CodecChangeDetectorConfig = {
+	/** Buffer a `CODEC_CHANGED` client event into the sample too. Default true. */
+	createEvent?: boolean;
+}
+
 /**
- * Records which codec each track is actually using, and when that changes. An observation rather
- * than a fault: the codec in use is the missing column in nearly every aggregate quality
- * question — why the bad calls cluster on H264, whether AV1 is being negotiated anywhere at all,
- * whether a hardware encoder quietly fell back to software mid-call — and none of it is
- * answerable without a record of what was in use and when. The cost is negligible, since a codec
- * changes once or twice in a call if it changes at all, unlike a per-tick metric.
+ * Records which codec each track is actually using, and when that changes. Use it to answer the
+ * aggregate quality questions that need the codec as a column — whether bad calls cluster on H264,
+ * whether AV1 is being negotiated at all, whether a hardware encoder fell back to software mid-call.
  *
- * It compares `sdpFmtpLine` as well as `mimeType`, because a profile switch inside one mime type
- * — an H264 profile-level-id change, say — is a real codec change with real consequences and
- * would otherwise be invisible. The first codec seen is the baseline, not a change.
+ * `sdpFmtpLine` counts as well as `mimeType`, so a profile switch inside one mime type is not
+ * invisible. The first codec seen is the baseline, not a change.
  *
  * Raises no issue. Emits `codec-changed`, plus the `CODEC_CHANGED` client event unless
  * `createEvent` is false. Config: `codecChangeDetector`.
+ *
+ * Category: Telemetry
+ * Layer: Media
+ *
  */
 export class CodecChangeDetector implements Detector {
 	public readonly name = 'codec-change-detector';
@@ -42,7 +47,7 @@ export class CodecChangeDetector implements Detector {
 
 		const rtp = this.trackMonitor.direction === 'inbound'
 			? this.trackMonitor.getInboundRtp()
-			: this.trackMonitor.getHighestLayer();
+			: this.trackMonitor.highestLayer;
 		const codec = rtp?.getCodec();
 
 		if (!codec?.mimeType) return;
@@ -54,7 +59,6 @@ export class CodecChangeDetector implements Detector {
 		this._fmtp = codec.sdpFmtpLine;
 
 		if (previousMimeType === undefined) return;
-		// sdpFmtpLine too: an H264 profile-level-id switch is a real codec change within the same mimeType
 		if (previousMimeType === codec.mimeType && previousFmtp === codec.sdpFmtpLine) return;
 
 		const clientMonitor = this.peerConnection.parent;

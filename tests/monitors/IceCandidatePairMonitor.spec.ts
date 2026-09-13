@@ -57,11 +57,15 @@ describe('IceCandidateMonitor path helpers', () => {
         expect(candidate.isRelay).toBe(true);
     });
 
-    it('falls back to relayProtocol when candidateType is missing', () => {
+    // `candidateType` is spec-required. A browser omitting it is an adapter's problem
+    // to fix before the monitors see the report — the monitor does not second-guess it
+    // from `relayProtocol`, which would be the monitor adapting stats.
+    it('does not infer relay-ness from relayProtocol when candidateType is missing', () => {
         const peerConnection = new MockPeerConnectionMonitor();
         const candidate = makeCandidate(peerConnection, { id: 'c', protocol: 'udp', relayProtocol: 'tcp' });
 
-        expect(candidate.isRelay).toBe(true);
+        expect(candidate.isRelay).toBe(false);
+        // The field itself is still read straight through; only the inference is gone.
         expect(candidate.turnTransport).toBe('tcp');
     });
 

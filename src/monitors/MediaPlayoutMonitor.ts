@@ -1,5 +1,4 @@
 import { Detectors } from "../detectors/Detectors";
-import { SynthesizedSamplesDetector } from "../detectors/SynthesizedSamplesDetector";
 import { MediaPlayoutStats } from "../schema/ClientSample";
 import { MediaKind } from "../schema/W3cStatsIdentifiers";
 import { PeerConnectionMonitor } from "./PeerConnectionMonitor";
@@ -7,6 +6,11 @@ import { positiveDelta } from "../utils/common";
 
 export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	private _visited = true;
+	/**
+	 * Empty as it stands: `AudioPlayoutSynthesisDetector` moved to the inbound tracks that feed this
+	 * device, where it can be judged per track. Kept as the registration point for any detector that
+	 * belongs to the device itself rather than to a stream playing through it.
+	 */
 	public readonly detectors = new Detectors();
 
 	timestamp: number;
@@ -24,26 +28,18 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 	public deltaTotalPlayoutDelay?: number | undefined;
 	public deltaSamplesCount?: number | undefined;
 
-	/**
-	 * Average playout delay per sample in this interval, in milliseconds —
-	 * `totalPlayoutDelay` alone grows forever and cannot be compared to a
-	 * threshold.
-	 */
+	/** Milliseconds since the previous stats report, from the reports' own timestamps. */
+	deltaTime?: number | undefined;
+
+
+	/** Average playout delay per sample in this interval, in milliseconds. */
 	public playoutDelayPerSampleInMs?: number | undefined;
 
-	/**
-	 * Share of the playout duration in this interval that was synthesized
-	 * (concealment / stretching) rather than real received audio, in `0..1`.
-	 */
+	/** Share of this interval's playout that was synthesized rather than received audio, `0..1`. */
 	public synthesizedSamplesRatio?: number | undefined;
-	/**
-	 * Additional data attached to this stats, will be shipped to the server
-	 */
+	/** Extra data attached to this stats; shipped to the server. */
 	attachments?: Record<string, unknown> | undefined;
-	/**
-	 * Additional data attached to this stats, will not be shipped to the server,
-	 * but can be used by the application
-	 */
+	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
 	public constructor(
@@ -56,11 +52,6 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 		Object.assign(this, options);
 
-		if (this._peerConnection.parent.config.syntheticSamplesDetector !== null) {
-			this.detectors.add(
-				new SynthesizedSamplesDetector(this),
-			);
-		}
 	}
 
 	public get visited(): boolean {
@@ -70,6 +61,9 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 
 		return result;
 	}
+
+	/** Accumulated stats time. Only differences between two readings mean anything. */
+	public statsClockTime = 0;
 
 	public getPeerConnection() {
 		return this._peerConnection;
@@ -82,6 +76,8 @@ export class MediaPlayoutMonitor implements MediaPlayoutStats {
 		if (elapsedInMs <= 0) {
 			return; // logger?
 		}
+		this.deltaTime = elapsedInMs;
+		this.statsClockTime += elapsedInMs;
 		this.deltaSynthesizedSamplesDuration = positiveDelta(stats.synthesizedSamplesDuration, this.synthesizedSamplesDuration) ?? 0;
 		this.deltaSamplesDuration = positiveDelta(stats.totalSamplesDuration, this.totalSamplesDuration) ?? 0;
 		this.deltaSynthesizedSamplesEvents = positiveDelta(stats.synthesizedSamplesEvents, this.synthesizedSamplesEvents);

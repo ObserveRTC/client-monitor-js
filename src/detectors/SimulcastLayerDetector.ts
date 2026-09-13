@@ -8,7 +8,7 @@ export type SimulcastLayerState = {
 	rid: string;
 	ssrc: number;
 	encodingIndex?: number;
-	/** Not the encoding's `active` flag alone: the layer also has to have sent bytes in the interval. */
+	/** Not the encoding's flag alone: the layer also has to have sent bytes in the interval. */
 	active: boolean;
 	bitrate?: number;
 	frameWidth?: number;
@@ -17,30 +17,30 @@ export type SimulcastLayerState = {
 	scalabilityMode?: string;
 }
 
+export type SimulcastLayerDetectorConfig = {
+	/** Whether to buffer a `SIMULCAST_LAYER_CHANGED` client event into the sample. DEFAULT: true */
+	createEvent?: boolean;
+}
+
 /**
- * Reports when the set of simulcast layers an outbound video track is actually sending
- * changes. This is an observation rather than a fault — layers are meant to come and go
- * as bandwidth and CPU allow — but the change is otherwise completely invisible: an
- * SFU-side "why is this participant blurry" investigation has no client-side record
- * that the high layer stopped being produced at all.
+ * Reports a change in which simulcast layers an outbound video track is actually sending. Layers
+ * are meant to come and go, so this is an observation rather than a fault — but use it to answer
+ * "why is this participant blurry" with a client-side record that the high layer stopped being
+ * produced at all.
  *
- * A layer counts as active only when the encoding is not explicitly disabled *and* it
- * actually sent bytes in the interval. `active: true` with no bytes is the common
- * real-world shape of a layer the encoder has quietly given up on, so trusting the flag
- * alone would hide exactly the transition worth reporting. Layers are named by `rid`
- * where the application sets one and by SSRC otherwise; naming them meaningfully
- * ("high"/"low") is the application's RID convention, not something this library can
- * infer.
- *
- * A track with fewer than two encodings is not simulcast and is left alone, and the
- * first observation establishes a baseline rather than reporting a change. While the
- * producer is paused the baseline is forgotten entirely, so resuming re-establishes it
- * instead of reporting the pause and the resume as two layer changes.
+ * A layer counts as active only when the encoding is not explicitly disabled *and* it sent bytes
+ * in the interval; `active: true` with no bytes is what a layer the encoder quietly gave up on
+ * looks like. Fewer than two encodings is not simulcast and is left alone, the first observation
+ * only establishes a baseline, and a pause forgets the baseline rather than reporting the pause
+ * and the resume as two changes.
  *
  * Raises no issue.
  * Monitor event: `simulcast-layer-changed`; client event `SIMULCAST_LAYER_CHANGED` when
- * `createEvent` is left on.
- * Config: `simulcastLayerDetector`.
+ * `createEvent` is left on. Config: `simulcastLayerDetector`.
+ *
+ * Category: Telemetry
+ * Layer: Media
+ *
  */
 export class SimulcastLayerDetector implements Detector {
 	public readonly name = 'simulcast-layer-detector';
@@ -124,7 +124,7 @@ export class SimulcastLayerDetector implements Detector {
 			payload: {
 				peerConnectionId: this.peerConnection.peerConnectionId,
 				trackId: this.trackMonitor.track.id,
-				// Schema 3.5.0 payloads are flat records of primitives, hence the comma-separated ids and the stringified snapshot.
+				// Schema payloads are flat records of primitives, hence the joined ids and the stringified snapshot.
 				activeLayerIds: activeKeys,
 				previousActiveLayerIds: from,
 				layers: JSON.stringify(layers),

@@ -38,7 +38,7 @@ import {
 	CodecChangedEventPayload,
 	VideoResolutionChangedEventPayload,
 	SimulcastLayerChangedEventPayload,
-	CaptureTrackEndedEventPayload,
+	CaptureSourceLostEventPayload,
 	CaptureTrackMutedEventPayload,
 	StatsCollectionGapEventPayload,
 	TabVisibilityChangedEventPayload,
@@ -55,7 +55,7 @@ export type ClientEventPayloadMap = {
 	[ClientEventTypes.CODEC_CHANGED]: CodecChangedEventPayload;
 	[ClientEventTypes.VIDEO_RESOLUTION_CHANGED]: VideoResolutionChangedEventPayload;
 	[ClientEventTypes.SIMULCAST_LAYER_CHANGED]: SimulcastLayerChangedEventPayload;
-	[ClientEventTypes.CAPTURE_TRACK_ENDED]: CaptureTrackEndedEventPayload;
+	[ClientEventTypes.CAPTURE_SOURCE_LOST]: CaptureSourceLostEventPayload;
 	[ClientEventTypes.CAPTURE_TRACK_MUTED]: CaptureTrackMutedEventPayload;
 	[ClientEventTypes.STATS_COLLECTION_GAP]: StatsCollectionGapEventPayload;
 	[ClientEventTypes.TAB_VISIBILITY_CHANGED]: TabVisibilityChangedEventPayload;
@@ -123,7 +123,7 @@ export class ClientEventPayloadProvider {
 	public createCodecChangedEventPayload: ClientEventPayloadProviderFunction<CodecChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createVideoResolutionChangedEventPayload: ClientEventPayloadProviderFunction<VideoResolutionChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createSimulcastLayerChangedEventPayload: ClientEventPayloadProviderFunction<SimulcastLayerChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
-	public createCaptureTrackEndedEventPayload: ClientEventPayloadProviderFunction<CaptureTrackEndedEventPayload> = createDefaultClientEventPayloadProviderFunction();
+	public createCaptureSourceLostEventPayload: ClientEventPayloadProviderFunction<CaptureSourceLostEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createCaptureTrackMutedEventPayload: ClientEventPayloadProviderFunction<CaptureTrackMutedEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createStatsCollectionGapEventPayload: ClientEventPayloadProviderFunction<StatsCollectionGapEventPayload> = createDefaultClientEventPayloadProviderFunction();
 	public createTabVisibilityChangedEventPayload: ClientEventPayloadProviderFunction<TabVisibilityChangedEventPayload> = createDefaultClientEventPayloadProviderFunction();
@@ -187,8 +187,8 @@ export class ClientEventPayloadProvider {
 				return this.createVideoResolutionChangedEventPayload(input as VideoResolutionChangedEventPayload);
 			case ClientEventTypes.SIMULCAST_LAYER_CHANGED:
 				return this.createSimulcastLayerChangedEventPayload(input as SimulcastLayerChangedEventPayload);
-			case ClientEventTypes.CAPTURE_TRACK_ENDED:
-				return this.createCaptureTrackEndedEventPayload(input as CaptureTrackEndedEventPayload);
+			case ClientEventTypes.CAPTURE_SOURCE_LOST:
+				return this.createCaptureSourceLostEventPayload(input as CaptureSourceLostEventPayload);
 			case ClientEventTypes.CAPTURE_TRACK_MUTED:
 				return this.createCaptureTrackMutedEventPayload(input as CaptureTrackMutedEventPayload);
 			case ClientEventTypes.STATS_COLLECTION_GAP:

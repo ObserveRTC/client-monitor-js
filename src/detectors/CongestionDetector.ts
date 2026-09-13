@@ -22,7 +22,22 @@ export type CongestionIssuePayload = {
 
 export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
 
+export type CongestionDetectorConfig = {
+	/**
+	 * How much corroboration the browser's own bandwidth verdict needs before congestion is
+	 * declared. `high` takes it at its word, `medium` also wants the round trip to be moving,
+	 * `low` instead wants outbound loss above 5%.
+	 */
+	sensitivity: 'low' | 'medium' | 'high';
+}
+
 /**
+ * **Deprecated.** Superseded by `UplinkCongestionDetector` and `DownlinkCongestionDetector`, which
+ * judge each direction on its own evidence and report a graded `severity` rather than a single
+ * on/off verdict for the whole connection. This class is kept only so integrations built against
+ * the `congestion` event and the `congestion` issue keep working through the transition, and will
+ * be removed. New code should read `uplink-congestion` and `downlink-congestion`.
+ *
  * Watches a peer connection for the point at which the network stops being able to carry what
  * the encoder wants to produce — the cause behind collapsing resolution, stuttering video and
  * the "you're breaking up" complaint.
@@ -45,14 +60,26 @@ export type CongestionDecetorEvent = ClientMonitorEvents['congestion'];
  * then reset, so each episode is measured against the headroom that immediately preceded it
  * rather than against the whole call.
  *
+ * Its issue is raised on the **client** registry rather than the connection's, which is what keeps
+ * it out of the score: `uplink-congestion` and `downlink-congestion` already price congestion, and
+ * a deprecated duplicate reporting the same condition must not penalise a call twice. The client
+ * registry is not read by `DefaultScoreCalculator` at all, so raising it there is what makes that
+ * true rather than a rule written down somewhere else.
+ *
  * Raises `congestion`. Emits `congestion`. Config: `congestionDetector`.
+ * Connection attribute: `PeerConnectionMonitor.congested`.
+ *
+ * Category: Transport Quality
+ * Layer: Capacity
+ *
+ * @deprecated Use `UplinkCongestionDetector` and `DownlinkCongestionDetector` instead.
  */
 export class CongestionDetector implements Detector {
 	public static readonly ISSUE_TYPE = 'congestion';
 	public readonly name = 'congestion-detector';
 	public disabled = false;
 	public includeIssueInSample = true;
-	
+
 	private _maxAvailableIncomingBitrate = 0;
 
 	private _maxReceivingBitrate = 0;
@@ -87,6 +114,7 @@ export class CongestionDetector implements Detector {
 		// avgRttInSec/ewmaRttInSec prefer the RTCP round trip and fall back to
 		// ICE/STUN together, so the difference below never mixes two round trips
 		let rttDiffInS = 0;
+
 		if (this.peerConnection.avgRttInSec !== undefined) {
 			if (this.peerConnection.ewmaRttInSec !== undefined) {
 				rttDiffInS = Math.abs(this.peerConnection.avgRttInSec - this.peerConnection.ewmaRttInSec);
@@ -94,15 +122,16 @@ export class CongestionDetector implements Detector {
 		}
 
 		let isCongested = false;
+
 		switch (this.config.sensitivity) {
 			case 'high':
 				isCongested = hasBwLimitedOutboundRtp;
 				break;
 			case 'medium': {
 				if (!this.peerConnection.ewmaRttInSec) break;
-				
+
 				const rttDiffThreshold = Math.min(0.15, Math.max(0.05, this.peerConnection.ewmaRttInSec * 0.33));
-				
+
 				isCongested = hasBwLimitedOutboundRtp && rttDiffInS > rttDiffThreshold;
 
 				break;
@@ -116,8 +145,8 @@ export class CongestionDetector implements Detector {
 				break;
 			}
 		}
-		const availableIncomingBitrate = this.peerConnection.totalAvailableIncomingBitrate;
-		const availableOutgoingBitrate = this.peerConnection.totalAvailableOutgoingBitrate;
+		const availableIncomingBitrate = this.peerConnection.totalAvailableIncomingBitrate ?? 0;
+		const availableOutgoingBitrate = this.peerConnection.totalAvailableOutgoingBitrate ?? 0;
 
 		if (!isCongested) {
 			if (this.peerConnection.congested) {
@@ -166,7 +195,7 @@ export class CongestionDetector implements Detector {
 		this._startedCongestionAt = Date.now();
 
 		this.peerConnection.parent.raiseIssue<CongestionIssuePayload>(this.issueKey, {
-				includeInSample: this.includeIssueInSample,
+			includeInSample: this.includeIssueInSample,
 			type: CongestionDetector.ISSUE_TYPE,
 			payload,
 		});
@@ -174,19 +203,13 @@ export class CongestionDetector implements Detector {
 
 	private _resolve(comment?: string) {
 		const clientMonitor = this.peerConnection.parent;
-		const issue = clientMonitor.activeIssues.get(this.issueKey);
-		let payload: CongestionIssuePayload | undefined;
-
-		if (issue) {
-			payload = {
-				...(issue.payload as CongestionIssuePayload),
-				durationInMs: this._startedCongestionAt ? Date.now() - this._startedCongestionAt : undefined,
-			};
-		}
 
 		clientMonitor.resolveIssue<CongestionIssuePayload>(this.issueKey, {
 			comment,
-			payload,
+			// The registry merges, so the raise's payload survives and only the duration is added.
+			payload: {
+				durationInMs: this._startedCongestionAt ? Date.now() - this._startedCongestionAt : undefined,
+			} as CongestionIssuePayload,
 			resolvedAt: Date.now(),
 		});
 

@@ -1,34 +1,31 @@
+import { stubClientIssues } from "../helpers/detectorMocks";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { DefaultScoreCalculator } from "../../src/scores/DefaultScoreCalculator";
 import { InboundTrackMonitor } from "../../src/monitors/InboundTrackMonitor";
 
 const noDetectorsConfig = {
-	audioDesyncDetector: null,
-	freezedVideoTrackDetector: null,
+	avDesyncPlayoutDetector: null,
 	dryInboundTrackDetector: null,
+	inboundTrackWindow: { numberOfSamples: { detection: 4, recovery: 3, flowDetection: 4, flowRecovery: 3 }, maxAllowedGapInMs: 60_000 },
 	playoutDiscrepancyDetector: null,
-	audioConcealmentDetector: null,
+	inventedSpeechDetector: null,
 	jitterBufferStressDetector: null,
 	decoderPerformanceDetector: null,
-	inboundFrameSupplyDetector: null,
+	decoderBottleneckDetector: null,
 	stuckDecoderDetector: null,
 	videoResolutionChangeDetector: null,
+	inboundVideoFlowStateDetector: null,
 	codecChangeDetector: null,
+	pixelatedVideoDetector: null,
 };
 
 const silentLogger = { trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
-/**
- * vp8 / standard motion ships as activation 40, saturation 80. A QP of 60 sits
- * exactly halfway, so the ramp gives 0.5 and the whole subtraction is half of
- * whatever weight the presented size selects — which makes the weight visible
- * in every assertion below.
- */
 const DECODED = { width: 640, height: 360 };
 
 function createInboundRtp(overrides: Record<string, unknown> = {}) {
 	return {
-		avgQpPerFrame: 60,
+		statsClockTime: 0,
+		getMediaPlayout: () => undefined,
 		frameWidth: DECODED.width,
 		frameHeight: DECODED.height,
 		framesPerSecond: 30,
@@ -38,7 +35,7 @@ function createInboundRtp(overrides: Record<string, unknown> = {}) {
 		framesRendered: 100,
 		deltaFramesReceived: 30,
 		getCodec: () => ({ mimeType: 'video/VP8' }),
-		getPeerConnection: () => ({ parent: { config: noDetectorsConfig, logger: silentLogger } }),
+		getPeerConnection: () => ({ parent: { config: noDetectorsConfig, logger: silentLogger, activeIssues: stubClientIssues() } }),
 		...overrides,
 	};
 }
@@ -56,152 +53,66 @@ function createMonitor(inboundRtp: unknown) {
 	return new InboundTrackMonitor(track as any, inboundRtp as any);
 }
 
-function pixelationPenalty(monitor: InboundTrackMonitor): number | undefined {
-	const calculator = new DefaultScoreCalculator({} as any) as any;
-
-	calculator._calculateInboundVideoTrackScore(monitor);
-
-	return (monitor.calculatedScore.reasons as any)?.['pixelated-video'];
-}
-
-describe('pixelation is charged by how big the picture is shown', () => {
-	it('uses the ordinary weight when no presented resolution was declared', () => {
+describe('displayMagnification is the track\'s own derived fact', () => {
+	it('is undefined before any presented size is known — not 1', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		// halfway up the band × 2.0
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
+		// "Nobody measured" and "painted at its decoded size" are different facts.
+		expect(monitor.displayMagnification).toBeUndefined();
 	});
 
-	it('uses the ordinary weight at roughly the decoded size', () => {
+	it('is the linear factor, taken from the areas', () => {
 		const monitor = createMonitor(createInboundRtp());
-
-		monitor.setContext({ presentedResolution: { ...DECODED } });
-
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
-	});
-
-	it('charges a large picture harder than fairness would suggest', () => {
-		const monitor = createMonitor(createInboundRtp());
-
-		// 2x linear — speaker view. The band drops 0.6 of its width per octave
-		// (40-80 becomes 16-56), so QP 60 is past saturation, and the weight is 3.0.
-		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
-
-		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
-	});
-
-	it('barely charges a thumbnail, where nobody can see the blocks', () => {
-		const monitor = createMonitor(createInboundRtp());
-
-		// 0.5x linear. The band rises only 0.15 of its width per octave
-		// (40-80 becomes 46-86), so QP 60 is 0.35 up it, and the weight is 0.5.
-		monitor.setContext({ presentedResolution: { width: 320, height: 180 } });
-
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.18, 5);
-	});
-
-	it('moves the bar much further up than down — magnifying is not the inverse of shrinking', () => {
-		const large = createMonitor(createInboundRtp());
-		const small = createMonitor(createInboundRtp());
-
-		large.setContext({ presentedResolution: { width: 1280, height: 720 } });   // +1 octave
-		small.setContext({ presentedResolution: { width: 320, height: 180 } });    // -1 octave
-
-		// one octave up drops the band 24 QP; one octave down raises it only 6
-		expect(pixelationPenalty(large)).toBeCloseTo(3.0, 5);
-		expect(pixelationPenalty(small)).toBeCloseTo(0.18, 5);
-	});
-
-	it('takes a saturated quantizer on a large picture to the full 3.0', () => {
-		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 90 }));
 
 		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
 
-		// a large video gone to blocks is worse than a frozen one
-		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
+		expect(monitor.displayMagnification).toBeCloseTo(2, 5);
 	});
 
-	it('caps the same saturated quantizer at 0.5 in a thumbnail', () => {
-		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 120 }));
-
-		monitor.setContext({ presentedResolution: { width: 320, height: 180 } });
-
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.5, 5);
-	});
-
-	it('holds the moved band inside the codec scale, where H.264 has no headroom', () => {
-		// h264 highmotion ships as 38-48 in a 0-51 scale; 0.15 of a band of
-		// leniency wants saturation at 49.5, which fits, but the clamp is what
-		// stops a wider shift landing at a quantizer H.264 cannot emit
-		const monitor = createMonitor(createInboundRtp({
-			avgQpPerFrame: 47,
-			getCodec: () => ({ mimeType: 'video/H264' }),
-		}));
-
-		monitor.setContext({
-			motionType: 'highmotion',
-			presentedResolution: { width: 320, height: 180 },
-		});
-
-		// band 39.5 -> 49.5, QP 47 is 0.75 up it, weight 0.5
-		expect(pixelationPenalty(monitor)).toBeCloseTo(0.38, 5);
-	});
-
-	it('clamps a wild magnification rather than following the ratio', () => {
-		// 320x180 decoded on a 4K screen is a linear factor of ~10.7; the band
-		// shift sees 2.0, not 10.7, so activation never runs below zero
-		const monitor = createMonitor(createInboundRtp({ frameWidth: 320, frameHeight: 180 }));
-
-		monitor.setContext({ presentedResolution: { width: 3840, height: 2160 } });
-
-		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
-	});
-
-	it('applies the weight boundaries inclusively at large and exclusively at small', () => {
-		const large = createMonitor(createInboundRtp());
-		const small = createMonitor(createInboundRtp());
-
-		// exactly 1.5x linear -> the large weight (3.0), band 26-66
-		large.setContext({ presentedResolution: { width: 960, height: 540 } });
-		// exactly 0.75x linear -> still the ordinary weight (2.0), band 42.5-82.5
-		small.setContext({ presentedResolution: { width: 480, height: 270 } });
-
-		expect(pixelationPenalty(large)).toBeCloseTo(2.55, 2);
-		expect(pixelationPenalty(small)).toBeCloseTo(0.88, 2);
-	});
-
-	it('takes the ratio from the areas, so a differently proportioned box is not magnification', () => {
+	it('reads a letterboxed box of the same area as no magnification', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		// 480x480 has the same area as 640x360 — a letterboxed square box
+		// 480x480 has the same area as 640x360
 		monitor.setContext({ presentedResolution: { width: 480, height: 480 } });
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
+		expect(monitor.displayMagnification).toBeCloseTo(1, 5);
 	});
 
-	it('leaves a genuinely clean picture unpenalized however large it is shown', () => {
-		// QP 15 is below even the fully lowered band (16 at 2x magnification)
-		const monitor = createMonitor(createInboundRtp({ avgQpPerFrame: 15 }));
+	it('reports the raw ratio, with no ceiling or floor', () => {
+		const huge = createMonitor(createInboundRtp({ frameWidth: 320, frameHeight: 180 }));
+		const tiny = createMonitor(createInboundRtp({ frameWidth: 3840, frameHeight: 2160 }));
 
-		monitor.setContext({ presentedResolution: { width: 3840, height: 2160 } });
+		huge.setContext({ presentedResolution: { width: 3840, height: 2160 } });
+		tiny.setContext({ presentedResolution: { width: 320, height: 180 } });
 
-		expect(pixelationPenalty(monitor)).toBeUndefined();
+		// A 320x180 stream on a 4K screen really is magnified twelvefold. Deciding whether that
+		// is meaningfully worse than fourfold belongs to whoever reads the number.
+		expect(huge.displayMagnification).toBeCloseTo(12, 5);
+		expect(tiny.displayMagnification).toBeCloseTo(1 / 12, 5);
 	});
 
-	it('uses the ordinary weight when the stats report no decoded resolution', () => {
-		const monitor = createMonitor(createInboundRtp({ frameWidth: undefined, frameHeight: undefined }));
+	it('goes back to undefined when the decoded size stops being reported', () => {
+		const inboundRtp = createInboundRtp() as Record<string, unknown>;
+		const monitor = createMonitor(inboundRtp);
 
 		monitor.setContext({ presentedResolution: { width: 1280, height: 720 } });
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
+		expect(monitor.displayMagnification).toBeCloseTo(2, 5);
+
+		inboundRtp.frameWidth = undefined;
+		monitor.update();
+
+		expect(monitor.displayMagnification).toBeUndefined();
 	});
 
-	it('uses the ordinary weight when the declared presented resolution is degenerate', () => {
+	it('is refreshed by setContext, not only on the next tick', () => {
 		const monitor = createMonitor(createInboundRtp());
 
-		monitor.setContext({ presentedResolution: { width: 0, height: 0 } });
+		monitor.setContext({ presentedResolution: { width: 320, height: 180 } });
 
-		expect(pixelationPenalty(monitor)).toBeCloseTo(1.0, 5);
+		// No update() in between — an application declaring a size and reading the magnification
+		// in the same breath must not get the previous layout's answer.
+		expect(monitor.displayMagnification).toBeCloseTo(0.5, 5);
 	});
 });
 
@@ -269,7 +180,7 @@ describe('presentedResolution derived from a video element', () => {
 		expect(monitor.presentedResolution).toEqual({ width: 640, height: 360 });
 	});
 
-	it('feeds the measured element straight into the weight', () => {
+	it('feeds the measured element straight into presentedResolution', () => {
 		const monitor = createMonitor(createInboundRtp());
 
 		// element twice the decoded size in each direction
@@ -277,6 +188,6 @@ describe('presentedResolution derived from a video element', () => {
 		monitor.update();
 
 		expect(monitor.presentedResolution).toEqual({ width: 1280, height: 720 });
-		expect(pixelationPenalty(monitor)).toBeCloseTo(3.0, 5);
+		expect(monitor.displayMagnification).toBeCloseTo(2, 5);
 	});
 });
