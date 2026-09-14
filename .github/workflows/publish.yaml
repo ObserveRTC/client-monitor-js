@@ -106,12 +106,7 @@ jobs:
                   RUN_NUMBER: ${{ github.run_number }}
               run: |
                   RC_VERSION="$(node -e '
-                    const base = process.env.BASE_VERSION
-                    const [core, pre] = base.split("-")
-                    const [major, minor, patch] = core.split(".").map(Number)
-                    // A stable base (4.7.0) targets the next patch (4.7.1); a base
-                    // that is already a prerelease (4.7.1-rc.3) keeps its own patch.
-                    const target = pre ? core : [major, minor, patch + 1].join(".")
+                    const target = process.env.BASE_VERSION.split("-")[0]
                     process.stdout.write(target + "-rc." + process.env.RUN_NUMBER)
                   ')"
                   echo "Publishing snapshot $RC_VERSION"
