@@ -1288,6 +1288,25 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 	}
 
+	/**
+	 * Whether a `MediaStreamTrack` this collection knows about is still live.
+	 *
+	 * A stats entry that stops being reported is not on its own evidence that anything went away:
+	 * a busy client drops a round now and then while the media keeps flowing. The track is the
+	 * evidence. `stop()` dispatches no event, so a vanished report remains the only teardown
+	 * signal for that case -- but it sets `readyState`, and reading it here tells a torn-down
+	 * track apart from a skipped round without waiting for anything.
+	 */
+	private _hasLiveTrack(trackIdentifier: string | undefined): boolean {
+		if (trackIdentifier === undefined) return false;
+
+		const track = this.mappedInboundTracks.get(trackIdentifier)?.track
+			?? this.mappedOutboundTracks.get(trackIdentifier)?.track
+			?? this._pendingMediaStreamTracks.get(trackIdentifier)?.track;
+
+		return track?.readyState === 'live';
+	}
+
 	private _checkVisited() {
 		for (const [id, monitor] of this.mappedCodecMonitors) {
 			if (monitor.visited) continue;
@@ -1296,6 +1315,12 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		for (const [id, monitor] of this.mappedInboundRtpMonitors) {
 			if (monitor.visited) continue;
+			// The rtp monitor outlives a round that did not report it, so long as its track is
+			// still live: the track monitor hangs off this one, and dropping it here is what
+			// used to cost a live track its monitor for the rest of the session. A gap in the
+			// window is what a missed round costs instead.
+			if (!this.closed && this._hasLiveTrack(monitor.trackIdentifier)) continue;
+
 			this.mappedInboundRtpMonitors.delete(id);
 
 			const inboundTrack = this.mappedInboundTracks.get(monitor.trackIdentifier ?? '');
@@ -1311,6 +1336,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		for (const [id, monitor] of this.mappedOutboundRtpMonitors) {
 			if (monitor.visited) continue;
+			if (!this.closed && this._hasLiveTrack(monitor.trackIdentifier)) continue;
+
 			this.mappedOutboundRtpMonitors.delete(id);
 			monitor.getTrack()?.mappedOutboundRtps.delete(monitor.ssrc);
 		}
@@ -1322,6 +1349,8 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 
 		for (const [id, monitor] of this.mappedMediaSourceMonitors) {
 			if (monitor.visited) continue;
+			if (!this.closed && this._hasLiveTrack(monitor.trackIdentifier)) continue;
+
 			this.mappedMediaSourceMonitors.delete(id);
 
 			const outboundTrack = this.mappedOutboundTracks.get(monitor.trackIdentifier ?? '');
@@ -1368,6 +1397,15 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		for (const [id, monitor] of this.mappedDataChannelMonitors) {
 			if (monitor.visited) continue;
 			this.mappedDataChannelMonitors.delete(id);
+		}
+
+		// The waiting room's only other exits are the first report that names the track and the
+		// `ended` listener -- the one signal `stop()` does not send. Without this, a consumer
+		// closed before it was ever reported stays parked for the rest of the call.
+		for (const [trackId, pending] of this._pendingMediaStreamTracks) {
+			if (pending.track.readyState === 'live') continue;
+
+			this._pendingMediaStreamTracks.delete(trackId);
 		}
 	}
 

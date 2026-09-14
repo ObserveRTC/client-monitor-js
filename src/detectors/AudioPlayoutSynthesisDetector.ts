@@ -152,6 +152,13 @@ export class AudioPlayoutSynthesisDetector implements Detector {
 		if (this.disabled) return;
 		if (this.trackMonitor.kind !== 'audio') return;
 
+		// A track that ended plays out nothing; there is no synthesis to take a share of.
+		if (this.trackMonitor.readyState !== 'live') {
+			this.trackMonitor.synthesizedAudioRatio = undefined;
+
+			return this._clear('track ended');
+		}
+
 		const {
 			detection: detectionWindow,
 			recovery: recoveryWindow,

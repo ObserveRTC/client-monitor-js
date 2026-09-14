@@ -251,7 +251,7 @@ describe('TransportDelayDetector', () => {
 		jest.useFakeTimers();
 		jest.setSystemTime(1_000);
 
-		const { clientMonitor, tick } = setup();
+		const { clientMonitor, tick, fillDetectionWindow } = setup();
 
 		for (let i = 0; i < 10; ++i) {
 			jest.setSystemTime(1_000 + (i + 1) * 60_000);
@@ -260,8 +260,15 @@ describe('TransportDelayDetector', () => {
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 
-		// The very next collection that carries real stats time fills the window and raises.
+		// Nor does one collection that carries real stats time. Ten readings taken at the same
+		// stats instant are one reading, so the window holds nothing to difference that against
+		// and the detector still has no stretch to judge.
 		tick(400, 6000);
+
+		expect(clientMonitor.getIssues()).toHaveLength(0);
+
+		// It raises once the path's own clock has supplied a whole detection window.
+		fillDetectionWindow(400);
 
 		expect(clientMonitor.getIssues()).toHaveLength(1);
 

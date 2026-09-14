@@ -90,7 +90,11 @@ export class AVDesyncPlayoutDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 
-		// One side is not playing out, so there is no relationship to measure.
+		if (this.trackMonitor.readyState !== 'live') {
+			this._sustainedForInMs = 0;
+
+			return this._raised ? this._resolve('track ended') : undefined;
+		}
 		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
 			this._sustainedForInMs = 0;
 

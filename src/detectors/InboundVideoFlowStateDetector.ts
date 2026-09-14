@@ -141,6 +141,10 @@ export class InboundVideoFlowStateDetector implements Detector {
 			return this._standDown('the video stream is gone');
 		}
 
+		if (this.trackMonitor.readyState !== 'live') {
+			return this._standDown('the track ended');
+		}
+
 		if (
 			this.trackMonitor.paused ||
 			this.trackMonitor.remoteOutboundTrackPaused ||

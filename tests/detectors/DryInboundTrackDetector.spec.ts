@@ -134,7 +134,8 @@ class MockInboundTrackMonitor {
         return this._issues ??= mockIssueRegistry(this.getPeerConnection().parent);
     }
 
-    public track = { id: 'test-track-id' };
+    public track = { id: 'test-track-id', readyState: 'live' as 'live' | 'ended' };
+    public get readyState() { return this.track.readyState; }
     private peerConnection = new MockPeerConnectionMonitor();
     private inboundRtp: InboundRtpStats | null = null;
     public paused = false;

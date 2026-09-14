@@ -285,6 +285,12 @@ export class SlicedWindow<T extends Record<string, number | null>, S extends Sli
 		if (item.timestamp < this.lastTimestamp)
 			throw new Error('items must be added in non-decreasing timestamp order');
 
+		// A collection that did not move the clock measured no interval, so there is nothing
+		// here a delta could span: two endpoints at the same instant difference to a change over
+		// no time at all, which is not a rate and not a zero. Dropped rather than rejected —
+		// a source that reports nothing on a tick is ordinary, not a caller error.
+		if (item.timestamp === this.lastTimestamp) return;
+
 		// Everything held describes a stretch that this value no longer continues.
 		if (this.lastTimestamp !== Number.NEGATIVE_INFINITY &&
 			this.config.maxAllowedGapInMs < item.timestamp - this.lastTimestamp) {

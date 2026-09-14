@@ -114,6 +114,12 @@ export class PlayoutDiscrepancyDetector implements Detector {
 			return;
 		}
 
+		if (this.trackMonitor.readyState !== 'live') {
+			this.trackMonitor.playoutDiscrepancy = undefined;
+			this.trackMonitor.videoPlayoutSkew = undefined;
+
+			return this._standDown('track ended');
+		}
 		if (this.trackMonitor.paused) {
 			this.trackMonitor.playoutDiscrepancy = undefined;
 			this.trackMonitor.videoPlayoutSkew = undefined;

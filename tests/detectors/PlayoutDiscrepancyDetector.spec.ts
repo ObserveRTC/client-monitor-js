@@ -143,7 +143,8 @@ class MockInboundTrackMonitor {
         return this._issues ??= mockIssueRegistry(this.getPeerConnection().parent);
     }
 
-    public track = { id: 'test-track-id' };
+    public track = { id: 'test-track-id', readyState: 'live' as 'live' | 'ended' };
+    public get readyState() { return this.track.readyState; }
 
     public readonly slicedWindow = new SlicedWindow({
         totals: { totalFramesReceived: null, totalFramesRendered: null } as {

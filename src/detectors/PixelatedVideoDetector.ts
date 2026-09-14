@@ -105,6 +105,14 @@ export class PixelatedVideoDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'video') return;
 
+		if (this.trackMonitor.readyState !== 'live') {
+			this._sustainedForInMs = 0;
+
+			if (this._raised) this._resolve('track ended');
+
+			return;
+		}
+
 		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
 			this._sustainedForInMs = 0;
 

@@ -84,6 +84,12 @@ export class FrameAssemblyStalledDetector implements Detector {
 			return;
 		}
 
+		if (this.trackMonitor.readyState !== 'live') {
+			this.trackMonitor.stalledFrameAssembly = undefined;
+
+			return this._reset('track ended');
+		}
+
 		if (
 			this.trackMonitor.paused ||
 			this.trackMonitor.remoteOutboundTrackPaused ||

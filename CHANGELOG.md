@@ -1,3 +1,68 @@
+## 4.9.1
+
+Three fixes to track monitor lifecycle, all reported from an edumeet integration on mediasoup.
+No API changes, no config changes, no breaking changes.
+
+### An inbound track could permanently lose its monitor while its media kept playing
+
+A `getStats()` round that omitted a track's `inbound-rtp` deleted that monitor and, with it, the
+`InboundTrackMonitor` hanging off it. When the report came back the next round,
+`_updateInboundRtp` looked for something to rebuild from in `_pendingMediaStreamTracks` — an entry
+`_createInboundTrackMonitor` had consumed when it first built the monitor. Nothing was rebuilt, and
+`getInboundTrackMonitor()` returned `undefined` for that track for the rest of the session.
+
+The track left `tracks`, so it stopped contributing to `DefaultScoreCalculator`, all its detectors
+stopped, and its declared context went with it — `contentType`, `videoTag`, `linkedVideoTrackId`,
+`remoteOutboundTrackPaused`. The `MediaStreamTrack` was untouched, so the picture kept playing:
+the stats window showed audio only for a peer whose video was fine.
+
+Rounds do occasionally omit a report, more often on busy clients. `_checkVisited` now keeps an
+`inbound-rtp`, `outbound-rtp` or `media-source` whose track is still `live`, so a gap costs a gap
+in the sliced window rather than the whole monitor. A component whose track has ended is dropped
+exactly as before.
+
+### Detectors judged tracks that had already ended
+
+`MediaStreamTrack.stop()` sets `readyState` to `ended` and dispatches no `ended` event — by the
+Media Capture spec, that event fires only when a track ends on its own. mediasoup-client's
+`Consumer.close()` goes further and removes the listener before calling `stop()`. So the `ended`
+handler that `addMediaStreamTrack` installs never ran for a closed consumer, and cleanup fell to
+`_checkVisited`, which needs the browser to stop reporting the track.
+
+It does not always stop. mediasoup-client rejects a closed consumer's m-section with port 0 —
+except the first one on each receive transport, which it merely disables to keep BUNDLE intact.
+That transceiver's `inbound-rtp` goes on being reported, so its track monitor went on updating at
+zero bytes and held `dry-inbound-track` raised for a consumer closed minutes earlier, for the rest
+of the call.
+
+`InboundTrackMonitor` and `OutboundTrackMonitor` now expose `readyState`, and every detector on an
+inbound track stands down on anything but `live`, resolving what it holds — the same way they
+already stood down on a paused track. Of the fifteen, only `DecoderBottleneckDetector` checked
+this before. `SimulcastLayerDetector` was guarded on the outbound side, where a stopped producer
+dropped every layer at once and read as a layer change.
+
+### A track closed before its first report was never released
+
+`addMediaStreamTrack` parks a track no report mentions yet, which is the normal case for a
+mediasoup consumer. That map was emptied only by the first report naming the track, or by the
+`ended` listener — the one signal `stop()` does not send. A consumer created and closed inside one
+collecting period stayed parked, holding a reference to its track, for the length of the call; at
+the default 5000ms period, a busy room accumulates them. Pre-existing in 4.9.0 and earlier, and
+invisible, since a parked track raises nothing and is sampled nowhere. `_checkVisited` now releases
+a parked track once it has ended.
+
+### `SlicedWindow` no longer accepts a repeated timestamp
+
+A collection that did not move the stats clock measured no interval, so there is nothing a delta
+can span. Such an entry also consumed a slot in a fixed-capacity window, evicting one that spanned
+real time, so a slice counted in values reported itself ready while covering less time than it
+asked for. Repeated timestamps are now dropped rather than stored.
+
+One behaviour change follows: `transport-delay-degraded` needs a full detection window of real
+stats time before it raises. It previously raised on the first collection carrying real time after
+a run of stalled ones — a blocked main thread or a sleeping device — because those stalled
+collections had filled the window.
+
 ## 4.9.0
 
 The detector layer is rebuilt around one rule: **one detector class raises one issue type**. 27

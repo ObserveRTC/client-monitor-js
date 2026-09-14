@@ -78,8 +78,8 @@ export class VideoRecoveryFailedDetector implements Detector {
 
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
-		// Nothing to read, or an end that is not watching: no recovery to judge.
 		if (!inboundRtp ||
+			this.trackMonitor.readyState !== 'live' ||
 			!this.peerConnection.parent.activeTab ||
 			this.trackMonitor.paused ||
 			this.trackMonitor.remoteOutboundTrackPaused

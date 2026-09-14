@@ -322,6 +322,11 @@ export class OutboundTrackMonitor {
 		return this.contentType === 'screenshare';
 	}
 
+	public get readyState(): MediaStreamTrack['readyState'] {
+		return this.track.readyState;
+	}
+
+
 	/**
 	 * Declares what the application knows about this track. **Merges**: a field the call does not
 	 * mention keeps its declared value, and a field passed as an explicit `undefined` is cleared.

@@ -99,6 +99,12 @@ export class JitterBufferStressDetector implements Detector {
 		const inboundRtp = this.trackMonitor.getInboundRtp();
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
+		if (this.trackMonitor.readyState !== 'live') {
+			this._consecutiveTicks = 0;
+			this.trackMonitor.jitterBufferStressSeverity = undefined;
+
+			return this._alertOn ? this._clear('track ended') : undefined;
+		}
 		if (this.trackMonitor.paused) {
 			this._consecutiveTicks = 0;
 			this.trackMonitor.jitterBufferStressSeverity = undefined;

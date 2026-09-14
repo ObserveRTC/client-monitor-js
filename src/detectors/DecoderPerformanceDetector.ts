@@ -112,8 +112,13 @@ export class DecoderPerformanceDetector implements Detector {
 			return;
 		}
 
-		// Every stand-down below is a reason the decoder could not be judged, so the flag goes
-		// blind rather than false: a backgrounded tab is not a decoder that kept up.
+		if (this.trackMonitor.readyState !== 'live') {
+			this._consecutiveTicks = 0;
+			this.trackMonitor.overloadedDecoder = undefined;
+			this.trackMonitor.decodeBudgetUtilization = undefined;
+
+			return this._alertOn ? this._clear('track ended') : undefined;
+		}
 		if (!this.peerConnection.parent.activeTab) {
 			this._consecutiveTicks = 0;
 			this.trackMonitor.overloadedDecoder = undefined;

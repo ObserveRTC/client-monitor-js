@@ -64,6 +64,14 @@ export class SimulcastLayerDetector implements Detector {
 		if (this.disabled) return;
 		if (this.trackMonitor.kind !== 'video') return;
 
+		// A track that ended sends nothing on every layer at once, which is the end of the track
+		// rather than the layers being dropped. Forgotten rather than skipped, so the last live
+		// set cannot read as a change against whatever comes after it.
+		if (this.trackMonitor.readyState !== 'live') {
+			this._previousActiveKeys = undefined;
+
+			return;
+		}
 		if (this.trackMonitor.paused) {
 			this._previousActiveKeys = undefined;
 

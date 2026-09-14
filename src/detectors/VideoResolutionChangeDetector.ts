@@ -54,6 +54,8 @@ export class VideoResolutionChangeDetector implements Detector {
 		if (this.disabled) return;
 		if (this.trackMonitor.kind !== 'video') return;
 
+		if (this.trackMonitor.readyState !== 'live') return;
+
 		const rtp = this.trackMonitor.direction === 'inbound'
 			? this.trackMonitor.getInboundRtp()
 			: this.trackMonitor.highestLayer;

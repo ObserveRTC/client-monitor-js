@@ -86,7 +86,12 @@ export class InventedSpeechDetector implements Detector {
 
 		if (!inboundRtp || inboundRtp.kind !== 'audio') return;
 
-		// Discarded rather than drained, so a pause cannot leak into the next episode.
+		if (this.trackMonitor.readyState !== 'live') {
+			this._bucketInMs = 0;
+			this.trackMonitor.inventedSpeechSeverity = undefined;
+
+			return this._raised ? this._clear('track ended') : undefined;
+		}
 		if (this.trackMonitor.paused) {
 			this._bucketInMs = 0;
 			this.trackMonitor.inventedSpeechSeverity = undefined;
