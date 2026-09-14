@@ -344,15 +344,31 @@ describe('SlicedWindow', () => {
 			expect(() => window.add({ timestamp: 999, value: { n: 1 } })).toThrow(/non-decreasing/);
 		});
 
-		it('accepts a repeated timestamp, which spans no time at all', () => {
+		/**
+		 * A collection that did not move the clock measured no interval, so there is nothing a
+		 * delta could span: two endpoints at the same instant difference to a change over no time
+		 * at all, which is not a rate and not a zero. It is also not free to hold -- capacity is
+		 * fixed, so an entry spanning nothing evicts one that spanned something, and a slice
+		 * counted in values would report itself ready while covering less time than it asks for.
+		 *
+		 * Dropped rather than rejected: a source that reports nothing on a tick is ordinary.
+		 */
+		it('ignores a repeated timestamp, which spans no time at all', () => {
 			const window = windowOf({ detection: { numberOfSamples: 2 } });
 			const slice = window.slices.detection;
 
 			window.add({ timestamp: 10, value: { n: 1 } });
 			window.add({ timestamp: 10, value: { n: 3 } });
 
-			expect(slice.durationInMs).toBe(0);
-			expect(slice.deltaN).toBe(2);
+			expect(window.numberOfEntries).toBe(1);
+			expect(slice.isReady).toBe(false);
+			expect(slice.deltaN).toBeNull();
+
+			// and the clock moving again picks up from the entry that is actually held
+			window.add({ timestamp: 20, value: { n: 5 } });
+
+			expect(slice.durationInMs).toBe(10);
+			expect(slice.deltaN).toBe(4);
 		});
 	});
 
