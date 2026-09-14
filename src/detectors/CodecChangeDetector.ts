@@ -45,6 +45,11 @@ export class CodecChangeDetector implements Detector {
 	public update() {
 		if (this.disabled) return;
 
+		// A track that ended negotiates nothing further; a codec still named in its last report
+		// is the codec it died on, not a change. Both monitors carry `readyState`, so neither
+		// direction needs its own case.
+		if (this.trackMonitor.readyState !== 'live') return;
+
 		const rtp = this.trackMonitor.direction === 'inbound'
 			? this.trackMonitor.getInboundRtp()
 			: this.trackMonitor.highestLayer;

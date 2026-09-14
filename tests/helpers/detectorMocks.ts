@@ -325,6 +325,11 @@ export class MockInboundTrackMonitor {
 		return this.track.kind;
 	}
 
+	/** Derived from the track, as the real `InboundTrackMonitor` derives it. */
+	public get readyState() {
+		return this.track.readyState;
+	}
+
 	public getPeerConnection() {
 		return this.peerConnection;
 	}
@@ -410,6 +415,11 @@ export class MockOutboundTrackMonitor {
 
 	public get kind() {
 		return this.track.kind;
+	}
+
+	/** Derived from the track, as the real `OutboundTrackMonitor` derives it. */
+	public get readyState() {
+		return this.track.readyState;
 	}
 
 	/**

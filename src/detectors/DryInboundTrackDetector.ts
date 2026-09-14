@@ -69,6 +69,15 @@ export class DryInboundTrackDetector implements Detector {
 
 			return;
 		}
+		if (this.trackMonitor.readyState !== 'live') {
+			this.trackMonitor.dry = undefined;
+			this._dryForInMs = 0;
+			if (this._startedDryAt !== undefined) {
+				this._resolve('track ended');
+			}
+			return;
+		}
+
 		// A paused end legitimately sends nothing, so there is no silence to judge.
 		if (this.trackMonitor.paused || this.trackMonitor.remoteOutboundTrackPaused) {
 			this.trackMonitor.dry = undefined;

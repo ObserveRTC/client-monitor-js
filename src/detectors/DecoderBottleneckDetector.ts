@@ -187,7 +187,10 @@ export class DecoderBottleneckDetector implements Detector {
 		if (this.trackMonitor.remoteOutboundTrackPaused) return this._clear({
 			comment: 'remote sender paused',
 		});
-		if (track.readyState !== 'live' || track.muted || !track.enabled) return this._clear({
+		if (this.trackMonitor.readyState !== 'live') return this._clear({
+			comment: 'track ended',
+		});
+		if (track.muted || !track.enabled) return this._clear({
 			comment: 'track not playing',
 		});
 

@@ -549,6 +549,18 @@ export class InboundTrackMonitor {
 		this._refreshDisplayMagnification();
 	}
 
+	/**
+	 * The underlying `MediaStreamTrack`'s `readyState`, read here rather than tracked from the
+	 * track's `ended` event: by the Media Capture spec that event fires only when a track ends
+	 * *on its own*, and `stop()` leaves `readyState` at `'ended'` having dispatched nothing.
+	 * An application closing a mediasoup consumer goes exactly that way, so every detector on
+	 * this track stands down on `!== 'live'` the same way it stands down on {@link paused}:
+	 * a track that ended is not a track that failed.
+	 */
+	public get readyState(): MediaStreamTrack['readyState'] {
+		return this.track.readyState;
+	}
+
 	public getPeerConnection() {
 		return this._inboundRtp.getPeerConnection();
 	}

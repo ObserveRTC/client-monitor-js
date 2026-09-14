@@ -79,6 +79,7 @@ function createHarness(configOverrides: Partial<{
 		direction: 'inbound' as const,
 		kind: 'video',
 		track,
+		get readyState() { return track.readyState; },
 		paused: false,
 		remoteOutboundTrackPaused: false,
 		degradedFrameSupply: undefined as boolean | undefined,
@@ -450,7 +451,7 @@ describe('DecoderBottleneckDetector', () => {
 				(h) => { h.trackMonitor.remoteOutboundTrackPaused = true; },
 				'remote sender paused',
 			],
-			[ 'an ended track', (h) => { h.track.readyState = 'ended'; }, 'track not playing' ],
+			[ 'an ended track', (h) => { h.track.readyState = 'ended'; }, 'track ended' ],
 			[ 'a muted track', (h) => { h.track.muted = true; }, 'track not playing' ],
 			[ 'a disabled track', (h) => { h.track.enabled = false; }, 'track not playing' ],
 		];

@@ -1398,6 +1398,26 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 			if (monitor.visited) continue;
 			this.mappedDataChannelMonitors.delete(id);
 		}
+
+		for (const [trackId, trackMonitor] of this.mappedInboundTracks) {
+			if (trackMonitor.track.readyState === 'live') continue;
+
+			trackMonitor.issues.resolveAll('the track ended');
+			this.mappedInboundTracks.delete(trackId);
+		}
+
+		for (const [trackId, trackMonitor] of this.mappedOutboundTracks) {
+			if (trackMonitor.track.readyState === 'live') continue;
+
+			// A capture source that went away by itself is the subject of a detector whose whole
+			// question this is, and it has not been asked yet. `sourceEnded` is set from the
+			// `ended` event, which only that case dispatches -- an application calling `stop()`
+			// leaves it false, and has nothing to find.
+			if (trackMonitor.sourceEnded) trackMonitor.detectors.update();
+
+			trackMonitor.issues.resolveAll('the track ended');
+			this.mappedOutboundTracks.delete(trackId);
+		}
 	}
 
 	public getTrackMonitor(trackId: string): TrackMonitor | undefined {

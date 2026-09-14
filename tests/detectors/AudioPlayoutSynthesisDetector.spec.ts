@@ -28,7 +28,7 @@ function createHarness(configOverrides: Partial<{
 	const emitted: { name: string, payload: any }[] = [];
 	const clientEvents: { type: string, payload?: Record<string, unknown> }[] = [];
 
-	const track = { id: 'audio-in-1', kind: 'audio' };
+	const track = { id: 'audio-in-1', kind: 'audio', readyState: 'live' as 'live' | 'ended' };
 	const mediaPlayout = { id: 'playout-1' };
 
 	const clientMonitor = {
@@ -80,6 +80,7 @@ function createHarness(configOverrides: Partial<{
 		direction: 'inbound' as const,
 		kind: 'audio',
 		track,
+		get readyState() { return track.readyState; },
 		slicedWindow,
 		getInboundRtp: () => ({ getMediaPlayout: () => mediaPlayout }),
 		issues: new IssueRegistry({

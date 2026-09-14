@@ -108,6 +108,11 @@ export class StuckDecoderDetector implements Detector {
 
 			return;
 		}
+		if (this.trackMonitor.readyState !== 'live') {
+			this.trackMonitor.stuckedDecoder = undefined;
+
+			return this._reset('track ended');
+		}
 		if (this.trackMonitor.paused) {
 			this.trackMonitor.stuckedDecoder = undefined;
 
