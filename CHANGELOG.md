@@ -1,3 +1,51 @@
+## 4.10.0 (unreleased)
+
+### Breaking: `InventedSpeechDetector` renamed to `ConcealedSamplesDetector`
+
+"Concealed samples" is the term audio engineers recognise — it is what the W3C stats
+(`concealedSamples`, `silentConcealedSamples`) and NetEQ call it. "Invented speech" also
+overstated what the detector sees; see the next section. Straight rename, same algorithm,
+**no aliases** for any of the old names.
+
+| 4.9.x | 4.10.0 |
+|---|---|
+| `InventedSpeechDetector` / `invented-speech-detector` | `ConcealedSamplesDetector` / `concealed-samples-detector` |
+| issue type and monitor event `invented-speech` | `concealed-samples` |
+| config `inventedSpeechDetector` | `concealedSamplesDetector` |
+| `allowedInventedRatio`, `raiseAfterInventedMs` | `allowedConcealedRatio`, `raiseAfterConcealedMs` |
+| `InboundRtpMonitor.inventedSpeechRatio` | `nonSilentConcealedRatio` |
+| payload `inventedSpeechRatio`, `excessInventedMs` | `nonSilentConcealedRatio`, `excessConcealedMs` |
+| `InboundTrackMonitor.inventedSpeechSeverity` | `concealedSamplesSeverity` |
+| `DefaultScoreCalculator.INVENTED_SPEECH_ACTIVATION` / `_SATURATION` | `CONCEALED_SAMPLES_ACTIVATION` / `_SATURATION` |
+| score reason `invented-speech` | `concealed-samples` |
+| `InventedSpeechIssuePayload`, `InventedSpeechEventPayload`, `InventedSpeechDetectorConfig` | `ConcealedSamples…` |
+
+The issue payload gains `concealmentEventRate`, so a few longer gaps can be told from
+constant micro-concealment.
+
+### Why the old detector could not see dropouts
+
+NetEQ fades concealment out: the mute slope steepens on the 3rd and 7th consecutive expand,
+and the output reaches zero after roughly 60–120 ms. From then on libwebrtc counts every
+concealed sample as `silentConcealedSamples` — the same bucket as DTX comfort noise, which
+the detector has to subtract. So each concealment event adds at most ~100 ms to the ratio
+however long the gap lasts, and a two-second dropout was nearly invisible. What the detector
+actually finds is **frequent short gaps** (choppy audio), and it is now documented as such.
+
+### New: `AudioInterruptionDetector` — `audio-interruption`
+
+Reports dropouts of 150 ms and longer, from Chromium's non-standard `inbound-rtp`
+`interruptionCount` / `totalInterruptionDuration` (libwebrtc counts every concealment event
+of at least 150 ms, silent part included). Same leaky-accumulator shape as its sibling:
+`allowedInterruptedRatio: 0.02`, `raiseAfterInterruptedMs: 500`. The interruption that ends
+when a paused stream resumes is discarded. Chromium only; elsewhere it reports
+`inputsUnavailable`. Config `audioInterruptionDetector`, monitor event `audio-interruption`,
+charged in `DefaultScoreCalculator` as `audioInterruptionSeverity × AUDIO_INTERRUPTION_MAX_CHARGE` (2).
+
+New on `InboundRtpMonitor`: `interruptionCount`, `totalInterruptionDuration`,
+`deltaInterruptionCount`, `deltaTotalInterruptionDurationInMs`. They are not added to the
+sample schema.
+
 ## 4.9.1
 
 Three fixes to track monitor lifecycle, all reported from an edumeet integration on mediasoup.

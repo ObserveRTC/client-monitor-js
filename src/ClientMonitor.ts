@@ -375,11 +375,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 // The stretch both verdicts are measured over is the track's shared window, not a
                 // duration here: see `inboundTrackWindow`.
             }),
-            inventedSpeechDetector: detectorDefault(monitorConfig.inventedSpeechDetector, {
-                // Share of concealed audio tolerated before it counts against the budget.
-                allowedInventedRatio: 0.05,
-                // Invented audio beyond the allowance, in ms, that opens the issue.
-                raiseAfterInventedMs: 400,
+            concealedSamplesDetector: detectorDefault(monitorConfig.concealedSamplesDetector, {
+                // Share of non-silent concealed audio tolerated before it counts against the budget.
+                allowedConcealedRatio: 0.05,
+                // Non-silent concealed audio beyond the allowance, in ms, that opens the issue.
+                raiseAfterConcealedMs: 400,
+            }),
+            audioInterruptionDetector: detectorDefault(monitorConfig.audioInterruptionDetector, {
+                // Share of time that may be spent interrupted for free; also the drain rate, so a
+                // full accumulator empties after 25 s without interruptions.
+                allowedInterruptedRatio: 0.02,
+                // Interrupted ms beyond the allowance that opens the issue: one ~0.5 s dropout,
+                // or a few 150–300 ms ones close together.
+                raiseAfterInterruptedMs: 500,
             }),
             audioPlayoutSynthesisDetector: detectorDefault(monitorConfig.audioPlayoutSynthesisDetector, {
                 // A share of what was played, not a duration per collection. The previous

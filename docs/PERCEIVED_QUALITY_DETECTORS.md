@@ -105,7 +105,7 @@ is a stage name to hand an engineer.
 A perceived-quality detector has no boundary to name. Everything is running: the
 decoder is decoding, the renderer is painting, NetEQ is emitting samples on
 schedule. The finding is that the *result* is bad — 0.012 bits per pixel, 6
-frames per second, 8% of the last fifteen seconds of audio invented — and the
+frames per second, 8% of the last fifteen seconds of audio concealed — and the
 only thing that turns a number into a finding is a threshold plus time.
 
 **Both can be right about the same call, and neither depends on the other.**
@@ -180,7 +180,9 @@ derives.
 | `ewmaFps` | `0.9 * previous + 0.1 * framesPerSecond`, seeded with the first reading | `PlayoutDiscrepancyDetector` |
 | `fpsVolatility` | mean absolute deviation of `lastNFramesPerSec` (≤10 readings) ÷ their mean | no detector — published for consumers |
 | `avgFramesPerSec` | mean of the same ≤10 readings | *(nothing in this category — see below)* |
-| `inventedSpeechRatio` | (Δ concealed − Δ silent concealed) ÷ Δ `totalSamplesReceived`, **this interval** | `InventedSpeechDetector` |
+| `nonSilentConcealedRatio` | (Δ concealed − Δ silent concealed) ÷ Δ `totalSamplesReceived`, **this interval** | `ConcealedSamplesDetector` |
+| `deltaTotalInterruptionDurationInMs` | Δ `totalInterruptionDuration` ×1000 (Chromium, non-standard), credited to the interval the interruption ended in | `AudioInterruptionDetector` |
+| `deltaInterruptionCount` | Δ `interruptionCount` (Chromium, non-standard) | `AudioInterruptionDetector` |
 | `timeStretchRate` | (Δ inserted + Δ removed) ÷ Δ `totalSamplesReceived` | `JitterBufferStressDetector` |
 | `jitterBufferTargetDelayInMs` | Δ `jitterBufferTargetDelay` ÷ Δ `jitterBufferEmittedCount`, ×1000 | `JitterBufferStressDetector` |
 | `avgJitterBufferDelayInMs` | Δ `jitterBufferDelay` ÷ Δ `jitterBufferEmittedCount`, ×1000 | `JitterBufferStressDetector` (payload only) |
@@ -234,11 +236,11 @@ magnification rather than a finished weight is what lets a dashboard or a custom
 `ScoreCalculator` tier it differently.
 
 No detector in this category derives a value the monitor also computes any more.
-The last two both stopped in 4.9.0: `InventedSpeechDetector` used to keep a
+The last two both stopped in 4.9.0: `ConcealedSamplesDetector` (then `InventedSpeechDetector`) used to keep a
 numerator and a denominator of its own, because it judged a ratio over a sliding
 window and summing per-tick ratios is not the ratio of the sums — integrating a
 rate over elapsed time removed that reason, so it reads
-`inboundRtp.inventedSpeechRatio` like everything else. The deleted
+`inboundRtp.nonSilentConcealedRatio` like everything else. The deleted
 `AudioDesyncDetector` re-normalized the same two NetEQ counters `timeStretchRate`
 is derived from, and that duplication went with the class.
 
@@ -295,7 +297,8 @@ at a 2000 ms cadence and ten at the default 5000 ms one.
 | Visual — smoothness | `InboundVideoFlowStateDetector` | `video-flow-disrupted` (`state: 'choppy'`) | `inboundVideoFlowStateDetector` | inbound video |
 | Visual — continuity | `InboundVideoFlowStateDetector` | `video-flow-disrupted` | `inboundVideoFlowStateDetector` | inbound video |
 | Audio — clarity | *(none)* | *(none — by design)* | — | **empty, deliberately** |
-| Audio — continuity | `InventedSpeechDetector` | `invented-speech` | `inventedSpeechDetector` | inbound audio |
+| Audio — continuity | `ConcealedSamplesDetector` | `concealed-samples` | `concealedSamplesDetector` | inbound audio |
+| Audio — continuity | `AudioInterruptionDetector` | `audio-interruption` | `audioInterruptionDetector` | inbound audio (Chromium only) |
 | Audio — naturalness | `AudioPlayoutSynthesisDetector` | `synthesized-audio` | `audioPlayoutSynthesisDetector` | media playout (Chromium only) |
 | Synchronization | `AVDesyncPlayoutDetector` | `av-desync` | `avDesyncPlayoutDetector` | inbound audio **paired with a declared video track**, where the browser reports `estimatedPlayoutTimestamp` |
 | Responsiveness | `JitterBufferStressDetector` | `audio-jitter-buffer-stress` | `jitterBufferStressDetector` | inbound audio |
@@ -311,7 +314,7 @@ internally, Safari not at all). On much of a real fleet this detector is
 reporting `inputsUnavailable` rather than health, which is exactly why it sets
 that flag. Read the two together or read neither.
 
-Seven classes, six issue types. Every class except
+Eight classes, seven issue types. Every class except
 `AudioPlayoutSynthesisDetector` binds to `InboundTrackMonitor` and is registered
 only for the kind it judges — the video classes are constructed only for video
 tracks, the audio classes only for audio ones — so the `kind` guards inside
@@ -329,7 +332,8 @@ Four of those keys are new in 4.9.0. Two were renamed because the key spelled a
 different word from the detector it configures: `videoFreezesDetector` became
 `inboundVideoFlowStateDetector`, and `syntheticSamplesDetector` became
 `audioPlayoutSynthesisDetector`. The other two followed their classes:
-`audioConcealmentDetector` became `inventedSpeechDetector`, and
+`audioConcealmentDetector` became `inventedSpeechDetector` (renamed again to
+`concealedSamplesDetector` in 4.10.0), and
 `audioDesyncDetector` became `avDesyncPlayoutDetector`. Unlike the first two, neither of
 those carries any of the old fields, because the detector behind each was
 replaced rather than renamed — see [Audio — continuity](#audio--continuity) and
@@ -340,9 +344,12 @@ anyway the detector runs on its defaults.
 The detector `name` strings, which are what `detectors.disable()` /
 `enable()` / `getByName()` take, are `pixelated-video-detector`,
 `inbound-video-flow-state-detector`,
-`invented-speech-detector`, `audio-playout-synthesis-detector`,
-`av-desync-playout-detector` and `jitter-buffer-stress-detector`. Two of them are new in
-4.9.0: `audio-concealment-detector` became `invented-speech-detector` and
+`concealed-samples-detector`, `audio-interruption-detector`,
+`audio-playout-synthesis-detector`, `av-desync-playout-detector` and
+`jitter-buffer-stress-detector`. `audio-interruption-detector` is new in 4.10.0, and
+`invented-speech-detector` became `concealed-samples-detector` in the same release,
+unaliased. Two were new in 4.9.0: `audio-concealment-detector` became
+`invented-speech-detector` and
 `audio-desync-detector` became `av-desync-playout-detector`, in both cases because the
 class behind the name was replaced. Like every other retired name neither is
 aliased — `disable('audio-desync-detector')` returns `false` rather than silently
@@ -592,7 +599,7 @@ both fail on the same ground:
 
 - **A concealment-derived intelligibility score.** Concealment is *continuity* —
   the sound had holes, and NetEQ papered over them — and it is already owned,
-  one sub-layer down as `invented-speech`. Recomputing
+  one sub-layer down as `concealed-samples`. Recomputing
   it with a different threshold and calling the result clarity would be one
   condition wearing two names, which is exactly what the
   [known deviations](./DETECTOR_TAXONOMY.md#known-deviations) list exists to
@@ -615,124 +622,183 @@ goes.
 
 **Question.** Is the sound whole, or is the listener hearing holes in it?
 
-### `InventedSpeechDetector` — `invented-speech`
+### `ConcealedSamplesDetector` — `concealed-samples`
 
-**What it detects.** A listener being fed audio the sender never sent, for long
-enough to be the thing behind a "they were breaking up" complaint. When packets
-are missing or late NetEQ does not fall silent; it fabricates audio from what
-came before so playout never stops. That is usually the right trade and usually
-inaudible, which is exactly why packet loss is a poor proxy for how a call
-sounded: Opus and NetEQ hide a great deal of loss perfectly, and audio falls
-apart without dramatic loss when the jitter buffer misbehaves. What the listener
-hears is the fabrication, so that is what this measures — and why this and
+**What it detects.** A dense run of **short concealment gaps** on one inbound
+audio stream — the choppy, warbling or robotic speech behind a "they were
+breaking up" complaint. When packets are missing or late NetEQ does not fall
+silent; it conceals the gap from what came before so playout never stops. That
+is usually the right trade and usually inaudible, which is exactly why packet
+loss is a poor proxy for how a call sounded: Opus and NetEQ hide a great deal of
+loss perfectly, and audio falls apart without dramatic loss when the jitter
+buffer misbehaves. This measures the concealment itself — and is why this and
 `transport-loss-sustained` are different findings rather than two readings of
 one.
 
-**Signals.** `inboundRtp.inventedSpeechRatio`, and `deltaTime` to integrate it
-over. The ratio is `undefined` when the browser reports no concealment counters
-or when no samples arrived this interval, and the detector treats that as an
-abstention rather than as zero.
+**Signals.** `inboundRtp.nonSilentConcealedRatio`, and `deltaTime` to integrate it
+over; `concealmentEventRate` rides along in the payload. The ratio is
+`undefined` when the browser reports no concealment counters or when no samples
+arrived this interval, and the detector treats that as an abstention rather
+than as zero.
 
-**Only audible invention counts.** `concealedSamples` climbs through ordinary
-silence too — NetEQ has nothing to reproduce and the fabrication comes out as
-silence or comfort noise nobody could distinguish from the real thing — so
-`silentConcealedSamples` is subtracted on the monitor before the ratio is
-formed:
+**Only non-silent concealment counts.** `silentConcealedSamples` is subtracted on
+the monitor before the ratio is formed:
 
 ```
-inventedSpeechRatio = max(0, ΔconcealedSamples − ΔsilentConcealedSamples)
-                      ÷ ΔtotalSamplesReceived
+nonSilentConcealedRatio = max(0, ΔconcealedSamples − ΔsilentConcealedSamples)
+                        ÷ ΔtotalSamplesReceived
 ```
 
-That subtraction is what keeps every quiet moment of every call from reading as
-a fault, and the spec pins it: 5000 concealed samples of which 5000 are silent
-move nothing.
+libwebrtc counts a concealed sample as silent when NetEQ's expansion is fully
+muted or the last decoded frame was comfort noise. Two quite different things
+land there:
+
+- **DTX silence.** Comfort noise between DTX frames. Without the subtraction
+  every quiet moment of every call would read as a fault; the spec pins it —
+  5000 concealed samples of which 5000 are silent move nothing.
+- **The tail of every long gap.** NetEQ fades its concealment out: the mute
+  slope steepens on the 3rd and 7th consecutive expand, and the mute factor
+  reaches zero after roughly 60–120 ms depending on the signal. Everything
+  concealed after that is silent too.
+
+The second is a **hard limit on what this detector can see**: each concealment
+event contributes at most ~100 ms to the ratio however long the gap lasts. A
+two-second dropout reads as ~100 ms here and then nothing. Dropouts are
+[`AudioInterruptionDetector`](#audiointerruptiondetector--audio-interruption)'s
+finding; the two are complements.
 
 **The accumulator.** One number, in milliseconds, is the whole of the detector's
-state. Each tick contributes `inventedSpeechRatio × deltaTime` milliseconds of
-invention and is credited `allowedInventedRatio × deltaTime` of tolerance; the
-difference moves the accumulator, clamped between zero and
-`raiseAfterInventedMs`. Above the allowance it fills, below it drains.
+state. Each tick contributes `nonSilentConcealedRatio × deltaTime` milliseconds and
+is credited `allowedConcealedRatio × deltaTime` of tolerance; the difference
+moves the accumulator, clamped between zero and `raiseAfterConcealedMs`. Above
+the allowance it fills, below it drains.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `allowedInventedRatio` | `0.05` | share of audio that may be invented without counting against the stream — and, being the same number, the rate at which the accumulator drains |
-| `raiseAfterInventedMs` | `400` | invented milliseconds *beyond* the allowance that must accumulate before the issue is raised |
+| `allowedConcealedRatio` | `0.05` | share of audio that may be non-silent concealment without counting against the stream — and, being the same number, the rate at which the accumulator drains |
+| `raiseAfterConcealedMs` | `400` | non-silent concealed milliseconds *beyond* the allowance that must accumulate before the issue is raised |
 
-At the defaults that is 0.4 s of excess invention to open — two seconds of audio
-at 25% invented, or two collections at 20% — and, because the allowance is also
-the drain rate, `raiseAfterInventedMs / allowedInventedRatio` = 8 s of clean
-audio to close. The 5% comes from RFC 7294, which calls a second with more than
-5% concealment severely concealed.
+At the defaults that is 0.4 s beyond the allowance to open — two seconds of
+audio at 25%, or two collections at 20% — and, because the allowance is also the
+drain rate, `raiseAfterConcealedMs / allowedConcealedRatio` = 8 s of clean audio
+to close. The 5% comes from RFC 7294, which calls a second with more than 5%
+concealment severely concealed. Because each event is capped by the fade, 25%
+means at least two or three separate gaps every second: one 60 ms gap per second
+(6%) takes ~40 s to raise, three per second (18%) about 3 s. That is the shape
+of bursty Wi-Fi loss beyond what Opus in-band FEC recovers — frequent, not
+impossible — and `concealmentEventRate` in the payload tells a few longer gaps
+from constant micro-concealment.
 
-**It does not care how often you poll.** This is the property the design exists
-for, and the reason the class was rewritten in 4.9.0. The previous
-implementation classified each tick as bad or good against a threshold and then
-judged a ratio over a 15 s sliding window, which meant a bad second inside a
-five-second collection was averaged down by five and the detector's sensitivity
-moved with `collectingPeriodInMs`. Integrating a rate over elapsed time has no
-such artefact: the same audio produces the same accumulator trajectory at any
-collection period. The spec drives it directly — 4000 ms at 12.5% invented
-delivered as one tick and as two lands on the same accumulator, and the same
-finishing tick tips both over at the same moment.
+**It does not care how often you poll.** Integrating a rate over elapsed time
+has no tick-length artefact: the same audio produces the same accumulator
+trajectory at any collection period. The spec drives it directly — 4000 ms at
+12.5% delivered as one tick and as two lands on the same accumulator, and the
+same finishing tick tips both over at the same moment.
 
-**Brief pauses do not end an episode.** The second property, and the other half
-of the point. A clean tick drains only the allowance, so at the defaults a
-two-second gap costs a quarter of a full accumulator. Someone who breaks up,
-pauses for breath and breaks up again keeps accumulating rather than starting
-over, while genuinely recovered audio still closes the issue after about eight
-seconds. A long silence does drain it to empty and resolve — which is right,
-since there is no ongoing problem to report while nobody is speaking, and it
-reopens within seconds if they resume badly.
+**Brief pauses do not end an episode.** A clean tick drains only the allowance,
+so at the defaults a two-second gap costs a quarter of a full accumulator.
+Someone who breaks up, pauses for breath and breaks up again keeps accumulating
+rather than starting over, while genuinely recovered audio still closes the
+issue after about eight seconds.
 
-**Raise.** The accumulator reaches `raiseAfterInventedMs`. Payload:
-`peerConnectionId`, `trackId`, `inventedSpeechRatio` (the tick's own ratio, at
-the moment the issue was raised) and `excessInventedMs` (the accumulator, so a
-full `raiseAfterInventedMs`). The monitor event `invented-speech` carries the
-track monitor and the ratio.
+**Raise.** The accumulator reaches `raiseAfterConcealedMs`. Payload:
+`peerConnectionId`, `trackId`, `nonSilentConcealedRatio` (the tick's own ratio),
+`excessConcealedMs` (the accumulator, so a full `raiseAfterConcealedMs`) and
+`concealmentEventRate`. The monitor event `concealed-samples` carries the track
+monitor and the ratio.
 
 **Resolve.** The accumulator reaches zero (`audio recovered`), or a stand-down.
 
-**Stand-downs.** Consumer paused (`consumer paused`) and remote producer paused
-(`remote track paused`), both of which **discard the accumulator** rather than
-draining it — nothing is being sent, so there is nothing to invent, and a paused
-stretch must not leak into the next episode. That is the one case where the
-continuity property is deliberately switched off.
+**Stand-downs.** Track ended (`track ended`), consumer paused (`consumer
+paused`) and remote producer paused (`remote track paused`), all of which
+**discard the accumulator** rather than draining it, so a paused stretch does not
+leak into the next episode.
 
 **When the inputs are missing** the detector sets `inputsUnavailable` and
-abstains, leaving the accumulator where it was. A browser that omits
-`silentConcealedSamples` therefore reads as "I could not see whether anything is
-wrong" rather than as a healthy stream — see
+abstains, leaving the accumulator where it was — see
 [When inputs are missing](./DETECTOR_TAXONOMY.md#when-inputs-are-missing).
 
 **What the accumulator cannot tell you** is the shape of what filled it. One
-second at 25% invented and five seconds at 5% are both 200 ms of excess, and the
-detector cannot distinguish them; a listener probably could. That is the price
-of poll-independence, and it is the right trade for a finding with raise and
-resolve semantics rather than a severity number. Note also that resolving takes
-8 s of *stats time* at the defaults, so a `collectingPeriodInMs` longer than that
-would let a single clean tick drain a full accumulator in one step — the one
-configuration in which the continuity property quietly stops working.
+second at 25% and five seconds at 5% are both 200 ms of excess. That is the
+price of poll-independence. Resolving takes 8 s of *stats time* at the defaults,
+so a `collectingPeriodInMs` longer than that lets a single clean tick drain a
+full accumulator in one step.
 
-**False positives.** Invention measures the *receiver's* repair work, so a
+**False positives.** Concealment measures the *receiver's* repair work, so a
 listener whose own machine is starved of CPU produces the same signal as a bad
 network. Music and other non-speech audio conceals differently from speech, and
 the allowance is speech-derived.
 
 **What it deliberately does not claim.** Not intelligibility, which is
-[the empty sub-layer above](#audio--clarity). Not loss: the packets that never
-arrived are `transport-loss-sustained`'s subject, and the two co-fire or not
-independently — heavy loss with inaudible concealment is Opus working, and
-audible invention with no loss is the jitter buffer failing to hold a stream
-together. And not RFC 7294's per-second classifier, which it does not claim to
-be: it keeps the RFC's 5% meaning the same thing — the share of audio that was
-invented — but applies it as a sustained rate rather than a per-second verdict,
-because a cumulative counter sampled every few seconds cannot see inside a tick.
+[the empty sub-layer above](#audio--clarity). Not loss: heavy loss with
+inaudible concealment is Opus working, and concealment with no loss is the
+jitter buffer failing to hold a stream together. Not dropouts, for the reason
+above. And not RFC 7294's per-second classifier: it keeps the RFC's 5% but
+applies it as a sustained rate, because a cumulative counter sampled every few
+seconds cannot see inside a tick.
+
+### `AudioInterruptionDetector` — `audio-interruption`
+
+**What it detects.** **Audio dropouts** on one inbound audio stream: stretches of
+150 ms or longer where NetEQ had nothing to decode and the listener heard the
+voice cut out. This is the finding `ConcealedSamplesDetector` is structurally
+unable to make.
+
+**Signals.** Chromium's non-standard `inbound-rtp` members `interruptionCount`
+and `totalInterruptionDuration` (seconds), exposed on `InboundRtpMonitor` and
+differenced into `deltaInterruptionCount` and
+`deltaTotalInterruptionDurationInMs`. They are not in the sample schema. In
+libwebrtc every concealment event — silent part included — is measured when it
+ends (`StatisticsCalculator::EndExpandEvent`), and one of at least
+`kInterruptionLenMs = 150` ms counts as an interruption. Comfort noise during DTX
+is not expansion, so DTX silence does not produce interruptions.
+
+**Retrospective by nature.** The counters move when an interruption *ends*, so a
+dropout is credited whole to the collection in which audio came back. The
+detector reports what happened, not what is happening; a dropout still in
+progress is invisible until it finishes (and a stream that stops for good is
+`dry-inbound-track`'s subject).
+
+**The accumulator.** The same shape as its sibling. Each tick adds its
+interrupted milliseconds and drains `allowedInterruptedRatio × deltaTime`,
+clamped between zero and `raiseAfterInterruptedMs`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `allowedInterruptedRatio` | `0.02` | share of stream time that may be interrupted for free — and the drain rate |
+| `raiseAfterInterruptedMs` | `500` | interrupted milliseconds *beyond* the allowance that must accumulate before the issue is raised |
+
+At the defaults one ~0.5 s dropout, or two or three 150–300 ms ones within a
+few seconds, raises; a single 150 ms blip drains away. A full accumulator
+empties after `500 / 0.02` = 25 s without interruptions.
+
+**Raise.** Payload: `peerConnectionId`, `trackId`, and for the episode so far
+`interruptionCount`, `interruptedMs`, `avgInterruptionInMs` (one long dropout
+versus several short ones) and `excessInterruptedMs`. Updated as further
+interruptions land. The monitor event `audio-interruption` carries the track
+monitor, `interruptionCount` and `interruptedMs`.
+
+**Resolve.** The accumulator reaches zero (`audio recovered`), or a stand-down.
+
+**Stand-downs, and the pause problem.** To NetEQ a paused producer *is* a
+dropout: packets stop, it conceals, and when audio returns the whole paused
+stretch is recorded as one interruption. So besides discarding the accumulator
+on track ended, consumer paused and remote track paused, the detector drops the
+interrupted time on the collection in which received audio resumes after such a
+stand-down. A remote pause the application does not declare through
+`remoteOutboundTrackPaused` cannot be told apart and reads as a dropout.
+
+**Chromium only.** Firefox and WebKit report neither counter, so the detector
+sets `inputsUnavailable` there: no issue means no measurement, not health.
+
+**Score.** While open it charges `audioInterruptionSeverity` (the bucket fill,
+`0..1`) × `AUDIO_INTERRUPTION_MAX_CHARGE` (2), so the charge falls as the bucket
+drains rather than jumping back.
 
 ## Audio — naturalness
 
 **Question.** Is what comes out of the speaker real audio, or audio the browser
-invented?
+synthesized?
 
 ### `AudioPlayoutSynthesisDetector` — `synthesized-audio`
 
@@ -770,13 +836,13 @@ makes the two readings identical, which is why the discrepancy has survived; a
 threshold of `50` means fifty seconds of synthesized audio in one interval, not
 fifty milliseconds.
 
-**It raises `synthesized-audio` once the invented share crosses
+**It raises `synthesized-audio` once the synthesized share crosses
 `synthesizedRatioThreshold`.** A share of what was played rather than a duration
 per collection, which is what the earlier `minSynthesizedSamplesDuration: 0` got
 wrong: it reported on every tick that concealed anything at all, and its unit was
 seconds while the config documented milliseconds.
 
-It is priced alongside `invented-speech` rather than on top of it. The two are
+It is priced alongside `concealed-samples` rather than on top of it. The two are
 the same fault seen from two places — the stream that concealed, and the playout
 device that invented — so the pair is weighted so one episode is not charged
 twice.
@@ -985,8 +1051,8 @@ latent?
 **What it detects.** An audio jitter buffer fighting the network and losing. The
 user-visible failure is conversation that has gone latent and slightly warped —
 voices sped up or dragged out, replies landing on top of each other — rather
-than the dropouts `InventedSpeechDetector` covers. The two are complements:
-invented speech is what the buffer does when it has already run dry, and this is
+than the gaps `ConcealedSamplesDetector` and `AudioInterruptionDetector` cover. They
+are complements: concealment is what the buffer does when it has already run dry, and this is
 the buffer straining before it gets there.
 
 **Signals.** `inboundRtp.jitterBufferTargetDelayInMs` (what NetEQ is currently
@@ -1078,7 +1144,8 @@ with no network involvement at all.
 | Visual — smoothness | `video-flow-disrupted` (`state: 'choppy'`) | `InboundVideoFlowStateDetector` | `video-flow-disrupted` |
 | Visual — continuity | `video-flow-disrupted` | `InboundVideoFlowStateDetector` | `video-flow-disrupted` |
 | Audio — clarity | *(none — by design)* | — | — |
-| Audio — continuity | `invented-speech` | `InventedSpeechDetector` | `invented-speech` |
+| Audio — continuity | `concealed-samples` | `ConcealedSamplesDetector` | `concealed-samples` |
+| Audio — continuity | `audio-interruption` | `AudioInterruptionDetector` | `audio-interruption` |
 | Audio — naturalness | *(none — recorded intention)* | `AudioPlayoutSynthesisDetector` | `synthesized-audio` |
 | Synchronization | `av-desync` | `AVDesyncPlayoutDetector` | `av-desync` |
 | Responsiveness | `audio-jitter-buffer-stress` | `JitterBufferStressDetector` | `audio-jitter-buffer-stress` |
@@ -1087,7 +1154,7 @@ Every issue here is keyed per track — `<issue-type>-track-<track.id>` — beca
 the experience is per track: one participant's video can be frozen while
 everyone else's is fine, and an issue keyed per peer connection could not say
 which. That key format is also, unfortunately, reconstructed as a string literal
-inside `DefaultScoreCalculator` for two of the audio issues — `invented-speech`
+inside `DefaultScoreCalculator` for two of the audio issues — `concealed-samples`
 and `audio-jitter-buffer-stress`, the second of them twice; see
 [known deviations](./DETECTOR_TAXONOMY.md#known-deviations).
 
@@ -1136,11 +1203,13 @@ The same pattern holds across every boundary this category has:
 - **Against Connectivity.** Perceived quality issues on a call that also raised
   `unstable-ice-path` say the reselections are audible; on a call that raised
   nothing in Connectivity they say the path is fine and something else is wrong.
-- **Against Transport Quality.** `invented-speech` with
+- **Against Transport Quality.** `concealed-samples` with
   `transport-loss-sustained` is loss the listener heard;
   `transport-loss-sustained` without it is loss Opus successfully hid, which is
-  a different and much less urgent finding. `invented-speech` *without* loss
-  points at the buffer rather than the wire.
+  a different and much less urgent finding. `concealed-samples` *without* loss
+  points at the buffer rather than the wire. `audio-interruption` with
+  `transport-loss-sustained` is a burst outage on the path; without it, a stall
+  upstream of the wire (a sender or SFU that stopped forwarding) or a local one.
 - **Against Pipeline Disruption.** `video-flow-disrupted` with `stuck-decoder`
   names the component; `video-flow-disrupted` alone means the freeze is real and
   the break is upstream of anything this endpoint can see. A `choppy` verdict with
@@ -1219,7 +1288,7 @@ guess past this horizon is strongest exactly where the subject is a human
 experience.
 
 **Perception is not in the stats.** Nearly every value here is a proxy. Bits per
-pixel is a proxy for blockiness, invented speech is a proxy for audible holes,
+pixel is a proxy for blockiness, non-silent concealment is a proxy for audible holes,
 and a deep buffer plus stretching is a proxy for a conversation that has gone
 latent. Each proxy is defensible and each has a documented failure mode, listed
 with its detector. The playout skew behind `av-desync` is the one value in the
@@ -1250,8 +1319,9 @@ exists so that "nothing is wrong" and "I could not see whether anything is wrong
 are distinguishable from outside — see
 [When inputs are missing](./DETECTOR_TAXONOMY.md#when-inputs-are-missing). In
 this category `PixelatedVideoDetector`, `InboundVideoFlowStateDetector`,
-`InventedSpeechDetector` and `AVDesyncPlayoutDetector` set it — the last two gained it
-in 4.9.0. `InventedSpeechDetector` was the case the flag was written for: a
+`ConcealedSamplesDetector`, `AVDesyncPlayoutDetector` and `AudioInterruptionDetector`
+set it — the middle two gained it in 4.9.0, the last is new in 4.10.0 and, being
+Chromium-only, is dark on every other browser. `ConcealedSamplesDetector` was the case the flag was written for: a
 browser omitting `silentConcealedSamples` used to silence the detector
 permanently and invisibly. `AVDesyncPlayoutDetector` is the case that makes it
 unavoidable, because for that class silence is the *normal* state on much of a

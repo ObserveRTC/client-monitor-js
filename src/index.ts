@@ -60,7 +60,8 @@ export type {
     IceRestartEventPayload,
     IceRestartRecommendedEventPayload,
     IcePathEstablishmentSlowEventPayload,
-    InventedSpeechEventPayload,
+    ConcealedSamplesEventPayload,
+    AudioInterruptionEventPayload,
     AudioJitterBufferStressEventPayload,
     VideoDecoderOverloadedEventPayload,
     VideoRecoveryFailedEventPayload,
@@ -131,9 +132,12 @@ export type { CpuPerformanceIssuePayload } from './detectors/CpuPerformanceDetec
 export type { DryInboundTrackIssuePayload } from './detectors/DryInboundTrackDetector';
 export type { DryOutboundTrackIssuePayload } from './detectors/DryOutboundTrackDetector';
 export type { PlayoutDiscrepancyIssuePayload } from './detectors/PlayoutDiscrepancyDetector';
-export { InventedSpeechDetector } from './detectors/InventedSpeechDetector';
-export type { InventedSpeechDetectorConfig } from './detectors/InventedSpeechDetector';
-export type { InventedSpeechIssuePayload } from './detectors/InventedSpeechDetector';
+export { ConcealedSamplesDetector } from './detectors/ConcealedSamplesDetector';
+export type { ConcealedSamplesDetectorConfig } from './detectors/ConcealedSamplesDetector';
+export type { ConcealedSamplesIssuePayload } from './detectors/ConcealedSamplesDetector';
+export { AudioInterruptionDetector } from './detectors/AudioInterruptionDetector';
+export type { AudioInterruptionDetectorConfig } from './detectors/AudioInterruptionDetector';
+export type { AudioInterruptionIssuePayload } from './detectors/AudioInterruptionDetector';
 export { JitterBufferStressDetector } from './detectors/JitterBufferStressDetector';
 export type { JitterBufferStressDetectorConfig } from './detectors/JitterBufferStressDetector';
 export type { JitterBufferStressIssuePayload } from './detectors/JitterBufferStressDetector';

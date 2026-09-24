@@ -119,9 +119,9 @@ describe('InboundRtpMonitor derived fields', () => {
 		expect(monitor.bitrate).toBeUndefined();
 	});
 
-	// Silence inflates `concealedSamples`; without the subtraction every quiet
+	// DTX silence inflates `concealedSamples`; without the subtraction every quiet
 	// call would read as badly degraded.
-	it('excludes silent concealment from the invented speech ratio', () => {
+	it('excludes silent concealment from the non-silent concealed ratio', () => {
 		const monitor = inbound('audio', {
 			totalSamplesReceived: 0,
 			concealedSamples: 0,
@@ -141,8 +141,48 @@ describe('InboundRtpMonitor derived fields', () => {
 			concealmentEvents: 4,
 		} as any);
 
-		expect(monitor.inventedSpeechRatio).toBeCloseTo(2000 / 96000);
+		expect(monitor.nonSilentConcealedRatio).toBeCloseTo(2000 / 96000);
 		expect(monitor.concealmentEventRate).toBeCloseTo(2);
+	});
+
+	// Chromium's non-standard interruption counters are not in the schema, so they
+	// are read off the raw report; `totalInterruptionDuration` is in seconds.
+	it('derives interruptions from Chromium\'s non-standard counters', () => {
+		const monitor = inbound('audio', {
+			interruptionCount: 1,
+			totalInterruptionDuration: 0.2,
+		} as any);
+
+		monitor.accept({
+			id: 'in-1',
+			timestamp: 3000,
+			ssrc: 1,
+			kind: 'audio',
+			trackIdentifier: 'track-1',
+			interruptionCount: 3,
+			totalInterruptionDuration: 1.4,
+		} as any);
+
+		expect(monitor.interruptionCount).toBe(3);
+		expect(monitor.deltaInterruptionCount).toBe(2);
+		expect(monitor.deltaTotalInterruptionDurationInMs).toBeCloseTo(1200);
+	});
+
+	it('leaves interruptions undefined where the browser does not report them', () => {
+		const monitor = inbound('audio', { totalSamplesReceived: 0 });
+
+		monitor.accept({
+			id: 'in-1',
+			timestamp: 3000,
+			ssrc: 1,
+			kind: 'audio',
+			trackIdentifier: 'track-1',
+			totalSamplesReceived: 96000,
+		} as any);
+
+		expect(monitor.interruptionCount).toBeUndefined();
+		expect(monitor.deltaInterruptionCount).toBeUndefined();
+		expect(monitor.deltaTotalInterruptionDurationInMs).toBeUndefined();
 	});
 
 	it('derives jitter buffer delay per emitted sample', () => {

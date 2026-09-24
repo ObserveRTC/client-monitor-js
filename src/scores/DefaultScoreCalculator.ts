@@ -107,13 +107,20 @@ export class DefaultScoreCalculator {
 	public static DECODE_BUDGET_SATURATION = 1.0;
 
 	/**
-	 * How full `InventedSpeechDetector`'s bucket is, `1` being its raise point. The ramp exists so
+	 * What an open `audio-interruption` costs at its raise point: the voice cutting out is worse
+	 * than choppy audio, so it is priced above the 0–1 concealment charges. The charge follows the
+	 * detector's bucket as it drains, so the score recovers with the audio rather than jumping back.
+	 */
+	public static AUDIO_INTERRUPTION_MAX_CHARGE = 2;
+
+	/**
+	 * How full `ConcealedSamplesDetector`'s bucket is, `1` being its raise point. The ramp exists so
 	 * inbound audio is not a flat 5.0 right up to the collection the detector speaks on: audio that
 	 * keeps filling the bucket and draining it again is audibly worse than audio that never does.
 	 * The activation keeps ordinary concealment out of it.
 	 */
-	public static INVENTED_SPEECH_ACTIVATION = 0.25;
-	public static INVENTED_SPEECH_SATURATION = 1.0;
+	public static CONCEALED_SAMPLES_ACTIVATION = 0.25;
+	public static CONCEALED_SAMPLES_SATURATION = 1.0;
 
 	/** Inter-arrival jitter, the one path property no detector thresholds. */
 	public static JITTER_ACTIVATION_IN_MS = 30;
@@ -308,17 +315,22 @@ export class DefaultScoreCalculator {
 			hasIssues = true;
 		}
 
-		if (activeIssues.hasType('invented-speech')) {
-			subtractions['invented-speech'] = normalizedClamp(trackMonitor.getInboundRtp()?.inventedSpeechRatio);
+		if (activeIssues.hasType('concealed-samples')) {
+			subtractions['concealed-samples'] = normalizedClamp(trackMonitor.getInboundRtp()?.nonSilentConcealedRatio);
 			hasIssues = true;
-		} else if (trackMonitor.inventedSpeechSeverity !== undefined) {
+		} else if (trackMonitor.concealedSamplesSeverity !== undefined) {
 			const penalty = this._normalizedPenalty(
-				trackMonitor.inventedSpeechSeverity,
-				DefaultScoreCalculator.INVENTED_SPEECH_ACTIVATION,
-				DefaultScoreCalculator.INVENTED_SPEECH_SATURATION,
+				trackMonitor.concealedSamplesSeverity,
+				DefaultScoreCalculator.CONCEALED_SAMPLES_ACTIVATION,
+				DefaultScoreCalculator.CONCEALED_SAMPLES_SATURATION,
 			);
 
 			if (0 < penalty) subtractions['unstable-audio-playout'] = penalty;
+		}
+		if (activeIssues.hasType('audio-interruption')) {
+			subtractions['audio-interruption'] = normalizedClamp(trackMonitor.audioInterruptionSeverity)
+				* DefaultScoreCalculator.AUDIO_INTERRUPTION_MAX_CHARGE;
+			hasIssues = true;
 		}
 		if (activeIssues.hasType('synthesized-audio')) {
 			subtractions['synthesized-audio'] = normalizedClamp(trackMonitor.synthesizedAudioRatio);
