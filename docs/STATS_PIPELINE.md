@@ -343,7 +343,7 @@ Monitors incoming media tracks with attached detectors:
 **Detectors:**
 
 -   `DryInboundTrackDetector` and `CodecChangeDetector` (any kind)
--   Audio: `AVDesyncPlayoutDetector`, `InventedSpeechDetector`, `JitterBufferStressDetector`
+-   Audio: `AVDesyncPlayoutDetector`, `ConcealedSamplesDetector`, `JitterBufferStressDetector`
 -   Video: `InboundVideoFlowStateDetector`, `VideoRecoveryFailedDetector`, `PlayoutDiscrepancyDetector`, `DecoderBottleneckDetector`, `DecoderPerformanceDetector`, `StuckDecoderDetector`, `VideoResolutionChangeDetector`, `FrameAssemblyStalledDetector`, `PixelatedVideoDetector`
 
 Which of them are constructed depends on the matching config keys; see [Detectors](./DETECTORS.md#detectors).

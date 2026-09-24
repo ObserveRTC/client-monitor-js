@@ -264,10 +264,18 @@ export type InboundVideoPlayoutDiscrepancyEventPayload = ClientMonitorBaseEvent 
 	trackMonitor: InboundTrackMonitor,
 }
 
-export type InventedSpeechEventPayload = ClientMonitorBaseEvent & {
+export type ConcealedSamplesEventPayload = ClientMonitorBaseEvent & {
 	trackMonitor: InboundTrackMonitor,
-	/** Share of the interval's audio that was invented rather than transmitted, in `0..1`. */
-	inventedSpeechRatio: number,
+	/** Share of the interval's received audio that was non-silent concealment, in `0..1`. */
+	nonSilentConcealedRatio: number,
+}
+
+export type AudioInterruptionEventPayload = ClientMonitorBaseEvent & {
+	trackMonitor: InboundTrackMonitor,
+	/** Interruptions (concealment events of 150 ms or longer) that ended during the episode so far. */
+	interruptionCount: number,
+	/** Their total duration, in milliseconds. */
+	interruptedMs: number,
 }
 
 export type AudioJitterBufferStressEventPayload = ClientMonitorBaseEvent & {
@@ -501,7 +509,8 @@ export type ClientMonitorEvents = {
 	'no-available-ice-candidate': [NoAvailableIceCandidateEventPayload],
 	'rtp-sender-stalled': [RtpSenderStalledEventPayload],
 	'transport-demux-stalled': [TransportDemuxStalledEventPayload],
-	'invented-speech': [InventedSpeechEventPayload],
+	'concealed-samples': [ConcealedSamplesEventPayload],
+	'audio-interruption': [AudioInterruptionEventPayload],
 	'audio-jitter-buffer-stress': [AudioJitterBufferStressEventPayload],
 	'transport-delay-degraded': [TransportDelayDegradedEventPayload],
 	'transport-loss-sustained': [TransportLossSustainedEventPayload],

@@ -76,8 +76,8 @@ export type AudioPlayoutSynthesisDetectorConfig = {
  * as `getInboundRtp().getMediaPlayout()`. Several tracks can share one device, so on a call with
  * several talkers the same concealment is reported against each of their tracks — which is the
  * honest reading, because every one of those streams is what the listener heard through it.
- * `InventedSpeechDetector` sits alongside on the same track and answers a narrower question: how
- * much of *that stream* was invented. This one answers what the output device did.
+ * `ConcealedSamplesDetector` sits alongside on the same track and answers a narrower question: how
+ * much of *that stream* was non-silent concealment. This one answers what the output device did.
  *
  * Both counters reach it through `InboundTrackMonitor.slicedWindow`, which carries the
  * playout totals alongside the track's own so every detector on the track judges the same stretch.

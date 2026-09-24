@@ -365,7 +365,8 @@ Three rules hold across all of them:
 | `AVDesyncPlayoutDetector` | `av-desync` | `avDesyncPlayoutDetector` |
 | `AudioPlayoutSynthesisDetector` | `synthesized-audio` | `audioPlayoutSynthesisDetector` |
 | `InboundVideoFlowStateDetector` | `video-flow-disrupted` | `inboundVideoFlowStateDetector` |
-| `InventedSpeechDetector` | `invented-speech` | `inventedSpeechDetector` |
+| `AudioInterruptionDetector` | `audio-interruption` | `audioInterruptionDetector` |
+| `ConcealedSamplesDetector` | `concealed-samples` | `concealedSamplesDetector` |
 | `JitterBufferStressDetector` | `audio-jitter-buffer-stress` | `jitterBufferStressDetector` |
 | `PixelatedVideoDetector` | `pixelated-video` | `pixelatedVideoDetector` |
 

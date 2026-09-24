@@ -1,23 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { InventedSpeechDetector } from "../../src/detectors/InventedSpeechDetector";
+import { ConcealedSamplesDetector } from "../../src/detectors/ConcealedSamplesDetector";
 import { MockClientMonitor, MockInboundTrackMonitor } from "../helpers/detectorMocks";
 
 const CONFIG = {
-	allowedInventedRatio: 0.05,
-	raiseAfterInventedMs: 400,
+	allowedConcealedRatio: 0.05,
+	raiseAfterConcealedMs: 400,
 };
 
 function setup(kind: 'audio' | 'video' = 'audio') {
 	const trackMonitor = new MockInboundTrackMonitor(kind);
 	const clientMonitor = trackMonitor.getPeerConnection().parent as MockClientMonitor;
 
-	clientMonitor.config.inventedSpeechDetector = { ...CONFIG };
+	clientMonitor.config.concealedSamplesDetector = { ...CONFIG };
 
-	const detector = new InventedSpeechDetector(trackMonitor as any);
+	const detector = new ConcealedSamplesDetector(trackMonitor as any);
 
 	/**
-	 * One collection tick: `ratio` of this interval's audio was invented rather
-	 * than transmitted, over `deltaTime` milliseconds of the stream's own clock.
+	 * One collection tick: `ratio` of this interval's received audio was
+	 * non-silent concealment, over `deltaTime` milliseconds of the stream's own clock.
 	 * The accumulator integrates the rate over that clock and never over the wall
 	 * clock, so a spec that wants time to pass says so here.
 	 */
@@ -25,13 +25,14 @@ function setup(kind: 'audio' | 'video' = 'audio') {
 		trackMonitor.setInboundRtp({
 			kind,
 			deltaTime,
-			inventedSpeechRatio: ratio,
+			nonSilentConcealedRatio: ratio,
+			concealmentEventRate: 3,
 		});
 		detector.update();
 	};
 
 	/**
-	 * At the defaults a 2000ms tick at 20% invented contributes 400 − 100 = 300ms,
+	 * At the defaults a 2000ms tick at 20% non-silent concealment contributes 400 − 100 = 300ms,
 	 * so two of them fill the 400ms accumulator and raise.
 	 */
 	const raise = () => {
@@ -48,30 +49,30 @@ function setup(kind: 'audio' | 'video' = 'audio') {
  * here so a spec can state its case in samples where that is what it is about; the
  * derivation itself belongs to the monitor and is covered in DerivedFields.spec.
  */
-const inventedRatioOf = (total: number, concealed: number, silent = 0) =>
+const nonSilentConcealedRatioOf = (total: number, concealed: number, silent = 0) =>
 	Math.max(0, concealed - silent) / total;
 
-describe('InventedSpeechDetector', () => {
+describe('ConcealedSamplesDetector', () => {
 	it('is named after the fault it reports', () => {
 		const { detector } = setup();
 
-		expect(detector.name).toBe('invented-speech-detector');
+		expect(detector.name).toBe('concealed-samples-detector');
 	});
 
-	it('stays silent on a stream inventing less than the allowance', () => {
+	it('stays silent on a stream concealing less than the allowance', () => {
 		const { clientMonitor, tick } = setup();
 
-		// NetEQ always fabricates a little; 1% of the audio is under the 5% the
+		// NetEQ always conceals a little; 1% of the audio is under the 5% the
 		// allowance grants and drains as fast as it arrives.
 		for (let i = 0; i < 10; ++i) tick(0.01);
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
 
-	it('raises once the invention beyond the allowance fills the accumulator', () => {
+	it('raises once concealment beyond the allowance fills the accumulator', () => {
 		const { clientMonitor, tick } = setup();
 
-		// 2000ms at 20% invented is 400ms of invention against 100ms of allowance:
+		// 2000ms at 20% is 400ms of non-silent concealment against 100ms of allowance:
 		// +300, which is not yet the 400 the config asks for.
 		tick(0.2);
 
@@ -79,21 +80,23 @@ describe('InventedSpeechDetector', () => {
 
 		tick(0.2);
 
-		const issue = clientMonitor.issueOfType('invented-speech');
+		const issue = clientMonitor.issueOfType('concealed-samples');
 
 		expect(issue).toBeDefined();
-		expect(issue?.payload.inventedSpeechRatio).toBeCloseTo(0.2);
-		expect(issue?.payload.excessInventedMs).toBeCloseTo(400);
-		expect(clientMonitor.emittedOf('invented-speech')).toHaveLength(1);
+		expect(issue?.payload.nonSilentConcealedRatio).toBeCloseTo(0.2);
+		expect(issue?.payload.excessConcealedMs).toBeCloseTo(400);
+		expect(issue?.payload.concealmentEventRate).toBeCloseTo(3);
+		expect(clientMonitor.emittedOf('concealed-samples')).toHaveLength(1);
 	});
 
-	// The whole point of the metric: `concealedSamples` rises during ordinary
-	// silence, so without subtracting the silent part every quiet call would look
-	// broken. Half this interval was concealed and none of it was audible.
-	it('does not count concealment the listener could not hear', () => {
+	// `concealedSamples` rises through DTX comfort noise and through the faded-out
+	// tail of any long gap, both counted as silent. Half this interval was concealed
+	// and all of it silent, so this detector sees nothing — a long dropout is
+	// AudioInterruptionDetector's finding, not this one's.
+	it('does not count silent concealment', () => {
 		const { clientMonitor, tick } = setup();
 
-		for (let i = 0; i < 10; ++i) tick(inventedRatioOf(10000, 5000, 5000));
+		for (let i = 0; i < 10; ++i) tick(nonSilentConcealedRatioOf(10000, 5000, 5000));
 
 		expect(clientMonitor.getIssues()).toHaveLength(0);
 	});
@@ -156,7 +159,7 @@ describe('InventedSpeechDetector', () => {
 	// threshold and added its whole duration, so its sensitivity moved with
 	// `collectingPeriodInMs`.
 	it('reaches the same accumulator however the same audio is split across ticks', () => {
-		// 4000ms at 12.5% invented: 500ms of invention against 200ms of allowance,
+		// 4000ms at 12.5%: 500ms of non-silent concealment against 200ms of allowance,
 		// so +300 either way — short of the 400 that raises.
 		const asOneTick = setup();
 
@@ -176,9 +179,9 @@ describe('InventedSpeechDetector', () => {
 		asOneTick.tick(0.15, 1000);
 		asTwoTicks.tick(0.15, 1000);
 
-		expect(asOneTick.clientMonitor.issueOfType('invented-speech')?.payload.excessInventedMs)
+		expect(asOneTick.clientMonitor.issueOfType('concealed-samples')?.payload.excessConcealedMs)
 			.toBeCloseTo(400);
-		expect(asTwoTicks.clientMonitor.issueOfType('invented-speech')?.payload.excessInventedMs)
+		expect(asTwoTicks.clientMonitor.issueOfType('concealed-samples')?.payload.excessConcealedMs)
 			.toBeCloseTo(400);
 	});
 
@@ -198,8 +201,8 @@ describe('InventedSpeechDetector', () => {
 		expect(detector.inputsUnavailable).toBe(false);
 	});
 
-	// Invention is judged over the stream's own time. A collector that was away for
-	// ten minutes did not listen to ten minutes of fabricated audio.
+	// Concealment is judged over the stream's own time. A collector that was away for
+	// ten minutes did not listen to ten minutes of concealed audio.
 	it('raises nothing when only wall-clock time passes', () => {
 		jest.useFakeTimers();
 		jest.setSystemTime(1_000);
@@ -230,7 +233,7 @@ describe('InventedSpeechDetector', () => {
 	});
 
 	// A pause is not clean audio, so the accumulator is thrown away rather than
-	// drained: nothing invented before the pause counts towards the next episode.
+	// drained: nothing concealed before the pause counts towards the next episode.
 	it('closes an open episode when the consumer pauses, and starts the next one from empty', () => {
 		const { clientMonitor, trackMonitor, tick, raise } = setup();
 

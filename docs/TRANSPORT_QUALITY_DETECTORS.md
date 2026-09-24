@@ -799,10 +799,10 @@ quality one, read the connectivity issue first: the lowest category that fired i
 the diagnosis.
 
 **Above: Perceived Quality.** The clearest pairing in the whole taxonomy is
-`transport-loss-sustained` and `invented-speech`. `TransportLossDetector`
-measures packets not arriving, on the peer connection. `InventedSpeechDetector`
-measures the jitter buffer fabricating audio to cover what did not arrive, on one
-inbound audio track. One is the cause and lives on the path; the other is the
+`transport-loss-sustained` and `concealed-samples`. `TransportLossDetector`
+measures packets not arriving, on the peer connection. `ConcealedSamplesDetector`
+measures the jitter buffer concealing short gaps in what did not arrive, on one
+inbound audio track (long dropouts are `audio-interruption`). One is the cause and lives on the path; the other is the
 symptom and lives in the user's ear.
 
 **They are not a chain, and that is the point.** Neither detector reads the

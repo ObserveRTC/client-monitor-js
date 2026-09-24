@@ -41,7 +41,8 @@ export type JitterBufferStressDetectorConfig = {
 /**
  * Reports an inbound track's audio jitter buffer fighting the network and losing — conversation gone
  * latent and slightly warped, voices sped up or dragged out. Use it to tell straining apart from a
- * buffer that has already run dry and is fabricating audio, which `InventedSpeechDetector` covers.
+ * buffer that has already run dry and is concealing, which `ConcealedSamplesDetector` (short gaps) and
+ * `AudioInterruptionDetector` (dropouts) cover.
  *
  * A finding means the path is delivering unevenly enough that the buffer has to grow and warp
  * audio to cover it — congestion, a wireless link, or a route with variable queuing. The listener

@@ -88,7 +88,8 @@ describe('InboundTrackMonitor contentType', () => {
         stuckDecoderDetector: null,
         videoResolutionChangeDetector: null,
         avDesyncPlayoutDetector: null,
-        inventedSpeechDetector: null,
+        concealedSamplesDetector: null,
+        audioInterruptionDetector: null,
         jitterBufferStressDetector: null,
     };
 

@@ -82,7 +82,8 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     //  is pipeline-disruption and lives in its own two detectors, listed above)
     'pixelated-video-detector': 'perceived-quality',
     'inbound-video-flow-state-detector': 'perceived-quality',
-    'invented-speech-detector': 'perceived-quality',
+    'concealed-samples-detector': 'perceived-quality',
+    'audio-interruption-detector': 'perceived-quality',
     'av-desync-playout-detector': 'perceived-quality',
     'jitter-buffer-stress-detector': 'perceived-quality',
     'audio-playout-synthesis-detector': 'perceived-quality',
@@ -160,7 +161,8 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     // 4 — Perceived Quality (docs/PERCEIVED_QUALITY_DETECTORS.md)
     'pixelated-video-detector': 'Visual — clarity',
     'inbound-video-flow-state-detector': 'Visual — continuity',
-    'invented-speech-detector': 'Audio — continuity',
+    'concealed-samples-detector': 'Audio — continuity',
+    'audio-interruption-detector': 'Audio — continuity',
     'audio-playout-synthesis-detector': 'Audio — naturalness',
     'av-desync-playout-detector': 'Synchronization',
     'jitter-buffer-stress-detector': 'Responsiveness',
