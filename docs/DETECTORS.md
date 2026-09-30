@@ -22,7 +22,8 @@ Configuration follows one convention everywhere: omit a detector's config key to
 
 | Detector | Watches | Reports | Good for |
 |---|---|---|---|
-| [`InventedSpeechDetector`](#inventedspeechdetector) | inbound audio | issue `invented-speech` | How the audio actually *sounded* — catches degradation packet loss numbers miss |
+| [`ConcealedSamplesDetector`](#concealedsamplesdetector) | inbound audio | issue `concealed-samples` | Choppy audio from dense short concealment gaps — degradation packet loss numbers miss |
+| [`AudioInterruptionDetector`](#audiointerruptiondetector) | inbound audio | issue `audio-interruption` | Dropouts of 150 ms and longer — the voice cutting out (Chromium only) |
 | [`JitterBufferStressDetector`](#jitterbufferstressdetector) | inbound audio | issue `audio-jitter-buffer-stress` | The jitter buffer adding latency *and* stretching audio — delay the user hears |
 | [`AVDesyncPlayoutDetector`](#avdesyncplayoutdetector) | inbound audio + its linked video | issue `av-desync` | Lip sync: the two tracks of one participant playing out at different points in the sender's timeline |
 | [`AudioPlayoutSynthesisDetector`](#audioplayoutsynthesisdetector) | audio playout | event `synthesized-audio` | The playout device injecting synthesized audio |
@@ -185,7 +186,8 @@ In case shrinking down the sample size is something your application wants, the 
 | `PixelatedVideoDetector` | `pixelated-video` | **Yes** | `inbound-rtp` `bytesReceived`, `frameWidth`, `frameHeight`, `framesPerSecond` — but the screen-share and pause guards are not sampled |
 | `FrameAssemblyStalledDetector` | `frame-assembly-stalled` | **Yes** (approx.) | `inbound-rtp` `packetsReceived` vs `framesReceived`; the pause and background guards are not sampled |
 | `AVDesyncPlayoutDetector` | `av-desync` | No | joins `estimatedPlayoutTimestamp` across two `inbound-rtp` reports, and the pairing between them is application-declared context that never reaches the sample |
-| `InventedSpeechDetector` | `invented-speech` | **Yes** | `inbound-rtp` `concealedSamples`, `silentConcealedSamples`, `totalSamplesReceived` |
+| `ConcealedSamplesDetector` | `concealed-samples` | **Yes** | `inbound-rtp` `concealedSamples`, `silentConcealedSamples`, `totalSamplesReceived` |
+| `AudioInterruptionDetector` | `audio-interruption` | No | Chromium's non-standard `inbound-rtp` `interruptionCount`, `totalInterruptionDuration`, which the sample schema does not carry |
 | `JitterBufferStressDetector` | `audio-jitter-buffer-stress` | **Yes** (approx.) | `inbound-rtp` jitter-buffer totals; the consecutive-tick nuance is lost |
 | `AudioPlayoutSynthesisDetector` | event only | **Yes** | `media-playout` synthesized-sample totals |
 | `PlayoutDiscrepancyDetector` | `inbound-video-playout-discrepancy` | **Yes** | `inbound-rtp` `framesReceived` vs `framesRendered` |
@@ -216,37 +218,63 @@ In case shrinking down the sample size is something your application wants, the 
 
 ## Audio detectors
 
-> Three of these four are **Perceived Quality** — invented speech, jitter-buffer stress and desync are continuously-measured perceptual values judged over an accumulator or a window, and so is `AudioPlayoutSynthesisDetector` despite emitting only an event. Full reference, including why the audio-clarity sub-layer is deliberately empty and what each proxy cannot claim: [docs/PERCEIVED_QUALITY_DETECTORS.md](./PERCEIVED_QUALITY_DETECTORS.md).
+> These are **Perceived Quality** — concealment, interruptions, jitter-buffer stress and desync are continuously-measured perceptual values judged over an accumulator or a window, and so is `AudioPlayoutSynthesisDetector` despite emitting only an event. Full reference, including why the audio-clarity sub-layer is deliberately empty and what each proxy cannot claim: [docs/PERCEIVED_QUALITY_DETECTORS.md](./PERCEIVED_QUALITY_DETECTORS.md).
 
-### InventedSpeechDetector
+### ConcealedSamplesDetector
 
-Reports a listener being fed audio the sender never sent. When packets are missing or late, NetEQ fabricates audio from what came before so playout never stops — usually inaudibly, which is why packet loss is a poor proxy for how a call sounded. What the listener hears is the fabrication, so that is what this measures: the **audible** invented share (silent concealment subtracted, because concealment during talker silence is indistinguishable from the real thing).
+Reports a dense run of **short concealment gaps** on one inbound audio stream — choppy, warbling or robotic speech. When packets are missing or late, NetEQ conceals the gap from what came before so playout never stops, which is why packet loss is a poor proxy for how a call sounded. This measures `nonSilentConcealedRatio`: `concealedSamples − silentConcealedSamples`, over `totalSamplesReceived`.
 
-One accumulator, in milliseconds, is the whole of it. Each tick adds `inventedSpeechRatio × deltaTime` of invention and drains `allowedInventedRatio × deltaTime` of allowance, clamped to `[0, raiseAfterInventedMs]`; the issue opens when it is full and closes when it is empty. Two properties follow, and both are the point: **the verdict does not depend on how often you poll** — a rate integrated over elapsed time has no tick-length artefact — and **a brief pause does not end an episode**, since a clean tick drains only the allowance. Someone who breaks up, pauses for breath and breaks up again is one issue, not three.
+**It is blind to long dropouts, by construction.** NetEQ fades its concealment to silence within roughly 60–120 ms of consecutive expansion, and from then on counts every concealed sample as `silentConcealedSamples` — the same bucket as DTX comfort noise, which is why the subtraction is needed at all. Each concealment event therefore adds at most ~100 ms to this ratio however long the gap lasts. Dropouts are [`AudioInterruptionDetector`](#audiointerruptiondetector)'s finding.
 
-**Use the result:** show a "poor audio from X" indicator on the affected participant's tile. Server-side, the issue lifecycle gives you exact audible-degradation windows per participant.
+One accumulator, in milliseconds, is the whole of it. Each tick adds `nonSilentConcealedRatio × deltaTime` and drains `allowedConcealedRatio × deltaTime` of allowance, clamped to `[0, raiseAfterConcealedMs]`; the issue opens when it is full and closes when it is empty. **The verdict does not depend on how often you poll**, and **a brief pause does not end an episode**, since a clean tick drains only the allowance. Because each event is capped by the fade, reaching the raise point takes several gaps per second sustained over seconds — bursty loss beyond what Opus in-band FEC recovers. The payload's `concealmentEventRate` tells a few longer gaps from constant micro-concealment.
+
+**Use the result:** show a "poor audio from X" indicator on the affected participant's tile. Server-side, the issue lifecycle gives you exact choppy-audio windows per participant.
 
 ```javascript
-inventedSpeechDetector: {
-    allowedInventedRatio: 0.05, // share that may be invented without counting — and the drain rate
-    raiseAfterInventedMs: 400,  // invented ms beyond the allowance before the issue opens
+concealedSamplesDetector: {
+    allowedConcealedRatio: 0.05, // share of non-silent concealment that is free — and the drain rate
+    raiseAfterConcealedMs: 400,  // non-silent concealed ms beyond the allowance before the issue opens
 }
-// At these defaults: 0.4s of excess invention opens it (two seconds of audio at
-// 25% invented), and raiseAfterInventedMs / allowedInventedRatio = 8s of clean
-// audio closes it.
+// At these defaults: 0.4s beyond the allowance opens it (two seconds of audio at
+// 25%), and raiseAfterConcealedMs / allowedConcealedRatio = 8s of clean audio closes it.
 ```
 
 ```typescript
-monitor.on('invented-speech', ({ trackMonitor, inventedSpeechRatio }) => {
-    // the user is HEARING this — mark the participant's tile
-    ui.setAudioQualityWarning(trackMonitor.track.id, { rate: inventedSpeechRatio });
+monitor.on('concealed-samples', ({ trackMonitor, nonSilentConcealedRatio }) => {
+    ui.setAudioQualityWarning(trackMonitor.track.id, { rate: nonSilentConcealedRatio });
 });
 monitor.on('issue-resolved', (issue) => {
-    if (issue.type === 'invented-speech') ui.clearAudioQualityWarning(/* by key */);
+    if (issue.type === 'concealed-samples') ui.clearAudioQualityWarning(/* by key */);
 });
 ```
 
 **Sources:** [RFC 7294 §3.4 (severely concealed seconds)](https://www.rfc-editor.org/rfc/rfc7294#section-3.4) · [Voice quality monitoring (Webex)](https://help.webex.com/article/kqh7le/Voice-quality-monitoring) · [How WebRTC's NetEQ jitter buffer provides smooth audio (webrtcHacks)](https://webrtchacks.com/how-webrtcs-neteq-jitter-buffer-provides-smooth-audio/) · [W3C webrtc-stats](https://www.w3.org/TR/webrtc-stats/)
+
+### AudioInterruptionDetector
+
+Reports **audio dropouts**: stretches of 150 ms or longer where NetEQ had nothing to decode and the listener heard the voice cut out. libwebrtc counts every concealment event of at least 150 ms, silent part included, as an *interruption* and Chromium exposes them on audio `inbound-rtp` as the non-standard `interruptionCount` and `totalInterruptionDuration`. They are the dropouts `ConcealedSamplesDetector` cannot see.
+
+The counters advance when an interruption **ends**, so the finding is retrospective: a dropout is credited whole to the collection in which audio came back. Each tick adds its interrupted milliseconds to one accumulator and drains `allowedInterruptedRatio × deltaTime`, clamped to `[0, raiseAfterInterruptedMs]`. One ~0.5 s dropout, or a few 150–300 ms ones close together, raises; a single 150 ms blip does not.
+
+A pause is a dropout NetEQ cannot tell from a fault, so while the consumer or remote producer is paused — and on the collection in which received audio resumes after it — interrupted time is discarded. Declare remote pauses with `remoteOutboundTrackPaused`, or they read as dropouts.
+
+**Chromium only.** Elsewhere it reports `inputsUnavailable`: no issue means no measurement, not health.
+
+```javascript
+audioInterruptionDetector: {
+    allowedInterruptedRatio: 0.02, // share of time that may be interrupted for free — and the drain rate
+    raiseAfterInterruptedMs: 500,  // interrupted ms beyond the allowance before the issue opens
+}
+// A full accumulator empties after 500 / 0.02 = 25s without interruptions.
+```
+
+```typescript
+monitor.on('audio-interruption', ({ trackMonitor, interruptionCount, interruptedMs }) => {
+    ui.setAudioDropoutWarning(trackMonitor.track.id, { interruptionCount, interruptedMs });
+});
+```
+
+**Sources:** [libwebrtc `StatisticsCalculator::EndExpandEvent` (`kInterruptionLenMs = 150`)](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_coding/neteq/statistics_calculator.cc) · [libwebrtc NetEQ `Expand` muting](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_coding/neteq/expand.cc)
 
 ### JitterBufferStressDetector
 

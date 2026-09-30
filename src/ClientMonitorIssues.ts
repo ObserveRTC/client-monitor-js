@@ -11,7 +11,8 @@ import { IceTransportStalledIssuePayload } from "./detectors/IceTransportStalled
 import { UnstableIcePathIssuePayload } from "./detectors/UnstableIcePathDetector";
 import { IceEstablishmentFailedIssuePayload } from "./detectors/IceEstablishmentFailedDetector";
 import { PlayoutDiscrepancyIssuePayload } from "./detectors/PlayoutDiscrepancyDetector";
-import { InventedSpeechIssuePayload } from "./detectors/InventedSpeechDetector";
+import { ConcealedSamplesIssuePayload } from "./detectors/ConcealedSamplesDetector";
+import { AudioInterruptionIssuePayload } from "./detectors/AudioInterruptionDetector";
 import { JitterBufferStressIssuePayload } from "./detectors/JitterBufferStressDetector";
 import { DecoderPerformanceIssuePayload } from "./detectors/DecoderPerformanceDetector";
 import { VideoRecoveryFailedIssuePayload } from "./detectors/VideoRecoveryFailedDetector";
@@ -55,7 +56,8 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
     | RaisedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
     | RaisedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' }
-    | RaisedClientIssue<InventedSpeechIssuePayload>         & { type: 'invented-speech' }
+    | RaisedClientIssue<ConcealedSamplesIssuePayload>         & { type: 'concealed-samples' }
+    | RaisedClientIssue<AudioInterruptionIssuePayload>        & { type: 'audio-interruption' }
     | RaisedClientIssue<JitterBufferStressIssuePayload>    & { type: 'audio-jitter-buffer-stress' }
     | RaisedClientIssue<DecoderPerformanceIssuePayload>    & { type: 'video-decoder-overloaded' }
     | RaisedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
@@ -99,7 +101,8 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<IceDisconnectedIssuePayload>       & { type: 'ice-disconnected' }
     | ResolvedClientIssue<IceConnectionFailedIssuePayload>   & { type: 'ice-connection-failed' }
     | ResolvedClientIssue<IceTransportStalledIssuePayload>   & { type: 'ice-transport-stalled' }
-    | ResolvedClientIssue<InventedSpeechIssuePayload>         & { type: 'invented-speech' }
+    | ResolvedClientIssue<ConcealedSamplesIssuePayload>         & { type: 'concealed-samples' }
+    | ResolvedClientIssue<AudioInterruptionIssuePayload>        & { type: 'audio-interruption' }
     | ResolvedClientIssue<JitterBufferStressIssuePayload>    & { type: 'audio-jitter-buffer-stress' }
     | ResolvedClientIssue<DecoderPerformanceIssuePayload>    & { type: 'video-decoder-overloaded' }
     | ResolvedClientIssue<VideoRecoveryFailedIssuePayload>   & { type: 'video-recovery-failed' }
@@ -148,7 +151,8 @@ export function isClientMonitorIssue(
         case 'ice-disconnected':
         case 'ice-connection-failed':
         case 'ice-transport-stalled':
-        case 'invented-speech':
+        case 'concealed-samples':
+        case 'audio-interruption':
         case 'synthesized-audio':
         case 'congestion':
         case 'audio-jitter-buffer-stress':

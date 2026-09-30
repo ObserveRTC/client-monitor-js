@@ -154,7 +154,8 @@ console.log(inboundRtp.deltaCorruptionProbability); // Frame corruption change
 console.log(inboundRtp.deltaTime);                  // Elapsed time for calculations (ms)
 
 // Audio concealment and jitter buffer (the "how did it sound" set)
-console.log(inboundRtp.inventedSpeechRatio);        // Share of the interval NetEQ invented — silence excluded
+console.log(inboundRtp.nonSilentConcealedRatio);        // (concealed − silentConcealed) / received — short gaps only
+console.log(inboundRtp.deltaTotalInterruptionDurationInMs); // ms of ≥150 ms dropouts that ended this interval (Chromium)
 console.log(inboundRtp.concealmentEventRate);       // Concealment events per second
 console.log(inboundRtp.timeStretchRate);            // Share of samples NetEQ stretched or compressed
 console.log(inboundRtp.avgJitterBufferDelayInMs);   // Latency the buffer actually added, per sample

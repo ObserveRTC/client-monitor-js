@@ -1,3 +1,4 @@
+import type { SdpDescriptionInput } from "./monitors/SdpMonitor";
 import { ExtensionStat,
     ClientSample,
     ClientEvent as ClientSampleClientEvent,
@@ -375,11 +376,19 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 // The stretch both verdicts are measured over is the track's shared window, not a
                 // duration here: see `inboundTrackWindow`.
             }),
-            inventedSpeechDetector: detectorDefault(monitorConfig.inventedSpeechDetector, {
-                // Share of concealed audio tolerated before it counts against the budget.
-                allowedInventedRatio: 0.05,
-                // Invented audio beyond the allowance, in ms, that opens the issue.
-                raiseAfterInventedMs: 400,
+            concealedSamplesDetector: detectorDefault(monitorConfig.concealedSamplesDetector, {
+                // Share of non-silent concealed audio tolerated before it counts against the budget.
+                allowedConcealedRatio: 0.05,
+                // Non-silent concealed audio beyond the allowance, in ms, that opens the issue.
+                raiseAfterConcealedMs: 400,
+            }),
+            audioInterruptionDetector: detectorDefault(monitorConfig.audioInterruptionDetector, {
+                // Share of time that may be spent interrupted for free; also the drain rate, so a
+                // full accumulator empties after 25 s without interruptions.
+                allowedInterruptedRatio: 0.02,
+                // Interrupted ms beyond the allowance that opens the issue: one ~0.5 s dropout,
+                // or a few 150–300 ms ones close together.
+                raiseAfterInterruptedMs: 500,
             }),
             audioPlayoutSynthesisDetector: detectorDefault(monitorConfig.audioPlayoutSynthesisDetector, {
                 // A share of what was played, not a duration per collection. The previous
@@ -693,6 +702,42 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public getPeerConnectionMonitor(peerConnectionId: string): PeerConnectionMonitor | undefined {
         return this.mappedPeerConnections.get(peerConnectionId);
+    }
+
+    /**
+     * Hands a local session description to the peer connection's {@link SdpMonitor}: it is added to
+     * the next sample as `LOCAL_SDP` metadata and read into the peer connection's SDP-derived fields
+     * (`negotiationRole`, `receivingAudioDtx`, `negotiatedAudioCodecs`, ...). Call it after
+     * `setLocalDescription` resolved, with `pc.localDescription` or the description you set.
+     *
+     * Returns `false` when no peer connection is monitored under that id, the monitor is closed, or
+     * the description carried nothing new (no SDP, a rollback, or identical to the previous one).
+     */
+    public acceptLocalDescription(peerConnectionId: string, description: SdpDescriptionInput): boolean {
+        return this._acceptDescription('local', peerConnectionId, description);
+    }
+
+    /** The remote counterpart of {@link acceptLocalDescription}; reported as `REMOTE_SDP`. */
+    public acceptRemoteDescription(peerConnectionId: string, description: SdpDescriptionInput): boolean {
+        return this._acceptDescription('remote', peerConnectionId, description);
+    }
+
+    private _acceptDescription(side: 'local' | 'remote', peerConnectionId: string, description: SdpDescriptionInput): boolean {
+        if (this.closed) return false;
+
+        const peerConnection = this.mappedPeerConnections.get(peerConnectionId);
+
+        if (!peerConnection) {
+            this.logger.warn(`[${MODULE_NAME}]:`, `Cannot accept ${side} description: no PeerConnectionMonitor with id ${peerConnectionId}`);
+
+            return false;
+        }
+
+        const accepted = side === 'local'
+            ? peerConnection.sdp.acceptLocalDescription(description)
+            : peerConnection.sdp.acceptRemoteDescription(description);
+
+        return accepted !== undefined;
     }
 
     /**

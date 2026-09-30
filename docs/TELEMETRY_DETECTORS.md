@@ -154,7 +154,7 @@ either one here would put a genuine finding somewhere nobody looks for findings.
 | Class | Category | Why it is not Telemetry |
 |---|---|---|
 | `IcePathEstablishmentDetector` | Connectivity, layer 3 | "Establishment is taking a long time" is not yet a claim that establishment *failed* — that claim is a separate class with a separate threshold, `IceEstablishmentFailedDetector`, raising `ice-establishment-failed`. The event-only shape here is the design, not a gap. Documented in [CONNECTIVITY_DETECTORS.md](./CONNECTIVITY_DETECTORS.md#layer-3--path-establishment) |
-| `AudioPlayoutSynthesisDetector` | Perceived Quality | It would **fail** the counterfactual test: a listener hearing invented speech across a sustained window is a fault worth raising. It is a Category 4 detector with a missing issue, not a fact about the session. Documented in [PERCEIVED_QUALITY_DETECTORS.md](./PERCEIVED_QUALITY_DETECTORS.md) |
+| `AudioPlayoutSynthesisDetector` | Perceived Quality | It would **fail** the counterfactual test: a listener hearing synthesized audio across a sustained window is a fault worth raising. It is a Category 4 detector with a missing issue, not a fact about the session. Documented in [PERCEIVED_QUALITY_DETECTORS.md](./PERCEIVED_QUALITY_DETECTORS.md) |
 
 Read the other way round, the rule also explains why two classes that *are*
 Telemetry are documented outside this file. `IceRestartDetector` and

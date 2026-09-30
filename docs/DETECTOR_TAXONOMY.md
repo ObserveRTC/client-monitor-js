@@ -92,7 +92,7 @@ Each category is one question, one detection shape, and one membership test.
 | **1 Connectivity** | Can this endpoint establish and keep the communication path the session needs? | A stage's proof of progress is missing altogether: ICE never nominated a pair; DTLS never completed | The subject is the path itself, and the failure is a stage that never completed or stopped holding |
 | **2 Transport Quality** | The path is established and stable — is it carrying traffic well enough? | A continuously-measured property of a *working* path is bad: round trip above 300 ms for six seconds; loss above 5% | Every stage completed, and the path is still the reason the call is bad |
 | **3 Pipeline Disruption** | Did the media chain stop somewhere, or do two adjacent components disagree? | A monotonic counter went flat, or two adjacent ones disagree: frames encode, no packets leave | You can name the boundary at which progress stopped |
-| **4 Perceived Quality** | Is what the user sees and hears degraded, badly enough and long enough to matter? | A perceptual value is severely degraded and *stays* degraded: 0.4 s of audio invented beyond the allowance, and not yet drained | Everything is still running, and it is still bad |
+| **4 Perceived Quality** | Is what the user sees and hears degraded, badly enough and long enough to matter? | A perceptual value is severely degraded and *stays* degraded: 0.4 s of non-silent concealment beyond the allowance, and not yet drained | Everything is still running, and it is still bad |
 | **5 Telemetry** | What is this session's shape, and what changed about it? | A fact changed, and no threshold on it would ever be right: the codec switched; the selected tuple moved | Would raising an issue here *ever* be the right thing to do? If no, it is Telemetry |
 
 Telemetry's test is deliberately counterfactual — *would it ever be right to*, not
@@ -148,7 +148,7 @@ classes emit only events; eight are Telemetry and two are not:
 | Class | Category | Why it is not Telemetry |
 |---|---|---|
 | `IcePathEstablishmentDetector` | Connectivity, layer 3 | "Establishment is taking a long time" is not yet a claim that establishment *failed*. That claim is a separate class with a separate threshold — `IceEstablishmentFailedDetector`, raising `ice-establishment-failed`. The event-only shape is the design, not a gap |
-| `AudioPlayoutSynthesisDetector` | Perceived Quality | It *fails* the counterfactual test: a listener hearing invented speech across a sustained window is a fault worth raising. A Category 4 detector with a missing issue, not a fact about the session |
+| `AudioPlayoutSynthesisDetector` | Perceived Quality | It *fails* the counterfactual test: a listener hearing synthesized audio across a sustained window is a fault worth raising. A Category 4 detector with a missing issue, not a fact about the session |
 
 Filing either under Telemetry would put a genuine finding somewhere nobody looks
 for findings.
@@ -220,10 +220,10 @@ makes the fact available without a detector in the way, and it is why the video
 quality and transport threshold detectors are each well under a hundred lines: they
 hold no window, no ring buffer and no statistics. As of 4.9.0 no detector
 re-derives a value the monitor also computes. The last two both stopped that
-release: `InventedSpeechDetector` had the better reason — it judged a ratio over a
+release: `ConcealedSamplesDetector` (then `InventedSpeechDetector`) had the better reason — it judged a ratio over a
 sliding window, and summing per-tick ratios is not the ratio of the sums — and its
 rewrite integrates a rate over elapsed time instead, so it now reads
-`inventedSpeechRatio` off the monitor; `AudioDesyncDetector` had the weaker one, a
+`nonSilentConcealedRatio` off the monitor; `AudioDesyncDetector` had the weaker one, a
 second normalization of the two NetEQ counters behind `timeStretchRate`, and was
 deleted outright.
 
@@ -481,12 +481,12 @@ one. `BlockedStunRequestsDetector` is the sharpest case, because its missing sta
 no substitute: without the candidate pair's `deltaResponsesReceived` (Firefox 142+)
 there is no proof the path still answers, so it declines to judge that transport rather
 than reading ICE's `connected` as consent — [design rule
-5](#5-a-detector-never-infers-the-raw-stats-it-needs) in its sharpest form. Eleven
+5](#5-a-detector-never-infers-the-raw-stats-it-needs) in its sharpest form. Twelve
 others set it for the measurement each depends on: `BlockedInboundMediaDetector`,
 `BlockedOutboundMediaDetector`, `CpuPerformanceDetector`, `TransportDelayDetector`,
 `TransportLossDetector`, `UplinkCongestionDetector`, `DownlinkCongestionDetector`,
-`PixelatedVideoDetector`, `InboundVideoFlowStateDetector`, `InventedSpeechDetector`
-and `AVDesyncPlayoutDetector`.
+`PixelatedVideoDetector`, `InboundVideoFlowStateDetector`, `ConcealedSamplesDetector`,
+`AudioInterruptionDetector` and `AVDesyncPlayoutDetector`.
 
 **`AVDesyncPlayoutDetector` is the clearest illustration of why the flag exists**, because
 for that class being unable to see is the *ordinary* state rather than the
@@ -508,12 +508,12 @@ sender is muted **is not** unavailable. That is *not applicable*, a different
 statement about a different thing: the detector could judge, and there is nothing to
 judge. Only a missing measurement sets the flag.
 
-Fourteen of the 46 classes set it, which is not enough — see
+Fifteen of the 47 classes set it, which is not enough — see
 [Known deviations](#known-deviations).
 
 ## The full map
 
-**46 detector classes, 37 issue types, 9 event-only classes.** One class, one
+**47 detector classes, 38 issue types, 9 event-only classes.** One class, one
 issue type — so within each table the class column and the issue column are the
 same list read twice, which is the point of the arrangement.
 
@@ -664,14 +664,15 @@ do not perceive ticks. **Aggressively pause-aware:** without stand-downs on paus
 mute and backgrounded tabs this would be the noisiest category rather than the most
 actionable.
 
-**6 classes, 6 issue types.** All bind to `InboundTrackMonitor` except
+**7 classes, 7 issue types.** All bind to `InboundTrackMonitor` except
 `AudioPlayoutSynthesisDetector`, which binds to `MediaPlayoutMonitor`. Perception
 happens at the receiver, so a sender-side detector reporting the far end's
 experience would be guessing.
 
 | Class | `name` | Raises | Sub-layer | Config key |
 |---|---|---|---|---|
-| `InventedSpeechDetector` | `invented-speech-detector` | `invented-speech` | Audio — continuity | `inventedSpeechDetector` |
+| `ConcealedSamplesDetector` | `concealed-samples-detector` | `concealed-samples` | Audio — continuity | `concealedSamplesDetector` |
+| `AudioInterruptionDetector` | `audio-interruption-detector` | `audio-interruption` | Audio — continuity | `audioInterruptionDetector` |
 | `AudioPlayoutSynthesisDetector` | `audio-playout-synthesis-detector` | `synthesized-audio` | Audio — naturalness | `audioPlayoutSynthesisDetector` |
 | `JitterBufferStressDetector` | `jitter-buffer-stress-detector` | `audio-jitter-buffer-stress` | Responsiveness | `jitterBufferStressDetector` |
 | `AVDesyncPlayoutDetector` | `av-desync-playout-detector` | `av-desync` | Synchronization | `avDesyncPlayoutDetector` |
@@ -755,7 +756,8 @@ became; every one of them now fails the lookup.
 | `ice-tuple-change-detector` | `ice-traversal-detector` (a straight rename) |
 | `no-available-ice-candidate-detector` | `ice-reachability-detector` |
 | `long-pc-connection-establishment-detector` | `ice-path-establishment-detector` |
-| `audio-concealment-detector` | `invented-speech-detector` (a straight rename, of a class rewritten around it) |
+| `audio-concealment-detector` | `invented-speech-detector` in 4.9.0 (a straight rename, of a class rewritten around it), then `concealed-samples-detector` in 4.10.0 |
+| `invented-speech-detector` | `concealed-samples-detector` (4.10.0; a straight rename, no alias) |
 | `audio-desync-detector` | `av-desync-playout-detector` (a different detector, measuring a different quantity — see below) |
 | `freezed-video-track-detector` | `inbound-video-flow-state-detector` (one class for the frozen and choppy verdicts; the issue became `video-flow-disrupted`) |
 | `blocked-transport-detector` | `blocked-inbound-media-detector`, `blocked-outbound-media-detector`, `blocked-stun-requests-detector` |
@@ -795,7 +797,8 @@ retired key fails to type-check rather than being silently ignored.
 | `videoRecoveryDetector` | `videoRecoveryFailedDetector` |
 | `videoFreezesDetector` | `inboundVideoFlowStateDetector` *(replacement — one detector for both the frozen and choppy verdicts)* |
 | `syntheticSamplesDetector` | `audioPlayoutSynthesisDetector` *(rename)* |
-| `audioConcealmentDetector` | `inventedSpeechDetector` *(rename — and a different shape; none of the four old fields has an equivalent)* |
+| `audioConcealmentDetector` | `inventedSpeechDetector` in 4.9.0 *(rename — and a different shape; none of the four old fields has an equivalent)*, then `concealedSamplesDetector` in 4.10.0 |
+| `inventedSpeechDetector` | `concealedSamplesDetector` *(4.10.0 rename: `allowedInventedRatio` → `allowedConcealedRatio`, `raiseAfterInventedMs` → `raiseAfterConcealedMs`)* |
 | `audioDesyncDetector` | `avDesyncPlayoutDetector` *(replacement — a skew in milliseconds, not a correction fraction; neither old field has an equivalent)* |
 | `freezedVideoTrackDetector` | `inboundVideoFlowStateDetector` *(as above; `frozenAfterInMs` and `minFreezeCountForChoppy` replace the old duration keys)* |
 | `synthesizedSamplesDetector` | `audioPlayoutSynthesisDetector` *(rename; same fields)* |
@@ -826,8 +829,17 @@ both in 4.9.0 and both for the same reason — the detector stopped measuring wh
 the old name claimed.
 
 `audio-concealment` became `invented-speech`, taking its monitor event, its payload
-type and its score reason with it: the finding is now the share of audio that was
-*invented*, not the share of samples that were concealed.
+type and its score reason with it: the finding became the share of audio that was
+concealed *audibly* (silent concealment subtracted), not the share of samples that
+were concealed.
+
+In 4.10.0 `invented-speech` became `concealed-samples`, again with its monitor event,
+payload type and score reason, and with no alias. The measurement is unchanged; the
+name is the one audio engineers recognise (`concealedSamples` /
+`silentConcealedSamples`), and "invented speech" overstated what it can see: NetEQ
+fades concealment to silence within ~60–120 ms, so every long dropout lands in
+`silentConcealedSamples` and is invisible to it. Those dropouts are the new
+`audio-interruption`.
 
 `audio-desync` became `av-desync`, taking the monitor event (`audio-desync-track` →
 `av-desync`) and the payload type (`AudioDesyncIssuePayload` → `AVDesyncPlayoutIssuePayload`)
@@ -903,14 +915,15 @@ Two consequences worth naming. A handful of charges still have no detector behin
 them — `dropped-video-frames`, `volatile-fps`, `blocky-video` and the rest of the
 continuous readings — and those live in the calculator alone, because a detector
 says nothing until its threshold is crossed and a merely mediocre call would
-otherwise read a flat 5.0. And in the other direction, 19 of the 37 issue types
+otherwise read a flat 5.0. And in the other direction, 19 of the 38 issue types
 carry no charge at all today; which of those is deliberate and which is a gap is
 [set out in that document](./SCORE_CALCULATIONS.md#what-it-does-not-charge).
 
-**Silence is still not readable across most of Perceived Quality.** Fourteen of the 46
-classes set `inputsUnavailable`, four of them in Category 4:
-`PixelatedVideoDetector`, `InboundVideoFlowStateDetector`, `InventedSpeechDetector`
-and `AVDesyncPlayoutDetector`, the last three added in 4.9.0.
+**Silence is still not readable across most of Perceived Quality.** Fifteen of the 47
+classes set `inputsUnavailable`, five of them in Category 4:
+`PixelatedVideoDetector`, `InboundVideoFlowStateDetector`, `ConcealedSamplesDetector`,
+`AVDesyncPlayoutDetector` (those three added in 4.9.0) and `AudioInterruptionDetector`
+(4.10.0).
 `JitterBufferStressDetector` and `AudioPlayoutSynthesisDetector` still return quietly
 when their counters are missing, so a browser omitting `jitterBufferTargetDelay`
 produces a permanently and invisibly silent detector. No telemetry detector sets it either, least defensibly

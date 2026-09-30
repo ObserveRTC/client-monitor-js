@@ -1,5 +1,6 @@
 import { Logger } from "./utils/logger";
-import type { InventedSpeechDetectorConfig } from "./detectors/InventedSpeechDetector";
+import type { ConcealedSamplesDetectorConfig } from "./detectors/ConcealedSamplesDetector";
+import type { AudioInterruptionDetectorConfig } from "./detectors/AudioInterruptionDetector";
 import type { AVDesyncPlayoutDetectorConfig } from "./detectors/AVDesyncPlayoutDetector";
 import type { BlockedStunRequestsDetectorConfig } from "./detectors/BlockedStunRequestsDetector";
 import type { BlockedOutboundMediaDetectorConfig } from "./detectors/BlockedOutboundMediaDetector";
@@ -518,12 +519,24 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     inboundVideoFlowStateDetector: InboundVideoFlowStateDetectorConfig | null;
 
     /**
-     * Configuration for `InventedSpeechDetector` — audio the listener heard as
-     * NetEQ's fabrication rather than as anything the sender transmitted.
+     * Configuration for `ConcealedSamplesDetector` — a dense run of short, audible
+     * concealment gaps (`concealedSamples − silentConcealedSamples`) on one inbound
+     * audio stream. Blind to long dropouts by construction; see
+     * `audioInterruptionDetector` for those.
      *
      * Pass `null` to disable the detector entirely.
      */
-    inventedSpeechDetector: InventedSpeechDetectorConfig | null;
+    concealedSamplesDetector: ConcealedSamplesDetectorConfig | null;
+
+    /**
+     * Configuration for `AudioInterruptionDetector` — audio dropouts of 150 ms and
+     * longer on one inbound audio stream, read from Chromium's non-standard
+     * `interruptionCount` / `totalInterruptionDuration`. Reports its inputs
+     * unavailable on browsers that do not expose them.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    audioInterruptionDetector: AudioInterruptionDetectorConfig | null;
 
     /**
      * Configuration for `AudioPlayoutSynthesisDetector` — audio the receiver had to
