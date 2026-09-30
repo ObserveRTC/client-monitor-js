@@ -47,6 +47,7 @@ import { BlockedInboundMediaDetector, BlockedInboundMediaIssuePayload } from "..
 import { StatsCollector } from "../collectors/StatsCollector";
 import { StatsAdapters } from "../adapters/StatsAdapters";
 import { SelectedIcePath } from "./SelectedIcePath";
+import { SdpMonitor } from "./SdpMonitor";
 import { sampledScoreReasons } from "../scores/utils";
 import {
 	CertificateStats,
@@ -429,6 +430,38 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	/** Extra data for the application only; not shipped to the server. */
 	public appData?: Record<string, unknown> | undefined;
 
+	/**
+	 * The local and remote session descriptions of this peer connection, fed through
+	 * `ClientMonitor.acceptLocalDescription` / `acceptRemoteDescription`. The fields below are what it
+	 * read out of them; every one is `undefined` until the descriptions that decide it were accepted.
+	 */
+	public readonly sdp: SdpMonitor;
+
+	// ---- from SDP (see `sdp`) ----
+	/** `offerer` or `answerer` in the last completed offer/answer exchange. */
+	public negotiationRole?: 'offerer' | 'answerer';
+	/** This endpoint's DTLS role, from the answer's `a=setup`. */
+	public dtlsRole?: 'client' | 'server';
+	/** The far end is ICE lite — typical of an SFU such as mediasoup. */
+	public remoteIceLite?: boolean;
+	public localIceLite?: boolean;
+	/** Every non-rejected media section is in one `a=group:BUNDLE`. */
+	public bundled?: boolean;
+	/** The primary (non-repair) codec of each negotiated audio / video section, deduplicated. */
+	public negotiatedAudioCodecs?: string[];
+	public negotiatedVideoCodecs?: string[];
+	/** The far end asked this endpoint to send Opus with DTX (`usedtx=1` in its description). */
+	public sendingAudioDtx?: boolean;
+	/** This endpoint asked the far end to send Opus with DTX. Inbound DTX silence is expected. */
+	public receivingAudioDtx?: boolean;
+	/** Opus in-band FEC requested on what this endpoint sends / receives (`useinbandfec=1`). */
+	public sendingAudioInbandFec?: boolean;
+	public receivingAudioInbandFec?: boolean;
+	/** RED (RFC 2198) is in a negotiated audio section's codec list. */
+	public audioRedNegotiated?: boolean;
+	/** A negotiated video section this endpoint sends on carries more than one simulcast layer. */
+	public sendingSimulcast?: boolean;
+
 	public constructor(
 		public readonly peerConnectionId: string,
 		public readonly statsCollector: StatsCollector,
@@ -438,6 +471,7 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	) {
 		super();
 		this.statsAdapters = new StatsAdapters(logger);
+		this.sdp = new SdpMonitor(this);
 		this.issues = new IssueRegistry<PeerConnectionIssues>(parent.activeIssues.asSink);
 		const windowConfig = parent.config.peerConnectionWindow;
 

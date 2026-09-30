@@ -7,6 +7,8 @@
 [![npm version](https://badge.fury.io/js/@observertc%2Fclient-monitor-js.svg)](https://badge.fury.io/js/@observertc%2Fclient-monitor-js)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+**Live demo:** [webrtc-observer.org](https://webrtc-observer.org/) — an example web page running the client monitor.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -108,6 +110,36 @@ monitor.addSource(transport);
 ```
 
 **Important**: When adding a mediasoup device, the monitor automatically hooks into the `newtransport` event to detect newly created transports. However, transports created before adding the device must be added manually.
+
+### Session Descriptions (SDP)
+
+The stats API does not say whether DTX, in-band FEC, RED or simulcast were negotiated, whether the far
+end is ICE lite, or which DTLS role this endpoint took. Hand the monitor the descriptions you applied
+and it reads them out:
+
+```javascript
+await pc.setLocalDescription(offer);
+monitor.acceptLocalDescription(peerConnectionId, pc.localDescription);
+
+await pc.setRemoteDescription(answer);
+monitor.acceptRemoteDescription(peerConnectionId, pc.remoteDescription);
+
+const pcMonitor = monitor.getPeerConnectionMonitor(peerConnectionId);
+pcMonitor.receivingAudioDtx;      // this endpoint asked the far end to send Opus with DTX
+pcMonitor.remoteIceLite;          // true behind an ICE-lite SFU
+pcMonitor.negotiatedAudioCodecs;  // ['audio/opus']
+pcMonitor.sdp.negotiatedMediaSections; // per mid: directions, codecs, DTX/FEC/RED, simulcast layers
+```
+
+For sources added with `addSource` this happens automatically: the `RTCPeerConnection` binding reads both
+descriptions on every `signalingstatechange`, and the mediasoup transport binding does the same on the
+transport's underlying connection (reached through mediasoup-client's private `handler._pc`; if a
+handler has none, the transport is still monitored, just without SDP).
+
+Each accepted description is also added to the next sample as `LOCAL_SDP` / `REMOTE_SDP` metadata
+(`payload: { peerConnectionId, type, sdp }`, with `a=ice-pwd` redacted). An identical repeat is
+ignored, as are rollbacks. The SDP-derived fields on `PeerConnectionMonitor` stay `undefined` until
+the descriptions that decide them were accepted; most need a completed offer/answer pair.
 
 ### Logger Integration
 
@@ -613,6 +645,9 @@ https://github.com/observertc/schemas. This release ships `ClientSample` **3.7.0
 
 > **[docs/EXAMPLES.md](./docs/EXAMPLES.md)** — end-to-end integrations, reacting to
 > issues, adaptive bitrate, sending samples to a server, and custom detectors.
+
+To see the monitor running in a browser, open the example page at
+[webrtc-observer.org](https://webrtc-observer.org/).
 
 ## Troubleshooting
 

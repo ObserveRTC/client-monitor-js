@@ -1,3 +1,4 @@
+import type { SdpDescriptionInput } from "./monitors/SdpMonitor";
 import { ExtensionStat,
     ClientSample,
     ClientEvent as ClientSampleClientEvent,
@@ -701,6 +702,42 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     public getPeerConnectionMonitor(peerConnectionId: string): PeerConnectionMonitor | undefined {
         return this.mappedPeerConnections.get(peerConnectionId);
+    }
+
+    /**
+     * Hands a local session description to the peer connection's {@link SdpMonitor}: it is added to
+     * the next sample as `LOCAL_SDP` metadata and read into the peer connection's SDP-derived fields
+     * (`negotiationRole`, `receivingAudioDtx`, `negotiatedAudioCodecs`, ...). Call it after
+     * `setLocalDescription` resolved, with `pc.localDescription` or the description you set.
+     *
+     * Returns `false` when no peer connection is monitored under that id, the monitor is closed, or
+     * the description carried nothing new (no SDP, a rollback, or identical to the previous one).
+     */
+    public acceptLocalDescription(peerConnectionId: string, description: SdpDescriptionInput): boolean {
+        return this._acceptDescription('local', peerConnectionId, description);
+    }
+
+    /** The remote counterpart of {@link acceptLocalDescription}; reported as `REMOTE_SDP`. */
+    public acceptRemoteDescription(peerConnectionId: string, description: SdpDescriptionInput): boolean {
+        return this._acceptDescription('remote', peerConnectionId, description);
+    }
+
+    private _acceptDescription(side: 'local' | 'remote', peerConnectionId: string, description: SdpDescriptionInput): boolean {
+        if (this.closed) return false;
+
+        const peerConnection = this.mappedPeerConnections.get(peerConnectionId);
+
+        if (!peerConnection) {
+            this.logger.warn(`[${MODULE_NAME}]:`, `Cannot accept ${side} description: no PeerConnectionMonitor with id ${peerConnectionId}`);
+
+            return false;
+        }
+
+        const accepted = side === 'local'
+            ? peerConnection.sdp.acceptLocalDescription(description)
+            : peerConnection.sdp.acceptRemoteDescription(description);
+
+        return accepted !== undefined;
     }
 
     /**

@@ -296,3 +296,8 @@ export type {
 // export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {
 //     return new ClientMonitor(config);
 // }
+
+export { SdpMonitor } from './monitors/SdpMonitor';
+export type { SdpDescription, SdpDescriptionInput, SdpNegotiatedMediaSection } from './monitors/SdpMonitor';
+export { parseSdp } from './utils/sdp';
+export type { ParsedSdp, SdpMediaSection, SdpCodec, SdpDirection, SdpSetupRole } from './utils/sdp';

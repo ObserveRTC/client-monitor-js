@@ -1,5 +1,25 @@
 ## 4.10.0 (unreleased)
 
+### New: session descriptions — `SdpMonitor`
+
+`ClientMonitor.acceptLocalDescription(peerConnectionId, description)` and
+`acceptRemoteDescription(...)` hand an applied description to the peer connection's new
+`PeerConnectionMonitor.sdp` (`SdpMonitor`, which has the same two methods). Each accepted
+description is added to the sample as `LOCAL_SDP` / new `REMOTE_SDP` metadata, payload
+`{ peerConnectionId, type, sdp }` with `a=ice-pwd` redacted; identical repeats and rollbacks are
+ignored.
+
+What it reads is published on `PeerConnectionMonitor`: `negotiationRole`, `dtlsRole`,
+`remoteIceLite`, `localIceLite`, `bundled`, `negotiatedAudioCodecs`, `negotiatedVideoCodecs`,
+`sendingAudioDtx`, `receivingAudioDtx`, `sendingAudioInbandFec`, `receivingAudioInbandFec`,
+`audioRedNegotiated`, `sendingSimulcast`; per media section on
+`sdp.negotiatedMediaSections`. The parser (`parseSdp`) is exported. No new dependency.
+
+Sources feed it automatically: `RtcPeerConnectionBinding` and `MediasoupTransportBinding` read the
+connection's descriptions when bound and on every `signalingstatechange`. The mediasoup binding
+reaches the connection through mediasoup-client's private `transport.handler._pc`
+(`peerConnectionOfTransport`); a handler without one is monitored as before, without SDP.
+
 ### Breaking: `InventedSpeechDetector` renamed to `ConcealedSamplesDetector`
 
 "Concealed samples" is the term audio engineers recognise — it is what the W3C stats
