@@ -636,6 +636,7 @@ the call is bad, it says *where* it broke.
 | `EncoderBottleneckDetector` | `encoder-bottleneck-detector` | `encoder-bottleneck` | Send — frames to encoder | `encoderBottleneckDetector` |
 | `CaptureSourceLostDetector` | `capture-source-lost-detector` | `capture-source-lost` | Send — the source | `captureSourceLostDetector` |
 | `SilentAudioSourceDetector` | `silent-audio-source-detector` | `silent-audio-source` | Send — the source | `silentAudioSourceDetector` |
+| `LoopbackAudioInputDetector` | `loopback-audio-input-detector` | `loopback-audio-input` | Send — the source | `loopbackAudioInputDetector` |
 
 **Send — processing to encoder input, the boundary between the capture callback and
 the encoder, has no detector**, because no browser statistic sits there; its

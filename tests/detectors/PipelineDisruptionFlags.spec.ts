@@ -20,6 +20,7 @@ const FLAGS: Record<string, string> = {
 	PlayoutDiscrepancyDetector: 'playoutDiscrepancy',
 	RtpSenderStalledDetector: 'stalledRtpSender',
 	SilentAudioSourceDetector: 'silentAudioSource',
+	LoopbackAudioInputDetector: 'loopbackAudioInput',
 	VideoCaptureBottleneckDetector: 'degradedVideoCapture',
 	StuckDecoderDetector: 'stuckedDecoder',
 	TransportDemuxStalledDetector: 'stalledTransportDemux',

@@ -68,6 +68,7 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     'cpu-performance-detector': 'pipeline-disruption',
     'capture-source-lost-detector': 'pipeline-disruption',
     'silent-audio-source-detector': 'pipeline-disruption',
+    'loopback-audio-input-detector': 'pipeline-disruption',
     'video-capture-bottleneck-detector': 'pipeline-disruption',
     'encoder-bottleneck-detector': 'pipeline-disruption',
     'dry-outbound-track-detector': 'pipeline-disruption',
@@ -145,6 +146,7 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     // that belong to neither.
     'capture-source-lost-detector': 'Send — the source',
     'silent-audio-source-detector': 'Send — the source',
+    'loopback-audio-input-detector': 'Send — the source',
     'video-capture-bottleneck-detector': 'Send — capture to frame supply',
     'encoder-bottleneck-detector': 'Send — frames to encoder',
     'rtp-sender-stalled-detector': 'Send — encoder to RTP sender',

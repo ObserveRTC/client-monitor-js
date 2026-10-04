@@ -21,6 +21,7 @@ import { EncoderBottleneckIssuePayload } from "./detectors/EncoderBottleneckDete
 import { DecoderBottleneckIssuePayload } from "./detectors/DecoderBottleneckDetector";
 import { CaptureSourceLostIssuePayload } from "./detectors/CaptureSourceLostDetector";
 import { SilentAudioSourceIssuePayload } from "./detectors/SilentAudioSourceDetector";
+import { LoopbackAudioInputIssuePayload } from "./detectors/LoopbackAudioInputDetector";
 import { AudioPlayoutSynthesisIssuePayload } from "./detectors/AudioPlayoutSynthesisDetector";
 import { CongestionIssuePayload } from "./detectors/CongestionDetector";
 import { StuckDecoderIssuePayload } from "./detectors/StuckDecoderDetector";
@@ -66,6 +67,7 @@ export type ClientMonitorIssue =
     | RaisedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | RaisedClientIssue<CaptureSourceLostIssuePayload>     & { type: 'capture-source-lost' }
     | RaisedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
+    | RaisedClientIssue<LoopbackAudioInputIssuePayload>    & { type: 'loopback-audio-input' }
     | RaisedClientIssue<AudioPlayoutSynthesisIssuePayload>     & { type: 'synthesized-audio' }
     | RaisedClientIssue<CongestionIssuePayload>     & { type: 'congestion' }
     | RaisedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
@@ -111,6 +113,7 @@ export type ClientMonitorResolvedIssue =
     | ResolvedClientIssue<EncoderBottleneckIssuePayload>     & { type: 'encoder-bottleneck' }
     | ResolvedClientIssue<CaptureSourceLostIssuePayload>     & { type: 'capture-source-lost' }
     | ResolvedClientIssue<SilentAudioSourceIssuePayload>     & { type: 'silent-audio-source' }
+    | ResolvedClientIssue<LoopbackAudioInputIssuePayload>    & { type: 'loopback-audio-input' }
     | ResolvedClientIssue<AudioPlayoutSynthesisIssuePayload>     & { type: 'synthesized-audio' }
     | ResolvedClientIssue<CongestionIssuePayload>     & { type: 'congestion' }
     | ResolvedClientIssue<StuckDecoderIssuePayload>          & { type: 'stuck-decoder' }
@@ -163,6 +166,7 @@ export function isClientMonitorIssue(
         case 'encoder-bottleneck':
         case 'capture-source-lost':
         case 'silent-audio-source':
+        case 'loopback-audio-input':
         case 'stuck-decoder':
         case 'blocked-stun-requests':
         case 'blocked-outbound-media-transport':

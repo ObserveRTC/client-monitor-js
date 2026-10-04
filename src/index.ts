@@ -167,6 +167,9 @@ export type { CaptureTrackMutedDetectorConfig } from './detectors/CaptureTrackMu
 export { SilentAudioSourceDetector } from './detectors/SilentAudioSourceDetector';
 export type { SilentAudioSourceDetectorConfig } from './detectors/SilentAudioSourceDetector';
 export type { SilentAudioSourceIssuePayload } from './detectors/SilentAudioSourceDetector';
+export { LoopbackAudioInputDetector, DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS } from './detectors/LoopbackAudioInputDetector';
+export type { LoopbackAudioInputDetectorConfig } from './detectors/LoopbackAudioInputDetector';
+export type { LoopbackAudioInputIssuePayload } from './detectors/LoopbackAudioInputDetector';
 export { CodecChangeDetector } from './detectors/CodecChangeDetector';
 export type { CodecChangeDetectorConfig } from './detectors/CodecChangeDetector';
 export { VideoResolutionChangeDetector } from './detectors/VideoResolutionChangeDetector';
@@ -288,6 +291,9 @@ export type {
     RemoteInboundRtpStats,
     RemoteOutboundRtpStats,
 } from './schema/ClientSample';
+
+export { ClientMetaTypes } from './schema/ClientMetaTypes';
+export type { AudioInputDevice } from './schema/ClientMetaTypes';
 
 export type {
     Logger,

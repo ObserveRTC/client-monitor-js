@@ -38,6 +38,7 @@ import { ClientEventPayloadProvider } from './sources/ClientEventPayloadProvider
 import { IssueRegistry } from './utils/IssueRegistry';
 import { ExtensionStatsMonitor } from './monitors/ExtensionStatsMonitor';
 import { SliceConfig, SlicedWindow } from './utils/SlicedWindow';
+import { DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS } from './detectors/LoopbackAudioInputDetector';
 
 const MODULE_NAME = 'ClientMonitor';
 
@@ -302,6 +303,9 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
                 silenceThresholdInMs: 60000,
                 silenceRmsThreshold: 0.0001,
                 recoveryRmsThreshold: 0.0003,
+            }),
+            loopbackAudioInputDetector: detectorDefault(monitorConfig.loopbackAudioInputDetector, {
+                labelPatterns: [ ...DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS ],
             }),
             videoCaptureBottleneckDetector: detectorDefault(monitorConfig.videoCaptureBottleneckDetector, {
                 produceDegradationThreshold: 0.2,

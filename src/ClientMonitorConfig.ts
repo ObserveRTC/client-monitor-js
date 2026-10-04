@@ -36,6 +36,7 @@ import type { PixelatedVideoDetectorConfig } from "./detectors/PixelatedVideoDet
 import type { PlayoutDiscrepancyDetectorConfig } from "./detectors/PlayoutDiscrepancyDetector";
 import type { RtpSenderStalledDetectorConfig } from "./detectors/RtpSenderStalledDetector";
 import type { SilentAudioSourceDetectorConfig } from "./detectors/SilentAudioSourceDetector";
+import type { LoopbackAudioInputDetectorConfig } from "./detectors/LoopbackAudioInputDetector";
 import type { SimulcastLayerDetectorConfig } from "./detectors/SimulcastLayerDetector";
 import type { StatsGapDetectorConfig } from "./detectors/StatsGapDetector";
 import type { StuckDecoderDetectorConfig } from "./detectors/StuckDecoderDetector";
@@ -378,6 +379,15 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
      * Pass `null` to disable the detector entirely.
      */
     silentAudioSourceDetector: SilentAudioSourceDetectorConfig | null;
+
+    /**
+     * Configuration for `LoopbackAudioInputDetector` — an outbound audio track
+     * capturing from a loopback of the machine's own output (`Monitor of …`,
+     * `Stereo Mix`) instead of a microphone.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    loopbackAudioInputDetector: LoopbackAudioInputDetectorConfig | null;
 
     /**
      * Thresholds for `VideoCaptureBottleneckDetector` — the capture device falling

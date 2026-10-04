@@ -40,6 +40,7 @@ Configuration follows one convention everywhere: omit a detector's config key to
 | [`DecoderBottleneckDetector`](#decoderbottleneckdetector) | inbound video | issue `decoder-bottleneck` | Frames arrived and the decoder did not turn enough of them into pictures |
 | [`CaptureSourceLostDetector`](#capture-detectors) | outbound tracks | issue `capture-source-lost` | The capture device went away — unplugged, quit, stopped from the browser bar |
 | [`SilentAudioSourceDetector`](#capture-detectors) | outbound audio | issue `silent-audio-source` | A live, unmuted microphone producing nothing but digital silence |
+| [`LoopbackAudioInputDetector`](#capture-detectors) | outbound audio | issue `loopback-audio-input` | The microphone is a loopback of the machine's own output (`Monitor of …`, `Stereo Mix`), so the far end hears itself |
 | [`CaptureTrackMutedDetector`](#capture-detectors) | outbound tracks | event `capture-track-muted` / `CAPTURE_TRACK_MUTED` | The OS or another application took the device — a timestamp, not a fault |
 | [`UplinkCongestionDetector`](./CONNECTION_DETECTORS.md#uplinkcongestiondetector) | peer connection | issue `uplink-congestion` | The sending path is out of room — estimate collapsing with the pacer filling |
 | [`DownlinkCongestionDetector`](./CONNECTION_DETECTORS.md#downlinkcongestiondetector) | peer connection | issue `downlink-congestion` | The receiving path is out of room — arriving bitrate collapsing with the jitter buffer bloating |
