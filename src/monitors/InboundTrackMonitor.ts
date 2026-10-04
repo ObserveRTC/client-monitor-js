@@ -9,7 +9,8 @@ import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { InboundTrackSample } from "../schema/ClientSample";
 import { sampledScoreReasons } from "../scores/utils";
 import { PlayoutDiscrepancyDetector, PlayoutDiscrepancyIssuePayload } from "../detectors/PlayoutDiscrepancyDetector";
-import { InventedSpeechDetector, InventedSpeechIssuePayload } from "../detectors/InventedSpeechDetector";
+import { ConcealedSamplesDetector, ConcealedSamplesIssuePayload } from "../detectors/ConcealedSamplesDetector";
+import { AudioInterruptionDetector, AudioInterruptionIssuePayload } from "../detectors/AudioInterruptionDetector";
 import { JitterBufferStressDetector, JitterBufferStressIssuePayload } from "../detectors/JitterBufferStressDetector";
 import { DecoderPerformanceDetector, DecoderPerformanceIssuePayload } from "../detectors/DecoderPerformanceDetector";
 import { DecoderBottleneckDetector, DecoderBottleneckIssuePayload } from "../detectors/DecoderBottleneckDetector";
@@ -78,6 +79,8 @@ export type InboundTrackContext = {
 	 * a producer can be paused before this consumer is created.
 	 */
 	remoteOutboundTrackPaused?: boolean;
+
+	dtxMode?: boolean;
 }
 
 /**
@@ -163,6 +166,7 @@ export type InboundTrackWindowConfig = {
  * Only detectors that raise a *stateful* issue appear. `VideoResolutionChangeDetector` and `CodecChangeDetector` emit events and raise nothing, so they have no entry.
  */
 export type InboundTrackIssues = {
+	[AudioInterruptionDetector.ISSUE_TYPE]: AudioInterruptionIssuePayload,
 	[AudioPlayoutSynthesisDetector.ISSUE_TYPE]: AudioPlayoutSynthesisIssuePayload,
 	[AVDesyncPlayoutDetector.ISSUE_TYPE]: AVDesyncPlayoutIssuePayload,
 	[DecoderBottleneckDetector.ISSUE_TYPE]: DecoderBottleneckIssuePayload,
@@ -170,7 +174,7 @@ export type InboundTrackIssues = {
 	[DryInboundTrackDetector.ISSUE_TYPE]: DryInboundTrackIssuePayload,
 	[FrameAssemblyStalledDetector.ISSUE_TYPE]: FrameAssemblyStalledIssuePayload,
 	[InboundVideoFlowStateDetector.ISSUE_TYPE]: VideoFlowIssuePayload,
-	[InventedSpeechDetector.ISSUE_TYPE]: InventedSpeechIssuePayload,
+	[ConcealedSamplesDetector.ISSUE_TYPE]: ConcealedSamplesIssuePayload,
 	[JitterBufferStressDetector.ISSUE_TYPE]: JitterBufferStressIssuePayload,
 	[PixelatedVideoDetector.ISSUE_TYPE]: PixelatedVideoIssuePayload,
 	[PlayoutDiscrepancyDetector.ISSUE_TYPE]: PlayoutDiscrepancyIssuePayload,
@@ -215,8 +219,6 @@ export class InboundTrackMonitor {
 	>;
 
 
-	public dtxMode = false;
-
 	private _context: InboundTrackContext = {};
 
 	/**
@@ -255,6 +257,9 @@ export class InboundTrackMonitor {
 	}
 	public get videoTag(): HTMLVideoElement | undefined {
 		return this._context.videoTag;
+	}
+	public get dtxMode(): boolean | undefined {
+		return this._context.dtxMode;
 	}
 
 	/**
@@ -369,8 +374,11 @@ export class InboundTrackMonitor {
 	/** How much of the per-frame budget decoding used, `1` being exactly the budget. `DecoderPerformanceDetector`. */
 	public decodeBudgetUtilization?: number;
 
-	/** How full the invented-speech bucket is, `0..1`, where `1` is the raise point. `InventedSpeechDetector`. */
-	public inventedSpeechSeverity?: number;
+	/** How full the non-silent concealment bucket is, `0..1`, where `1` is the raise point. `ConcealedSamplesDetector`. */
+	public concealedSamplesSeverity?: number;
+
+	/** How full the dropout bucket is, `0..1`, where `1` is the raise point. `AudioInterruptionDetector`. */
+	public audioInterruptionSeverity?: number;
 
 	/** Decoding costing more time per frame than the stream's frame rate leaves for it. `DecoderPerformanceDetector`. */
 	public overloadedDecoder?: boolean;
@@ -463,8 +471,11 @@ export class InboundTrackMonitor {
 			if (monitorConfig.avDesyncPlayoutDetector !== null) {
 				this.detectors.add(new AVDesyncPlayoutDetector(this));
 			}
-			if (monitorConfig.inventedSpeechDetector !== null) {
-				this.detectors.add(new InventedSpeechDetector(this));
+			if (monitorConfig.concealedSamplesDetector !== null) {
+				this.detectors.add(new ConcealedSamplesDetector(this));
+			}
+			if (monitorConfig.audioInterruptionDetector !== null) {
+				this.detectors.add(new AudioInterruptionDetector(this));
 			}
 			if (monitorConfig.jitterBufferStressDetector !== null) {
 				this.detectors.add(new JitterBufferStressDetector(this));

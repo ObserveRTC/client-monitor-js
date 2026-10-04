@@ -219,15 +219,15 @@ describe('pixelated video', () => {
  * video has had continuous ramps all along.
  */
 describe('inbound audio charges', () => {
-	it('ramps on a filling invented-speech bucket before any finding', () => {
-		const { track } = inboundTrack('audio', { inventedSpeechSeverity: 0.625 });
+	it('ramps on a filling concealed-samples bucket before any finding', () => {
+		const { track } = inboundTrack('audio', { concealedSamplesSeverity: 0.625 });
 
 		// Halfway between the activation and the raise point, so half a point off a flat 5.0.
 		expect(scoreOf(track).value).toBeCloseTo(MAX - 0.5, 6);
 	});
 
 	it('charges nothing for a bucket below the activation', () => {
-		const { track } = inboundTrack('audio', { inventedSpeechSeverity: 0.1 });
+		const { track } = inboundTrack('audio', { concealedSamplesSeverity: 0.1 });
 
 		const score = scoreOf(track);
 
@@ -236,15 +236,29 @@ describe('inbound audio charges', () => {
 	});
 
 	it('hands over to the finding once the detector raises', () => {
-		const { track, inboundRtp } = inboundTrack('audio', { inventedSpeechSeverity: 1 });
+		const { track, inboundRtp } = inboundTrack('audio', { concealedSamplesSeverity: 1 });
 
-		inboundRtp.inventedSpeechRatio = 0.3;
-		raise(track, 'invented-speech');
+		inboundRtp.nonSilentConcealedRatio = 0.3;
+		raise(track, 'concealed-samples');
 
 		const reasons = scoreOf(track).reasons;
 
-		expect(reasons?.['invented-speech']).toBeCloseTo(0.3, 6);
+		expect(reasons?.['concealed-samples']).toBeCloseTo(0.3, 6);
 		expect(reasons?.['unstable-audio-playout']).toBeUndefined();
+	});
+
+	it('charges an open audio-interruption by how full its bucket still is', () => {
+		const { track } = inboundTrack('audio', { audioInterruptionSeverity: 0.5 });
+
+		raise(track, 'audio-interruption');
+
+		expect(scoreOf(track).reasons?.['audio-interruption']).toBeCloseTo(1, 6);
+	});
+
+	it('charges nothing for interruptions that have not raised', () => {
+		const { track } = inboundTrack('audio', { audioInterruptionSeverity: 0.8 });
+
+		expect(scoreOf(track).value).toBe(MAX);
 	});
 });
 

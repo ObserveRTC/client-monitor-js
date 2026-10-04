@@ -60,7 +60,8 @@ export type {
     IceRestartEventPayload,
     IceRestartRecommendedEventPayload,
     IcePathEstablishmentSlowEventPayload,
-    InventedSpeechEventPayload,
+    ConcealedSamplesEventPayload,
+    AudioInterruptionEventPayload,
     AudioJitterBufferStressEventPayload,
     VideoDecoderOverloadedEventPayload,
     VideoRecoveryFailedEventPayload,
@@ -131,9 +132,12 @@ export type { CpuPerformanceIssuePayload } from './detectors/CpuPerformanceDetec
 export type { DryInboundTrackIssuePayload } from './detectors/DryInboundTrackDetector';
 export type { DryOutboundTrackIssuePayload } from './detectors/DryOutboundTrackDetector';
 export type { PlayoutDiscrepancyIssuePayload } from './detectors/PlayoutDiscrepancyDetector';
-export { InventedSpeechDetector } from './detectors/InventedSpeechDetector';
-export type { InventedSpeechDetectorConfig } from './detectors/InventedSpeechDetector';
-export type { InventedSpeechIssuePayload } from './detectors/InventedSpeechDetector';
+export { ConcealedSamplesDetector } from './detectors/ConcealedSamplesDetector';
+export type { ConcealedSamplesDetectorConfig } from './detectors/ConcealedSamplesDetector';
+export type { ConcealedSamplesIssuePayload } from './detectors/ConcealedSamplesDetector';
+export { AudioInterruptionDetector } from './detectors/AudioInterruptionDetector';
+export type { AudioInterruptionDetectorConfig } from './detectors/AudioInterruptionDetector';
+export type { AudioInterruptionIssuePayload } from './detectors/AudioInterruptionDetector';
 export { JitterBufferStressDetector } from './detectors/JitterBufferStressDetector';
 export type { JitterBufferStressDetectorConfig } from './detectors/JitterBufferStressDetector';
 export type { JitterBufferStressIssuePayload } from './detectors/JitterBufferStressDetector';
@@ -163,6 +167,9 @@ export type { CaptureTrackMutedDetectorConfig } from './detectors/CaptureTrackMu
 export { SilentAudioSourceDetector } from './detectors/SilentAudioSourceDetector';
 export type { SilentAudioSourceDetectorConfig } from './detectors/SilentAudioSourceDetector';
 export type { SilentAudioSourceIssuePayload } from './detectors/SilentAudioSourceDetector';
+export { LoopbackAudioInputDetector, DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS } from './detectors/LoopbackAudioInputDetector';
+export type { LoopbackAudioInputDetectorConfig } from './detectors/LoopbackAudioInputDetector';
+export type { LoopbackAudioInputIssuePayload } from './detectors/LoopbackAudioInputDetector';
 export { CodecChangeDetector } from './detectors/CodecChangeDetector';
 export type { CodecChangeDetectorConfig } from './detectors/CodecChangeDetector';
 export { VideoResolutionChangeDetector } from './detectors/VideoResolutionChangeDetector';
@@ -285,6 +292,9 @@ export type {
     RemoteOutboundRtpStats,
 } from './schema/ClientSample';
 
+export { ClientMetaTypes } from './schema/ClientMetaTypes';
+export type { AudioInputDevice } from './schema/ClientMetaTypes';
+
 export type {
     Logger,
 } from "./utils/logger";
@@ -292,3 +302,8 @@ export type {
 // export function createClientMonitor(config: Partial<ClientMonitorConfig>): ClientMonitor {
 //     return new ClientMonitor(config);
 // }
+
+export { SdpMonitor } from './monitors/SdpMonitor';
+export type { SdpDescription, SdpDescriptionInput, SdpNegotiatedMediaSection } from './monitors/SdpMonitor';
+export { parseSdp } from './utils/sdp';
+export type { ParsedSdp, SdpMediaSection, SdpCodec, SdpDirection, SdpSetupRole } from './utils/sdp';

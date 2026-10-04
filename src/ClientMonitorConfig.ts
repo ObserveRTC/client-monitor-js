@@ -1,5 +1,6 @@
 import { Logger } from "./utils/logger";
-import type { InventedSpeechDetectorConfig } from "./detectors/InventedSpeechDetector";
+import type { ConcealedSamplesDetectorConfig } from "./detectors/ConcealedSamplesDetector";
+import type { AudioInterruptionDetectorConfig } from "./detectors/AudioInterruptionDetector";
 import type { AVDesyncPlayoutDetectorConfig } from "./detectors/AVDesyncPlayoutDetector";
 import type { BlockedStunRequestsDetectorConfig } from "./detectors/BlockedStunRequestsDetector";
 import type { BlockedOutboundMediaDetectorConfig } from "./detectors/BlockedOutboundMediaDetector";
@@ -35,6 +36,7 @@ import type { PixelatedVideoDetectorConfig } from "./detectors/PixelatedVideoDet
 import type { PlayoutDiscrepancyDetectorConfig } from "./detectors/PlayoutDiscrepancyDetector";
 import type { RtpSenderStalledDetectorConfig } from "./detectors/RtpSenderStalledDetector";
 import type { SilentAudioSourceDetectorConfig } from "./detectors/SilentAudioSourceDetector";
+import type { LoopbackAudioInputDetectorConfig } from "./detectors/LoopbackAudioInputDetector";
 import type { SimulcastLayerDetectorConfig } from "./detectors/SimulcastLayerDetector";
 import type { StatsGapDetectorConfig } from "./detectors/StatsGapDetector";
 import type { StuckDecoderDetectorConfig } from "./detectors/StuckDecoderDetector";
@@ -379,6 +381,15 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     silentAudioSourceDetector: SilentAudioSourceDetectorConfig | null;
 
     /**
+     * Configuration for `LoopbackAudioInputDetector` — an outbound audio track
+     * capturing from a loopback of the machine's own output (`Monitor of …`,
+     * `Stereo Mix`) instead of a microphone.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    loopbackAudioInputDetector: LoopbackAudioInputDetectorConfig | null;
+
+    /**
      * Thresholds for `VideoCaptureBottleneckDetector` — the capture device falling
      * short of the frame rate it promised.
      *
@@ -518,12 +529,24 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     inboundVideoFlowStateDetector: InboundVideoFlowStateDetectorConfig | null;
 
     /**
-     * Configuration for `InventedSpeechDetector` — audio the listener heard as
-     * NetEQ's fabrication rather than as anything the sender transmitted.
+     * Configuration for `ConcealedSamplesDetector` — a dense run of short, audible
+     * concealment gaps (`concealedSamples − silentConcealedSamples`) on one inbound
+     * audio stream. Blind to long dropouts by construction; see
+     * `audioInterruptionDetector` for those.
      *
      * Pass `null` to disable the detector entirely.
      */
-    inventedSpeechDetector: InventedSpeechDetectorConfig | null;
+    concealedSamplesDetector: ConcealedSamplesDetectorConfig | null;
+
+    /**
+     * Configuration for `AudioInterruptionDetector` — audio dropouts of 150 ms and
+     * longer on one inbound audio stream, read from Chromium's non-standard
+     * `interruptionCount` / `totalInterruptionDuration`. Reports its inputs
+     * unavailable on browsers that do not expose them.
+     *
+     * Pass `null` to disable the detector entirely.
+     */
+    audioInterruptionDetector: AudioInterruptionDetectorConfig | null;
 
     /**
      * Configuration for `AudioPlayoutSynthesisDetector` — audio the receiver had to

@@ -136,7 +136,8 @@ Ten classes are the exception and emit events only, because what they report is 
 | `transport-demux-stalled` | Transport receiving above `minTransportReceiveBitrateBps` while every inbound RTP on it stays flat, for `thresholdInMs` | Inbound RTP receives again, or the transport goes away | `'transport-demux-stalled'` | `TransportDemuxStalledIssuePayload` |
 | `dtls-handshake-failed` | An ICE transport reached `dtlsState: 'failed'` | A later handshake connects (after an ICE restart re-keys it) | `'dtls-handshake-failed'` | `DtlsHandshakeFailedIssuePayload` |
 | `dtls-handshake-stalled` | ICE proven healthy while DTLS sat in `new`/`connecting` past `stalledThresholdInMs` | The handshake completes | `'dtls-handshake-stalled'` | `DtlsHandshakeStalledIssuePayload` |
-| `invented-speech` | Invented audio (silence excluded) accumulates `raiseAfterInventedMs` beyond `allowedInventedRatio` | The accumulator drains back to zero | `'invented-speech'` | `InventedSpeechIssuePayload` |
+| `concealed-samples` | Non-silent concealment (`concealedSamples − silentConcealedSamples`) accumulates `raiseAfterConcealedMs` beyond `allowedConcealedRatio` | The accumulator drains back to zero | `'concealed-samples'` | `ConcealedSamplesIssuePayload` |
+| `audio-interruption` | Dropouts of ≥ 150 ms (Chromium `interruptionCount` / `totalInterruptionDuration`) accumulate `raiseAfterInterruptedMs` beyond `allowedInterruptedRatio` | The accumulator drains back to zero | `'audio-interruption'` | `AudioInterruptionIssuePayload` |
 | `audio-jitter-buffer-stress` | Target delay grown **and** NetEQ time-stretching, for `minConsecutiveTicks` | Either condition clears | `'audio-jitter-buffer-stress'` | `JitterBufferStressIssuePayload` |
 | `video-decoder-overloaded` | Frames arrived and loss was quiet, but decode time overran the frame budget or frames were dropped after arrival | The decoder keeps up again | `'video-decoder-overloaded'` | `DecoderPerformanceIssuePayload` |
 | `video-recovery-failed` | PLIs sent, picture frozen, `keyFramesDecoded` not advancing for `recoveryFailedThresholdInMs` | A keyframe arrives or the freeze ends | `'video-recovery-failed'` | `VideoRecoveryFailedIssuePayload` |
@@ -144,6 +145,7 @@ Ten classes are the exception and emit events only, because what they report is 
 | `decoder-bottleneck` | the decoder left more than `decodeDegradationThreshold` of the frames that arrived over `durationInMs` | the next average comes back at or above it | `'decoder-bottleneck'` | `DecoderBottleneckIssuePayload` |
 | `encoder-bottleneck` | A delivering source outran the encoder for `durationInMs` continuously | The encoder keeps up again | `'encoder-bottleneck'` | `EncoderBottleneckIssuePayload` |
 | `silent-audio-source` | A live, enabled, unmuted microphone produced silence for `silenceThresholdInMs` | Audio appears, or the track stops capturing | `'silent-audio-source'` | `SilentAudioSourceIssuePayload` |
+| `loopback-audio-input` | The outbound audio track's label matches a `labelPatterns` entry (`Monitor of …`, `Stereo Mix`) | The track stops being reported (judged once per track) | — | `LoopbackAudioInputIssuePayload` |
 | `stuck-decoder` | RTP bytes flowing, nothing decoding, PLIs firing, for `thresholdInMs` | Frames decode again | `'stuck-decoder'` | `StuckDecoderIssuePayload` |
 | `frame-assembly-stalled` | Packets kept arriving with `framesReceived` flat for `thresholdInMs`, past `minPacketsReceived` | A frame is assembled, packets stop arriving, or the track pauses | `'frame-assembly-stalled'` | `FrameAssemblyStalledIssuePayload` |
 | `pixelated-video` | `normalizedQp` stayed at or above `threshold` for `durationInMs` of stats time | It falls below `recoveryThreshold`, the quantizer stops being reported, or the track pauses | `'pixelated-video'` | `PixelatedVideoIssuePayload` |
@@ -542,7 +544,8 @@ monitor.on('video-flow-disrupted',                 (e) => { /* … */ });
 monitor.on('dry-inbound-track',                   (e) => { /* … */ });
 monitor.on('dry-outbound-track',                  (e) => { /* … */ });
 monitor.on('inbound-video-playout-discrepancy',   (e) => { /* … */ });
-monitor.on('invented-speech',                     (e) => { /* audio NetEQ invented, not raw loss */ });
+monitor.on('concealed-samples',                   (e) => { /* dense short concealment gaps, not raw loss */ });
+monitor.on('audio-interruption',                  (e) => { /* ≥150 ms dropouts: the voice cut out */ });
 monitor.on('audio-jitter-buffer-stress',          (e) => { /* buffer grown AND stretching */ });
 monitor.on('video-decoder-overloaded',            (e) => { /* frames arrived, client could not decode */ });
 monitor.on('video-recovery-failed',               (e) => { /* we asked for a keyframe; nothing came back */ });

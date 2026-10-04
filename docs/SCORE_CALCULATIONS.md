@@ -125,7 +125,7 @@ Loss, delay and congestion are properties of the *transport* — every stream ri
 shares them, and no single track owns them. Their detectors raise on the peer
 connection, so they are charged **once**, there.
 
-Freezes, volatile frame rates, dropped frames, pixelation, invented speech,
+Freezes, volatile frame rates, dropped frames, pixelation, concealment, audio interruptions,
 jitter-buffer stress: these measure *damage the user experienced*. Their detectors
 raise on the **track**, and only there.
 
@@ -133,10 +133,10 @@ The distinction is cause versus effect, and the two are not interchangeable:
 
 - **The same loss does different damage to different tracks.** 2% loss is inaudible on
   an Opus stream with FEC and PLC, and very visible on video without it. The loss
-  figure cannot tell you which happened; the share of audio NetEQ had to invent and
+  figure cannot tell you which happened; the share of audio NetEQ had to conceal and
   the freeze count can.
 - **Damage happens without loss.** In a captured session, 754 of 772 intervals measured
-  **zero** packet loss, and 31 of them still had audible invention above 0.5% —
+  **zero** packet loss, and 31 of them still had non-silent concealment above 0.5% —
   jitter-buffer underruns and late arrivals, not packets that never came.
 - **A clean path can carry a broken track, and a bad path a fine one.** A camera that
   has stopped producing frames scores badly on a perfect network.
@@ -177,12 +177,13 @@ frame rate.
 | Charge | Gate | Cost |
 | --- | --- | --- |
 | `dry-inbound-track` | issue | 5.0 |
-| `invented-speech` | issue | `inventedSpeechRatio`, 0–1 |
+| `concealed-samples` | issue | `nonSilentConcealedRatio`, 0–1 |
+| `audio-interruption` | issue | `audioInterruptionSeverity` × 2 (`AUDIO_INTERRUPTION_MAX_CHARGE`), 0–2, falling as the bucket drains |
 | `synthesized-audio` | issue | `synthesizedAudioRatio`, 0–1 |
 | `audio-jitter-buffer-stress` | issue | `jitterBufferStressSeverity`, 0–1 |
-| `unstable-audio-playout` | reading — no `invented-speech` open | `inventedSpeechSeverity` ramped 0.25 → 1.0, 0–1 |
+| `unstable-audio-playout` | reading — no `concealed-samples` open | `concealedSamplesSeverity` ramped 0.25 → 1.0, 0–1 |
 
-`invented-speech` and `unstable-audio-playout` are the same measurement either side of
+`concealed-samples` and `unstable-audio-playout` are the same measurement either side of
 the detector's threshold, so they are mutually exclusive rather than additive.
 
 ### Outbound video track
@@ -234,7 +235,7 @@ verdict is never contradicted by an empty reason list.
 
 ## What it does not charge
 
-**19 of the 37 issue types carry no charge in this calculator.** An unpriced issue is
+**19 of the 38 issue types carry no charge in this calculator.** An unpriced issue is
 still raised, still emitted and still shipped in the sample — it just does not move a
 score.
 

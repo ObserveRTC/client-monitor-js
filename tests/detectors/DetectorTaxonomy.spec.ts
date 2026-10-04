@@ -68,6 +68,7 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     'cpu-performance-detector': 'pipeline-disruption',
     'capture-source-lost-detector': 'pipeline-disruption',
     'silent-audio-source-detector': 'pipeline-disruption',
+    'loopback-audio-input-detector': 'pipeline-disruption',
     'video-capture-bottleneck-detector': 'pipeline-disruption',
     'encoder-bottleneck-detector': 'pipeline-disruption',
     'dry-outbound-track-detector': 'pipeline-disruption',
@@ -82,7 +83,8 @@ const DETECTOR_CATEGORIES: Readonly<Record<string, DetectorCategory>> = Object.f
     //  is pipeline-disruption and lives in its own two detectors, listed above)
     'pixelated-video-detector': 'perceived-quality',
     'inbound-video-flow-state-detector': 'perceived-quality',
-    'invented-speech-detector': 'perceived-quality',
+    'concealed-samples-detector': 'perceived-quality',
+    'audio-interruption-detector': 'perceived-quality',
     'av-desync-playout-detector': 'perceived-quality',
     'jitter-buffer-stress-detector': 'perceived-quality',
     'audio-playout-synthesis-detector': 'perceived-quality',
@@ -144,6 +146,7 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     // that belong to neither.
     'capture-source-lost-detector': 'Send — the source',
     'silent-audio-source-detector': 'Send — the source',
+    'loopback-audio-input-detector': 'Send — the source',
     'video-capture-bottleneck-detector': 'Send — capture to frame supply',
     'encoder-bottleneck-detector': 'Send — frames to encoder',
     'rtp-sender-stalled-detector': 'Send — encoder to RTP sender',
@@ -160,7 +163,8 @@ const DETECTOR_LAYERS: Readonly<Record<string, string>> = Object.freeze({
     // 4 — Perceived Quality (docs/PERCEIVED_QUALITY_DETECTORS.md)
     'pixelated-video-detector': 'Visual — clarity',
     'inbound-video-flow-state-detector': 'Visual — continuity',
-    'invented-speech-detector': 'Audio — continuity',
+    'concealed-samples-detector': 'Audio — continuity',
+    'audio-interruption-detector': 'Audio — continuity',
     'audio-playout-synthesis-detector': 'Audio — naturalness',
     'av-desync-playout-detector': 'Synchronization',
     'jitter-buffer-stress-detector': 'Responsiveness',

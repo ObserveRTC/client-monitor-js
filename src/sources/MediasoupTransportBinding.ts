@@ -2,7 +2,7 @@ import * as mediasoup from 'mediasoup-client';
 import { PeerConnectionMonitor } from '../monitors/PeerConnectionMonitor';
 import { ClientEventTypes } from '../schema/ClientEventTypes';
 import { ClientEventPayloadMap } from './ClientEventPayloadProvider';
-import { bindMediaStreamTrackEvents } from './RtcPeerConnectionBinding';
+import { bindMediaStreamTrackEvents, captureSessionDescriptions } from './RtcPeerConnectionBinding';
 
 // export type MediasoupTransportListenerContext = {
 // 	transport:  mediasoup.types.Transport;
@@ -10,7 +10,29 @@ import { bindMediaStreamTrackEvents } from './RtcPeerConnectionBinding';
 // 	attachments?: Record<string, unknown>;
 // }
 
+/**
+ * The `RTCPeerConnection` behind a mediasoup-client transport, or `undefined`.
+ *
+ * mediasoup-client does not expose it: `transport.handler` is public, but every browser handler
+ * keeps its connection in the private `_pc` field (Chrome*, Firefox*, Safari*, ReactNative*, as of
+ * 3.9). This reads that field and checks it is shaped like a peer connection, so a handler without
+ * one (`FakeHandler`, `Edge11`) or a future release that renames it yields `undefined` rather than
+ * an error — the binding then simply has no SDP to report.
+ */
+export function peerConnectionOfTransport(transport: mediasoup.types.Transport): RTCPeerConnection | undefined {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const handler = (transport as any).handler ?? (transport as any)._handler;
+	const pc = handler?._pc;
+
+	if (!pc || typeof pc.addEventListener !== 'function' || !('localDescription' in pc)) return undefined;
+
+	return pc as RTCPeerConnection;
+}
+
 export class MediasoupTransportBinding {
+	/** The transport's own `RTCPeerConnection`, when it could be reached; see {@link peerConnectionOfTransport}. */
+	public readonly peerConnection?: RTCPeerConnection;
+
 	public constructor(
 		public readonly transport: mediasoup.types.Transport,
 		public readonly monitor: PeerConnectionMonitor,
@@ -22,6 +44,8 @@ export class MediasoupTransportBinding {
 		this._dataConsumerAdded = this._dataConsumerAdded.bind(this);
 		this._connectionStateChanged = this._connectionStateChanged.bind(this);
 		this._iceGatheringStateChanged = this._iceGatheringStateChanged.bind(this);
+		this._signalingStateChanged = this._signalingStateChanged.bind(this);
+		this.peerConnection = peerConnectionOfTransport(transport);
 
 		this.bind = this.bind.bind(this);
 		this.unbind = this.unbind.bind(this);
@@ -50,6 +74,7 @@ export class MediasoupTransportBinding {
 		this.transport.observer.off('newdataconsumer', this._dataConsumerAdded);
 		this.transport.off('connectionstatechange', this._connectionStateChanged);
 		this.transport.off('icegatheringstatechange', this._iceGatheringStateChanged);
+		this.peerConnection?.removeEventListener('signalingstatechange', this._signalingStateChanged);
 
 		this.monitor.close();
 
@@ -64,6 +89,18 @@ export class MediasoupTransportBinding {
 		this.transport.observer.on('newdataconsumer', this._dataConsumerAdded);
 		this.transport.on('connectionstatechange', this._connectionStateChanged);
 		this.transport.on('icegatheringstatechange', this._iceGatheringStateChanged);
+
+		// Every produce / consume / restartIce renegotiates the handler's connection, and each
+		// set*Description moves its signaling state. Read once now too: a transport added after it
+		// already produced or consumed has descriptions no event will announce.
+		if (this.peerConnection) {
+			this.peerConnection.addEventListener('signalingstatechange', this._signalingStateChanged);
+			captureSessionDescriptions(this.peerConnection, this.monitor);
+		}
+	}
+
+	private _signalingStateChanged() {
+		if (this.peerConnection) captureSessionDescriptions(this.peerConnection, this.monitor);
 	}
 
 	private _consumerPaused(consumer: mediasoup.types.Consumer) {

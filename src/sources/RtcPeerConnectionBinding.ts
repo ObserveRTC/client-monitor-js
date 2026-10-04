@@ -63,6 +63,19 @@ export class RtcPeerConnectionBinding {
 		this.peerConnection.addEventListener('icecandidateerror', this._onIceCandidateError);
 		this.peerConnection.addEventListener('track', this._onTrack);
 		this.peerConnection.addEventListener('datachannel', this._onDataChannel);
+
+		// A peer connection added mid-call already carries descriptions no event will announce.
+		this._captureDescriptions();
+	}
+
+	/**
+	 * Feeds the connection's current descriptions to `monitor.sdp`. Every `setLocalDescription` /
+	 * `setRemoteDescription` that changes anything moves `signalingState`, so reading both on each
+	 * change catches every offer and answer; the one that did not change is recognised as a repeat
+	 * and ignored by the SDP monitor.
+	 */
+	private _captureDescriptions() {
+		captureSessionDescriptions(this.peerConnection, this.monitor);
 	}
 
 	private _onDataChannel(event: RTCDataChannelEvent) {
@@ -162,6 +175,8 @@ export class RtcPeerConnectionBinding {
 	}
 
 	private _onSignalingStateChange() {
+		this._captureDescriptions();
+
 		return this._fireEvent(ClientEventTypes.SIGNALING_STATE_CHANGE, {
 			peerConnectionId: this.monitor.peerConnectionId,
 			signalingState: this.peerConnection.signalingState,
@@ -304,4 +319,23 @@ export function bindRtcDataChannelEvents(options: {
 		}
 	);
 
+}
+/**
+ * Feeds a connection's current local and remote descriptions to `monitor.sdp`. Shared by every
+ * source binding that can reach an `RTCPeerConnection`; unchanged descriptions are repeats the SDP
+ * monitor ignores, so calling it on every signaling change is safe.
+ */
+export function captureSessionDescriptions(
+	peerConnection: Pick<RTCPeerConnection, 'localDescription' | 'remoteDescription'>,
+	monitor: PeerConnectionMonitor,
+): void {
+	try {
+		const local = peerConnection.localDescription;
+		const remote = peerConnection.remoteDescription;
+
+		if (local) monitor.sdp.acceptLocalDescription(local);
+		if (remote) monitor.sdp.acceptRemoteDescription(remote);
+	} catch (err) {
+		monitor.parent.logger.warn('[RtcPeerConnectionBinding]:', 'Failed to read session descriptions', err);
+	}
 }

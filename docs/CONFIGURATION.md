@@ -140,6 +140,9 @@ const monitor = new ClientMonitor({
         silenceRmsThreshold: 0.0001,   // interval-integrated RMS, not the flickery audioLevel
         recoveryRmsThreshold: 0.0003,  // higher, so one dither blip cannot close a finding
     },
+    loopbackAudioInputDetector: {
+        labelPatterns: [ ...DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS ], // 'Monitor of …', 'Stereo Mix', …
+    },
     // Frame supply: is whatever produces this track's frames delivering what it
     // should? Average over a duration, compare, judge.
     // Both average over the `detection` and `recovery` slices of
@@ -207,9 +210,13 @@ const monitor = new ClientMonitor({
     inboundVideoFlowStateDetector: {
         // the stretch both verdicts are measured over is inboundTrackWindow
     },
-    inventedSpeechDetector: {
-        allowedInventedRatio: 0.05,  // RFC 7294 calls a second above 5% concealment severely concealed
-        raiseAfterInventedMs: 400,   // invention beyond the allowance before the issue opens
+    concealedSamplesDetector: {
+        allowedConcealedRatio: 0.05,  // RFC 7294 calls a second above 5% concealment severely concealed
+        raiseAfterConcealedMs: 400,   // non-silent concealed ms beyond the allowance before the issue opens
+    },
+    audioInterruptionDetector: {
+        allowedInterruptedRatio: 0.02, // share of time that may be interrupted (≥150 ms dropouts) for free
+        raiseAfterInterruptedMs: 500,  // interrupted ms beyond the allowance before the issue opens
     },
     audioPlayoutSynthesisDetector: {
         synthesizedRatioThreshold: 0.05,  // share of what was played that was invented

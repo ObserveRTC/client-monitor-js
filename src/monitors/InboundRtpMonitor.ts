@@ -5,6 +5,12 @@ import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
 import { qpScaleOf } from "../utils/quantizer";
 import { positiveDelta } from "../utils/common";
 
+/** Chromium's non-standard audio `inbound-rtp` members this monitor reads beyond the schema. */
+type ChromiumInboundRtpExtras = {
+	interruptionCount?: number;
+	totalInterruptionDuration?: number;
+};
+
 export class InboundRtpMonitor implements InboundRtpStats {
 	// field indicate that this object was visited by accepting stats
 	private _visited = true;
@@ -82,6 +88,15 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	totalSquaredCorruptionProbability?: number | undefined;
 	corruptionMeasurements?: number | undefined;
 
+	/**
+	 * Chromium-only and non-standard: concealment events of 150 ms or longer (NetEQ's
+	 * "interruptions", silent concealment included) since the stream started, counted when each one
+	 * ends. `undefined` on every other browser. Kept on the monitor, not in the sample schema.
+	 */
+	interruptionCount?: number | undefined;
+	/** Chromium-only and non-standard: the total duration of those interruptions, in seconds. */
+	totalInterruptionDuration?: number | undefined;
+
 	// derived fields
 	bitrate?: number;
 	avgFramesPerSec?: number;
@@ -145,11 +160,18 @@ export class InboundRtpMonitor implements InboundRtpStats {
 	public deltaJitterBufferEmittedCount?: number;
 	public deltaJitterBufferTargetDelay?: number;
 	/**
-	 * Share of this interval's audio (`0..1`) the listener heard as concealment rather than
-	 * transmitted audio. Silent concealment is excluded, so what is left is audible invention.
+	 * Share of this interval's received audio (`0..1`) that was non-silent concealment:
+	 * `(ΔconcealedSamples − ΔsilentConcealedSamples) / ΔtotalSamplesReceived`. Silent concealment
+	 * covers DTX comfort noise *and* the faded-out tail of any gap longer than NetEQ's ~60–120 ms
+	 * fade, so this reads short gaps and is capped per concealment event — long dropouts show up in
+	 * {@link deltaTotalInterruptionDurationInMs} instead.
 	 * `undefined` when the counters are absent or no samples arrived, which is not zero.
 	 */
-	public inventedSpeechRatio?: number;
+	public nonSilentConcealedRatio?: number;
+	/** Interruptions (≥ 150 ms concealment events) that ended in this interval. Chromium only. */
+	public deltaInterruptionCount?: number;
+	/** Their total duration, in milliseconds. Chromium only; credited whole to the interval they ended in. */
+	public deltaTotalInterruptionDurationInMs?: number;
 	public concealmentEventRate?: number;
 	/** Share of samples NetEQ stretched or compressed to keep up. */
 	public timeStretchRate?: number;
@@ -297,6 +319,9 @@ export class InboundRtpMonitor implements InboundRtpStats {
 		this.totalCorruptionProbability = stats.totalCorruptionProbability;
 		this.totalSquaredCorruptionProbability = stats.totalSquaredCorruptionProbability;
 		this.corruptionMeasurements = stats.corruptionMeasurements;
+		// Not in the schema: Chromium reports them on audio `inbound-rtp` and the raw report is passed through.
+		this.interruptionCount = (stats as ChromiumInboundRtpExtras).interruptionCount;
+		this.totalInterruptionDuration = (stats as ChromiumInboundRtpExtras).totalInterruptionDuration;
 		this.attachments = stats.attachments;
 	}
 
@@ -366,11 +391,22 @@ export class InboundRtpMonitor implements InboundRtpStats {
 
 		if (this.deltaConcealedSamples !== undefined && 0 < (this.deltaTotalSamplesReceived ?? 0)) {
 			// Silent concealment is subtracted: `concealedSamples` also rises during ordinary silence.
-			const invented = Math.max(0, this.deltaConcealedSamples - (this.deltaSilentConcealedSamples ?? 0));
+			const nonSilent = Math.max(0, this.deltaConcealedSamples - (this.deltaSilentConcealedSamples ?? 0));
 
-			this.inventedSpeechRatio = invented / (this.deltaTotalSamplesReceived as number);
+			this.nonSilentConcealedRatio = nonSilent / (this.deltaTotalSamplesReceived as number);
 		} else {
-			this.inventedSpeechRatio = undefined;
+			this.nonSilentConcealedRatio = undefined;
+		}
+		{
+			const extras = stats as ChromiumInboundRtpExtras;
+
+			this.deltaInterruptionCount = positiveDelta(extras.interruptionCount, this.interruptionCount);
+
+			const deltaInterruptionDuration = positiveDelta(extras.totalInterruptionDuration, this.totalInterruptionDuration);
+
+			this.deltaTotalInterruptionDurationInMs = deltaInterruptionDuration === undefined
+				? undefined
+				: deltaInterruptionDuration * 1000;
 		}
 		this.concealmentEventRate = this.deltaConcealmentEvents !== undefined
 			? this.deltaConcealmentEvents / elapsedInSec : undefined;
