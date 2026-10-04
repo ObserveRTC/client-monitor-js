@@ -2,6 +2,7 @@ import { Detectors } from "../detectors/Detectors";
 import { CaptureTrackMutedDetector } from "../detectors/CaptureTrackMutedDetector";
 import { SilentAudioSourceDetector, SilentAudioSourceIssuePayload } from "../detectors/SilentAudioSourceDetector";
 import { CodecChangeDetector } from "../detectors/CodecChangeDetector";
+import { LoopbackAudioInputDetector, LoopbackAudioInputIssuePayload } from "../detectors/LoopbackAudioInputDetector";
 import { VideoCaptureBottleneckDetector, VideoCaptureBottleneckIssuePayload } from "../detectors/VideoCaptureBottleneckDetector";
 import { EncoderBottleneckDetector, EncoderBottleneckIssuePayload } from "../detectors/EncoderBottleneckDetector";
 import { SimulcastLayerDetector } from "../detectors/SimulcastLayerDetector";
@@ -85,6 +86,7 @@ export type OutboundTrackIssues = {
 	[EncoderBottleneckDetector.ISSUE_TYPE]: EncoderBottleneckIssuePayload,
 	[VideoCaptureBottleneckDetector.ISSUE_TYPE]: VideoCaptureBottleneckIssuePayload,
 	[SilentAudioSourceDetector.ISSUE_TYPE]: SilentAudioSourceIssuePayload,
+	[LoopbackAudioInputDetector.ISSUE_TYPE]: LoopbackAudioInputIssuePayload,
 }
 
 export class OutboundTrackMonitor {
@@ -193,6 +195,13 @@ export class OutboundTrackMonitor {
 	public silentAudioSource?: boolean;
 
 	/**
+	 * The capture device is a loopback of the machine's own audio output (`Monitor of …`,
+	 * `Stereo Mix`), not a microphone, so the far end hears its own voice back.
+	 * `LoopbackAudioInputDetector`.
+	 */
+	public loopbackAudioInput?: boolean;
+
+	/**
 	 * The capture device behind this track taken away. `CaptureSourceLostDetector`, whose finding is
 	 * terminal — once `true` this never returns to `false`.
 	 */
@@ -263,6 +272,9 @@ export class OutboundTrackMonitor {
 		if (this.kind === 'audio') {
 			if (monitorConfig.silentAudioSourceDetector !== null) {
 				this.detectors.add(new SilentAudioSourceDetector(this));
+			}
+			if (monitorConfig.loopbackAudioInputDetector !== null) {
+				this.detectors.add(new LoopbackAudioInputDetector(this));
 			}
 		} else if (this.kind === 'video') {
 			// Registration order is the run order, but no detector below depends on another's

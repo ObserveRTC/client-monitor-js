@@ -187,6 +187,7 @@ them to. `S1` outside this document would mean nothing to anybody.
 |---|---|---|---|---|
 | Send — the source | `CaptureSourceLostDetector` | `capture-source-lost` | `captureSourceLostDetector` | Audio + video, outbound track; reads the track object, not stats |
 | Send — the source | `SilentAudioSourceDetector` | `silent-audio-source` | `silentAudioSourceDetector` | Audio only, outbound track |
+| Send — the source | `LoopbackAudioInputDetector` | `loopback-audio-input` | `loopbackAudioInputDetector` | Audio only, outbound track; reads the track label, not stats |
 | Send — capture to frame supply (S1) | `VideoCaptureBottleneckDetector` | `video-capture-bottleneck` | `videoCaptureBottleneckDetector` | Video only; screen shares refused; needs `getSettings().frameRate` |
 | **Send — processing to encoder input (S2)** | *(none — no browser stat exists)* | — | — | **Unwatched by design of the stats, not by choice** |
 | Send — frames to encoder (S3) | `EncoderBottleneckDetector` | `encoder-bottleneck` | `encoderBottleneckDetector` | Video only; highest active layer only |
@@ -397,6 +398,43 @@ several possible causes it is.
 configured to capture? **Boundary S1.** Between what the device was asked for
 (`track.getSettings().frameRate`) and what it produced
 (`mediaSource.sourceFps`).
+
+### `LoopbackAudioInputDetector` — `loopback-audio-input`
+
+**What it detects.** An outbound audio track capturing from a loopback of the
+machine's own output instead of a microphone: a PulseAudio/PipeWire
+`Monitor of <sink>` source on Linux, `Stereo Mix` / `Wave Out Mix` /
+`What U Hear` on Windows. Everything the machine plays, the other
+participants' voices included, goes back into the call, so they hear
+themselves. Every stat on every side looks healthy, and AEC being on does not
+help: the far end's voice comes back as a clean digital copy, not through a
+room.
+
+**How.** The track label is matched against `labelPatterns`, case-insensitive
+regular expressions. Virtual cables (BlackHole, VB-Audio CABLE, VoiceMeeter)
+are not in the default list, because they routinely carry a processed
+microphone; add them if your users should not have them.
+
+**Lifecycle.** Judged once per track. A label never changes, so the first
+collection that sees one decides, records `loopbackAudioInput` on the track,
+and the detector removes itself from the track's registry: it costs nothing
+afterwards. A track with an empty label (permission not granted yet) is looked
+at again on the next collection; screen share, video and tracks already ended
+are dropped unjudged. The finding stays open while the track is muted,
+disabled or paused, since the device has not changed, and resolves with the
+track's other issues when the track stops being reported. A device switch
+produces a new track, which is judged afresh.
+
+**What it does not claim.** That anyone heard an echo. It says the device is
+named like a loopback. Correlating one participant's outbound audio with
+another's is the observer's job. The label also goes to the server on its own,
+as `AUDIO_INPUT_DEVICE` client metadata, whether or not this detector matched.
+
+```ts
+loopbackAudioInputDetector: {
+    labelPatterns: [ ...DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS, '^BlackHole\\b' ],
+},
+```
 
 ### `VideoCaptureBottleneckDetector` — `video-capture-bottleneck`
 
@@ -1465,6 +1503,7 @@ the *only* problem. It is one endpoint's reading of its own machine.
 |---|---|---|---|---|
 | Send | the source | `capture-source-lost` | `CaptureSourceLostDetector` | Outbound track |
 | Send | the source | `silent-audio-source` | `SilentAudioSourceDetector` | Outbound track |
+| Send | the source | `loopback-audio-input` | `LoopbackAudioInputDetector` | Outbound track |
 | Send | S1 capture → frames | `video-capture-bottleneck` | `VideoCaptureBottleneckDetector` | Outbound track |
 | Send | S2 processing | *(unwatched — no stat exists)* | — | — |
 | Send | S3 frames → encoder | `encoder-bottleneck` | `EncoderBottleneckDetector` | Outbound track |

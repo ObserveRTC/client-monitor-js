@@ -1,5 +1,22 @@
 ## 4.10.0 (unreleased)
 
+### `LoopbackAudioInputDetector` — `loopback-audio-input`
+
+A new Pipeline Disruption detector on outbound audio tracks. It raises `loopback-audio-input` when the
+capture device's label names a loopback of the machine's own output (`Monitor of …` on
+PulseAudio/PipeWire, `Stereo Mix` / `Wave Out Mix` / `What U Hear` on Windows). The far end hears
+itself on such a call while every stat looks healthy. A label never changes, so each track is judged
+once and the detector then removes itself from the track's registry. Config: `loopbackAudioInputDetector.labelPatterns`,
+defaulting to `DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS`. Track attribute:
+`OutboundTrackMonitor.loopbackAudioInput`.
+
+### `AUDIO_INPUT_DEVICE` client metadata
+
+Each outbound audio track now sends one `AUDIO_INPUT_DEVICE` meta item when it is first monitored:
+`{ peerConnectionId, trackId, label, deviceId?, groupId? }`. It reaches the server whichever source
+binding created the track, unlike `MEDIA_TRACK_ADDED`. `ClientMetaTypes` and `AudioInputDevice` are now
+exported.
+
 ### New: session descriptions — `SdpMonitor`
 
 `ClientMonitor.acceptLocalDescription(peerConnectionId, description)` and

@@ -7,6 +7,7 @@ import { ClientMonitor } from "../ClientMonitor";
 import { Detectors } from "../detectors/Detectors";
 import * as W3C from "../schema/W3cStatsIdentifiers";
 import { Logger } from "../utils/logger";
+import { AudioInputDevice, ClientMetaTypes } from "../schema/ClientMetaTypes";
 import { InboundRtpMonitor } from "./InboundRtpMonitor";
 import { RemoteOutboundRtpMonitor } from "./RemoteOutboundRtpMonitor";
 import { OutboundRtpMonitor } from "./OutboundRtpMonitor";
@@ -1882,9 +1883,33 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		const pendingContext = this.parent.takePendingOutboundTrackContext(track.id);
 		if (pendingContext) trackMonitor.setContext(pendingContext);
 
+		if (track.kind === 'audio') this._addAudioInputDeviceMetaData(trackMonitor);
+
 		this.parent.emit('new-outbound-track-monitor', {
 			clientMonitor: this.parent,
 			outboundTrackMonitor: trackMonitor,
+		});
+	}
+
+	/**
+	 * Tells the server which device the outbound audio track captures from. The label is the one
+	 * piece of evidence an echo investigation needs that the stats never carry, and the observer
+	 * reads it from here rather than digging it out of `MEDIA_TRACK_ADDED`, which only the
+	 * RTCPeerConnection binding fires.
+	 */
+	private _addAudioInputDeviceMetaData(trackMonitor: OutboundTrackMonitor) {
+		const { track } = trackMonitor;
+		const payload: AudioInputDevice = {
+			peerConnectionId: this.peerConnectionId,
+			trackId: track.id,
+			label: track.label,
+			deviceId: trackMonitor.settings?.deviceId || undefined,
+			groupId: trackMonitor.settings?.groupId || undefined,
+		};
+
+		this.parent.addMetaData({
+			type: ClientMetaTypes.AUDIO_INPUT_DEVICE,
+			payload,
 		});
 	}
 

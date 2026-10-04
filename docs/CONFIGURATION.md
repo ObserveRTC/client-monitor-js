@@ -140,6 +140,9 @@ const monitor = new ClientMonitor({
         silenceRmsThreshold: 0.0001,   // interval-integrated RMS, not the flickery audioLevel
         recoveryRmsThreshold: 0.0003,  // higher, so one dither blip cannot close a finding
     },
+    loopbackAudioInputDetector: {
+        labelPatterns: [ ...DEFAULT_LOOPBACK_AUDIO_INPUT_LABEL_PATTERNS ], // 'Monitor of …', 'Stereo Mix', …
+    },
     // Frame supply: is whatever produces this track's frames delivering what it
     // should? Average over a duration, compare, judge.
     // Both average over the `detection` and `recovery` slices of
