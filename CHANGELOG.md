@@ -1,4 +1,4 @@
-## 4.10.0 (unreleased)
+## 4.10.0
 
 ### `LoopbackAudioInputDetector` — `loopback-audio-input`
 
