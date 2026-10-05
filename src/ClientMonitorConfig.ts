@@ -658,6 +658,17 @@ export type AppliedClientMonitorConfig<AppData extends Record<string, unknown> =
     sendIceTransportMetadataOnChangeOnly?: boolean;
 
     /**
+     * Whether each accepted local / remote session description is added to the
+     * samples as `LOCAL_SDP` / `REMOTE_SDP` metadata (`a=ice-pwd` redacted).
+     * Off, the descriptions are still read and the SDP-derived fields on
+     * `PeerConnectionMonitor` are still published; only the raw SDP stays off
+     * the wire.
+     *
+     * DEFAULT: false (only an explicit `true` enables shipping)
+     */
+    sendSdpMetadataToServer?: boolean;
+
+    /**
      * Additional metadata to be included in the client monitor.
      *
      * OPTIONAL

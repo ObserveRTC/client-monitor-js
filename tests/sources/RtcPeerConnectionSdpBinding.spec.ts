@@ -53,6 +53,7 @@ describe('RtcPeerConnectionBinding session descriptions', () => {
 			addClientJointEventOnCreated: false,
 			addClientLeftEventOnClose: false,
 			bufferingEventsForSamples: true,
+			sendSdpMetadataToServer: true,
 		} as any);
 		pcMonitor = new PeerConnectionMonitor('pc-1', { getStats: async () => [] } as any, monitor, monitor.logger);
 		monitor.mappedPeerConnections.set('pc-1', pcMonitor);
