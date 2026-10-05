@@ -1,3 +1,12 @@
+## 4.10.1
+
+### `sendSdpMetadataToServer` — SDP metadata is now opt-in
+
+`LOCAL_SDP` / `REMOTE_SDP` meta items are no longer added to samples unless
+`sendSdpMetadataToServer: true` is set. Default `false`. `SdpMonitor` still reads every accepted
+description and the SDP-derived `PeerConnectionMonitor` fields are unaffected; only the raw SDP stays
+off the wire.
+
 ## 4.10.0
 
 ### `LoopbackAudioInputDetector` — `loopback-audio-input`

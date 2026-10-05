@@ -444,6 +444,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
             sendResolvedIssuesToServer: monitorConfig.sendResolvedIssuesToServer ?? true,
             sendScoreReasonsToServer: monitorConfig.sendScoreReasonsToServer ?? true,
             sendIceTransportMetadataOnChangeOnly: monitorConfig.sendIceTransportMetadataOnChangeOnly ?? true,
+            sendSdpMetadataToServer: monitorConfig.sendSdpMetadataToServer ?? false,
             appData: monitorConfig.appData ?? {} as AppData,
         }
 
@@ -710,7 +711,7 @@ export class ClientMonitor<AppData extends Record<string, unknown> = Record<stri
 
     /**
      * Hands a local session description to the peer connection's {@link SdpMonitor}: it is added to
-     * the next sample as `LOCAL_SDP` metadata and read into the peer connection's SDP-derived fields
+     * the next sample as `LOCAL_SDP` metadata (when `sendSdpMetadataToServer` is on) and read into the peer connection's SDP-derived fields
      * (`negotiationRole`, `receivingAudioDtx`, `negotiatedAudioCodecs`, ...). Call it after
      * `setLocalDescription` resolved, with `pc.localDescription` or the description you set.
      *

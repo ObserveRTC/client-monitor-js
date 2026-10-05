@@ -81,8 +81,8 @@ const isAnswer = (description?: SdpDescription) =>
  * It is fed, not bound: the application (or a source binding) calls `acceptLocalDescription` /
  * `acceptRemoteDescription` with the description it applied — normally through
  * `ClientMonitor.acceptLocalDescription(peerConnectionId, description)`. Each accepted description
- * is also added to the next sample as `LOCAL_SDP` / `REMOTE_SDP` metadata, with `a=ice-pwd`
- * redacted; one identical to the previous description on the same side is not added twice.
+ * is also added to the next sample as `LOCAL_SDP` / `REMOTE_SDP` metadata when the monitor's
+ * `sendSdpMetadataToServer` is on (off by default), with `a=ice-pwd` redacted; one identical to the previous description on the same side is not added twice.
  *
  * It trusts what it is given. A description that was rejected by `setLocalDescription` or rolled
  * back is still read as applied, so accept a description after the call that applied it resolved.
@@ -153,6 +153,8 @@ export class SdpMonitor {
 	}
 
 	private _report(type: ClientMetaTypes, description: SdpDescription) {
+		if (this._peerConnection.parent.config.sendSdpMetadataToServer !== true) return;
+
 		this._peerConnection.parent.addMetaData({
 			type,
 			payload: {

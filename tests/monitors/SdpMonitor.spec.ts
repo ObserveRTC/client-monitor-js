@@ -16,6 +16,7 @@ describe('SdpMonitor', () => {
 			addClientJointEventOnCreated: false,
 			addClientLeftEventOnClose: false,
 			bufferingEventsForSamples: true,
+			sendSdpMetadataToServer: true,
 		} as any);
 		pc = new PeerConnectionMonitor('pc-1', { getStats: async () => [] } as any, monitor, monitor.logger);
 		monitor.mappedPeerConnections.set('pc-1', pc);
@@ -45,6 +46,33 @@ describe('SdpMonitor', () => {
 
 		expect(sample?.clientMetaItems?.map((item) => item.type).filter((type) => type.endsWith('_SDP')))
 			.toEqual([ 'LOCAL_SDP', 'REMOTE_SDP' ]);
+	});
+
+	it('does not add descriptions to the sample unless sendSdpMetadataToServer is set', () => {
+		const quiet = new ClientMonitor({
+			collectingPeriodInMs: 0,
+			samplingPeriodInMs: 0,
+			integrateNavigatorMediaDevices: false,
+			addClientJointEventOnCreated: false,
+			addClientLeftEventOnClose: false,
+			bufferingEventsForSamples: true,
+		} as any);
+		const quietPc = new PeerConnectionMonitor('pc-q', { getStats: async () => [] } as any, quiet, quiet.logger);
+		const quietMeta: any[] = [];
+
+		quiet.mappedPeerConnections.set('pc-q', quietPc);
+		quiet.on('meta', (item: any) => quietMeta.push(item));
+
+		expect(quiet.config.sendSdpMetadataToServer).toBe(false);
+		expect(quiet.acceptLocalDescription('pc-q', { type: 'offer', sdp: CHROME_OFFER })).toBe(true);
+		expect(quiet.acceptRemoteDescription('pc-q', { type: 'answer', sdp: SFU_ANSWER })).toBe(true);
+
+		expect(quietMeta.filter((item) => item.type.endsWith('_SDP'))).toHaveLength(0);
+		expect(quiet.createSample()?.clientMetaItems?.filter((item) => item.type.endsWith('_SDP')) ?? []).toHaveLength(0);
+		// Still read and published.
+		expect(quietPc.negotiationRole).toBe('offerer');
+
+		quiet.close();
 	});
 
 	it('keeps the full SDP on the monitor', () => {

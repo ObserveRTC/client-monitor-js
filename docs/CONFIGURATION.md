@@ -25,6 +25,7 @@ const monitor = new ClientMonitor({
     sendScoreReasonsToServer: true, // Default: true — `false` drops scoreReasons from samples
     sendResolvedIssuesToServer: true, // Default: true — `false` ships raises only, with no `key`
     sendIceTransportMetadataOnChangeOnly: true, // Default: true — static ICE transport members on change only
+    sendSdpMetadataToServer: false, // Default: false — `true` adds LOCAL_SDP / REMOTE_SDP meta items to samples
 
     // Window sizes, shared by every detector bound to that level, so detectors
     // judging the same thing judge the same stretch of time. Counted in values,

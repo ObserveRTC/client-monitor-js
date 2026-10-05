@@ -136,9 +136,10 @@ descriptions on every `signalingstatechange`, and the mediasoup transport bindin
 transport's underlying connection (reached through mediasoup-client's private `handler._pc`; if a
 handler has none, the transport is still monitored, just without SDP).
 
-Each accepted description is also added to the next sample as `LOCAL_SDP` / `REMOTE_SDP` metadata
-(`payload: { peerConnectionId, type, sdp }`, with `a=ice-pwd` redacted). An identical repeat is
-ignored, as are rollbacks. The SDP-derived fields on `PeerConnectionMonitor` stay `undefined` until
+With `sendSdpMetadataToServer: true` (default `false`), each accepted description is also added to
+the next sample as `LOCAL_SDP` / `REMOTE_SDP` metadata (`payload: { peerConnectionId, type, sdp }`,
+with `a=ice-pwd` redacted). An identical repeat is ignored, as are rollbacks. The flag only controls
+the wire: descriptions are read and the fields below are published either way. The SDP-derived fields on `PeerConnectionMonitor` stay `undefined` until
 the descriptions that decide them were accepted; most need a completed offer/answer pair.
 
 ### Logger Integration
