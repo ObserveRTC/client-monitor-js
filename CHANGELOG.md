@@ -1,3 +1,16 @@
+## 4.10.2
+
+### `CpuPerformanceDetector` — simulcast no longer reads as CPU limitation
+
+`PeerConnectionMonitor.deltaVideoEncodeTimeInMs` summed `totalEncodeTime` over every software-encoded
+video outbound-rtp, so the three layers of a simulcast camera were added together. The layers are
+encoded in parallel, and an encoder producing all of them in one call can stamp each with that call's
+full duration, so the sum overstated the load and raised `cpulimitation` repeatedly on healthy
+machines ([#73](https://github.com/ObserveRTC/client-monitor-js/issues/73)). Encode time is now taken
+per media source (`mediaSourceId`): one source contributes its largest layer, and separate sources
+(camera, screen share) still add. `encoderUtilization` in the issue payload changes scale accordingly.
+Decoder utilization is unchanged.
+
 ## 4.10.1
 
 ### `sendSdpMetadataToServer` — SDP metadata is now opt-in
