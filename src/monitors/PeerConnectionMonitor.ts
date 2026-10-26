@@ -332,6 +332,9 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 	 * naming an off-CPU implementation, or flagged `powerEfficient`, are left out as the sum is
 	 * taken: whether a stream counts is a property of that collection, not of the stretch a
 	 * detector later reads.
+	 *
+	 * On the encoder side the sum is over media sources rather than outbound-rtps: the simulcast
+	 * layers of one source contribute the largest layer's encode time, not the layers' total.
 	 */
 	public deltaVideoEncodeTimeInMs?: number;
 	public deltaVideoDecodeTimeInMs?: number;
@@ -674,6 +677,11 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		// Kept apart: RTCP and ICE round trips measure different paths.
 		const rtcpRttMeasurementsInS: number[] = [];
 		const iceRttMeasurementsInS: number[] = [];
+		// Codec time per media source, not per outbound-rtp. Simulcast layers of one source are
+		// encoded in parallel, and an encoder producing every layer in one call may stamp each
+		// layer with that call's whole duration, so their sum is not the work done. The largest
+		// layer stands for its source; distinct sources (camera, screen share) still add.
+		const videoEncodeTimeBySourceInMs = new Map<string, number>();
 		this.deltaVideoBytesSent = undefined;
 		this.deltaAudioBytesSent = undefined;
 		this.deltaVideoBytesReceived = undefined;
@@ -785,12 +793,13 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 								this.sendingVideoBitrate += monitor?.bitrate ?? 0;
 								this.deltaVideoBytesSent = accumulatedValue(this.deltaVideoBytesSent, monitor?.deltaBytesSent);
 
-								if (monitor && !runsOffCpu(monitor.encoderImplementation, monitor.powerEfficientEncoder)) {
-									this.deltaVideoEncodeTimeInMs = accumulatedValue(
-										this.deltaVideoEncodeTimeInMs,
-										monitor.deltaEncodeTime === undefined
-											? undefined
-											: monitor.deltaEncodeTime * 1000,
+								if (monitor && monitor.deltaEncodeTime !== undefined && !runsOffCpu(monitor.encoderImplementation, monitor.powerEfficientEncoder)) {
+									const sourceKey = monitor.mediaSourceId ?? `outbound-rtp:${monitor.id}`;
+									const encodeTimeInMs = monitor.deltaEncodeTime * 1000;
+
+									videoEncodeTimeBySourceInMs.set(
+										sourceKey,
+										Math.max(videoEncodeTimeBySourceInMs.get(sourceKey) ?? 0, encodeTimeInMs),
 									);
 								}
 								this.totalPacketSendDelayInSec = accumulatedValue(this.totalPacketSendDelayInSec, monitor?.deltaPacketSendDelay);
@@ -876,6 +885,10 @@ export class PeerConnectionMonitor extends EventEmitter<PeerConnectionMonitorEve
 		}
 
 		this._checkVisited();
+
+		for (const encodeTimeInMs of videoEncodeTimeBySourceInMs.values()) {
+			this.deltaVideoEncodeTimeInMs = accumulatedValue(this.deltaVideoEncodeTimeInMs, encodeTimeInMs);
+		}
 
 		if (0 < rtcpRttMeasurementsInS.length) {
 			this.rtcpRttInSec = rtcpRttMeasurementsInS.reduce((acc, rtt) => acc + rtt, 0) / rtcpRttMeasurementsInS.length;

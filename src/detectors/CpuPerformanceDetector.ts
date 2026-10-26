@@ -6,10 +6,10 @@ import { Detector } from "./Detector";
 
 export type CpuPerformanceIssuePayload = {
 	/**
-	 * Time spent inside the video encoders per unit of stats time, summed over every sending
-	 * stream that encodes on the CPU. `0.5` is half the interval occupied encoding; because the
-	 * streams add, three simulcast layers busy half the time each come to `1.5` rather than
-	 * saturating at `1`.
+	 * Time spent inside the video encoders per unit of stats time, summed over every media
+	 * source that encodes on the CPU. `0.5` is half the interval occupied encoding. The simulcast
+	 * layers of one source count once, as their largest layer; two sources busy half the time
+	 * each come to `1` and nothing clamps the sum.
 	 */
 	encoderUtilization: number;
 
@@ -60,7 +60,11 @@ export type CpuPerformanceDetectorConfig = {
  *
  * The measurement is **utilization** — codec time per unit of stats time, summed over the video
  * streams, where `0.25` is a quarter of the stretch spent inside a codec. Summed rather than
- * averaged, so three simulcast layers busy half the time each read `1.5`; nothing clamps it at `1`.
+ * averaged, so two sources busy half the time each read `1`; nothing clamps it at `1`. Simulcast
+ * layers of one source are not summed: they are encoded in parallel, and an encoder that produces
+ * every layer in one call can stamp each with the call's full duration, so their total overstated
+ * the load several times over on a healthy machine (issue #73). The largest layer stands for the
+ * source instead.
  * `encoderUtilization` and `decoderUtilization` combine with `min()` into `minUtilization`, so codec
  * work on one side alone is a busy stream and work on both at once is a busy machine. A client
  * missing one direction is judged on the other.
@@ -211,8 +215,8 @@ export class CpuPerformanceDetector implements Detector {
 	 * Codec time over the stretch the slice spans, for each direction, and the lower of the two.
 	 *
 	 * The denominator is the slice's own wall clock rather than a sum of per-stream intervals, so
-	 * the summed-across-streams scale survives: three simulcast layers each busy half the stretch
-	 * read `1.5`, where dividing by their combined interval would have averaged them back to `0.5`.
+	 * the summed-across-sources scale survives: two sources each busy half the stretch read `1`,
+	 * where dividing by their combined interval would have averaged them back to `0.5`.
 	 * Nothing clamps it at `1`.
 	 *
 	 * `undefined` when neither direction produced a delta — the window says it could not see, which
