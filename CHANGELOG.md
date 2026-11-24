@@ -1,4 +1,4 @@
-## Unreleased
+## 4.10.3
 
 ### Disabled detectors are now called, so disabling closes what they hold open
 
