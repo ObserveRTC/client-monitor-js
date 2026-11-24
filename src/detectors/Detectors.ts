@@ -13,6 +13,8 @@ const MODULE_NAME = 'Detectors';
  */
 export class Detectors implements Iterable<Detector> {
 	private _detectors = new Map<string, Detector>();
+	/** Disabled detectors whose `onDisabled()` has already run, so it runs once per disabling. */
+	private readonly _tornDown = new WeakSet<Detector>();
 	private readonly logger;
 
 	public constructor(...detectors: Detector[]) {
@@ -66,6 +68,7 @@ export class Detectors implements Iterable<Detector> {
 		const detector = this.getByName(name);
 		if (!detector) return false;
 		detector.disabled = true;
+		this._teardown(detector);
 		return true;
 	}
 
@@ -73,15 +76,22 @@ export class Detectors implements Iterable<Detector> {
 		const detector = this.getByName(name);
 		if (!detector) return false;
 		detector.disabled = false;
+		this._tornDown.delete(detector);
 		return true;
 	}
 
 	public disableAll(): void {
-		for (const detector of this._detectors.values()) detector.disabled = true;
+		for (const detector of this._detectors.values()) {
+			detector.disabled = true;
+			this._teardown(detector);
+		}
 	}
 
 	public enableAll(): void {
-		for (const detector of this._detectors.values()) detector.disabled = false;
+		for (const detector of this._detectors.values()) {
+			detector.disabled = false;
+			this._tornDown.delete(detector);
+		}
 	}
 
 	public isEnabled(name: string): boolean {
@@ -91,12 +101,27 @@ export class Detectors implements Iterable<Detector> {
 
 	public update(): void {
 		for (const detector of this._detectors.values()) {
-			if (detector.disabled) continue;
+			if (detector.disabled) {
+				// Catches a detector disabled by setting the flag directly.
+				this._teardown(detector);
+				continue;
+			}
+			this._tornDown.delete(detector);
 			try {
 				detector.update();
 			} catch (err) {
 				this.logger.warn(`[${MODULE_NAME}]:`, `Error updating detector ${detector?.constructor?.name}`, err);
 			}
+		}
+	}
+
+	private _teardown(detector: Detector): void {
+		if (this._tornDown.has(detector)) return;
+		this._tornDown.add(detector);
+		try {
+			detector.onDisabled?.();
+		} catch (err) {
+			this.logger.warn(`[${MODULE_NAME}]:`, `Error disabling detector ${detector?.constructor?.name}`, err);
 		}
 	}
 }

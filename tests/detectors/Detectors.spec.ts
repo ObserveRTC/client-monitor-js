@@ -202,4 +202,114 @@ describe('Detectors', () => {
 			expect(() => new Detectors().update()).not.toThrow();
 		});
 	});
+
+
+	/**
+	 * A disabled detector is skipped, so anything it had open stays open and its window survives
+	 * to be counted again after `enable()`. `onDisabled()` is how a detector closes that out; the
+	 * registry's part is to call it exactly once per disabling, however the flag was set.
+	 */
+	describe('onDisabled', () => {
+		function closing(name: string) {
+			const calls = { updates: 0, closed: 0 };
+			const d: Detector & { calls: typeof calls } = {
+				name,
+				calls,
+				update() { ++calls.updates; },
+				onDisabled() { ++calls.closed; },
+			};
+
+			return d;
+		}
+
+		it('runs when the detector is disabled by name, and not again while it stays disabled', () => {
+			const d = closing('a-detector');
+			const detectors = new Detectors(d);
+
+			detectors.disable('a-detector');
+			detectors.update();
+			detectors.update();
+			detectors.disable('a-detector');
+
+			expect(d.calls.closed).toBe(1);
+			expect(d.calls.updates).toBe(0);
+		});
+
+		it('runs for every detector on disableAll()', () => {
+			const a = closing('a-detector');
+			const b = closing('b-detector');
+			const detectors = new Detectors(a, b);
+
+			detectors.disableAll();
+
+			expect([ a.calls.closed, b.calls.closed ]).toEqual([ 1, 1 ]);
+		});
+
+		it('runs on the next update when the flag was set directly', () => {
+			const d = closing('a-detector');
+			const detectors = new Detectors(d);
+
+			d.disabled = true;
+			expect(d.calls.closed).toBe(0);
+
+			detectors.update();
+			detectors.update();
+
+			expect(d.calls.closed).toBe(1);
+			expect(d.calls.updates).toBe(0);
+		});
+
+		it('runs again for each new disabling after the detector was enabled', () => {
+			const d = closing('a-detector');
+			const detectors = new Detectors(d);
+
+			detectors.disable('a-detector');
+			detectors.enable('a-detector');
+			detectors.update();
+			detectors.disable('a-detector');
+
+			expect(d.calls.closed).toBe(2);
+			expect(d.calls.updates).toBe(1);
+		});
+
+		it('runs again after enableAll() and a direct re-disable', () => {
+			const d = closing('a-detector');
+			const detectors = new Detectors(d);
+
+			detectors.disableAll();
+			detectors.enableAll();
+			d.disabled = true;
+			detectors.update();
+
+			expect(d.calls.closed).toBe(2);
+		});
+
+		it('does not require a detector to implement it', () => {
+			const detectors = new Detectors(detector('a-detector'));
+
+			expect(() => {
+				detectors.disable('a-detector');
+				detectors.update();
+			}).not.toThrow();
+		});
+
+		it('keeps one detector that throws from stopping the others being disabled', () => {
+			const bad: Detector = {
+				name: 'bad-detector',
+				update() { /* quiet */ },
+				onDisabled() { throw new Error('boom'); },
+			};
+			const good = closing('good-detector');
+			const detectors = new Detectors(bad, good);
+
+			const warn = jest.spyOn(console, 'warn').mockImplementation(() => { /* expected */ });
+
+			try {
+				expect(() => detectors.disableAll()).not.toThrow();
+				expect(good.calls.closed).toBe(1);
+			} finally {
+				warn.mockRestore();
+			}
+		});
+	});
 });

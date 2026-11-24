@@ -210,6 +210,16 @@ export class DryOutboundTrackDetector implements Detector {
 		});
 	}
 
+	/** Closes an open finding and forgets the dry stretch, so re-enabling does not resume it. */
+	public onDisabled(): void {
+		this.trackMonitor.dry = undefined;
+		this._dryForInMs = 0;
+
+		if (this._startedDryAt !== undefined) {
+			this._resolve('detector disabled');
+		}
+	}
+
 	private _raise(payload: DryOutboundTrackIssuePayload) {
 		// Set here, not at the call site, so the flag and the finding cannot drift.
 		this.trackMonitor.dry = true;

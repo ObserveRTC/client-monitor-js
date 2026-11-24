@@ -549,4 +549,54 @@ describe('DryOutboundTrackDetector', () => {
             expect(() => detector.update()).not.toThrow();
         });
     });
+
+
+    describe('onDisabled()', () => {
+        const dryTicks = () => {
+            mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
+            tick();
+            tick(6000);
+        };
+
+        it('closes the open issue and clears the track flag', () => {
+            dryTicks();
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+            expect(mockTrackMonitor.dry).toBe(true);
+
+            detector.onDisabled();
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+            expect(mockTrackMonitor.issues.hasType('dry-outbound-track')).toBe(false);
+            expect(mockTrackMonitor.dry).toBeUndefined();
+        });
+
+        it('is a no-op when nothing is open', () => {
+            expect(() => detector.onDisabled()).not.toThrow();
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+        });
+
+        it('forgets the dry stretch, so re-enabling needs a full threshold again', () => {
+            mockTrackMonitor.setOutboundRtp({ bytesSent: 0, deltaBytesSent: 0 });
+            tick();
+            tick(4000); // 4000 of 5000 ms
+
+            detector.onDisabled();
+            tick(2000); // would be 6000 ms if the earlier stretch had survived
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(0);
+
+            tick(4000);
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+        });
+
+        it('lets the issue be raised again after it was closed by disabling', () => {
+            dryTicks();
+            detector.onDisabled();
+
+            tick(6000);
+
+            expect(mockClientMonitor.getIssues()).toHaveLength(1);
+        });
+    });
 });

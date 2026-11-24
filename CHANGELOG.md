@@ -1,3 +1,21 @@
+## Unreleased
+
+### `Detector.onDisabled()` — disabling a detector now closes what it holds open
+
+A disabled detector is skipped by `Detectors.update()`, so an issue it had raised stayed open for as
+long as it was off (`issues.hasType()` kept answering `true`, and a score that prices that issue kept
+charging it), and its accumulated window survived to be counted again after `enable()`. That made
+`detectors.disable()` unusable for switching a detector off for a known stretch, for example while the
+application deliberately stops a sender.
+
+`Detector` gains an optional `onDisabled(): void`, which `Detectors` calls once each time a detector
+goes from enabled to disabled: by `disable()` and `disableAll()`, or on the next `update()` when the
+`disabled` flag was set directly. `DryOutboundTrackDetector` and `RtpSenderStalledDetector` implement
+it: they resolve their open issue (comment `detector disabled`), clear `OutboundTrackMonitor.dry` /
+`PeerConnectionMonitor.stalledRtpSender`, and forget the dry or stall stretch, so re-enabling needs a
+full threshold again. Detectors that do not implement it behave as before; the other built-in
+detectors can adopt it the same way.
+
 ## 4.10.2
 
 ### `CpuPerformanceDetector` — simulcast no longer reads as CPU limitation

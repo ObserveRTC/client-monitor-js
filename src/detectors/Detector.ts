@@ -29,4 +29,14 @@ export interface Detector {
     /** When `false` the local issue lifecycle still runs, but no issue entry is buffered into the `ClientSample` shipped to the server. Defaults to true. */
     includeIssueInSample?: boolean;
     update(): void;
+    /**
+     * Optional. Called once by the owning `Detectors` registry when this detector goes from enabled
+     * to disabled, by `disable()`, `disableAll()` or by setting `disabled` directly (the next
+     * `update()` of the registry notices it). A disabled detector is skipped, so without this a
+     * finding it had open would stay open for as long as it is off, and its accumulated window would
+     * survive to be counted again after `enable()`. Implement it to close the issue the detector
+     * holds, clear any monitor attribute it owns, and drop its cross-tick state, so that enabling it
+     * again starts from a clean slate. It must be safe to call when nothing is open.
+     */
+    onDisabled?(): void;
 }
