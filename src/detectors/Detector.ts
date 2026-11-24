@@ -18,6 +18,13 @@
  * is fine, reconstructing a missing counter is not. That last one is a layer of the library's
  * boundary: adapters make stats spec-conformant, monitors derive facts, detectors threshold them.
  *
+ * `disabled` is a switch the application flips, and the registry still calls `update()` on a disabled
+ * detector. That call is the detector's only chance to tidy up after itself, so a detector that
+ * holds state must, while `disabled` is true, close the issue it has open, clear the monitor
+ * attribute it owns and drop its accumulated window, and then return. The work is idempotent, so it
+ * is safe on every tick while the detector stays disabled, and enabling the detector again then
+ * starts from a clean slate.
+ *
  * The interface carries only what the registry needs to run a detector and what an application needs
  * to toggle one. Several detectors also expose a public `inputsUnavailable` flag — "we cannot see
  * whether anything is wrong" as distinct from "nothing is wrong" — deliberately left out of the
@@ -29,14 +36,4 @@ export interface Detector {
     /** When `false` the local issue lifecycle still runs, but no issue entry is buffered into the `ClientSample` shipped to the server. Defaults to true. */
     includeIssueInSample?: boolean;
     update(): void;
-    /**
-     * Optional. Called once by the owning `Detectors` registry when this detector goes from enabled
-     * to disabled, by `disable()`, `disableAll()` or by setting `disabled` directly (the next
-     * `update()` of the registry notices it). A disabled detector is skipped, so without this a
-     * finding it had open would stay open for as long as it is off, and its accumulated window would
-     * survive to be counted again after `enable()`. Implement it to close the issue the detector
-     * holds, clear any monitor attribute it owns, and drop its cross-tick state, so that enabling it
-     * again starts from a clean slate. It must be safe to call when nothing is open.
-     */
-    onDisabled?(): void;
 }

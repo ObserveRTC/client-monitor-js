@@ -106,6 +106,11 @@ export class DryOutboundTrackDetector implements Detector {
 	public update() {
 		if (this.disabled) {
 			this.trackMonitor.dry = undefined;
+			this._dryForInMs = 0;
+
+			if (this._startedDryAt !== undefined) {
+				this._resolve('detector disabled');
+			}
 
 			return;
 		}
@@ -208,16 +213,6 @@ export class DryOutboundTrackDetector implements Detector {
 			dryForInMs,
 			activeLayers: activeRtps.length,
 		});
-	}
-
-	/** Closes an open finding and forgets the dry stretch, so re-enabling does not resume it. */
-	public onDisabled(): void {
-		this.trackMonitor.dry = undefined;
-		this._dryForInMs = 0;
-
-		if (this._startedDryAt !== undefined) {
-			this._resolve('detector disabled');
-		}
 	}
 
 	private _raise(payload: DryOutboundTrackIssuePayload) {

@@ -737,7 +737,11 @@ import { Detector, ClientMonitor } from "@observertc/client-monitor-js";
 
 class CustomDetector implements Detector {
     public readonly name = 'custom-detector';
-    /** Optional kill-switch honored by both `Detectors.update()` and this method. */
+    /**
+     * Optional kill-switch. `Detectors.update()` still calls `update()` on a disabled detector, so
+     * the method decides what disabled means: do nothing, and, if the detector holds an issue or a
+     * monitor attribute, close it first (see the note under "Runtime toggle" below).
+     */
     public disabled = false;
 
     constructor(private monitor: ClientMonitor) {}
@@ -768,12 +772,14 @@ monitor.detectors.getByName('custom-detector');           // the instance
 monitor.detectors.listOfNames;                            // ['cpu-performance-detector', 'custom-detector', ...]
 
 // Runtime toggle
-monitor.detectors.disable('custom-detector');             // detector stays attached but its update() is skipped
+monitor.detectors.disable('custom-detector');             // detector stays attached; update() still runs and sees disabled === true
 monitor.detectors.enable('custom-detector');
 
 // Detach
 monitor.detectors.remove(detector);
 ```
+
+`Detectors.update()` calls a disabled detector too, and a built-in detector uses that call to resolve the issue it holds open, clear the monitor attribute it owns and drop its accumulated window before it returns. A custom detector that raises issues or sets monitor attributes should do the same inside its `if (this.disabled)` branch, and one that does not check `disabled` at all will keep running while disabled.
 
 See [Controlling which detectors run](./EVENTS_AND_ISSUES.md#controlling-which-detectors-run) for the full set of registry helpers.
 

@@ -85,6 +85,19 @@ describe('IceTraversalDetector', () => {
         expect(detector.tuples.size).toBe(1);
     });
 
+    it('does nothing while it is disabled', () => {
+        const eventSpy = jest.fn();
+        mockClientMonitor.on('ice-tuple-changed', eventSpy);
+        mockPeerConnection.setPairs(makePair('10.0.0.1:1111:203.0.113.5:3478:udp'));
+        detector.update();
+
+        detector.disabled = true;
+        mockPeerConnection.setPairs(makePair('10.0.0.2:2222:203.0.113.5:3478:udp'));
+        detector.update();
+
+        expect(eventSpy).not.toHaveBeenCalled();
+    });
+
     it('stays silent while the tuple set is unchanged', () => {
         const eventSpy = jest.fn();
         mockClientMonitor.on('ice-tuple-changed', eventSpy);

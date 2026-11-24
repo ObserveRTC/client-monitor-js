@@ -70,6 +70,12 @@ export class RtpSenderStalledDetector implements Detector {
 		if (this.disabled) {
 			this.peerConnection.stalledRtpSender = undefined;
 
+			for (const ssrc of [ ...this._states.keys() ]) {
+				this._clear(ssrc, 'detector disabled');
+			}
+
+			this._states.clear();
+
 			return;
 		}
 		if (this.peerConnection.closed) {
@@ -152,16 +158,6 @@ export class RtpSenderStalledDetector implements Detector {
 		const anyStalled = [ ...this._states.values() ].some((state) => state.raisedAt !== undefined);
 
 		this.peerConnection.stalledRtpSender = anyStalled ? true : anyJudged ? false : undefined;
-	}
-
-	/** Closes every open finding and forgets every sender's stall window, so re-enabling starts clean. */
-	public onDisabled(): void {
-		for (const ssrc of [ ...this._states.keys() ]) {
-			this._clear(ssrc, 'detector disabled');
-		}
-
-		this._states.clear();
-		this.peerConnection.stalledRtpSender = undefined;
 	}
 
 	private _getState(ssrc: number): SenderState {

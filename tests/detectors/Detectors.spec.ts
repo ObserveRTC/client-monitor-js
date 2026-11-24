@@ -7,7 +7,7 @@ import { Detector } from "../../src/detectors/Detector";
  *
  * Two of its guarantees are load-bearing for the whole one-class-per-finding split, and neither
  * is visible from any single detector's tests: **one throwing detector costs only its own
- * verdict**, and **`disabled` is a skip rather than a removal**. If the first breaks, a class
+ * verdict**, and **`disabled` is a flag, not a removal, and a disabled detector is still run so it can tidy up after itself**. If the first breaks, a class
  * that raises one issue starts losing its neighbours' verdicts to a malformed stats report,
  * which is the failure the split exists to prevent.
  */
@@ -91,14 +91,15 @@ describe('Detectors', () => {
 	});
 
 	describe('disabling', () => {
-		it('skips a disabled detector without removing it', () => {
+		it('keeps running a disabled detector and does not remove it', () => {
 			const a = counting('a-detector');
 			const detectors = new Detectors(a);
 
 			expect(detectors.disable('a-detector')).toBe(true);
 			detectors.update();
 
-			expect(a.calls.count).toBe(0);
+			// The detector decides what `disabled` means for its own `update()`.
+			expect(a.calls.count).toBe(1);
 			// Still registered — `size`, iteration and lookup all still see it.
 			expect(detectors.size).toBe(1);
 			expect(detectors.has('a-detector')).toBe(true);
@@ -106,8 +107,9 @@ describe('Detectors', () => {
 			expect(detectors.isEnabled('a-detector')).toBe(false);
 		});
 
-		it('runs it again once enabled', () => {
-			const a = counting('a-detector');
+		it('lets the detector see whether it is disabled on each update, and enable it again', () => {
+			const seen: (boolean | undefined)[] = [];
+			const a: Detector = { name: 'a-detector', update() { seen.push(a.disabled); } };
 			const detectors = new Detectors(a);
 
 			detectors.disable('a-detector');
@@ -115,7 +117,7 @@ describe('Detectors', () => {
 			detectors.enable('a-detector');
 			detectors.update();
 
-			expect(a.calls.count).toBe(1);
+			expect(seen).toEqual([ true, false ]);
 			expect(detectors.isEnabled('a-detector')).toBe(true);
 		});
 
@@ -133,10 +135,12 @@ describe('Detectors', () => {
 			const detectors = new Detectors(a, b);
 
 			detectors.disableAll();
-			detectors.update();
-			expect(a.calls.count + b.calls.count).toBe(0);
+			expect(detectors.isEnabled('a-detector') || detectors.isEnabled('b-detector')).toBe(false);
 
 			detectors.enableAll();
+			expect(detectors.isEnabled('a-detector') && detectors.isEnabled('b-detector')).toBe(true);
+
+			// Every detector is called either way: what disabled means is up to the detector.
 			detectors.update();
 			expect(a.calls.count + b.calls.count).toBe(2);
 		});
@@ -200,116 +204,6 @@ describe('Detectors', () => {
 
 		it('updates an empty registry without complaint', () => {
 			expect(() => new Detectors().update()).not.toThrow();
-		});
-	});
-
-
-	/**
-	 * A disabled detector is skipped, so anything it had open stays open and its window survives
-	 * to be counted again after `enable()`. `onDisabled()` is how a detector closes that out; the
-	 * registry's part is to call it exactly once per disabling, however the flag was set.
-	 */
-	describe('onDisabled', () => {
-		function closing(name: string) {
-			const calls = { updates: 0, closed: 0 };
-			const d: Detector & { calls: typeof calls } = {
-				name,
-				calls,
-				update() { ++calls.updates; },
-				onDisabled() { ++calls.closed; },
-			};
-
-			return d;
-		}
-
-		it('runs when the detector is disabled by name, and not again while it stays disabled', () => {
-			const d = closing('a-detector');
-			const detectors = new Detectors(d);
-
-			detectors.disable('a-detector');
-			detectors.update();
-			detectors.update();
-			detectors.disable('a-detector');
-
-			expect(d.calls.closed).toBe(1);
-			expect(d.calls.updates).toBe(0);
-		});
-
-		it('runs for every detector on disableAll()', () => {
-			const a = closing('a-detector');
-			const b = closing('b-detector');
-			const detectors = new Detectors(a, b);
-
-			detectors.disableAll();
-
-			expect([ a.calls.closed, b.calls.closed ]).toEqual([ 1, 1 ]);
-		});
-
-		it('runs on the next update when the flag was set directly', () => {
-			const d = closing('a-detector');
-			const detectors = new Detectors(d);
-
-			d.disabled = true;
-			expect(d.calls.closed).toBe(0);
-
-			detectors.update();
-			detectors.update();
-
-			expect(d.calls.closed).toBe(1);
-			expect(d.calls.updates).toBe(0);
-		});
-
-		it('runs again for each new disabling after the detector was enabled', () => {
-			const d = closing('a-detector');
-			const detectors = new Detectors(d);
-
-			detectors.disable('a-detector');
-			detectors.enable('a-detector');
-			detectors.update();
-			detectors.disable('a-detector');
-
-			expect(d.calls.closed).toBe(2);
-			expect(d.calls.updates).toBe(1);
-		});
-
-		it('runs again after enableAll() and a direct re-disable', () => {
-			const d = closing('a-detector');
-			const detectors = new Detectors(d);
-
-			detectors.disableAll();
-			detectors.enableAll();
-			d.disabled = true;
-			detectors.update();
-
-			expect(d.calls.closed).toBe(2);
-		});
-
-		it('does not require a detector to implement it', () => {
-			const detectors = new Detectors(detector('a-detector'));
-
-			expect(() => {
-				detectors.disable('a-detector');
-				detectors.update();
-			}).not.toThrow();
-		});
-
-		it('keeps one detector that throws from stopping the others being disabled', () => {
-			const bad: Detector = {
-				name: 'bad-detector',
-				update() { /* quiet */ },
-				onDisabled() { throw new Error('boom'); },
-			};
-			const good = closing('good-detector');
-			const detectors = new Detectors(bad, good);
-
-			const warn = jest.spyOn(console, 'warn').mockImplementation(() => { /* expected */ });
-
-			try {
-				expect(() => detectors.disableAll()).not.toThrow();
-				expect(good.calls.closed).toBe(1);
-			} finally {
-				warn.mockRestore();
-			}
 		});
 	});
 });

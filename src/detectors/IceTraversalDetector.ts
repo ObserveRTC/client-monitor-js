@@ -25,6 +25,7 @@ export type IceTraversalDetectorConfig = Record<string, never>;
  */
 export class IceTraversalDetector implements Detector {
 		public readonly name = 'ice-traversal-detector';
+		public disabled = false;
 		
 		public constructor(
 				public readonly pcMonitor: PeerConnectionMonitor,
@@ -34,6 +35,7 @@ export class IceTraversalDetector implements Detector {
 		public readonly tuples = new Set<string>();
 
 		public update() {
+			if (this.disabled) return;
 			if (this.pcMonitor.closed) return;
 			
 			const wasEmpty = this.tuples.size === 0;

@@ -258,14 +258,15 @@ describe('RtpSenderStalledDetector', () => {
     });
 
 
-    describe('onDisabled()', () => {
+    describe('disabled while an issue is open', () => {
         it('closes the open issue and clears the connection flag', () => {
             outboundRtp.deltaFramesEncoded = 30;
             outboundRtp.deltaPacketsSent = 0;
             ticks(4);
             expect(mockClientMonitor.getIssuesByType('rtp-sender-stalled')).toHaveLength(1);
 
-            detector.onDisabled();
+            detector.disabled = true;
+            ticks(1);
 
             expect(mockClientMonitor.getIssuesByType('rtp-sender-stalled')).toHaveLength(0);
             expect(mockPeerConnection.issues.hasType('rtp-sender-stalled')).toBe(false);
@@ -273,8 +274,21 @@ describe('RtpSenderStalledDetector', () => {
             expect((mockPeerConnection as any).stalledRtpSender).toBeUndefined();
         });
 
-        it('is a no-op when nothing is open', () => {
-            expect(() => detector.onDisabled()).not.toThrow();
+        it('is safe to repeat on every tick while it stays disabled', () => {
+            outboundRtp.deltaFramesEncoded = 30;
+            outboundRtp.deltaPacketsSent = 0;
+            ticks(4);
+            detector.disabled = true;
+
+            expect(() => ticks(3)).not.toThrow();
+            expect(mockClientMonitor.resolvedIssues).toHaveLength(1);
+        });
+
+        it('does nothing when no issue is open', () => {
+            detector.disabled = true;
+
+            expect(() => ticks(2)).not.toThrow();
+            expect(mockClientMonitor.resolvedIssues).toHaveLength(0);
         });
 
         it('forgets the stall window, so re-enabling needs a full threshold again', () => {
@@ -282,7 +296,9 @@ describe('RtpSenderStalledDetector', () => {
             outboundRtp.deltaPacketsSent = 0;
             ticks(2); // 2000 of 4000 ms
 
-            detector.onDisabled();
+            detector.disabled = true;
+            ticks(1);
+            detector.disabled = false;
             ticks(2); // would cross the threshold if the earlier window had survived
 
             expect(mockClientMonitor.getIssuesByType('rtp-sender-stalled')).toHaveLength(0);

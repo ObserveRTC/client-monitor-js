@@ -364,7 +364,7 @@ class UnexpectedMicMuteDetector implements Detector {
 Three things to notice:
 
 1. `disabled` is a public field — applications flip it at runtime to silence the detector.
-2. `Detectors.update()` skips detectors with `disabled === true`, and the in-method `if (this.disabled) return;` makes direct invocations behave the same.
+2. `Detectors.update()` calls a detector even when it has `disabled === true`, and the `if (this.disabled)` branch at the top of `update()` is what stands it down: it closes whatever the detector holds open and returns.
 3. The detector is the source of truth for `_startedAt`; the resolved payload carries the duration so consumers don't have to track it themselves.
 
 ## Controlling which detectors run
@@ -409,14 +409,14 @@ detectors.remove(detector);             // detach an instance
 detectors.clear();                      // detach all
 
 // Runtime toggle
-detectors.disable(name);                // sets detector.disabled = true (returns true if found)
+detectors.disable(name);                // sets detector.disabled = true (returns true if found); takes effect on the next collection
 detectors.enable(name);                 // sets detector.disabled = false
 detectors.isEnabled(name);              // attached AND not disabled
 detectors.disableAll();                 // silence every attached detector
 detectors.enableAll();                  // re-enable every attached detector
 ```
 
-Disabling is a toggle, not an eviction, so the registry skips a disabled detector. To keep that from leaving things behind, a detector may implement the optional `onDisabled()` hook of the `Detector` contract. The registry calls it once each time the detector goes from enabled to disabled — from `disable()`, `disableAll()`, or, for a flag set directly (`detector.disabled = true`), on the registry's next `update()` — and the detector uses it to resolve the issue it holds open, clear the monitor attribute it owns, and drop its accumulated window. Enabling it again then starts from a clean slate instead of resuming a stretch measured before it was switched off. `dry-outbound-track-detector` and `rtp-sender-stalled-detector` implement it; a detector that does not simply keeps whatever it had until it runs again.
+A disabled detector is still called by `update()`, and the built-in ones use that call to clean up after themselves: they resolve the issue they hold open, clear the monitor attribute they own and drop their accumulated window, then return. The cleanup therefore happens on the next collection after `disable()`, before the score is calculated, and enabling the detector again starts from a clean slate instead of resuming a stretch measured before it was switched off. `dry-outbound-track-detector` and `rtp-sender-stalled-detector` do this; a detector that has not been given that cleanup simply stops evaluating and keeps whatever it had until it is enabled again.
 
 Common patterns:
 
