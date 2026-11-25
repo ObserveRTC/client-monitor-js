@@ -70,6 +70,12 @@ export class RtpSenderStalledDetector implements Detector {
 		if (this.disabled) {
 			this.peerConnection.stalledRtpSender = undefined;
 
+			for (const ssrc of [ ...this._states.keys() ]) {
+				this._clear(ssrc, 'detector disabled');
+			}
+
+			this._states.clear();
+
 			return;
 		}
 		if (this.peerConnection.closed) {

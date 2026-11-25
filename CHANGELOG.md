@@ -1,3 +1,25 @@
+## 4.10.3
+
+### Disabled detectors are now called, so disabling closes what they hold open
+
+`Detectors.update()` used to skip a disabled detector, so an issue it had raised stayed open for as
+long as it was off (`issues.hasType()` kept answering `true`, and a score that prices that issue kept
+charging it), and its accumulated window was counted again after `enable()`. That made
+`detectors.disable()` unusable for switching a detector off for a known stretch, for example while the
+application deliberately stops a sender.
+
+`Detectors.update()` now calls every detector, disabled or not, and the `if (this.disabled)` branch
+each detector already had decides what disabled means. `DryOutboundTrackDetector` and
+`RtpSenderStalledDetector` use it to resolve their open issue (comment `detector disabled`), clear
+`OutboundTrackMonitor.dry` / `PeerConnectionMonitor.stalledRtpSender` and forget the dry or stall
+stretch, so re-enabling needs a full threshold again. The cleanup runs on the next collection after
+`disable()`, before the score is calculated. The other built-in detectors keep returning early and can
+get the same cleanup later.
+
+A custom detector that does not check `disabled` at the top of `update()` will now run while disabled;
+the contract in `Detector` says what a disabled detector must do. `IceTraversalDetector` was the one
+built-in without the check and has it now.
+
 ## 4.10.2
 
 ### `CpuPerformanceDetector` — simulcast no longer reads as CPU limitation

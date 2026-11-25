@@ -106,6 +106,11 @@ export class DryOutboundTrackDetector implements Detector {
 	public update() {
 		if (this.disabled) {
 			this.trackMonitor.dry = undefined;
+			this._dryForInMs = 0;
+
+			if (this._startedDryAt !== undefined) {
+				this._resolve('detector disabled');
+			}
 
 			return;
 		}

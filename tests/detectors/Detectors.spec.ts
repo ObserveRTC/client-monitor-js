@@ -7,7 +7,7 @@ import { Detector } from "../../src/detectors/Detector";
  *
  * Two of its guarantees are load-bearing for the whole one-class-per-finding split, and neither
  * is visible from any single detector's tests: **one throwing detector costs only its own
- * verdict**, and **`disabled` is a skip rather than a removal**. If the first breaks, a class
+ * verdict**, and **`disabled` is a flag, not a removal, and a disabled detector is still run so it can tidy up after itself**. If the first breaks, a class
  * that raises one issue starts losing its neighbours' verdicts to a malformed stats report,
  * which is the failure the split exists to prevent.
  */
@@ -91,14 +91,15 @@ describe('Detectors', () => {
 	});
 
 	describe('disabling', () => {
-		it('skips a disabled detector without removing it', () => {
+		it('keeps running a disabled detector and does not remove it', () => {
 			const a = counting('a-detector');
 			const detectors = new Detectors(a);
 
 			expect(detectors.disable('a-detector')).toBe(true);
 			detectors.update();
 
-			expect(a.calls.count).toBe(0);
+			// The detector decides what `disabled` means for its own `update()`.
+			expect(a.calls.count).toBe(1);
 			// Still registered — `size`, iteration and lookup all still see it.
 			expect(detectors.size).toBe(1);
 			expect(detectors.has('a-detector')).toBe(true);
@@ -106,8 +107,9 @@ describe('Detectors', () => {
 			expect(detectors.isEnabled('a-detector')).toBe(false);
 		});
 
-		it('runs it again once enabled', () => {
-			const a = counting('a-detector');
+		it('lets the detector see whether it is disabled on each update, and enable it again', () => {
+			const seen: (boolean | undefined)[] = [];
+			const a: Detector = { name: 'a-detector', update() { seen.push(a.disabled); } };
 			const detectors = new Detectors(a);
 
 			detectors.disable('a-detector');
@@ -115,7 +117,7 @@ describe('Detectors', () => {
 			detectors.enable('a-detector');
 			detectors.update();
 
-			expect(a.calls.count).toBe(1);
+			expect(seen).toEqual([ true, false ]);
 			expect(detectors.isEnabled('a-detector')).toBe(true);
 		});
 
@@ -133,10 +135,12 @@ describe('Detectors', () => {
 			const detectors = new Detectors(a, b);
 
 			detectors.disableAll();
-			detectors.update();
-			expect(a.calls.count + b.calls.count).toBe(0);
+			expect(detectors.isEnabled('a-detector') || detectors.isEnabled('b-detector')).toBe(false);
 
 			detectors.enableAll();
+			expect(detectors.isEnabled('a-detector') && detectors.isEnabled('b-detector')).toBe(true);
+
+			// Every detector is called either way: what disabled means is up to the detector.
 			detectors.update();
 			expect(a.calls.count + b.calls.count).toBe(2);
 		});

@@ -7,8 +7,9 @@ const MODULE_NAME = 'Detectors';
  * Registry and runner for a set of `Detector` instances, one per layer of the monitor hierarchy.
  * `update()` walks them in the order they were added — deterministic, but no built-in detector
  * depends on that order — and wraps each call in a try/catch, so one throwing detector costs only
- * its own verdict. Disabling is a flag rather than removal: `update()` skips disabled detectors
- * while iteration, `size`, `listOfNames`, `find()` and `filter()` still include them. Lookup by
+ * its own verdict. Disabling is a flag rather than removal: `update()` still calls a disabled
+ * detector, so that it can close what it holds open (see `Detector`), and iteration, `size`,
+ * `listOfNames`, `find()` and `filter()` include it. Lookup by
  * `name` is exact, with no aliases; the current names are in `listOfNames`.
  */
 export class Detectors implements Iterable<Detector> {
@@ -91,7 +92,6 @@ export class Detectors implements Iterable<Detector> {
 
 	public update(): void {
 		for (const detector of this._detectors.values()) {
-			if (detector.disabled) continue;
 			try {
 				detector.update();
 			} catch (err) {

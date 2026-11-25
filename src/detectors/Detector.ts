@@ -18,6 +18,13 @@
  * is fine, reconstructing a missing counter is not. That last one is a layer of the library's
  * boundary: adapters make stats spec-conformant, monitors derive facts, detectors threshold them.
  *
+ * `disabled` is a switch the application flips, and the registry still calls `update()` on a disabled
+ * detector. That call is the detector's only chance to tidy up after itself, so a detector that
+ * holds state must, while `disabled` is true, close the issue it has open, clear the monitor
+ * attribute it owns and drop its accumulated window, and then return. The work is idempotent, so it
+ * is safe on every tick while the detector stays disabled, and enabling the detector again then
+ * starts from a clean slate.
+ *
  * The interface carries only what the registry needs to run a detector and what an application needs
  * to toggle one. Several detectors also expose a public `inputsUnavailable` flag — "we cannot see
  * whether anything is wrong" as distinct from "nothing is wrong" — deliberately left out of the
